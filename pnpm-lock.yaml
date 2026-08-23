@@ -27,6 +27,12 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  contracts/fixtures/mcp-ping:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.4.3)
+
   contracts/fixtures/plugin-live-dispatch:
     devDependencies:
       '@deepseek-ai/cordis':

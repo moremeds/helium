@@ -122,8 +122,19 @@ of parent --profile, --patch, --dump-config, or --dump-default-config`). With
   `CLAUDE.md` interfering with an unrestricted run.
 - Ecosystem tools (§6) reach the claude-max child via an MCP stdio server exposing
   helium-toolkit (`--mcp-config`); in-process dsh tool registration cannot reach a
-  child process. MCP exposure is a phase-1 verification item, and until it is
-  verified the senior prompt carries sensor-fetched context inline.
+  child process. **Verified in implementation phase 1 (2026-08-23, claude
+  2.1.241):** YES — a stub MCP stdio server (`contracts/fixtures/mcp-ping`,
+  built on `@modelcontextprotocol/sdk@1.30.0`'s `McpServer` +
+  `StdioServerTransport`) was reached by a `claude -p` child via `--mcp-config
+  --strict-mcp-config --allowedTools "mcp__helium__helium_ping" --output-format
+  json --max-turns 3`, which returned `pong`. `--max-turns` is accepted by the
+  binary (no unknown-option error) though still hidden from `--help` on
+  2.1.241. One environment note carried into the mini's ops: an ambient
+  `ANTHROPIC_API_KEY` shadows the subscription OAuth login the `claude -p`
+  child would otherwise use, which is exactly why this table's
+  `CLAUDE_CODE_OAUTH_TOKEN`-from-file approach is required rather than relying
+  on ambient auth. Full evidence: Task 1.7 Spike B in
+  `docs/superpowers/plans/2026-08-23-helium-v1.md`.
 - Senior-lane failures are classified: 403 / connect-fail = proxy (Clash) issue,
   401 = token issue. The token's issue date is recorded so its age shows up in
   reports (it is a 1-year token).

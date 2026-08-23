@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "helium": {
+      "command": "node",
+      "args": [
+        "/Users/chenxi/projects/helium/contracts/fixtures/mcp-ping/server.mjs"
+      ]
+    }
+  }
+}
