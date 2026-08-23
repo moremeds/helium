@@ -21,7 +21,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@helium/core": "workspace:*",
+    "@helium/core": "file:../../packages/core",
     "croner": "10.0.1",
     "nodemailer": "9.0.5",
     "yaml": "2.9.0",

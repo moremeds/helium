@@ -118,7 +118,7 @@ importers:
   plugins/helium:
     dependencies:
       '@helium/core':
-        specifier: workspace:*
+        specifier: file:../../packages/core
         version: link:../../packages/core
       croner:
         specifier: 10.0.1
