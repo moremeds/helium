@@ -1,0 +1,6 @@
+packages:
+  - packages/*
+  - plugins/*
+  - contracts
+allowBuilds:
+  esbuild: true
