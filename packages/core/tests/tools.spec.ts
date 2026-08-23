@@ -2,7 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildTools, isSelectOnly } from "../src/tools/index.js";
+import {
+  buildTools,
+  hasDeniedTableFunction,
+  isSelectOnly,
+} from "../src/tools/index.js";
 import {
   json,
   startFixture,
@@ -19,6 +23,26 @@ describe("isSelectOnly", () => {
     expect(isSelectOnly("DELETE FROM bars")).toBe(false);
     expect(isSelectOnly("SELECT 1; DROP TABLE bars")).toBe(false);
     expect(isSelectOnly("/* SELECT */ ATTACH 'x'")).toBe(false);
+  });
+});
+
+describe("hasDeniedTableFunction", () => {
+  it("flags DuckDB's raw file-reading and extension-management tokens inside an otherwise-valid SELECT", () => {
+    // DuckDB's core table functions read arbitrary local files from inside
+    // a SELECT even on a READ_ONLY connection; livewire lake access is via
+    // catalog views, so agent SQL never legitimately needs these.
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_csv('/etc/passwd')"),
+    ).toBe(true);
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_parquet('/etc/shadow')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM read_json('/x')")).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM glob('/**/*')")).toBe(true);
+    expect(hasDeniedTableFunction("INSTALL httpfs; SELECT 1")).toBe(true);
+    expect(hasDeniedTableFunction("LOAD httpfs")).toBe(true);
+    expect(hasDeniedTableFunction("-- read_csv\nSELECT 1")).toBe(false);
+    expect(hasDeniedTableFunction("SELECT * FROM bars")).toBe(false);
   });
 });
 
@@ -212,5 +236,23 @@ describe("ecosystem tools", () => {
       stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
     }).find((x) => x.name === "livewire_sql")!;
     await expect(t.run({ sql: "DROP TABLE bars" })).rejects.toThrow(/SELECT/);
+  });
+
+  it("livewire_sql refuses raw file-reading table functions before touching DuckDB", async () => {
+    const t = buildTools({
+      argonBase: fixture.url,
+      apexBase: fixture.url,
+      livewireDb: "/nonexistent.duckdb",
+      stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
+    }).find((x) => x.name === "livewire_sql")!;
+    // Each is a well-formed single SELECT statement (passes isSelectOnly),
+    // so only the deny-list stands between it and DuckDB actually opening
+    // "/nonexistent.duckdb" -- which would surface as a different error.
+    await expect(
+      t.run({ sql: "SELECT * FROM read_csv('/etc/passwd')" }),
+    ).rejects.toThrow(/read_csv|denied|not allowed/i);
+    await expect(
+      t.run({ sql: "SELECT * FROM read_parquet('/etc/shadow')" }),
+    ).rejects.toThrow(/read_parquet|denied|not allowed/i);
   });
 });
