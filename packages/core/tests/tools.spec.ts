@@ -86,6 +86,22 @@ describe("ecosystem tools", () => {
     ).rejects.toThrow(/must start with/);
   });
 
+  it("argon_api rejects a path-traversal or double-slash path before the allow-list check", async () => {
+    // "/api/macro/../../../etc/passwd" starts with the allow-listed prefix
+    // "/api/macro/" as a RAW string; only buildUrl()'s new URL(...) would
+    // later collapse the ".." segments (RFC 3986 dot-segment removal),
+    // turning it into a request to "/etc/passwd" — a route the allow-list
+    // never approved. Must be rejected before that prefix check runs, and
+    // must never reach the upstream server.
+    await expect(
+      byName("argon_api").run({ path: "/api/macro/../../../etc/passwd" }),
+    ).rejects.toThrow(/traversal/);
+    await expect(
+      byName("argon_api").run({ path: "//evil.example.com/x" }),
+    ).rejects.toThrow(/traversal/);
+    expect(seen).toHaveLength(0);
+  });
+
   it("argon_api appends query parameters", async () => {
     await byName("argon_api").run({
       path: "/api/macro/rates",

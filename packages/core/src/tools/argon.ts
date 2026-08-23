@@ -66,6 +66,25 @@ export async function call(
   return JSON.stringify({ status: res.status, url, body });
 }
 
+/**
+ * Reject a raw path containing a dot-segment ("..") or a double slash ("//")
+ * before any allow-list check runs. readTool()'s allow-list check is a
+ * prefix match on the RAW path string — e.g. "/api/macro/../../../etc/passwd"
+ * starts with the allow-listed "/api/macro/" prefix as a literal string.
+ * Only buildUrl()'s `new URL(...)` later collapses ".." segments (RFC 3986
+ * dot-segment removal), by which point the outgoing request has silently
+ * become "/etc/passwd" — a route the allow-list never approved. Reject
+ * before the allow-list check ever runs, rather than trusting URL
+ * normalization to be defensive.
+ */
+function rejectPathTraversal(name: string, path: string): void {
+  if (path.includes("..") || path.includes("//")) {
+    throw new Error(
+      `${name}: "${path}" contains a path-traversal ("..") or double-slash ("//") segment`,
+    );
+  }
+}
+
 /** Shared with apex.ts: a read-only GET tool gated by an allow-listed prefix set. */
 export function readTool(
   name: string,
@@ -86,6 +105,7 @@ export function readTool(
       if (!path.startsWith("/")) {
         throw new Error(`${name}: path must start with "/", got: ${path}`);
       }
+      rejectPathTraversal(name, path);
       if (!prefixes.some((p) => path.startsWith(p))) {
         throw new Error(
           `${name}: "${path}" is not an allow-listed read path (${prefixes.join(", ")})`,
@@ -96,7 +116,13 @@ export function readTool(
   };
 }
 
-/** Shared with apex.ts: a POST tool gated by an exact-match allow-list. */
+/**
+ * Shared with apex.ts: a POST tool gated by an exact-match allow-list.
+ * No separate rejectPathTraversal() call here: unlike readTool()'s prefix
+ * match, this check is exact-string equality against literal allow-listed
+ * paths (none of which contain ".."), so a traversal segment can only ever
+ * make `path` fail to equal an allowed entry — it cannot forge a match.
+ */
 export function postTool(
   name: string,
   description: string,
