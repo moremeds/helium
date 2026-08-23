@@ -4,4 +4,15 @@
     - id: helium
       name: "dsh-plugin-helium"
       config:
-        tickFile: !!js process.env.HELIUM_CONTRACT_TICK_FILE
+        jobsDir: !!js process.env.HELIUM_JOBS_DIR
+        stateRoot: !!js process.env.HELIUM_STATE_ROOT
+        contextFile: !!js process.env.HELIUM_CONTEXT_FILE
+        calendarsDir: !!js process.env.HELIUM_CALENDARS_DIR
+        argonBase: !!js process.env.HELIUM_ARGON_BASE
+        apexBase: !!js process.env.HELIUM_APEX_BASE
+        livewireDb: !!js process.env.HELIUM_LIVEWIRE_DB
+        envFile: !!js process.env.HELIUM_ENV_FILE
+        claudeTokenFile: !!js process.env.HELIUM_CLAUDE_TOKEN_FILE
+        proxy: !!js process.env.HELIUM_PROXY || 'http://127.0.0.1:7897'
+        mcpBin: !!js process.env.HELIUM_MCP_BIN
+        emailTo: !!js process.env.HELIUM_EMAIL_TO

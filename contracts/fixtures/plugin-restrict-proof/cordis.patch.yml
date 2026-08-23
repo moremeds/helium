@@ -1,0 +1,5 @@
+- insert:
+    - id: helium-restrict-proof
+      name: "dsh-plugin-helium-restrict-proof"
+      config:
+        outFile: !!js process.env.HELIUM_RESTRICT_OUT
