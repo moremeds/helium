@@ -7,15 +7,19 @@ import type { EcosystemTool } from "./types.js";
 import { postTool, readTool } from "./argon.js";
 
 /**
- * Verified apex routes. Read-only surface. `/screener/results/` (added
- * 2026-08-24) reads back a screener run's result by run_id -- without it an
- * agent can enqueue a screener job through apex_compute but never fetch
- * what it produced.
+ * Verified apex routes. Read-only surface. `/screener/results/` and
+ * `/backtest/results/` (added 2026-08-24) read back a run's result by
+ * run_id. `/screener/results/` closes the loop with apex_compute's screener
+ * routes; `/backtest/results/` is included too even though apex_compute has
+ * no `/backtest/run` route (its real body can't be expressed by this
+ * allow-list, see APEX_COMPUTE_PATHS below) -- a backtest run started some
+ * other way is still a legitimate read for this agent to make.
  */
 export const APEX_READ_PREFIXES = [
   "/health",
   "/v1/",
   "/screener/results/",
+  "/backtest/results/",
 ] as const;
 
 /**
@@ -53,9 +57,9 @@ export function apexTools(apexBase: string): EcosystemTool[] {
   return [
     readTool(
       "apex_api",
-      "GET a read-only apex route. Allowed prefixes: /health, /v1/, /screener/results/. " +
-        "Returns {status, url, body, truncated}; body is cut to 64 KiB with truncated: true " +
-        "when the response is larger.",
+      "GET a read-only apex route. Allowed prefixes: /health, /v1/, /screener/results/, " +
+        "/backtest/results/. Returns {status, url, body, truncated}; body is cut to 64 KiB " +
+        "with truncated: true when the response is larger.",
       apexBase,
       APEX_READ_PREFIXES,
     ),

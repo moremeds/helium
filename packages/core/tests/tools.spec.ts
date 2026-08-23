@@ -174,6 +174,20 @@ describe("ecosystem tools", () => {
     });
   });
 
+  it("apex_api also allows GET /backtest/results/{run_id}", async () => {
+    // apex's real GET /backtest/results/{run_id} reads back a backtest run's
+    // result the same way /screener/results/ does for screener runs — the
+    // brief names both prefixes explicitly, independent of whether
+    // apex_compute itself can enqueue a backtest (it can't; see the
+    // "refuses /backtest/run" test above).
+    await byName("apex_api").run({ path: "/backtest/results/run-7" });
+    expect(seen[0]).toEqual({
+      url: "/backtest/results/run-7",
+      method: "GET",
+      body: "",
+    });
+  });
+
   it("argon_rescan and apex_compute POST only to their own allow-lists", async () => {
     for (const name of ["argon_rescan", "argon_ai_analysis", "apex_compute"]) {
       await expect(byName(name).run({ path: "/api/anything" })).rejects.toThrow(

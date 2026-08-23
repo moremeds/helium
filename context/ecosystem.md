@@ -47,6 +47,8 @@ apex is the signal computation engine: bars, indicators, rule-based signals, con
   range, ...) that this tool's fixed allow-list can't express; macro v1 doesn't need it.
 - `GET /screener/results/{run_id}` — read back a screener run's result once `apex_compute` has
   enqueued it.
+- `GET /backtest/results/{run_id}` — read back a backtest run's result. `apex_compute` cannot
+  enqueue a backtest itself (see above), but a run started some other way is still readable.
 
 Semantics: apex is deterministic and mechanical. It tells you which rules fired, not what they
 mean. Use it to check whether a macro narrative has a price-level counterpart.
