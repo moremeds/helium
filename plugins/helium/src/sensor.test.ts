@@ -152,4 +152,45 @@ describe("StateChangePoller", () => {
     expect(fired).toHaveLength(0);
     expect(JSON.stringify(store.loadSensor("macro-watch"))).toBe(before);
   });
+
+  it("skips a concurrent tick while one is already in flight, avoiding duplicate fires", async () => {
+    let release = (): void => {};
+    let gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow = await startFixture(async (_req, res) => {
+      await gate;
+      json(res, payload);
+    });
+    try {
+      const p = new StateChangePoller({
+        job: "macro-watch",
+        trigger: trigger(`${slow.url}/api/rates/snapshot`),
+        store,
+        onTrigger: (ev) => {
+          fired.push(ev);
+        },
+        now: () => new Date(clock),
+      });
+
+      release(); // let the baseline poll through immediately
+      await p.tick(); // baseline established
+
+      payload = { regime: { state: "easing" } };
+      gate = new Promise<void>((resolve) => {
+        release = resolve;
+      }); // re-arm: block the next response so the tick stays in flight
+
+      const first = p.tick(); // in flight, blocked on the gate
+      const second = await p.tick(); // concurrent re-entry while #inFlight is true
+      expect(second.state).toBe("skipped");
+
+      release();
+      const firstResult = await first;
+      expect(firstResult.state).toBe("changed");
+      expect(fired).toHaveLength(1);
+    } finally {
+      await slow.close();
+    }
+  });
 });

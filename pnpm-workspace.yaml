@@ -3,6 +3,7 @@ packages:
   - plugins/*
   - contracts
   - contracts/fixtures/plugin-live-dispatch
+  - contracts/fixtures/mcp-ping
 allowBuilds:
   esbuild: true
   koffi: true

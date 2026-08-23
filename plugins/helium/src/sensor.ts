@@ -49,7 +49,12 @@ export function hashFields(x: Record<string, unknown>): string {
 }
 
 export type PollState =
-  "baseline" | "unchanged" | "changed" | "deduped" | "unknown";
+  | "baseline"
+  | "unchanged"
+  | "changed"
+  | "deduped"
+  | "unknown"
+  | "skipped";
 export interface PollStatus {
   job: string;
   url: string;
@@ -67,6 +72,7 @@ export class StateChangePoller {
   readonly #onTrigger: (ev: TriggerEvent) => void | Promise<void>;
   readonly #fetch: typeof fetch;
   readonly #now: () => Date;
+  #inFlight = false;
 
   constructor(opts: {
     job: string;
@@ -84,7 +90,25 @@ export class StateChangePoller {
     this.#now = opts.now ?? (() => new Date());
   }
 
+  /**
+   * One poll cycle. A tick already in flight makes this call a no-op that
+   * reports `skipped` immediately — an overlapping tick against the same
+   * StateStore would otherwise race dedup/baseline writes (plan-mandated
+   * guard; mirrors the spike's `busy` flag).
+   */
   async tick(): Promise<PollStatus> {
+    if (this.#inFlight) {
+      return { job: this.#job, url: this.#trigger.url, state: "skipped" };
+    }
+    this.#inFlight = true;
+    try {
+      return await this.#doTick();
+    } finally {
+      this.#inFlight = false;
+    }
+  }
+
+  async #doTick(): Promise<PollStatus> {
     const url = this.#trigger.url;
     let fields: Record<string, unknown>;
     try {
