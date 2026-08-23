@@ -63,7 +63,7 @@ prompt: |
   that state changes, when a scheduled FOMC / CPI / NFP window opens, or on the
   weekday 17:00 America/New_York synthesis tick.
 
-  The trigger payload in LAYER 3 gives you the previous and current values of the
+  The trigger payload in the "## Trigger" section gives you the previous and current values of the
   watched fields. Everything else you need you must fetch with the argon_api tool
   (read-only): /api/rates/snapshot, /api/macro/policy, /api/macro/inflation,
   /api/macro/rates, /api/macro/usd, /api/macro/gold, /api/gold/*, /api/regime.
@@ -78,7 +78,7 @@ prompt: |
   A regime flip, a direction reversal, a confidence break through a level, or a
   first policy datapoint inside a calendar window is material.
 
-  Do not write analysis. Do not call tools. Answer from LAYER 3 alone, and emit
+  Do not write analysis. Do not call tools. Answer from the "## Trigger" section alone, and emit
   exactly one JSON object as the last thing in your reply:
 
   {"escalate": true|false, "severity": "noise"|"minor"|"material"|"critical",
@@ -97,7 +97,7 @@ prompt: |
      and the policy-credibility channel, in that order of weight.
   3. **Tech exposure.** What does it imply for long-duration equity exposure.
      Duration sensitivity, not sector storytelling.
-  4. **Changed vs the standing thesis.** LAYER 2b holds the current thesis if one
+  4. **Changed vs the standing thesis.** The "## Standing thesis" section holds the current thesis if one
      exists. State explicitly what is unchanged, what is amended, and what — if
      anything — would now falsify the thesis. If there is no standing thesis, say
      so and treat this as the initial statement.
