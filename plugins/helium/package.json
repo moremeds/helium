@@ -22,6 +22,8 @@
   },
   "dependencies": {
     "@helium/core": "workspace:*",
+    "croner": "10.0.1",
+    "yaml": "2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
