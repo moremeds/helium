@@ -13,6 +13,9 @@
     "test:contracts": "vitest run --project contracts",
     "test:e2e-local": "vitest run -c vitest.e2e.config.ts"
   },
+  "dependencies": {
+    "nodemailer": "9.0.5"
+  },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",
     "typescript": "^5",
