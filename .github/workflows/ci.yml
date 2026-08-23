@@ -21,6 +21,11 @@ jobs:
           node-version: "22.19.0"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # packages/core/lib is gitignored build output; plugins/helium and
+      # contracts both import @helium/core through its published exports
+      # (./lib/index.js), so typecheck/test need it built first — matches
+      # the contracts job below, which already has this step.
+      - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
 
