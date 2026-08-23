@@ -49,6 +49,9 @@ export function buildUrl(
   return url.toString();
 }
 
+/** Matches ThesisStore's own 64 KiB cap (spec §7) — one size budget for anything this toolkit hands back to the agent. */
+export const MAX_RESPONSE_BYTES = 64 * 1024;
+
 export async function call(
   url: string,
   method: "GET" | "POST",
@@ -62,14 +65,23 @@ export async function call(
     init.body = JSON.stringify(jsonBody);
   }
   const res = await impl(url, init);
-  const text = await res.text();
+  const rawText = await res.text();
+  const rawBytes = Buffer.from(rawText, "utf8");
+  const truncated = rawBytes.byteLength > MAX_RESPONSE_BYTES;
+  const text = truncated
+    ? rawBytes.subarray(0, MAX_RESPONSE_BYTES).toString("utf8")
+    : rawText;
   let body: unknown;
   try {
-    body = JSON.parse(text);
+    // A truncated body is cut mid-structure by construction; parsing it as
+    // JSON would either throw (falling through to the raw-string branch
+    // below anyway) or, worse, succeed on a coincidentally-valid prefix.
+    // Skip the attempt and always hand back the capped text directly.
+    body = truncated ? text : JSON.parse(text);
   } catch {
     body = text;
   }
-  return JSON.stringify({ status: res.status, url, body });
+  return JSON.stringify({ status: res.status, url, body, truncated });
 }
 
 /**
@@ -169,7 +181,8 @@ export function argonTools(argonBase: string): EcosystemTool[] {
     readTool(
       "argon_api",
       "GET a read-only argon route. Allowed prefixes: /api/macro/, /api/rates/snapshot, " +
-        "/api/gold/, /api/regime, /api/health, /api/stock/. Returns {status, url, body}.",
+        "/api/gold/, /api/regime, /api/health, /api/stock/. Returns {status, url, body, " +
+        "truncated}; body is cut to 64 KiB with truncated: true when the response is larger.",
       argonBase,
       ARGON_READ_PREFIXES,
     ),

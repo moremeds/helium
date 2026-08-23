@@ -255,4 +255,35 @@ describe("ecosystem tools", () => {
       t.run({ sql: "SELECT * FROM read_parquet('/etc/shadow')" }),
     ).rejects.toThrow(/read_parquet|denied|not allowed/i);
   });
+
+  it("caps an HTTP tool's response body at 64 KiB and flags truncation", async () => {
+    const oversized = await startFixture((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ big: "x".repeat(70 * 1024) }));
+    });
+    try {
+      const t = buildTools({
+        argonBase: oversized.url,
+        apexBase: oversized.url,
+        livewireDb: "/nonexistent.duckdb",
+        stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
+      }).find((x) => x.name === "argon_api")!;
+      const out = JSON.parse(await t.run({ path: "/api/health" }));
+      expect(out.status).toBe(200);
+      expect(out.truncated).toBe(true);
+      expect(typeof out.body).toBe("string");
+      expect(Buffer.byteLength(out.body, "utf8")).toBeLessThanOrEqual(
+        64 * 1024,
+      );
+    } finally {
+      await oversized.close();
+    }
+  });
+
+  it("does not flag truncation for a response under the cap", async () => {
+    const out = JSON.parse(
+      await byName("argon_api").run({ path: "/api/rates/snapshot" }),
+    );
+    expect(out.truncated).toBe(false);
+  });
 });

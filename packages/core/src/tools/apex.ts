@@ -54,7 +54,8 @@ export function apexTools(apexBase: string): EcosystemTool[] {
     readTool(
       "apex_api",
       "GET a read-only apex route. Allowed prefixes: /health, /v1/, /screener/results/. " +
-        "Returns {status, url, body}.",
+        "Returns {status, url, body, truncated}; body is cut to 64 KiB with truncated: true " +
+        "when the response is larger.",
       apexBase,
       APEX_READ_PREFIXES,
     ),
