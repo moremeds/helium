@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import nodemailer, { type Transporter } from "nodemailer";
-import { nowIso, type JobSpec, type JsonlWriter } from "@helium/core";
+import type { JobSpec, JsonlWriter } from "@helium/core";
 import type { DispatchResult } from "./dispatch.js";
 import type { TriggerEvent } from "./sensor.js";
 
@@ -209,7 +209,7 @@ export class Delivery {
     writeFileSync(
       path,
       [
-        `# ${job.name} — ${nowIso()}`,
+        `# ${job.name} — ${this.#now().toISOString()}`,
         "",
         `- run: ${result.runId}`,
         `- severity: ${result.verdict?.severity ?? "n/a"}`,

@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonlWriter } from "@helium/core";
 import { Delivery, smtpFromEnv } from "./delivery.js";
 import { ev, job } from "./testing/fixtures.js";
@@ -77,7 +77,17 @@ describe("smtpFromEnv", () => {
 });
 
 describe("Delivery", () => {
+  // JsonlWriter names its dated files from the real system clock, not
+  // an injected one — freeze it to match rig()'s injected `now` so file
+  // naming and the `rows()` helper below agree deterministically
+  // (matches the convention in packages/core/tests/jsonl.spec.ts).
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("writes the JSONL row before anything else, then a report, then the email", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig();
     await r.delivery.deliver(job, ev, senior);
     const rows = r.rows("deliveries");
@@ -96,6 +106,8 @@ describe("Delivery", () => {
   });
 
   it("writes JSONL but no report or email for a triage-only result", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig();
     await r.delivery.deliver(job, ev, {
       runId: "r0",
@@ -111,6 +123,8 @@ describe("Delivery", () => {
   });
 
   it("retries a failing send and succeeds on the third attempt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig({ failures: 2 });
     await r.delivery.deliver(job, ev, senior);
     expect(r.sent).toHaveLength(1);
@@ -121,6 +135,8 @@ describe("Delivery", () => {
   });
 
   it("writes a dead-letter row when every attempt fails", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig({ failures: 99 });
     await r.delivery.deliver(job, ev, senior);
     const rows = r.rows("deliveries");
@@ -132,6 +148,8 @@ describe("Delivery", () => {
   });
 
   it("enforces the per-job hourly email cap from the JSONL trail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig();
     for (let i = 0; i < 5; i += 1) await r.delivery.deliver(job, ev, senior);
     expect(r.sent).toHaveLength(job.delivery.email!.maxPerHour);
@@ -139,6 +157,8 @@ describe("Delivery", () => {
   });
 
   it("records heartbeats and budget exhaustion as their own rows", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig();
     r.delivery.heartbeat({ job: "macro-watch", state: "unchanged" });
     r.delivery.budgetExhausted(job, ev, { tier: "triage", count: 30, cap: 30 });
@@ -150,6 +170,8 @@ describe("Delivery", () => {
   });
 
   it("summarises the day from the JSONL trail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
     const r = rig();
     await r.delivery.deliver(job, ev, senior);
     r.delivery.budgetExhausted(job, ev, { tier: "senior", count: 12, cap: 12 });

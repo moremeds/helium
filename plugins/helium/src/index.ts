@@ -33,6 +33,21 @@ export const name = "helium";
 export const inject = ["agentDefaultModel", "agents", "sessions", "tools"];
 export { type Config } from "./config.js";
 
+/**
+ * Runs a synchronous step and swallows (logs) any throw instead of letting it
+ * escape. Used to guard cron callbacks: croner@10.0.1 has no `catch` option
+ * for a sync `Cron(...)` callback, so an unguarded throw (e.g. a transient FS
+ * failure from `jsonl.prune()`) becomes an unhandled rejection that kills the
+ * whole daemon.
+ */
+export function runGuarded(label: string, fn: () => void): void {
+  try {
+    fn();
+  } catch (e: unknown) {
+    console.error(`${label}:`, e);
+  }
+}
+
 /** Fallback base cadence (spec has no bare interval when only calendar windows are armed). */
 const DEFAULT_WATCH_ONLY_INTERVAL_MS = 60_000;
 
@@ -195,7 +210,11 @@ export function apply(ctx: Context, raw: Config): void {
     "5 17 * * *",
     { timezone: "America/New_York", protect: true },
     () => {
-      jsonl.prune(90);
+      // Guarded independently of the dailySynthesis catch below (see
+      // runGuarded's doc comment for why this needs its own guard).
+      runGuarded("helium.prune", () => {
+        jsonl.prune(90);
+      });
       void delivery.dailySynthesis().catch((e: unknown) => {
         console.error("helium.synthesis:", e);
       });
