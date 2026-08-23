@@ -47,3 +47,108 @@ export function hashFields(x: Record<string, unknown>): string {
     .digest("hex")
     .slice(0, 12);
 }
+
+export type PollState =
+  "baseline" | "unchanged" | "changed" | "deduped" | "unknown";
+export interface PollStatus {
+  job: string;
+  url: string;
+  state: PollState;
+  hash?: string;
+  error?: string;
+}
+
+const FETCH_TIMEOUT_MS = 5_000;
+
+export class StateChangePoller {
+  readonly #job: string;
+  readonly #trigger: TriggerStateChange;
+  readonly #store: StateStore;
+  readonly #onTrigger: (ev: TriggerEvent) => void | Promise<void>;
+  readonly #fetch: typeof fetch;
+  readonly #now: () => Date;
+
+  constructor(opts: {
+    job: string;
+    trigger: TriggerStateChange;
+    store: StateStore;
+    onTrigger: (ev: TriggerEvent) => void | Promise<void>;
+    fetchImpl?: typeof fetch;
+    now?: () => Date;
+  }) {
+    this.#job = opts.job;
+    this.#trigger = opts.trigger;
+    this.#store = opts.store;
+    this.#onTrigger = opts.onTrigger;
+    this.#fetch = opts.fetchImpl ?? fetch;
+    this.#now = opts.now ?? (() => new Date());
+  }
+
+  async tick(): Promise<PollStatus> {
+    const url = this.#trigger.url;
+    let fields: Record<string, unknown>;
+    try {
+      const res = await this.#fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) {
+        // A timeout or an error status is not proof of death (spec §4): report unknown.
+        return {
+          job: this.#job,
+          url,
+          state: "unknown",
+          error: `HTTP ${res.status}`,
+        };
+      }
+      fields = extractFields(await res.json(), this.#trigger.fields);
+    } catch (error: unknown) {
+      return {
+        job: this.#job,
+        url,
+        state: "unknown",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    const hash = hashFields(fields);
+    const now = this.#now();
+    const state = this.#store.loadSensor(this.#job);
+
+    for (const [key, expiry] of Object.entries(state.dedup)) {
+      if (Date.parse(expiry) <= now.getTime()) delete state.dedup[key];
+    }
+
+    if (!state.baseline) {
+      state.baseline = { hash, fields };
+      this.#store.saveSensor(this.#job, state);
+      return { job: this.#job, url, state: "baseline", hash };
+    }
+    if (state.baseline.hash === hash) {
+      this.#store.saveSensor(this.#job, state);
+      return { job: this.#job, url, state: "unchanged", hash };
+    }
+
+    const previous = state.baseline.fields;
+    const dedupKey = `${this.#job}:${url}:${hash}`;
+    const suppressed = state.dedup[dedupKey] !== undefined;
+    state.baseline = { hash, fields };
+    if (!suppressed) {
+      state.dedup[dedupKey] = new Date(
+        now.getTime() + this.#trigger.dedupTtlMs,
+      ).toISOString();
+    }
+    // Persist BEFORE dispatching: a crash mid-dispatch must not re-fire the same change on
+    // restart (spec §13 AC#2 — no duplicate alerts on recovery).
+    this.#store.saveSensor(this.#job, state);
+    if (suppressed) return { job: this.#job, url, state: "deduped", hash };
+
+    await this.#onTrigger({
+      job: this.#job,
+      kind: "state-change",
+      firedAt: nowIso(),
+      dedupKey,
+      payload: { url, previous, current: fields },
+    });
+    return { job: this.#job, url, state: "changed", hash };
+  }
+}
