@@ -105,4 +105,28 @@ describe("CalendarWindowWatcher", () => {
     expect(await watcher.tick()).toBeNull();
     expect(fired).toHaveLength(1);
   });
+
+  it("currentWindow reports the open window without dedup or dispatch side effects", () => {
+    let clock = Date.parse("2026-09-16T17:00:00Z"); // 60m early, outside the window
+    const fired: TriggerEvent[] = [];
+    const watcher = new CalendarWindowWatcher({
+      job: "macro-watch",
+      trigger,
+      events: parseCalendar(YAML, "us-macro.yaml"),
+      store: new StateStore(mkdtempSync(join(tmpdir(), "helium-cal-"))),
+      onTrigger: (ev) => {
+        fired.push(ev);
+      },
+      now: () => new Date(clock),
+    });
+
+    expect(watcher.currentWindow()).toBeNull();
+
+    clock = Date.parse("2026-09-16T17:30:00Z"); // window opens
+    expect(watcher.currentWindow()?.name).toBe("FOMC-2026-09");
+    expect(fired).toHaveLength(0);
+
+    clock = Date.parse("2026-09-17T00:00:00Z"); // well past the window
+    expect(watcher.currentWindow()).toBeNull();
+  });
 });

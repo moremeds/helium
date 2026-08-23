@@ -49,12 +49,7 @@ export function hashFields(x: Record<string, unknown>): string {
 }
 
 export type PollState =
-  | "baseline"
-  | "unchanged"
-  | "changed"
-  | "deduped"
-  | "unknown"
-  | "skipped";
+  "baseline" | "unchanged" | "changed" | "deduped" | "unknown" | "skipped";
 export interface PollStatus {
   job: string;
   url: string;
@@ -175,4 +170,31 @@ export class StateChangePoller {
     });
     return { job: this.#job, url, state: "changed", hash };
   }
+}
+
+/**
+ * Run `run` repeatedly, re-reading the delay after every completed run so a calendar
+ * window can tighten the cadence mid-flight. Returns a disposer for ctx.effect.
+ */
+export function scheduleLoop(
+  getDelayMs: () => number,
+  run: () => Promise<void>,
+): () => void {
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const cycle = (): void => {
+    void run()
+      .catch((error: unknown) => {
+        console.error("helium.scheduleLoop:", error);
+      })
+      .finally(() => {
+        if (stopped) return;
+        timer = setTimeout(cycle, getDelayMs());
+      });
+  };
+  cycle();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }

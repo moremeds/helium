@@ -6,6 +6,7 @@ import { StateStore, type TriggerStateChange } from "@helium/core";
 import {
   extractFields,
   hashFields,
+  scheduleLoop,
   StateChangePoller,
   type TriggerEvent,
 } from "./sensor.js";
@@ -192,5 +193,30 @@ describe("StateChangePoller", () => {
     } finally {
       await slow.close();
     }
+  });
+});
+
+describe("scheduleLoop", () => {
+  it("re-reads the delay between runs and stops on dispose", async () => {
+    const delays: number[] = [];
+    let runs = 0;
+    let delay = 5;
+    const dispose = scheduleLoop(
+      () => {
+        delays.push(delay);
+        return delay;
+      },
+      async () => {
+        runs += 1;
+        if (runs === 1) delay = 1;
+      },
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    dispose();
+    const settled = runs;
+    expect(runs).toBeGreaterThanOrEqual(2);
+    expect(delays).toContain(1);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(runs).toBe(settled);
   });
 });
