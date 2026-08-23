@@ -74,6 +74,25 @@ done
 n=$(HELIUM_STATE_ROOT="$STATE_ROOT" node "$DEST/scripts/release/inflight.mjs")
 [ "$n" = "0" ] || say "WARNING: proceeding with $n dispatch(es) still in flight"
 
+# Serialize everything from here on (flip, kickstart, health window, any
+# flip-back, prune) against a concurrent deploy.sh or rollback.sh (fix
+# round 1, IMPORTANT 3). macOS has no `flock` command — confirmed absent on
+# this machine (util-linux only, not BSD/macOS userland) — so this uses
+# `mkdir`'s atomicity instead: POSIX mkdir(2) is a single atomic
+# create-or-EEXIST syscall, the same mutual-exclusion guarantee flock(1)
+# would give here. Released automatically on any exit path via the trap.
+LOCK_DIR="$RELEASES/.flip.lock"
+lock_tries=0
+until mkdir "$LOCK_DIR" 2>/dev/null; do
+  lock_tries=$((lock_tries + 1))
+  if [ "$lock_tries" -ge 300 ]; then
+    echo "FATAL: could not acquire $LOCK_DIR after 5 minutes — another deploy/rollback appears to be stuck holding it. Investigate; remove the lock dir by hand only once you have confirmed that process is dead." >&2
+    exit 73
+  fi
+  sleep 1
+done
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
 # `mv -fh` is the macOS-correct idiom: `-h` stops `mv` from following the
 # existing `current` symlink into its target directory, so the rename is
 # atomic (a plain `mv` would instead move the new symlink INSIDE the old
@@ -85,6 +104,17 @@ flip_to() {
   local got; got="$(readlink "$RELEASES/current")"
   [ "$got" = "$target" ] || { echo "flip verification failed: current -> $got" >&2; return 1; }
 }
+
+# `deploy-profile.sh` is always invoked with an explicit `--plugin-dir
+# <release>/plugins/helium` — the SPECIFIC release directory, never through
+# the mutable `current` symlink. That means the profile re-deploy below is
+# REQUIRED on every flip, forward or back, regardless of whether pnpm's
+# `file:` install symlinks or copies the plugin (the open question from
+# Task 3.3 Step 10 does not change this): the release directory itself
+# changes on a flip-back, so the profile must be re-pointed at the (old)
+# plugin path either way. Decided and documented here per fix round 1's
+# IMPORTANT 2; the simpler "flip symlink + kickstart only" alternative does
+# not apply.
 prev_target="$(readlink "$RELEASES/current" || true)"
 if [ -n "$prev_target" ]; then
   ln -sfn "$prev_target" "$RELEASES/.previous.$$"
@@ -115,11 +145,40 @@ while [ $SECONDS -lt $end ]; do
   fi
 done
 if [ "$ok" != "1" ]; then
-  say "HEALTH WINDOW FAILED — flipping back to $prev_target"
-  flip_to "$prev_target"
-  bash "$prev_target/scripts/deploy-profile.sh" --dsh-home "$DSH_HOME_DIR" \
-    --plugin-dir "$prev_target/plugins/helium"
-  launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"
+  say "HEALTH WINDOW FAILED"
+  # fix round 1, IMPORTANT 1: on a bootstrap/first-ever deploy `current` had
+  # no prior target, so prev_target is empty here. `flip_to ""` would
+  # "succeed" (ln -sfn "" tmp; mv -fh tmp current both exit 0, and the
+  # got==target check passes because both sides are "") while leaving
+  # `current` as a BROKEN empty symlink — reproduced empirically on this
+  # OS. Guard it explicitly and refuse to touch the symlink at all.
+  if [ -z "$prev_target" ]; then
+    echo "FATAL: no previous release to flip back to (this looks like a bootstrap/first-ever deploy — 'current' had no prior target). Leaving current -> $VERSION UNCHANGED (new release, but it failed its health window) rather than risk corrupting the symlink with an empty flip. An operator must investigate $VERSION by hand (heartbeat/runs JSONL, the daemon's own logs) before retrying." >&2
+    exit 69
+  fi
+  say "flipping back to $prev_target"
+  # fix round 1, IMPORTANT 2: the flip-back is 3 non-atomic steps under
+  # set -e (symlink flip, profile re-deploy, kickstart). Each is checked
+  # individually below with a message naming the exact inconsistency, so a
+  # partial failure is loud and unambiguous rather than a bare set -e exit.
+  if ! flip_to "$prev_target"; then
+    echo "FATAL: flip-back symlink update to $prev_target FAILED — current=<unknown, verify by hand> but the daemon is still running $VERSION. MANUAL INTERVENTION REQUIRED: inspect $RELEASES/current, re-point it at $prev_target if needed (ln -sfn $prev_target $RELEASES/current), then run: launchctl kickstart -k gui/$(id -u)/com.helium.dsh" >&2
+    exit 70
+  fi
+  if ! bash "$prev_target/scripts/deploy-profile.sh" --dsh-home "$DSH_HOME_DIR" \
+       --plugin-dir "$prev_target/plugins/helium"; then
+    echo "FATAL: current=$prev_target but the profile re-deploy FAILED — the running daemon may still be $VERSION (its profile was never re-pointed at $prev_target). MANUAL INTERVENTION REQUIRED: re-run 'bash $prev_target/scripts/deploy-profile.sh --dsh-home $DSH_HOME_DIR --plugin-dir $prev_target/plugins/helium' by hand, then 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh'." >&2
+    exit 71
+  fi
+  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+    say "kickstart failed once — retrying after 3s"
+    sleep 3
+    if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+      echo "FATAL: current=$prev_target and the profile was re-deployed, but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING the unhealthy $VERSION build even though current and the profile now point at $prev_target. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
+      exit 72
+    fi
+  fi
+  say "flip-back to $prev_target complete: symlink flipped, profile re-deployed, daemon kickstarted"
   exit 68
 fi
 
