@@ -44,7 +44,32 @@ export function buildUrl(
 ): string {
   if (!path.startsWith("/"))
     throw new Error(`path must start with "/", got: ${path}`);
+  const baseOrigin = new URL(base).origin;
   const url = new URL(base.replace(/\/$/, "") + path);
+  // The URL parser silently rewrites the path via RFC 3986 dot-segment
+  // removal ("." and ".." segments collapse) -- and that collapse applies
+  // just as much to a PERCENT-ENCODED ".." ("%2e%2e", any case) as to a
+  // literal one: new URL("http://h/api/stock/%2e%2e/%2e%2e/api/admin/x")
+  // .pathname === "/api/admin/x" (verified live). A raw-string substring
+  // check for a literal ".." can be defeated by encoding it, so it isn't a
+  // sound guard on its own. Requiring the parsed pathname to come back
+  // byte-identical to the requested path turns "the path that is checked is
+  // the path that is sent" into a structural guarantee instead of a
+  // blocklist an attacker can out-encode -- reject instead of trusting the
+  // parser's normalization to be safe.
+  if (url.pathname !== path) {
+    throw new Error(
+      `path "${path}" resolves to a different path ("${url.pathname}") once parsed -- refused as a likely path-traversal escape`,
+    );
+  }
+  // Defense in depth: a path starting with "/" concatenated onto `base`
+  // should never be able to change the origin, but confirm it structurally
+  // rather than assuming it.
+  if (url.origin !== baseOrigin) {
+    throw new Error(
+      `path "${path}" escapes the configured base origin ("${baseOrigin}" -> "${url.origin}") -- refused`,
+    );
+  }
   for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
   return url.toString();
 }
@@ -84,25 +109,6 @@ export async function call(
   return JSON.stringify({ status: res.status, url, body, truncated });
 }
 
-/**
- * Reject a raw path containing a dot-segment ("..") or a double slash ("//")
- * before any allow-list check runs. readTool()'s allow-list check is a
- * prefix match on the RAW path string — e.g. "/api/macro/../../../etc/passwd"
- * starts with the allow-listed "/api/macro/" prefix as a literal string.
- * Only buildUrl()'s `new URL(...)` later collapses ".." segments (RFC 3986
- * dot-segment removal), by which point the outgoing request has silently
- * become "/etc/passwd" — a route the allow-list never approved. Reject
- * before the allow-list check ever runs, rather than trusting URL
- * normalization to be defensive.
- */
-function rejectPathTraversal(name: string, path: string): void {
-  if (path.includes("..") || path.includes("//")) {
-    throw new Error(
-      `${name}: "${path}" contains a path-traversal ("..") or double-slash ("//") segment`,
-    );
-  }
-}
-
 /** Shared with apex.ts: a read-only GET tool gated by an allow-listed prefix set. */
 export function readTool(
   name: string,
@@ -120,10 +126,13 @@ export function readTool(
       // Reject a non-path (e.g. an absolute URL) before the allow-list check,
       // so an escape attempt gets buildUrl's specific diagnostic rather than
       // being folded into the generic "not an allow-listed path" message.
+      // Traversal/encoding escapes (literal ".." or its percent-encoded
+      // form, a double slash, ...) are caught structurally inside buildUrl()
+      // below, not here -- see its own comment for why a raw-string check on
+      // the prefix-matched path can't be a sound guard on its own.
       if (!path.startsWith("/")) {
         throw new Error(`${name}: path must start with "/", got: ${path}`);
       }
-      rejectPathTraversal(name, path);
       if (!prefixes.some((p) => path.startsWith(p))) {
         throw new Error(
           `${name}: "${path}" is not an allow-listed read path (${prefixes.join(", ")})`,

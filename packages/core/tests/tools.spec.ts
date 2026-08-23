@@ -55,6 +55,20 @@ describe("hasDeniedTableFunction", () => {
     expect(hasDeniedTableFunction("COPY (SELECT 1) TO '/tmp/x.csv'")).toBe(
       true,
     );
+    // `\b` does not treat "_" as a boundary, so a plain word-boundary match
+    // on "read_csv" alone does NOT match inside "read_csv_auto" -- and
+    // read_csv_auto/read_json_auto/read_ndjson are real, still-supported
+    // DuckDB functions with the same raw-file-read problem as their
+    // non-suffixed counterparts (fix round 1: this was a live bypass).
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_csv_auto('/etc/passwd')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM read_json_auto('/x')")).toBe(
+      true,
+    );
+    expect(hasDeniedTableFunction("SELECT * FROM read_ndjson('/x')")).toBe(
+      true,
+    );
     expect(hasDeniedTableFunction("-- read_csv\nSELECT 1")).toBe(false);
     expect(hasDeniedTableFunction("SELECT * FROM bars")).toBe(false);
     // Word-boundary match, not substring: none of these denied tokens are
@@ -141,20 +155,60 @@ describe("ecosystem tools", () => {
     ).rejects.toThrow(/must start with/);
   });
 
-  it("argon_api rejects a path-traversal or double-slash path before the allow-list check", async () => {
+  it("argon_api rejects a literal path-traversal path before it ever reaches buildUrl's fetch", async () => {
     // "/api/macro/../../../etc/passwd" starts with the allow-listed prefix
     // "/api/macro/" as a RAW string; only buildUrl()'s new URL(...) would
     // later collapse the ".." segments (RFC 3986 dot-segment removal),
     // turning it into a request to "/etc/passwd" — a route the allow-list
-    // never approved. Must be rejected before that prefix check runs, and
-    // must never reach the upstream server.
+    // never approved. buildUrl() now requires the parsed URL's pathname to
+    // come back byte-identical to the requested path, so this is caught
+    // there and the upstream server is never reached.
     await expect(
       byName("argon_api").run({ path: "/api/macro/../../../etc/passwd" }),
     ).rejects.toThrow(/traversal/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api rejects a percent-encoded path-traversal path (the raw-substring check on '..' alone can be out-encoded)", async () => {
+    // "%2e%2e" is the percent-encoded form of ".." — it contains no literal
+    // ".." substring, so a check limited to that literal would miss it, but
+    // the WHATWG URL parser decodes and collapses it exactly like a literal
+    // "..": new URL("http://h/api/stock/%2e%2e/%2e%2e/api/admin/x").pathname
+    // === "/api/admin/x" (verified live). "/api/stock/%2e%2e/%2e%2e/api/admin/x"
+    // starts with the allow-listed "/api/stock/" prefix as a raw string, so
+    // only buildUrl()'s pathname-equality check catches this.
     await expect(
-      byName("argon_api").run({ path: "//evil.example.com/x" }),
+      byName("argon_api").run({
+        path: "/api/stock/%2e%2e/%2e%2e/api/admin/x",
+      }),
     ).rejects.toThrow(/traversal/);
     expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api still allows a double-slash path to fail closed, just via the ordinary allow-list rejection", async () => {
+    // "//evil.example.com/x" does NOT change the resolved origin or get
+    // rewritten by the URL parser (verified live: new URL("http://h" +
+    // "//evil.example.com/x").host === "h", .pathname === the same string
+    // unchanged) — so buildUrl()'s pathname-equality guard has nothing to
+    // catch here. It's still safely refused: no allow-listed prefix starts
+    // with "//", so the ordinary prefix check rejects it before buildUrl
+    // (and therefore any fetch) ever runs.
+    await expect(
+      byName("argon_api").run({ path: "//evil.example.com/x" }),
+    ).rejects.toThrow(/not an allow-listed/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api still allows a normal templated path and a path+query combination", async () => {
+    // Regression guard for buildUrl()'s new pathname-equality check: a
+    // plain path with no characters the URL parser would ever rewrite must
+    // keep working, with or without a query string.
+    await byName("argon_api").run({ path: "/api/stock/AAPL/trade-insights" });
+    expect(seen[0]).toEqual({
+      url: "/api/stock/AAPL/trade-insights",
+      method: "GET",
+      body: "",
+    });
   });
 
   it("argon_api appends query parameters", async () => {
