@@ -10,15 +10,26 @@ import { postTool, readTool } from "./argon.js";
 export const APEX_READ_PREFIXES = ["/health", "/v1/"] as const;
 
 /**
- * apex screener/backtest compute paths, fail-closed. apex's local dev
- * service (127.0.0.1:8322) was not reachable from this laptop while this
- * task ran (`curl` to /openapi.json and /health both returned no
- * connection, 2026-08-24) — not tunneled per the brief, since 8322 is a
- * local-dev port, not the remote macmini case ssh -L applies to. Left empty
- * (fail-closed, every apex_compute call refused) until a real apex instance
- * is reachable and its POST /v1/... screener/backtest routes are verified.
+ * apex screener/backtest compute paths, fail-closed by default. apex's
+ * local dev service (127.0.0.1:8322) was not reachable from this laptop
+ * while this task ran (`curl` to /openapi.json and /health both returned no
+ * connection, `lsof -iTCP:8322` showed nothing listening, 2026-08-24) — not
+ * tunneled per the brief, since 8322 is a local-dev port, not the remote
+ * macmini case `ssh -L` applies to. Verified instead by reading the route
+ * decorators directly in the apex source (~/projects/apex,
+ * src/api/routes/{screener,backtest}.py): `APIRouter(prefix="/screener")`
+ * with `@router.post("/momentum", status_code=202)` and
+ * `@router.post("/pead", status_code=202)`, and `APIRouter(prefix="/backtest")`
+ * with `@router.post("/run", status_code=202)`; `server.py`'s
+ * `create_app()` mounts every router with no additional prefix, matching
+ * "root-mounted, no /api prefix". All three are literal (non-templated)
+ * paths, so postTool()'s exact-match design can express them.
  */
-export const APEX_COMPUTE_PATHS: readonly string[] = [];
+export const APEX_COMPUTE_PATHS: readonly string[] = [
+  "/screener/momentum",
+  "/screener/pead",
+  "/backtest/run",
+];
 
 export function apexTools(apexBase: string): EcosystemTool[] {
   return [

@@ -118,6 +118,30 @@ describe("ecosystem tools", () => {
     }
   });
 
+  it("argon_rescan POSTs to its one verified allow-listed route", async () => {
+    const out = JSON.parse(
+      await byName("argon_rescan").run({ path: "/api/watchlist/rescan-all" }),
+    );
+    expect(out.status).toBe(200);
+    expect(seen[0]).toEqual({
+      url: "/api/watchlist/rescan-all",
+      method: "POST",
+    });
+  });
+
+  it("apex_compute POSTs to each of its verified allow-listed routes", async () => {
+    for (const path of [
+      "/screener/momentum",
+      "/screener/pead",
+      "/backtest/run",
+    ]) {
+      seen.length = 0;
+      const out = JSON.parse(await byName("apex_compute").run({ path }));
+      expect(out.status).toBe(200);
+      expect(seen[0]).toEqual({ url: path, method: "POST" });
+    }
+  });
+
   it("thesis_write versions through ThesisStore and returns the diff", async () => {
     const t = tools();
     const write = t.find((x) => x.name === "thesis_write")!;
