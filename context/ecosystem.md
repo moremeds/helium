@@ -9,7 +9,11 @@ of them except through the tools named below.
 argon reconstructs the macro regime: policy stance, inflation trend, the rate path, the dollar,
 and gold. It is the primary source for "what is the macro state right now".
 
-- `GET /api/regime` — the current regime classification (state, direction, confidence).
+- `GET /api/regime` — the crash-risk/vol regime read: a composite score and bucket (`cri.score`,
+  `cri.level`), the crash-trigger flag (`crash_trigger.fired`), and their vix/vvix/correlation/
+  momentum inputs. This is a volatility regime, not the rate-path one — the policy-rate state,
+  direction and confidence triple lives on `/api/rates/snapshot`'s `state` object instead
+  (`state.state`, `state.direction`, `state.confidence`).
 - `GET /api/rates/snapshot` — the rate-path snapshot: front end vs long end, implied path.
 - `GET /api/macro/policy` — policy stance evidence (FOMC language, dots, guidance).
 - `GET /api/macro/inflation` — inflation trend and its components.
