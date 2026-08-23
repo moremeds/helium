@@ -196,8 +196,28 @@ export class TriageRunner implements TriageLane {
       // (see task-2.3-report.md Step 10), so flushing again here is safe and
       // idempotent — it is what hands the persistence plugin every event
       // dispose() is about to detach from.
-      await this.ctx.sessions.flush(handle.agent.session);
-      await handle.dispose();
+      //
+      // Guarded independently of the try/catch above (fix round 1, Dispatcher
+      // review): a throw here must never override an already-computed result
+      // by rejecting this dispatch() promise instead of resolving it — that
+      // would turn a completed/failed-but-handled triage turn into an
+      // unhandled rejection at the Dispatcher call site.
+      try {
+        await this.ctx.sessions.flush(handle.agent.session);
+      } catch (error: unknown) {
+        console.error(
+          `helium.dispatch(${job.name}): session flush failed during teardown`,
+          error,
+        );
+      }
+      try {
+        await handle.dispose();
+      } catch (error: unknown) {
+        console.error(
+          `helium.dispatch(${job.name}): agent dispose failed during teardown`,
+          error,
+        );
+      }
     }
   }
 
@@ -297,15 +317,40 @@ export function budgetCheck(
   return { allowed: kept.length < cap, count: kept.length, cap };
 }
 
-/** Race a lane against the job wall clock. The lane is left to settle; only the wait ends. */
+/**
+ * Race a lane against the job wall clock. The lane is left to settle; only
+ * the wait ends — dsh's `followup()` has no completion handle (spec §8), so
+ * a timed-out lane keeps running in the background rather than being
+ * cancelled.
+ *
+ * `label` identifies the abandoned lane in the fix-round-1 observability
+ * hook below (`helium.dispatch(<job>)/<tier>`); it plays no role in the
+ * race itself.
+ */
 async function withTimeout<T>(
   work: Promise<T>,
   ms: number,
   onTimeout: () => T,
+  label: string,
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  let timedOut = false;
   const guard = new Promise<T>((resolve) => {
-    timer = setTimeout(() => resolve(onTimeout()), ms);
+    timer = setTimeout(() => {
+      timedOut = true;
+      resolve(onTimeout());
+    }, ms);
+  });
+  // Fix round 1 (Dispatcher review, finding #3): `work` keeps running after
+  // `guard` wins the race, and Promise.race's own internal subscription to
+  // `work` silently discards whatever it eventually settles to — an
+  // abandoned lane's later rejection would otherwise vanish with no trace.
+  // Only log when the timeout actually fired first; a `work` rejection that
+  // arrives *before* the timeout is handled by the normal `await` below (and,
+  // if it escapes further, by `#run()`'s own containment) — logging it here
+  // too would just be noise.
+  work.catch((error: unknown) => {
+    if (timedOut) console.error(`${label}: abandoned lane error`, error);
   });
   try {
     return await Promise.race([work, guard]);
@@ -445,110 +490,191 @@ export class Dispatcher {
   }
 
   async #run(job: JobSpec, ev: TriggerEvent): Promise<void> {
-    // Controller addendum (Task 2.3 ruling): v1 has exactly one in-process
-    // triage engine. A job whose config drifted away from it fails loudly
-    // instead of silently paying for a dispatch the runtime cannot honor —
-    // and it never touches the budget, since no lane actually ran.
-    if (job.engine.triage.engine !== "deepseek") {
+    // Fix round 1 (Dispatcher review, findings #1/#2): `openRun` tracks
+    // whichever ledger run is currently started-but-not-finished, so that an
+    // error escaping *anywhere* below — a lane, a callback, ledger/store I/O —
+    // can be closed out correctly instead of becoming an unhandled rejection
+    // on the promise `#start()` stores in `#inFlight` (this method must never
+    // reject; see `#recoverFromEscapedError`).
+    let openRun: { runId: string; tier: "triage" | "senior" } | null = null;
+    try {
+      // Controller addendum (Task 2.3 ruling): v1 has exactly one in-process
+      // triage engine. A job whose config drifted away from it fails loudly
+      // instead of silently paying for a dispatch the runtime cannot honor —
+      // and it never touches the budget, since no lane actually ran.
+      if (job.engine.triage.engine !== "deepseek") {
+        const runId = this.opts.ledger.start(job.name, "triage");
+        openRun = { runId, tier: "triage" };
+        const error = `unsupported triage engine ${JSON.stringify(job.engine.triage.engine)} (v1 supports only "deepseek")`;
+        this.opts.ledger.finish(runId, job.name, "triage", "run_failed", {
+          error,
+        });
+        openRun = null;
+        await this.opts.onResult(job, ev, {
+          runId,
+          tier: "triage",
+          outcome: "run_failed",
+          error,
+        });
+        return;
+      }
+
+      const state = this.opts.store.loadSensor(job.name);
+      const triageBudget = budgetCheck(state, job, "triage", this.#now());
+      this.opts.store.saveSensor(job.name, state);
+      if (!triageBudget.allowed) {
+        await this.opts.onSuppressed(job, ev, {
+          ...triageBudget,
+          tier: "triage",
+        });
+        return;
+      }
+
+      this.#spend(job.name, "triage");
+      const triageId = this.opts.ledger.start(job.name, "triage");
+      openRun = { runId: triageId, tier: "triage" };
+      const prompt = assembleTriagePrompt(this.opts.contextText, job, ev);
+      const triage = await withTimeout(
+        this.opts.triage.dispatch(job, ev, prompt),
+        job.timeoutMs,
+        () => ({
+          outcome: "timed_out" as const,
+          error: "triage exceeded job timeout",
+        }),
+        `helium.dispatch(${job.name})/triage`,
+      );
+      this.opts.ledger.finish(triageId, job.name, "triage", triage.outcome, {
+        severity: triage.verdict?.severity,
+        error: triage.error,
+      });
+      openRun = null;
+      await this.opts.onResult(job, ev, {
+        runId: triageId,
+        tier: "triage",
+        outcome: triage.outcome,
+        verdict: triage.verdict,
+        error: triage.error,
+      });
+
+      const verdict = triage.verdict;
+      if (triage.outcome !== "run_completed" || !verdict) return;
+      if (!meetsThreshold(verdict, job.escalateWhen)) return;
+
+      const seniorState = this.opts.store.loadSensor(job.name);
+      const seniorBudget = budgetCheck(
+        seniorState,
+        job,
+        "senior",
+        this.#now(),
+      );
+      this.opts.store.saveSensor(job.name, seniorState);
+      if (!seniorBudget.allowed) {
+        await this.opts.onSuppressed(job, ev, {
+          ...seniorBudget,
+          tier: "senior",
+        });
+        return;
+      }
+
+      const release = await this.#seniorSlots.acquire();
+      try {
+        this.#spend(job.name, "senior");
+        const seniorId = this.opts.ledger.start(job.name, "senior");
+        openRun = { runId: seniorId, tier: "senior" };
+        const thesis =
+          job.memory === "thesis-file"
+            ? (this.opts.thesis?.read(job.name) ?? null)
+            : null;
+        const seniorPrompt = assembleSeniorPrompt(
+          this.opts.contextText,
+          job,
+          ev,
+          verdict,
+          thesis,
+        );
+        const senior = await withTimeout(
+          this.opts.senior.dispatch(job, ev, seniorPrompt),
+          job.timeoutMs,
+          () => ({
+            outcome: "timed_out" as const,
+            error: "senior exceeded job timeout",
+          }),
+          `helium.dispatch(${job.name})/senior`,
+        );
+        this.opts.ledger.finish(seniorId, job.name, "senior", senior.outcome, {
+          error: senior.error,
+        });
+        openRun = null;
+        await this.opts.onResult(job, ev, {
+          runId: seniorId,
+          tier: "senior",
+          outcome: senior.outcome,
+          verdict,
+          analysis: senior.analysis,
+          error: senior.error,
+        });
+      } finally {
+        // Runs on every exit from the try above, including a rejection from
+        // `senior.dispatch()`/`withTimeout` — the semaphore slot is released
+        // before that rejection ever reaches the outer catch below.
+        release();
+      }
+    } catch (error: unknown) {
+      await this.#recoverFromEscapedError(job, ev, openRun, error);
+    }
+  }
+
+  /**
+   * Last-resort containment (fix round 1): close out whatever run was open
+   * and notify `onResult`, but never let *this* throw either — a misbehaving
+   * lane, callback, or ledger/store write must never turn into an unhandled
+   * rejection that takes the whole daemon down with it.
+   */
+  async #recoverFromEscapedError(
+    job: JobSpec,
+    ev: TriggerEvent,
+    openRun: { runId: string; tier: "triage" | "senior" } | null,
+    error: unknown,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      if (openRun) {
+        this.opts.ledger.finish(
+          openRun.runId,
+          job.name,
+          openRun.tier,
+          "run_failed",
+          { error: message },
+        );
+        await this.opts.onResult(job, ev, {
+          runId: openRun.runId,
+          tier: openRun.tier,
+          outcome: "run_failed",
+          error: message,
+        });
+        return;
+      }
+      // No run was open — the error escaped before any lane started (e.g. a
+      // `StateStore`/ledger I/O failure ahead of the first `ledger.start()`),
+      // or after one already closed with its own legitimate outcome (e.g.
+      // `onResult` itself throwing). Either way, mint a fresh, immediately
+      // terminal pair so the failure is still visible in the runs stream
+      // instead of vanishing; tagged "triage" as the natural first phase.
       const runId = this.opts.ledger.start(job.name, "triage");
-      const error = `unsupported triage engine ${JSON.stringify(job.engine.triage.engine)} (v1 supports only "deepseek")`;
       this.opts.ledger.finish(runId, job.name, "triage", "run_failed", {
-        error,
+        error: `dispatch error (no lane in flight): ${message}`,
       });
       await this.opts.onResult(job, ev, {
         runId,
         tier: "triage",
         outcome: "run_failed",
-        error,
+        error: message,
       });
-      return;
-    }
-
-    const state = this.opts.store.loadSensor(job.name);
-    const triageBudget = budgetCheck(state, job, "triage", this.#now());
-    this.opts.store.saveSensor(job.name, state);
-    if (!triageBudget.allowed) {
-      await this.opts.onSuppressed(job, ev, {
-        ...triageBudget,
-        tier: "triage",
-      });
-      return;
-    }
-
-    this.#spend(job.name, "triage");
-    const triageId = this.opts.ledger.start(job.name, "triage");
-    const prompt = assembleTriagePrompt(this.opts.contextText, job, ev);
-    const triage = await withTimeout(
-      this.opts.triage.dispatch(job, ev, prompt),
-      job.timeoutMs,
-      () => ({
-        outcome: "timed_out" as const,
-        error: "triage exceeded job timeout",
-      }),
-    );
-    this.opts.ledger.finish(triageId, job.name, "triage", triage.outcome, {
-      severity: triage.verdict?.severity,
-      error: triage.error,
-    });
-    await this.opts.onResult(job, ev, {
-      runId: triageId,
-      tier: "triage",
-      outcome: triage.outcome,
-      verdict: triage.verdict,
-      error: triage.error,
-    });
-
-    const verdict = triage.verdict;
-    if (triage.outcome !== "run_completed" || !verdict) return;
-    if (!meetsThreshold(verdict, job.escalateWhen)) return;
-
-    const seniorState = this.opts.store.loadSensor(job.name);
-    const seniorBudget = budgetCheck(seniorState, job, "senior", this.#now());
-    this.opts.store.saveSensor(job.name, seniorState);
-    if (!seniorBudget.allowed) {
-      await this.opts.onSuppressed(job, ev, {
-        ...seniorBudget,
-        tier: "senior",
-      });
-      return;
-    }
-
-    const release = await this.#seniorSlots.acquire();
-    try {
-      this.#spend(job.name, "senior");
-      const seniorId = this.opts.ledger.start(job.name, "senior");
-      const thesis =
-        job.memory === "thesis-file"
-          ? (this.opts.thesis?.read(job.name) ?? null)
-          : null;
-      const seniorPrompt = assembleSeniorPrompt(
-        this.opts.contextText,
-        job,
-        ev,
-        verdict,
-        thesis,
+    } catch (recoveryError: unknown) {
+      console.error(
+        `helium.dispatch(${job.name}): error containment itself failed`,
+        { original: error, recoveryError },
       );
-      const senior = await withTimeout(
-        this.opts.senior.dispatch(job, ev, seniorPrompt),
-        job.timeoutMs,
-        () => ({
-          outcome: "timed_out" as const,
-          error: "senior exceeded job timeout",
-        }),
-      );
-      this.opts.ledger.finish(seniorId, job.name, "senior", senior.outcome, {
-        error: senior.error,
-      });
-      await this.opts.onResult(job, ev, {
-        runId: seniorId,
-        tier: "senior",
-        outcome: senior.outcome,
-        verdict,
-        analysis: senior.analysis,
-        error: senior.error,
-      });
-    } finally {
-      release();
     }
   }
 }

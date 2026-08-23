@@ -331,4 +331,122 @@ describe("Dispatcher", () => {
     const failRow = rows[1] as { detail?: { error?: string } };
     expect(failRow.detail?.error).toContain("gpt5");
   });
+
+  // Fix round 1 (Dispatcher review): a lane that REJECTS instead of resolving
+  // to a run_failed outcome (the concrete live path: TriageRunner.dispatch's
+  // `finally` throwing during flush/dispose teardown, even after a
+  // successfully computed result) must not turn into an unhandled rejection
+  // that kills the daemon.
+  it("recovers from a triage lane that rejects: dispatch resolves, the ledger records run_failed, and a coalesced follow-up still runs", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-disp-"));
+    const jsonlDir = join(root, "jsonl");
+    const store = new StateStore(root);
+    const ledger = new RunLedger(new JsonlWriter(jsonlDir));
+    const seenKeys: string[] = [];
+    const results: { tier: string; outcome: string }[] = [];
+    const dispatcher = new Dispatcher({
+      store,
+      ledger,
+      contextText: "CTX",
+      triage: {
+        dispatch: async (_j, e) => {
+          seenKeys.push(e.dedupKey);
+          if (e.dedupKey === "a") {
+            throw new Error("boom: simulated lane rejection");
+          }
+          return {
+            outcome: "run_completed" as const,
+            verdict: { escalate: false, severity: "noise" as never, reason: "r" },
+          };
+        },
+      },
+      senior: { dispatch: async () => ({ outcome: "run_completed" as const }) },
+      onResult: (_j, _e, r) => {
+        results.push({ tier: r.tier, outcome: r.outcome });
+      },
+      onSuppressed: () => {},
+    });
+
+    dispatcher.enqueue(job, { ...ev, dedupKey: "a" });
+    dispatcher.enqueue(job, { ...ev, dedupKey: "b" }); // coalesced while "a" is in flight
+
+    await expect(dispatcher.drain()).resolves.toBeUndefined(); // never rejects
+
+    expect(seenKeys).toEqual(["a", "b"]); // the coalesced follow-up still ran
+    expect(results).toEqual([
+      { tier: "triage", outcome: "run_failed" }, // "a"'s rejection, recovered
+      { tier: "triage", outcome: "run_completed" }, // "b" ran normally afterwards
+    ]);
+
+    const rows = readStream(jsonlDir, "runs");
+    expect(rows.map((row) => row.phase)).toEqual([
+      "run_started",
+      "run_failed", // "a"
+      "run_started",
+      "run_completed", // "b"
+    ]);
+  });
+
+  it("recovers from a senior lane that rejects mid-semaphore: the slot is released for the next job", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-disp-"));
+    const jsonlDir = join(root, "jsonl");
+    const store = new StateStore(root);
+    const ledger = new RunLedger(new JsonlWriter(jsonlDir));
+    let job2SeniorCalled = false;
+    const results: { job: string; tier: string; outcome: string }[] = [];
+    const job1 = { ...job, name: `${job.name}-1` } as JobSpec;
+    const job2 = { ...job, name: `${job.name}-2` } as JobSpec;
+    const dispatcher = new Dispatcher({
+      store,
+      ledger,
+      contextText: "CTX",
+      triage: {
+        dispatch: async () => ({
+          outcome: "run_completed" as const,
+          verdict: {
+            escalate: true,
+            severity: "material" as never,
+            reason: "r",
+          },
+        }),
+      },
+      senior: {
+        dispatch: async (j) => {
+          if (j.name === job1.name) {
+            throw new Error("boom: simulated senior lane rejection");
+          }
+          job2SeniorCalled = true;
+          return { outcome: "run_completed" as const };
+        },
+      },
+      onResult: (j, _e, r) => {
+        results.push({ job: j.name, tier: r.tier, outcome: r.outcome });
+      },
+      onSuppressed: () => {},
+      maxConcurrentSenior: 1, // a single slot makes the deadlock-if-unreleased failure mode decisive
+    });
+
+    dispatcher.enqueue(job1, { ...ev, job: job1.name });
+    dispatcher.enqueue(job2, { ...ev, job: job2.name });
+
+    await expect(dispatcher.drain()).resolves.toBeUndefined(); // never rejects; never hangs
+
+    // If the one semaphore slot had not been released after job1's senior
+    // lane rejected, job2's senior dispatch would never run at all — this is
+    // the direct proof the slot was freed, not just that nothing crashed.
+    expect(job2SeniorCalled).toBe(true);
+    expect(results).toEqual(
+      expect.arrayContaining([
+        { job: job1.name, tier: "senior", outcome: "run_failed" },
+        { job: job2.name, tier: "senior", outcome: "run_completed" },
+      ]),
+    );
+    const job1SeniorRows = readStream(jsonlDir, "runs").filter(
+      (row) => row.job === job1.name && row.tier === "senior",
+    );
+    expect(job1SeniorRows.map((row) => row.phase)).toEqual([
+      "run_started",
+      "run_failed",
+    ]);
+  });
 });
