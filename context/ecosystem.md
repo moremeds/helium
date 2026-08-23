@@ -45,6 +45,8 @@ apex is the signal computation engine: bars, indicators, rule-based signals, con
   per analysis, and only when the question genuinely needs it. `apex_compute` has no backtest
   route — apex's real `/backtest/run` requires a caller-supplied JSON body (universe, date
   range, ...) that this tool's fixed allow-list can't express; macro v1 doesn't need it.
+- `GET /screener/results/{run_id}` — read back a screener run's result once `apex_compute` has
+  enqueued it.
 
 Semantics: apex is deterministic and mechanical. It tells you which rules fired, not what they
 mean. Use it to check whether a macro narrative has a price-level counterpart.

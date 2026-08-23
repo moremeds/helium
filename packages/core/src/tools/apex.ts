@@ -6,8 +6,17 @@
 import type { EcosystemTool } from "./types.js";
 import { postTool, readTool } from "./argon.js";
 
-/** Verified apex routes (2026-08-23). Read-only surface. */
-export const APEX_READ_PREFIXES = ["/health", "/v1/"] as const;
+/**
+ * Verified apex routes. Read-only surface. `/screener/results/` (added
+ * 2026-08-24) reads back a screener run's result by run_id -- without it an
+ * agent can enqueue a screener job through apex_compute but never fetch
+ * what it produced.
+ */
+export const APEX_READ_PREFIXES = [
+  "/health",
+  "/v1/",
+  "/screener/results/",
+] as const;
 
 /**
  * apex screener compute paths, fail-closed by default. apex's local dev
@@ -44,7 +53,8 @@ export function apexTools(apexBase: string): EcosystemTool[] {
   return [
     readTool(
       "apex_api",
-      "GET a read-only apex route. Allowed prefixes: /health, /v1/. Returns {status, url, body}.",
+      "GET a read-only apex route. Allowed prefixes: /health, /v1/, /screener/results/. " +
+        "Returns {status, url, body}.",
       apexBase,
       APEX_READ_PREFIXES,
     ),

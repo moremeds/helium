@@ -138,6 +138,18 @@ describe("ecosystem tools", () => {
     ).rejects.toThrow(/not an allow-listed/);
   });
 
+  it("apex_api also allows GET /screener/results/{run_id}", async () => {
+    // apex's real GET /screener/results/{run_id} reads back a screener run
+    // apex_compute enqueued; without this prefix an agent could kick off a
+    // screener job but never fetch its result.
+    await byName("apex_api").run({ path: "/screener/results/run-42" });
+    expect(seen[0]).toEqual({
+      url: "/screener/results/run-42",
+      method: "GET",
+      body: "",
+    });
+  });
+
   it("argon_rescan and apex_compute POST only to their own allow-lists", async () => {
     for (const name of ["argon_rescan", "argon_ai_analysis", "apex_compute"]) {
       await expect(byName(name).run({ path: "/api/anything" })).rejects.toThrow(
