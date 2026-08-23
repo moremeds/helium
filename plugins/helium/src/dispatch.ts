@@ -183,9 +183,16 @@ export class TriageRunner implements TriageLane {
         error: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      // sessions.flush() persists every event above BEFORE dispose() detaches the
-      // agent/session from the in-memory live registry (dsh-session's SessionStore —
-      // see task-2.3-report.md Step 10). dispose() does not touch durable persistence.
+      // Unconditional flush-before-dispose: turn() already flushes after every
+      // successful whenIdle(), but a throw before/between turns must not skip
+      // the durability checkpoint dsh's own teardown callers rely on (flush's
+      // doc lists "teardown drains" as a legitimate caller —
+      // dsh-session/lib/types/index.d.ts:372-382). dispose() only detaches the
+      // agent/session from the in-memory live registry, never durable storage
+      // (see task-2.3-report.md Step 10), so flushing again here is safe and
+      // idempotent — it is what hands the persistence plugin every event
+      // dispose() is about to detach from.
+      await this.ctx.sessions.flush(handle.agent.session);
       await handle.dispose();
     }
   }
