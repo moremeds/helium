@@ -27,10 +27,11 @@ fi
 mkdir -p "$DSH_HOME_ARG"
 DSH_HOME_ABS="$(cd "$DSH_HOME_ARG" && pwd)"
 
-echo "deploy-profile: building dsh-plugin-helium"
-pnpm -C "$REPO_ROOT" -F dsh-plugin-helium build
-
 PLUGIN_ABS="$(cd "$PLUGIN_DIR" && pwd)"
+
+echo "deploy-profile: building plugin at $PLUGIN_ABS"
+pnpm -C "$PLUGIN_ABS" build
+
 if [ ! -f "$PLUGIN_ABS/lib/index.js" ]; then
   echo "deploy-profile: $PLUGIN_ABS/lib/index.js missing after build" >&2
   exit 1
