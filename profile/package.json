@@ -1,0 +1,15 @@
+{
+  "name": "dsh-profile-helium",
+  "private": true,
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "dsh-plugin-helium"
+      ]
+    }
+  },
+  "dependencies": {
+    "dsh-plugin-helium": "file:__HELIUM_PLUGIN_DIR__"
+  }
+}
