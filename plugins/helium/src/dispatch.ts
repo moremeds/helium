@@ -22,9 +22,13 @@ import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-system-prompt";
 import type {} from "@deepseek-ai/dsh-tools";
 import {
+  meetsThreshold,
   parseVerdict,
   type JobSpec,
+  type RunLedger,
   type RunOutcome,
+  type SensorState,
+  type StateStore,
   type TriageVerdict,
 } from "@helium/core";
 import type { TriggerEvent } from "./sensor.js";
@@ -215,5 +219,336 @@ export class TriageRunner implements TriageLane {
     await agent.whenIdle();
     await this.ctx.sessions.flush(agent.session as never);
     return finalText(agent.session.events, firstSeq);
+  }
+}
+
+/**
+ * Dispatch — orchestrator (spec §8): the only place that turns a trigger
+ * event into LLM work. Owns per-job single-flight with latest-wins
+ * coalescing (queue depth 1), the global senior semaphore, rolling budget
+ * windows, the two-phase run ledger, and per-dispatch wall-clock timeouts.
+ */
+
+/** Slot-limited holder queue: `limit` concurrent holders, FIFO beyond that. */
+export class Semaphore {
+  #free: number;
+  readonly #waiters: (() => void)[] = [];
+  constructor(limit: number) {
+    this.#free = limit;
+  }
+  async acquire(): Promise<() => void> {
+    if (this.#free > 0) {
+      this.#free -= 1;
+      return () => this.#release();
+    }
+    await new Promise<void>((resolve) => {
+      this.#waiters.push(resolve);
+    });
+    return () => this.#release();
+  }
+  #release(): void {
+    const next = this.#waiters.shift();
+    if (next) next();
+    else this.#free += 1;
+  }
+}
+
+/** Drop stamps older than the rolling window; order is preserved. */
+export function pruneFires(
+  stamps: string[],
+  windowMs: number,
+  now: number,
+): string[] {
+  return stamps.filter((s) => now - Date.parse(s) < windowMs);
+}
+
+const TRIAGE_WINDOW_MS = 3_600_000;
+const SENIOR_WINDOW_MS = 86_400_000;
+
+export interface BudgetCheck {
+  allowed: boolean;
+  count: number;
+  cap: number;
+}
+
+/**
+ * Rolling-window budget check for one tier. Prunes `state`'s fire stamps for
+ * that tier in place as a side effect — callers persist the pruned state via
+ * {@link StateStore.saveSensor} whether or not the check allows the dispatch.
+ */
+export function budgetCheck(
+  state: SensorState,
+  job: JobSpec,
+  tier: "triage" | "senior",
+  now: number,
+): BudgetCheck {
+  const isTriage = tier === "triage";
+  const windowMs = isTriage ? TRIAGE_WINDOW_MS : SENIOR_WINDOW_MS;
+  const cap = isTriage
+    ? job.budget.maxTriagePerHour
+    : job.budget.maxSeniorPerDay;
+  const kept = pruneFires(
+    isTriage ? state.triageFires : state.seniorFires,
+    windowMs,
+    now,
+  );
+  if (isTriage) state.triageFires = kept;
+  else state.seniorFires = kept;
+  return { allowed: kept.length < cap, count: kept.length, cap };
+}
+
+/** Race a lane against the job wall clock. The lane is left to settle; only the wait ends. */
+async function withTimeout<T>(
+  work: Promise<T>,
+  ms: number,
+  onTimeout: () => T,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const guard = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(onTimeout()), ms);
+  });
+  try {
+    return await Promise.race([work, guard]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export interface SeniorLane {
+  dispatch(
+    job: JobSpec,
+    ev: TriggerEvent,
+    prompt: string,
+  ): Promise<{ outcome: RunOutcome; analysis?: string; error?: string }>;
+}
+
+export interface ThesisReader {
+  read(job: string): string | null;
+}
+
+/** Four-layer context injection: ecosystem context → standing thesis → job prompt → triage verdict + trigger payload. */
+export function assembleSeniorPrompt(
+  contextText: string,
+  job: JobSpec,
+  ev: TriggerEvent,
+  verdict: TriageVerdict,
+  thesis: string | null,
+): string {
+  const parts = ["## Ecosystem context", contextText.trim(), ""];
+  if (thesis) parts.push("## Standing thesis", thesis.trim(), "");
+  parts.push(
+    "## Job",
+    job.prompt.trim(),
+    "",
+    "## Triage verdict",
+    "```json",
+    JSON.stringify(verdict, null, 2),
+    "```",
+    "",
+    "## Trigger",
+    "```json",
+    JSON.stringify(
+      { job: ev.job, kind: ev.kind, firedAt: ev.firedAt, payload: ev.payload },
+      null,
+      2,
+    ),
+    "```",
+    "",
+    "Write the analysis for the operator. If the standing thesis changed, rewrite it through " +
+      "the thesis_write tool — never edit the thesis file directly.",
+  );
+  return parts.join("\n");
+}
+
+export interface DispatchResult {
+  runId: string;
+  tier: "triage" | "senior";
+  outcome: RunOutcome;
+  verdict?: TriageVerdict;
+  analysis?: string;
+  error?: string;
+}
+
+interface Queued {
+  job: JobSpec;
+  ev: TriggerEvent;
+}
+
+export class Dispatcher {
+  readonly #inFlight = new Map<string, Promise<void>>();
+  readonly #pending = new Map<string, Queued>(); // depth 1: latest wins (spec §8)
+  readonly #seniorSlots: Semaphore;
+
+  constructor(
+    private readonly opts: {
+      store: StateStore;
+      ledger: RunLedger;
+      contextText: string;
+      triage: TriageLane;
+      senior: SeniorLane;
+      thesis?: ThesisReader;
+      onResult: (
+        job: JobSpec,
+        ev: TriggerEvent,
+        result: DispatchResult,
+      ) => void | Promise<void>;
+      onSuppressed: (
+        job: JobSpec,
+        ev: TriggerEvent,
+        info: BudgetCheck & { tier: string },
+      ) => void | Promise<void>;
+      maxConcurrentSenior?: number;
+      now?: () => Date;
+    },
+  ) {
+    this.#seniorSlots = new Semaphore(opts.maxConcurrentSenior ?? 2);
+  }
+
+  /** Start `job` immediately if it has no run in flight, else queue it (replacing any already-queued follow-up). */
+  enqueue(job: JobSpec, ev: TriggerEvent): void {
+    if (this.#inFlight.has(job.name)) {
+      this.#pending.set(job.name, { job, ev });
+      return;
+    }
+    this.#start(job, ev);
+  }
+
+  /** Resolve once every in-flight and queued run for every job has settled. */
+  async drain(): Promise<void> {
+    while (this.#inFlight.size > 0 || this.#pending.size > 0) {
+      await Promise.all([...this.#inFlight.values()]);
+    }
+  }
+
+  #start(job: JobSpec, ev: TriggerEvent): void {
+    const run = this.#run(job, ev).finally(() => {
+      this.#inFlight.delete(job.name);
+      const next = this.#pending.get(job.name);
+      if (next) {
+        this.#pending.delete(job.name);
+        this.#start(next.job, next.ev);
+      }
+    });
+    this.#inFlight.set(job.name, run);
+  }
+
+  #now(): number {
+    return (this.opts.now ?? (() => new Date()))().getTime();
+  }
+
+  #spend(job: string, tier: "triage" | "senior"): void {
+    const state = this.opts.store.loadSensor(job);
+    const stamp = new Date(this.#now()).toISOString();
+    if (tier === "triage") state.triageFires.push(stamp);
+    else state.seniorFires.push(stamp);
+    this.opts.store.saveSensor(job, state);
+  }
+
+  async #run(job: JobSpec, ev: TriggerEvent): Promise<void> {
+    // Controller addendum (Task 2.3 ruling): v1 has exactly one in-process
+    // triage engine. A job whose config drifted away from it fails loudly
+    // instead of silently paying for a dispatch the runtime cannot honor —
+    // and it never touches the budget, since no lane actually ran.
+    if (job.engine.triage.engine !== "deepseek") {
+      const runId = this.opts.ledger.start(job.name, "triage");
+      const error = `unsupported triage engine ${JSON.stringify(job.engine.triage.engine)} (v1 supports only "deepseek")`;
+      this.opts.ledger.finish(runId, job.name, "triage", "run_failed", {
+        error,
+      });
+      await this.opts.onResult(job, ev, {
+        runId,
+        tier: "triage",
+        outcome: "run_failed",
+        error,
+      });
+      return;
+    }
+
+    const state = this.opts.store.loadSensor(job.name);
+    const triageBudget = budgetCheck(state, job, "triage", this.#now());
+    this.opts.store.saveSensor(job.name, state);
+    if (!triageBudget.allowed) {
+      await this.opts.onSuppressed(job, ev, {
+        ...triageBudget,
+        tier: "triage",
+      });
+      return;
+    }
+
+    this.#spend(job.name, "triage");
+    const triageId = this.opts.ledger.start(job.name, "triage");
+    const prompt = assembleTriagePrompt(this.opts.contextText, job, ev);
+    const triage = await withTimeout(
+      this.opts.triage.dispatch(job, ev, prompt),
+      job.timeoutMs,
+      () => ({
+        outcome: "timed_out" as const,
+        error: "triage exceeded job timeout",
+      }),
+    );
+    this.opts.ledger.finish(triageId, job.name, "triage", triage.outcome, {
+      severity: triage.verdict?.severity,
+      error: triage.error,
+    });
+    await this.opts.onResult(job, ev, {
+      runId: triageId,
+      tier: "triage",
+      outcome: triage.outcome,
+      verdict: triage.verdict,
+      error: triage.error,
+    });
+
+    const verdict = triage.verdict;
+    if (triage.outcome !== "run_completed" || !verdict) return;
+    if (!meetsThreshold(verdict, job.escalateWhen)) return;
+
+    const seniorState = this.opts.store.loadSensor(job.name);
+    const seniorBudget = budgetCheck(seniorState, job, "senior", this.#now());
+    this.opts.store.saveSensor(job.name, seniorState);
+    if (!seniorBudget.allowed) {
+      await this.opts.onSuppressed(job, ev, {
+        ...seniorBudget,
+        tier: "senior",
+      });
+      return;
+    }
+
+    const release = await this.#seniorSlots.acquire();
+    try {
+      this.#spend(job.name, "senior");
+      const seniorId = this.opts.ledger.start(job.name, "senior");
+      const thesis =
+        job.memory === "thesis-file"
+          ? (this.opts.thesis?.read(job.name) ?? null)
+          : null;
+      const seniorPrompt = assembleSeniorPrompt(
+        this.opts.contextText,
+        job,
+        ev,
+        verdict,
+        thesis,
+      );
+      const senior = await withTimeout(
+        this.opts.senior.dispatch(job, ev, seniorPrompt),
+        job.timeoutMs,
+        () => ({
+          outcome: "timed_out" as const,
+          error: "senior exceeded job timeout",
+        }),
+      );
+      this.opts.ledger.finish(seniorId, job.name, "senior", senior.outcome, {
+        error: senior.error,
+      });
+      await this.opts.onResult(job, ev, {
+        runId: seniorId,
+        tier: "senior",
+        outcome: senior.outcome,
+        verdict,
+        analysis: senior.analysis,
+        error: senior.error,
+      });
+    } finally {
+      release();
+    }
   }
 }
