@@ -5,14 +5,16 @@
  * @module dsh-plugin-helium
  */
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
 import {
+  buildTools,
   JsonlWriter,
   RunLedger,
   StateStore,
+  ThesisStore,
   loadJobs,
   type TriggerCalendarWindow,
 } from "@helium/core";
@@ -28,6 +30,7 @@ import {
   StateChangePoller,
   type TriggerEvent,
 } from "./sensor.js";
+import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
 export const inject = ["agentDefaultModel", "agents", "sessions", "tools"];
@@ -56,11 +59,19 @@ const DEFAULT_WATCH_ONLY_INTERVAL_MS = 60_000;
  * into the `SeniorLane` outcome shape the {@link Dispatcher} expects.
  */
 function buildSeniorLane(cfg: Config): SeniorLane {
-  // Task 2.7 writes the MCP config JSON itself; this only derives the path
-  // it will land at, colocated with the server binary (the same layout
-  // `contracts/fixtures/mcp-ping/{server.mjs,mcp-config.json}` verified live
-  // in Task 1.7).
-  const mcpConfigPath = join(dirname(cfg.mcpBin), "mcp-config.json");
+  // Carry-in decision (Task 2.7, correcting Task 2.5's flagged colocated-
+  // with-cfg.mcpBin guess): task-3.1-brief.md Step 10 is the authoritative
+  // source for this path — the mini's `cfg.mcpBin` points inside a versioned,
+  // symlink-swapped release tree
+  // (`.../helium-releases/current/node_modules/.bin/helium-mcp`, per
+  // task-3.3-brief.md), so writing a generated config file next to it would
+  // land inside a pnpm-managed node_modules/.bin — HELIUM_STATE_ROOT is the
+  // stable, writable directory that survives a release swap, and is where
+  // Task 3.1 actually writes mcp.json once at startup. Task 2.7 (this task)
+  // does not write that file's content — only Task 3.1 does — this line only
+  // makes the path this process passes to `claude -p --mcp-config` agree
+  // with where Task 3.1 will put it.
+  const mcpConfigPath = join(cfg.stateRoot, "mcp.json");
   return {
     async dispatch(job, _ev, prompt) {
       const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
@@ -110,11 +121,26 @@ export function apply(ctx: Context, raw: Config): void {
     contextText,
     triage: new TriageRunner(ctx),
     senior: buildSeniorLane(cfg),
-    // ThesisReader wiring lands in Task 2.7 (ThesisStore); thesis-file jobs
-    // dispatch without injected thesis content until then.
+    thesis: new ThesisStore(cfg.stateRoot),
     onResult: (job, ev, result) => delivery.deliver(job, ev, result),
     onSuppressed: (job, ev, info) => delivery.budgetExhausted(job, ev, info),
   });
+
+  // Global in-process registration for dsh agents / the interactive Web UI:
+  // read-only by design (spec §6), regardless of any job's allowMutations. A
+  // job that enables mutations gets those tools only through the senior
+  // lane's MCP server (HELIUM_ALLOW_MUTATIONS=1), keeping the audit boundary
+  // on the child process instead of on every interactive session.
+  const tools = buildTools({
+    argonBase: cfg.argonBase,
+    apexBase: cfg.apexBase,
+    livewireDb: cfg.livewireDb,
+    stateRoot: cfg.stateRoot,
+  });
+  registerEcosystemTools(
+    ctx,
+    tools.filter((t) => !t.mutating),
+  );
 
   for (const job of loadJobs(cfg.jobsDir).filter((j) => j.enabled)) {
     const onTrigger = (ev: TriggerEvent): void => {
