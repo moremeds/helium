@@ -1,0 +1,259 @@
+/**
+ * Unit coverage for the pure orchestrator: job filtering, startup
+ * reconciliation, the Task 2.2 carry-in (one scheduling loop per job, not
+ * per trigger — a job's shared calendar watcher must be ticked once per
+ * cycle regardless of how many state-change triggers the job declares),
+ * cron-payload inbox folding, and stop() disposal. `apply()`-level dsh
+ * wiring is covered by the contract suite / local E2E, not here (mirrors
+ * index.test.ts's existing split).
+ * @module dsh-plugin-helium/runtime.test
+ */
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { jsonlFileName } from "@helium/core";
+import { CalendarWindowWatcher } from "./calendar.js";
+import {
+  augmentCronPayload,
+  drainInbox,
+  HeliumRuntime,
+  type RuntimeDeps,
+} from "./runtime.js";
+import { StateChangePoller } from "./sensor.js";
+import { startFixture, type Fixture } from "./testing/http-fixture.js";
+
+const JOB_YAML = (name: string, triggersYaml: string) => `
+name: ${name}
+enabled: true
+triggers:
+${triggersYaml}
+engine:
+  triage: { engine: deepseek, model: deepseek-v4-flash }
+  senior: { engine: claude-max }
+escalate_when: severity >= material
+session: fresh
+memory: none
+tools: []
+max_turns: { triage: 2, senior: 2 }
+timeout: 60s
+budget: { max_triage_per_hour: 60, max_senior_per_day: 60 }
+delivery:
+  jsonl: true
+prompt: unit fixture job
+`;
+
+const STATE_CHANGE = (
+  url: string,
+  fields: string,
+  intervalMs: number,
+) => `  - kind: state-change
+    url: ${url}
+    fields: [${fields}]
+    interval: ${intervalMs}ms`;
+
+const CALENDAR_WINDOW = (
+  calendar: string,
+  intervalMs: number,
+) => `  - kind: calendar-window
+    calendar: ${calendar}
+    window: { before: 5m, after: 5m }
+    interval_during: ${intervalMs}ms`;
+
+function rig(jobYaml: string, calendarYaml?: string) {
+  const root = mkdtempSync(join(tmpdir(), "helium-runtime-"));
+  const jobsDir = join(root, "jobs");
+  const calendarsDir = join(root, "calendars");
+  mkdirSync(jobsDir, { recursive: true });
+  mkdirSync(calendarsDir, { recursive: true });
+  writeFileSync(join(jobsDir, "job.yaml"), jobYaml, "utf8");
+  if (calendarYaml) {
+    writeFileSync(join(calendarsDir, "test-cal.yaml"), calendarYaml, "utf8");
+  }
+  writeFileSync(join(root, "ecosystem.md"), "# ctx\n", "utf8");
+  const deps: RuntimeDeps = {
+    config: {
+      jobsDir,
+      stateRoot: join(root, "state"),
+      contextFile: join(root, "ecosystem.md"),
+      calendarsDir,
+      argonBase: "http://127.0.0.1:1",
+      apexBase: "http://127.0.0.1:1",
+      envFile: join(root, "helium.env"),
+      claudeTokenFile: join(root, "token.env"),
+      proxy: "",
+      mcpBin: "",
+      emailTo: "unit@example.invalid",
+    },
+    engines: {
+      triage: { dispatch: async () => ({ outcome: "run_completed" as const }) },
+      senior: { dispatch: async () => ({ outcome: "run_completed" as const }) },
+    },
+    delivery: {
+      deliver: () => {},
+      budgetExhausted: () => {},
+      heartbeat: () => {},
+    },
+  };
+  return { root, jobsDir, deps };
+}
+
+describe("drainInbox", () => {
+  it("returns [] when the inbox directory does not exist", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-inbox-"));
+    expect(drainInbox(join(root, "inbox"))).toEqual([]);
+  });
+
+  it("reads and deletes .json drops in file-name order, skipping malformed ones", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-inbox-"));
+    const dir = join(root, "inbox");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "b.json"), JSON.stringify({ n: 2 }), "utf8");
+    writeFileSync(join(dir, "a.json"), JSON.stringify({ n: 1 }), "utf8");
+    writeFileSync(join(dir, "broken.json"), "{not json", "utf8");
+    writeFileSync(join(dir, "ignore.txt"), "nope", "utf8");
+
+    expect(drainInbox(dir)).toEqual([{ n: 1 }, { n: 2 }]);
+    // Consumed drops are removed; a second drain is empty. The malformed and
+    // non-.json files are left in place for inspection.
+    expect(drainInbox(dir)).toEqual([]);
+  });
+});
+
+describe("augmentCronPayload", () => {
+  it("folds the drained inbox into a cron event's payload", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-inbox-"));
+    const inboxDir = join(root, "inbox");
+    mkdirSync(inboxDir, { recursive: true });
+    writeFileSync(
+      join(inboxDir, "note.json"),
+      JSON.stringify({ kind: "canary" }),
+      "utf8",
+    );
+    const ev = augmentCronPayload(
+      {
+        job: "cronjob",
+        kind: "cron",
+        firedAt: "2026-08-24T00:00:00.000Z",
+        dedupKey: "cronjob:cron:x",
+        payload: { scheduledFor: "2026-08-24T00:00:00.000Z" },
+      },
+      root,
+    );
+    expect(ev.payload).toEqual({
+      scheduledFor: "2026-08-24T00:00:00.000Z",
+      inbox: [{ kind: "canary" }],
+    });
+  });
+
+  it("leaves a non-cron event's payload untouched", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-inbox-"));
+    const ev = augmentCronPayload(
+      {
+        job: "j",
+        kind: "state-change",
+        firedAt: "2026-08-24T00:00:00.000Z",
+        dedupKey: "d",
+        payload: { url: "u" },
+      },
+      root,
+    );
+    expect(ev.payload).toEqual({ url: "u" });
+  });
+});
+
+describe("HeliumRuntime", () => {
+  let fixture: Fixture | undefined;
+
+  afterEach(async () => {
+    await fixture?.close();
+    fixture = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it("loads and exposes only enabled jobs", () => {
+    const { deps, jobsDir } = rig(
+      JOB_YAML("a", STATE_CHANGE("http://127.0.0.1:1", "state", 1000)),
+    );
+    writeFileSync(
+      join(jobsDir, "disabled.yaml"),
+      JOB_YAML("b", STATE_CHANGE("http://127.0.0.1:1", "state", 1000)).replace(
+        "enabled: true",
+        "enabled: false",
+      ),
+      "utf8",
+    );
+    const rt = new HeliumRuntime(deps);
+    expect(rt.jobNames).toEqual(["a"]);
+  });
+
+  it("reconciles startup and appends a harness_started row before any job starts", () => {
+    const { deps } = rig(
+      JOB_YAML("a", STATE_CHANGE("http://127.0.0.1:1", "state", 1000)),
+    );
+    const rt = new HeliumRuntime(deps);
+    rt.start();
+    rt.stop();
+    const text = readFileSync(
+      join(deps.config.stateRoot, "jsonl", jsonlFileName("runs", new Date())),
+      "utf8",
+    );
+    expect(text).toContain('"phase":"harness_started"');
+    expect(text).toContain('"jobs":1');
+  });
+
+  it("carry-in (Task 2.2): one scheduling loop per job ticks a shared calendar watcher once per cycle, not once per state-change trigger", async () => {
+    fixture = await startFixture((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ state: "x" }));
+    });
+    const far = new Date(Date.now() + 3_600_000).toISOString();
+    const { deps } = rig(
+      JOB_YAML(
+        "multi",
+        [
+          STATE_CHANGE(fixture.url, "state", 40),
+          STATE_CHANGE(fixture.url, "state2", 40),
+          CALENDAR_WINDOW("test-cal", 40),
+        ].join("\n"),
+      ),
+      `- name: FOMC-test\n  kind: FOMC\n  at: ${far}\n`,
+    );
+
+    const pollerSpy = vi.spyOn(StateChangePoller.prototype, "tick");
+    const watcherSpy = vi.spyOn(CalendarWindowWatcher.prototype, "tick");
+    const rt = new HeliumRuntime(deps);
+    rt.start();
+    await new Promise((r) => setTimeout(r, 220));
+    rt.stop();
+
+    const pollerCalls = pollerSpy.mock.calls.length; // 2 pollers ticked every cycle
+    const watcherCalls = watcherSpy.mock.calls.length; // 1 watcher, shared by the job
+    expect(pollerCalls).toBeGreaterThan(0);
+    expect(pollerCalls % 2).toBe(0); // both state-change triggers tick together, in lockstep
+    // The regression this guards: a per-trigger scheduleLoop would tick the
+    // shared watcher once per trigger's own loop, i.e. `pollerCalls` times
+    // instead of once per job-cycle (`pollerCalls / 2`).
+    expect(watcherCalls).toBe(pollerCalls / 2);
+  });
+
+  it("stop() disposes the job loop so no further ticks occur", async () => {
+    let hits = 0;
+    fixture = await startFixture((_req, res) => {
+      hits += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ state: "x" }));
+    });
+    const { deps } = rig(
+      JOB_YAML("stoppable", STATE_CHANGE(fixture.url, "state", 30)),
+    );
+    const rt = new HeliumRuntime(deps);
+    rt.start();
+    await new Promise((r) => setTimeout(r, 100));
+    rt.stop();
+    const settled = hits;
+    expect(settled).toBeGreaterThan(0);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(hits).toBe(settled);
+  });
+});

@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
@@ -12,6 +12,11 @@ export default defineConfig({
             "plugins/*/tests/**/*.spec.ts",
             "plugins/*/src/**/*.test.ts",
           ],
+          // Belt-and-suspenders: the local E2E harness (Task 3.1) already
+          // lives outside these include globs (plugins/*/test/e2e/, not
+          // src/ or tests/), but excluding it explicitly keeps it out of
+          // the CI unit lane even if that ever changes.
+          exclude: [...configDefaults.exclude, "**/*.e2e.test.ts"],
         },
       },
       {
