@@ -2,5 +2,6 @@ packages:
   - packages/*
   - plugins/*
   - contracts
+  - contracts/fixtures/plugin-live-dispatch
 allowBuilds:
   esbuild: true

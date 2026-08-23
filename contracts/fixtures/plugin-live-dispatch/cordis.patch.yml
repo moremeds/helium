@@ -1,0 +1,5 @@
+- insert:
+    - id: helium-live-dispatch
+      name: "dsh-plugin-helium-live-dispatch"
+      config:
+        outFile: !!js process.env.HELIUM_LIVE_OUT
