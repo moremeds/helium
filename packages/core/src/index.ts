@@ -7,3 +7,4 @@ export * from "./jsonl.js";
 export * from "./job.js";
 export * from "./state.js";
 export * from "./runs.js";
+export * from "./verdict.js";
