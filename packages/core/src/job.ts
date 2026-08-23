@@ -36,6 +36,17 @@ export interface TriggerCron {
 
 export type Trigger = TriggerStateChange | TriggerCalendarWindow | TriggerCron;
 
+/**
+ * Task 3.6: a gated script action, run instead of the triage/senior engines
+ * when a job declares `script:` (spec §10, the dsh upgrade canary). `command`
+ * is absolute, or relative to the release root.
+ */
+export interface JobScriptAction {
+  command: string;
+  args: string[];
+  timeoutMs: number;
+}
+
 export interface JobSpec {
   name: string;
   enabled: boolean;
@@ -57,6 +68,13 @@ export interface JobSpec {
     email?: { to: string; subjectPrefix: string; maxPerHour: number };
   };
   prompt: string;
+  /**
+   * Optional script action (Task 3.6). A job carrying `script` still
+   * declares `engine`, `budget` and `delivery` in full — the triage/senior
+   * engines are simply unused for that job; the harness routes it to the
+   * script runner instead of a dsh agent turn.
+   */
+  script?: JobScriptAction;
 }
 
 /** Spec §8: dedup carries an explicit key and TTL; 6h when the file omits it. */
@@ -120,6 +138,15 @@ type TriggerYaml =
   | z.infer<typeof stateChangeYaml>
   | z.infer<typeof calendarWindowYaml>
   | z.infer<typeof cronYaml>;
+
+/** Task 3.6: `timeout` normalizes to `timeoutMs` via the shared `duration` schema, exactly like every other duration field. */
+const scriptYaml = z
+  .object({
+    command: z.string().min(1),
+    args: z.array(z.string()).default([]),
+    timeout: duration,
+  })
+  .strict();
 
 /** Normalize one parsed YAML trigger into its `Trigger` shape. */
 function toTrigger(raw: TriggerYaml): Trigger {
@@ -198,6 +225,7 @@ const jobYaml = z
       })
       .strict(),
     prompt: z.string().min(1),
+    script: scriptYaml.optional(),
   })
   .strict();
 
@@ -232,6 +260,15 @@ function toJobSpec(raw: z.infer<typeof jobYaml>): JobSpec {
           }),
     },
     prompt: raw.prompt,
+    ...(raw.script === undefined
+      ? {}
+      : {
+          script: {
+            command: raw.script.command,
+            args: raw.script.args,
+            timeoutMs: raw.script.timeout,
+          },
+        }),
   };
 }
 

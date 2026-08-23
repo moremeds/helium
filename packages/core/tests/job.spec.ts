@@ -134,6 +134,51 @@ describe("parseJobYaml", () => {
       tz: "America/New_York",
     });
   });
+
+  it("parses a job carrying a script block, normalizing its timeout to ms", () => {
+    const job = parseJobYaml(
+      `${MACRO_WATCH}\nscript:\n  command: /opt/helium/scripts/canary/run.sh\n  args: ["--flag"]\n  timeout: 40m\n`,
+      "jobs/dsh-canary.yaml",
+    );
+    expect(job.script).toEqual({
+      command: "/opt/helium/scripts/canary/run.sh",
+      args: ["--flag"],
+      timeoutMs: 2_400_000,
+    });
+  });
+
+  it("defaults a script block's args to [] when omitted", () => {
+    const job = parseJobYaml(
+      `${MACRO_WATCH}\nscript:\n  command: /opt/helium/scripts/canary/run.sh\n  timeout: 40m\n`,
+      "j.yaml",
+    );
+    expect(job.script?.args).toEqual([]);
+  });
+
+  it("omits script entirely from a job that does not declare one", () => {
+    const job = parseJobYaml(MACRO_WATCH, "jobs/macro-watch.yaml");
+    expect(job.script).toBeUndefined();
+  });
+
+  it("a script job still requires engine, budget and delivery — none become optional", () => {
+    const withScript = `${MACRO_WATCH}\nscript:\n  command: /opt/helium/scripts/canary/run.sh\n  timeout: 40m\n`;
+    const noBudget = withScript
+      .split("\n")
+      .filter(
+        (line) =>
+          !line.startsWith("budget:") &&
+          !line.startsWith("  max_triage") &&
+          !line.startsWith("  max_senior"),
+      )
+      .join("\n");
+    expect(() => parseJobYaml(noBudget, "j.yaml")).toThrow(/budget/);
+
+    const noEngine = withScript.replace(
+      /engine:\n  triage:.*\n  senior:.*\n/,
+      "",
+    );
+    expect(() => parseJobYaml(noEngine, "j.yaml")).toThrow(/engine/);
+  });
 });
 
 describe("loadJobs", () => {
