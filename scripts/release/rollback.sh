@@ -12,14 +12,19 @@ if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   exit $?
 fi
 started=$(date -u +%s)
-target="$(readlink "$RELEASES/previous")" || { echo "no previous release" >&2; exit 65; }
-current="$(readlink "$RELEASES/current")"
-[ -d "$target" ] || { echo "previous release $target missing" >&2; exit 65; }
-echo "[rollback] $current -> $target"
 
-# Serialize the flip/kickstart sequence against a concurrent deploy.sh or
+# Serialize the read-then-flip sequence against a concurrent deploy.sh or
 # rollback.sh (fix round 1, IMPORTANT 3) — same mkdir-based lock as
 # deploy.sh (macOS has no `flock` command; POSIX mkdir(2) is atomic).
+#
+# Acquired BEFORE reading current/previous below (fix round 2, ITEM 1):
+# fix round 1 read them first and only serialized the write, which is a
+# TOCTOU — a deploy.sh that lands a flip in the window between this
+# script's read and its own write would have its new release silently
+# discarded (this script would flip back to the stale `target` it already
+# read) and `previous` mis-stamped with stale data. Reading under the lock
+# instead guarantees nothing changes out from under this script between
+# the read and the flip.
 LOCK_DIR="$RELEASES/.flip.lock"
 lock_tries=0
 until mkdir "$LOCK_DIR" 2>/dev/null; do
@@ -31,6 +36,11 @@ until mkdir "$LOCK_DIR" 2>/dev/null; do
   sleep 1
 done
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+target="$(readlink "$RELEASES/previous")" || { echo "no previous release" >&2; exit 65; }
+current="$(readlink "$RELEASES/current")"
+[ -d "$target" ] || { echo "previous release $target missing" >&2; exit 65; }
+echo "[rollback] $current -> $target"
 
 tmp="$RELEASES/.current.$$"
 ln -sfn "$target" "$tmp"

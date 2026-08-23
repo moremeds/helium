@@ -124,7 +124,18 @@ fi
 flip_start=$(date -u +%s)
 flip_to "$DEST"
 say "flipped current -> $VERSION; restarting daemon"
-launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"
+# fix round 2, ITEM 2: match the flip-back path's kickstart handling here
+# too — a bare set -e abort on an otherwise-healthy deploy (current already
+# flipped to $VERSION) would leave the daemon running the OLD build with no
+# clear signal why, and no automatic path back into the health window below.
+if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+  say "kickstart failed once — retrying after 3s"
+  sleep 3
+  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+    echo "FATAL: current=$VERSION but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING the OLD release even though current now points at $VERSION. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'. If it comes up healthy, the deploy is fine; if not, run scripts/release/rollback.sh." >&2
+    exit 74
+  fi
+fi
 
 say "post-flip health window (2 heartbeat intervals)"
 ok=0; end=$((SECONDS + 180))
