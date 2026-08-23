@@ -3,17 +3,25 @@
  * reconciliation, the Task 2.2 carry-in (one scheduling loop per job, not
  * per trigger — a job's shared calendar watcher must be ticked once per
  * cycle regardless of how many state-change triggers the job declares),
- * cron-payload inbox folding, and stop() disposal. `apply()`-level dsh
- * wiring is covered by the contract suite / local E2E, not here (mirrors
- * index.test.ts's existing split).
+ * cron-payload inbox folding, stop() disposal, and (Task 3.6) routing a
+ * `script`-carrying job to the script runner instead of the dispatcher.
+ * `apply()`-level dsh wiring is covered by the contract suite / local E2E,
+ * not here (mirrors index.test.ts's existing split).
  * @module dsh-plugin-helium/runtime.test
  */
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { jsonlFileName } from "@helium/core";
 import { CalendarWindowWatcher } from "./calendar.js";
+import type { DispatchResult } from "./dispatch.js";
 import {
   augmentCronPayload,
   drainInbox,
@@ -255,5 +263,134 @@ describe("HeliumRuntime", () => {
     expect(settled).toBeGreaterThan(0);
     await new Promise((r) => setTimeout(r, 100));
     expect(hits).toBe(settled);
+  });
+
+  describe("script jobs (Task 3.6)", () => {
+    function fakeScript(body: string): string {
+      const dir = mkdtempSync(join(tmpdir(), "helium-runtime-script-bin-"));
+      const bin = join(dir, "run.sh");
+      writeFileSync(bin, `#!/bin/sh\n${body}\n`);
+      chmodSync(bin, 0o755);
+      return bin;
+    }
+
+    /** Fixture that returns a strictly-increasing body so `state-change` fires a "changed" event on the second poll, not just a baseline. */
+    async function changingFixture(): Promise<Fixture> {
+      let n = 0;
+      return startFixture((_req, res) => {
+        n += 1;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ state: `v${n}` }));
+      });
+    }
+
+    it("routes a job.script trigger through the script runner instead of the triage/senior engines, recording a ledger row and delivering a DispatchResult", async () => {
+      fixture = await changingFixture();
+      const script = fakeScript(`echo "trigger seen: $HELIUM_TRIGGER"; exit 0`);
+      const jobYaml = `${JOB_YAML("dsh-canary", STATE_CHANGE(fixture.url, "state", 25))}\nscript:\n  command: ${script}\n  args: []\n  timeout: 5s\n`;
+      const { deps } = rig(jobYaml);
+      const triageSpy = vi.fn(async () => ({
+        outcome: "run_completed" as const,
+      }));
+      deps.engines.triage = { dispatch: triageSpy };
+      const delivered: DispatchResult[] = [];
+      deps.delivery.deliver = (_job, _ev, result) => {
+        delivered.push(result);
+      };
+
+      const rt = new HeliumRuntime(deps);
+      rt.start();
+      await vi.waitFor(
+        () => {
+          expect(delivered.length).toBeGreaterThan(0);
+        },
+        { timeout: 3_000, interval: 20 },
+      );
+      rt.stop();
+
+      expect(triageSpy).not.toHaveBeenCalled();
+      expect(delivered[0].tier).toBe("triage");
+      expect(delivered[0].outcome).toBe("run_completed");
+      expect(delivered[0].analysis).toContain("trigger seen:");
+      expect(delivered[0].analysis).toContain('"kind":"state-change"');
+
+      const runsText = readFileSync(
+        join(deps.config.stateRoot, "jsonl", jsonlFileName("runs", new Date())),
+        "utf8",
+      );
+      expect(runsText).toContain('"phase":"run_started"');
+      expect(runsText).toContain('"phase":"run_completed"');
+    });
+
+    it("delivers run_failed with the stderr tail when the script exits non-zero", async () => {
+      fixture = await changingFixture();
+      const script = fakeScript(`echo "candidate install failed" 1>&2; exit 1`);
+      const jobYaml = `${JOB_YAML("dsh-canary", STATE_CHANGE(fixture.url, "state", 25))}\nscript:\n  command: ${script}\n  args: []\n  timeout: 5s\n`;
+      const { deps } = rig(jobYaml);
+      const delivered: DispatchResult[] = [];
+      deps.delivery.deliver = (_job, _ev, result) => {
+        delivered.push(result);
+      };
+
+      const rt = new HeliumRuntime(deps);
+      rt.start();
+      await vi.waitFor(
+        () => {
+          expect(delivered.length).toBeGreaterThan(0);
+        },
+        { timeout: 3_000, interval: 20 },
+      );
+      rt.stop();
+
+      expect(delivered[0].outcome).toBe("run_failed");
+      expect(delivered[0].error).toContain("candidate install failed");
+    });
+
+    it("does not run overlapping script instances for the same job — a trigger while one is in flight is skipped", async () => {
+      fixture = await changingFixture();
+      const markerDir = mkdtempSync(join(tmpdir(), "helium-script-marker-"));
+      const marker = join(markerDir, "count");
+      writeFileSync(marker, "0", "utf8");
+      // Sleeps well past several poll cycles, so the guard has many chances
+      // to (wrongly) let a second instance start before the first finishes.
+      const script = fakeScript(
+        `n=$(cat "${marker}"); echo $((n + 1)) > "${marker}"; sleep 0.3; exit 0`,
+      );
+      const jobYaml = `${JOB_YAML("dsh-canary", STATE_CHANGE(fixture.url, "state", 15))}\nscript:\n  command: ${script}\n  args: []\n  timeout: 5s\n`;
+      const { deps } = rig(jobYaml);
+      const delivered: DispatchResult[] = [];
+      deps.delivery.deliver = (_job, _ev, result) => {
+        delivered.push(result);
+      };
+
+      const rt = new HeliumRuntime(deps);
+      rt.start();
+
+      // Wait for the first script to actually start (timing-tolerant: real
+      // fetch/spawn latency varies by machine). It sleeps 300ms, so once
+      // the marker reads "1" the run is still mid-flight.
+      await vi.waitFor(
+        () => {
+          expect(readFileSync(marker, "utf8").trim()).toBe("1");
+        },
+        { timeout: 3_000, interval: 10 },
+      );
+      expect(delivered.length).toBe(0);
+
+      // Let the (only) in-flight script finish and deliver. Every ~15ms
+      // poll during that sleep fired a trigger too (proven by the "script
+      // already in flight, skipping trigger" log lines above) — none of
+      // them was allowed to start a second instance.
+      await vi.waitFor(
+        () => {
+          expect(delivered.length).toBeGreaterThan(0);
+        },
+        { timeout: 3_000, interval: 20 },
+      );
+      rt.stop();
+
+      expect(delivered.length).toBe(1);
+      expect(readFileSync(marker, "utf8").trim()).toBe("1");
+    });
   });
 });

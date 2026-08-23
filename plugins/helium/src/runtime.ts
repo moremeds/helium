@@ -26,6 +26,7 @@ import {
   ThesisStore,
   loadJobs,
   type JobSpec,
+  type RunOutcome,
   type TriggerCalendarWindow,
   type TriggerStateChange,
 } from "@helium/core";
@@ -39,6 +40,7 @@ import {
   type SeniorLane,
   type TriageLane,
 } from "./dispatch.js";
+import { runScriptProcess } from "./script.js";
 import {
   StateChangePoller,
   scheduleLoop,
@@ -137,6 +139,8 @@ export class HeliumRuntime {
   private readonly theses: ThesisStore;
   private readonly dispatcher: Dispatcher;
   private readonly disposers: (() => void)[] = [];
+  /** Task 3.6: job names with a script action currently running — a second trigger while one is in flight is skipped, not queued (the next poll cycle picks up any real state change again). */
+  private readonly scriptInFlight = new Set<string>();
 
   constructor(private readonly deps: RuntimeDeps) {
     const c = deps.config;
@@ -192,12 +196,75 @@ export class HeliumRuntime {
     )(message, extra);
   }
 
+  private nowMs(): number {
+    return (this.deps.now?.() ?? new Date()).getTime();
+  }
+
+  /**
+   * Task 3.6: run a job's `script` action instead of a dsh agent turn. Same
+   * ledger/delivery shape as the triage/senior lanes (`DispatchResult`,
+   * tier `"triage"`) so downstream consumers (JSONL, email, tests) need no
+   * special case for a script-backed job.
+   */
+  private async runScript(job: JobSpec, ev: TriggerEvent): Promise<void> {
+    if (this.scriptInFlight.has(job.name)) {
+      this.log("script already in flight, skipping trigger", {
+        job: job.name,
+      });
+      return;
+    }
+    this.scriptInFlight.add(job.name);
+    const runId = this.ledger.start(job.name, "triage");
+    const started = this.nowMs();
+    try {
+      const result = await runScriptProcess(job.script!, {
+        cwd: this.deps.config.jobsDir,
+        env: {
+          ...process.env,
+          HELIUM_STATE_ROOT: this.deps.config.stateRoot,
+          HELIUM_TRIGGER: JSON.stringify(ev),
+        },
+      });
+      const outcome: RunOutcome = result.timedOut
+        ? "timed_out"
+        : result.ok
+          ? "run_completed"
+          : "run_failed";
+      this.ledger.finish(runId, job.name, "triage", outcome, {
+        code: result.code,
+        ms: this.nowMs() - started,
+      });
+      await this.deps.delivery.deliver(job, ev, {
+        runId,
+        tier: "triage",
+        outcome,
+        analysis: result.analysis,
+        error: result.error,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.ledger.finish(runId, job.name, "triage", "run_failed", {
+        error: message,
+      });
+      await this.deps.delivery.deliver(job, ev, {
+        runId,
+        tier: "triage",
+        outcome: "run_failed",
+        error: message,
+      });
+    } finally {
+      this.scriptInFlight.delete(job.name);
+    }
+  }
+
   private startJob(job: JobSpec): void {
     const onTrigger = (ev: TriggerEvent): void => {
-      this.dispatcher.enqueue(
-        job,
-        augmentCronPayload(ev, this.deps.config.stateRoot),
-      );
+      const augmented = augmentCronPayload(ev, this.deps.config.stateRoot);
+      if (job.script) {
+        void this.runScript(job, augmented);
+        return;
+      }
+      this.dispatcher.enqueue(job, augmented);
     };
 
     const calendarTriggers = job.triggers.filter(
