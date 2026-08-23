@@ -10,6 +10,7 @@ export default defineConfig({
           include: [
             "packages/*/tests/**/*.spec.ts",
             "plugins/*/tests/**/*.spec.ts",
+            "plugins/*/src/**/*.test.ts",
           ],
         },
       },
