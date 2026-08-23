@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
+import { Cron } from "croner";
 import {
   JsonlWriter,
   RunLedger,
@@ -19,7 +20,9 @@ import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
 import { buildChildEnv, runClaude } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { CronTrigger } from "./cron.js";
+import { Delivery, smtpFromEnv } from "./delivery.js";
 import { Dispatcher, TriageRunner, type SeniorLane } from "./dispatch.js";
+import { readEnvFile } from "./envfile.js";
 import {
   scheduleLoop,
   StateChangePoller,
@@ -79,6 +82,13 @@ export function apply(ctx: Context, raw: Config): void {
   ledger.reconcileStartup();
 
   const contextText = readFileSync(cfg.contextFile, "utf8");
+  const delivery = new Delivery({
+    jsonl,
+    jsonlDir: paths.jsonl,
+    reportsDir: paths.reports,
+    emailTo: cfg.emailTo,
+    smtp: smtpFromEnv(readEnvFile(cfg.envFile)),
+  });
   const dispatcher = new Dispatcher({
     store,
     ledger,
@@ -87,12 +97,8 @@ export function apply(ctx: Context, raw: Config): void {
     senior: buildSeniorLane(cfg),
     // ThesisReader wiring lands in Task 2.7 (ThesisStore); thesis-file jobs
     // dispatch without injected thesis content until then.
-    onResult: (job, ev, result) => {
-      jsonl.append("results", { job: job.name, ev, result });
-    },
-    onSuppressed: (job, ev, info) => {
-      jsonl.append("suppressed", { job: job.name, ev, ...info });
-    },
+    onResult: (job, ev, result) => delivery.deliver(job, ev, result),
+    onSuppressed: (job, ev, info) => delivery.budgetExhausted(job, ev, info),
   });
 
   for (const job of loadJobs(cfg.jobsDir).filter((j) => j.enabled)) {
@@ -140,7 +146,10 @@ export function apply(ctx: Context, raw: Config): void {
             () => resolveInterval(trigger.intervalMs),
             async () => {
               for (const { watcher } of watchers) await watcher.tick();
-              await poller.tick();
+              const status = await poller.tick();
+              // Spec §8: heartbeat is written every sensor cycle, including
+              // no-ops. `status` already carries `job` (the poller's job name).
+              delivery.heartbeat({ trigger: "state-change", ...status });
             },
           ),
         `helium.sensor.poll(${job.name})`,
@@ -155,6 +164,12 @@ export function apply(ctx: Context, raw: Config): void {
             () => resolveInterval(DEFAULT_WATCH_ONLY_INTERVAL_MS),
             async () => {
               for (const { watcher } of watchers) await watcher.tick();
+              // Spec §8: heartbeat is written every sensor cycle, including no-ops.
+              delivery.heartbeat({
+                job: job.name,
+                trigger: "calendar-window",
+                state: "watch-only",
+              });
             },
           ),
         `helium.sensor.poll(${job.name})`,
@@ -172,4 +187,24 @@ export function apply(ctx: Context, raw: Config): void {
       }, `helium.sensor.cron(${job.name})`);
     }
   }
+
+  // Daily synthesis (spec §8/§11): the floor, not the product. Also prunes
+  // the JSONL trail to the 90-day retention window (controller-pinned
+  // addition — kept alongside the synthesis send itself, not a separate cron).
+  const synthesis = new Cron(
+    "5 17 * * *",
+    { timezone: "America/New_York", protect: true },
+    () => {
+      jsonl.prune(90);
+      void delivery.dailySynthesis().catch((e: unknown) => {
+        console.error("helium.synthesis:", e);
+      });
+    },
+  );
+  ctx.effect(
+    () => () => {
+      synthesis.stop();
+    },
+    "helium.delivery.synthesis()",
+  );
 }
