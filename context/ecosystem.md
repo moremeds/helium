@@ -59,10 +59,11 @@ livewire is the durable market-data warehouse. helium reads it through a read-on
 connection over the Parquet lake with `livewire_sql`: one `SELECT` (or `WITH ... SELECT`) per
 call, row-capped, through the lake's own catalog views only. Writes are refused by the engine,
 not merely by policy — but a READ_ONLY connection alone does not make raw file access safe:
-DuckDB's own table functions (`read_csv`, `read_parquet`, `read_json`, `glob`) can still read
-any local file the process can see, and `install`/`load` can pull in an extension that
-reintroduces write or network access. `livewire_sql` refuses all six as a third layer. Query the
-catalog views by name; never pass a raw file path.
+DuckDB's own table functions (`read_csv`, `read_parquet`, `read_json`, `read_text`, `glob`) can
+still read any local file the process can see, `attach` can open a second database file, `copy`
+can export query results to disk, and `install`/`load` can pull in an extension that
+reintroduces write or network access. `livewire_sql` refuses all nine as a third layer. Query
+the catalog views by name; never pass a raw file path.
 
 Semantics: the lake is point-in-time history. It is the right place for "has this happened
 before", "what did the distribution look like", "how large is this move against its own

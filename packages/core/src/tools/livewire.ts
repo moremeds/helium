@@ -24,16 +24,17 @@ export function isSelectOnly(sql: string): boolean {
 }
 
 /**
- * DuckDB's core table functions -- read_csv, read_parquet, read_json, glob
- * -- read arbitrary local files from inside a SELECT even on a READ_ONLY
- * connection (verified against the installed @duckdb/node-api); INSTALL and
- * LOAD can pull in an extension that reintroduces write or network access.
- * livewire lake access is via catalog views, so agent SQL never legitimately
- * needs any of these -- deny them as a third layer, alongside isSelectOnly
- * and DuckDB's own READ_ONLY connection.
+ * DuckDB's core table functions -- read_csv, read_parquet, read_json,
+ * read_text, glob -- read arbitrary local files from inside a SELECT even on
+ * a READ_ONLY connection (verified against the installed @duckdb/node-api);
+ * ATTACH opens a second database file outright; COPY exports query results
+ * to disk; INSTALL and LOAD can pull in an extension that reintroduces write
+ * or network access. livewire lake access is via catalog views, so agent SQL
+ * never legitimately needs any of these -- deny them as a third layer,
+ * alongside isSelectOnly and DuckDB's own READ_ONLY connection.
  */
 const DENIED_TOKENS =
-  /\b(read_csv|read_parquet|read_json|glob|install|load)\b/i;
+  /\b(read_csv|read_parquet|read_json|read_text|glob|install|load|attach|copy)\b/i;
 
 export function hasDeniedTableFunction(sql: string): boolean {
   return DENIED_TOKENS.test(stripSqlComments(sql));
@@ -48,7 +49,8 @@ export function livewireTools(livewireDb: string | undefined): EcosystemTool[] {
         "Run one read-only SELECT (or WITH ... SELECT) against livewire's DuckDB lake, " +
         "through its catalog views only. The connection is opened READ_ONLY; writes are " +
         "refused by the engine. Raw file-reading table functions (read_csv, read_parquet, " +
-        "read_json, glob) and extension management (install, load) are refused.",
+        "read_json, read_text, glob), database/extension management (attach, install, load), " +
+        "and exporting results to disk (copy) are refused.",
       paramsSchema: Params,
       mutating: false,
       async run(args) {
@@ -60,8 +62,8 @@ export function livewireTools(livewireDb: string | undefined): EcosystemTool[] {
         }
         if (hasDeniedTableFunction(sql)) {
           throw new Error(
-            "livewire_sql refuses read_csv/read_parquet/read_json/glob/install/load: " +
-              "read through the lake's catalog views, not raw file paths",
+            "livewire_sql refuses read_csv/read_parquet/read_json/read_text/glob/attach/" +
+              "install/load/copy: read through the lake's catalog views, not raw file paths",
           );
         }
         const instance = await DuckDBInstance.create(livewireDb, {

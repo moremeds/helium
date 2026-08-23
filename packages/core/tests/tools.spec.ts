@@ -41,8 +41,27 @@ describe("hasDeniedTableFunction", () => {
     expect(hasDeniedTableFunction("SELECT * FROM glob('/**/*')")).toBe(true);
     expect(hasDeniedTableFunction("INSTALL httpfs; SELECT 1")).toBe(true);
     expect(hasDeniedTableFunction("LOAD httpfs")).toBe(true);
+    // Brief's full token list also names read_text, attach, and copy -- all
+    // three are additional DuckDB filesystem/extension surfaces (a raw text
+    // file read, opening a second database file, and exporting query
+    // results to disk) with the same "not through the lake's catalog views"
+    // problem as the six above.
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_text('/etc/passwd')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("ATTACH '/etc/passwd' AS x; SELECT 1")).toBe(
+      true,
+    );
+    expect(hasDeniedTableFunction("COPY (SELECT 1) TO '/tmp/x.csv'")).toBe(
+      true,
+    );
     expect(hasDeniedTableFunction("-- read_csv\nSELECT 1")).toBe(false);
     expect(hasDeniedTableFunction("SELECT * FROM bars")).toBe(false);
+    // Word-boundary match, not substring: none of these denied tokens are
+    // whole words here, so a column/table named this way is not caught.
+    expect(
+      hasDeniedTableFunction("SELECT close FROM bars WHERE symbol='SPY'"),
+    ).toBe(false);
   });
 });
 
