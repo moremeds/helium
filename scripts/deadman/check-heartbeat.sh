@@ -19,7 +19,7 @@ command -v "${NODE_BIN%% *}" >/dev/null 2>&1 || {
 
 sentinel_dir="$STATE_ROOT/deadman"
 sentinel="$sentinel_dir/alerted-at"
-mkdir -p "$sentinel_dir"
+mkdir -p "$sentinel_dir" "$STATE_ROOT/jsonl"
 
 newest=$(find "$STATE_ROOT/jsonl" -name 'heartbeat-*.jsonl' -type f 2>/dev/null |
   sort | tail -1)

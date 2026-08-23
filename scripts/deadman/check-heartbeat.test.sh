@@ -52,6 +52,34 @@ printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
   echo FAIL-4
   exit 1
 }
+echo "case 5: jsonl/ subdirectory never created (state root exists, jsonl/ does not) -> 10, not a crash"
+tmp5=$(mktemp -d -t helium-deadman-test-nojsonl)
+mail5="$tmp5/mail.log"
+: >"$tmp5/helium.env"
+[ ! -d "$tmp5/state/jsonl" ] || {
+  echo FAIL-5-precondition
+  exit 1
+}
+run5() {
+  set +e
+  FAKE_MAIL_LOG="$mail5" \
+    HELIUM_STATE_ROOT="$tmp5/state" \
+    HELIUM_DEADMAN_ALERT_CMD="$tmp/fake-mailer" \
+    HELIUM_ENV_FILE="$tmp5/helium.env" \
+    bash "$here/check-heartbeat.sh" >/dev/null 2>&1
+  echo $?
+  set -e
+}
+[ "$(run5)" = 10 ] || {
+  echo FAIL-5
+  exit 1
+}
+[ -s "$mail5" ] || {
+  echo FAIL-5b-no-alert-attempted
+  exit 1
+}
+rm -rf "$tmp5"
+
 echo "mail log:"
 cat "$FAKE_MAIL_LOG"
 echo "ALL PASS"
