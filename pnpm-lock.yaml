@@ -65,6 +65,9 @@ importers:
       '@duckdb/node-api':
         specifier: 1.5.5-r.4
         version: 1.5.5-r.4
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.4.3)
       diff:
         specifier: 9.0.0
         version: 9.0.0
