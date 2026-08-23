@@ -23,7 +23,10 @@ export const job = {
   maxTurns: { triage: 2, senior: 8 },
   timeoutMs: 600_000,
   budget: { maxTriagePerHour: 30, maxSeniorPerDay: 12 },
-  delivery: { jsonl: true },
+  delivery: {
+    jsonl: true,
+    email: { to: "operator", subjectPrefix: "[helium/macro]", maxPerHour: 4 },
+  },
   prompt: "Judge whether the macro state change matters.",
 } as unknown as JobSpec;
 

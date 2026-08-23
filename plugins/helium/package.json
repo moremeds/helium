@@ -23,6 +23,7 @@
   "dependencies": {
     "@helium/core": "workspace:*",
     "croner": "10.0.1",
+    "nodemailer": "9.0.5",
     "yaml": "2.9.0",
     "zod": "^4.4.3"
   },
@@ -36,6 +37,7 @@
     "@deepseek-ai/dsh-system-prompt": "0.1.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
     "@types/node": "^22",
+    "@types/nodemailer": "8.0.1",
     "typescript": "^5"
   }
 }
