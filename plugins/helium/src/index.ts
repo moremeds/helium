@@ -1,8 +1,11 @@
 /**
  * helium — umbrella cordis plugin. Wires each enabled job's state-change,
- * calendar-window and cron triggers onto their own `ctx.effect` lifecycle.
+ * calendar-window and cron triggers onto their own `ctx.effect` lifecycle,
+ * and routes every fired trigger through the {@link Dispatcher}.
  * @module dsh-plugin-helium
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import {
@@ -13,8 +16,10 @@ import {
   type TriggerCalendarWindow,
 } from "@helium/core";
 import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
+import { buildChildEnv, runClaude } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { CronTrigger } from "./cron.js";
+import { Dispatcher, TriageRunner, type SeniorLane } from "./dispatch.js";
 import {
   scheduleLoop,
   StateChangePoller,
@@ -28,6 +33,43 @@ export { type Config } from "./config.js";
 /** Fallback base cadence (spec has no bare interval when only calendar windows are armed). */
 const DEFAULT_WATCH_ONLY_INTERVAL_MS = 60_000;
 
+/**
+ * Senior lane: spawns the host `claude -p` binary and translates its result
+ * into the `SeniorLane` outcome shape the {@link Dispatcher} expects.
+ */
+function buildSeniorLane(cfg: Config): SeniorLane {
+  // Task 2.7 writes the MCP config JSON itself; this only derives the path
+  // it will land at, colocated with the server binary (the same layout
+  // `contracts/fixtures/mcp-ping/{server.mjs,mcp-config.json}` verified live
+  // in Task 1.7).
+  const mcpConfigPath = join(dirname(cfg.mcpBin), "mcp-config.json");
+  return {
+    async dispatch(job, _ev, prompt) {
+      const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
+      const result = await runClaude({
+        prompt,
+        cwd: process.cwd(),
+        maxTurns: job.maxTurns.senior,
+        timeoutMs: job.timeoutMs,
+        allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
+        mcpConfigPath,
+        env,
+      });
+      if (result.ok) return { outcome: "run_completed", analysis: result.text };
+      if (result.classification === "timeout") {
+        return {
+          outcome: "timed_out",
+          error: "senior lane exceeded its wall clock",
+        };
+      }
+      return {
+        outcome: "run_failed",
+        error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
+      };
+    },
+  };
+}
+
 export function apply(ctx: Context, raw: Config): void {
   const cfg = ConfigSchema.parse(raw);
   const paths = statePaths(cfg);
@@ -36,9 +78,26 @@ export function apply(ctx: Context, raw: Config): void {
   const ledger = new RunLedger(jsonl);
   ledger.reconcileStartup();
 
+  const contextText = readFileSync(cfg.contextFile, "utf8");
+  const dispatcher = new Dispatcher({
+    store,
+    ledger,
+    contextText,
+    triage: new TriageRunner(ctx),
+    senior: buildSeniorLane(cfg),
+    // ThesisReader wiring lands in Task 2.7 (ThesisStore); thesis-file jobs
+    // dispatch without injected thesis content until then.
+    onResult: (job, ev, result) => {
+      jsonl.append("results", { job: job.name, ev, result });
+    },
+    onSuppressed: (job, ev, info) => {
+      jsonl.append("suppressed", { job: job.name, ev, ...info });
+    },
+  });
+
   for (const job of loadJobs(cfg.jobsDir).filter((j) => j.enabled)) {
     const onTrigger = (ev: TriggerEvent): void => {
-      jsonl.append("triggers", { ...ev });
+      dispatcher.enqueue(job, ev);
     };
 
     const watchers = job.triggers
