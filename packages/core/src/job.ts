@@ -62,7 +62,7 @@ export interface JobSpec {
 /** Spec §8: dedup carries an explicit key and TTL; 6h when the file omits it. */
 const DEFAULT_DEDUP_TTL_MS = parseDuration("6h");
 
-/** Spec §8: schedules and windows carry an explicit IANA tz. */
+/** Spec §8: schedules and calendar windows carry an explicit IANA tz (default America/New_York). */
 const DEFAULT_TZ = "America/New_York";
 
 /** A YAML duration literal, normalized to milliseconds. */

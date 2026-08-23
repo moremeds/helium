@@ -122,6 +122,18 @@ describe("parseJobYaml", () => {
       ),
     ).toThrow(/escalate_when/);
   });
+
+  it("defaults a cron trigger's tz to America/New_York when omitted", () => {
+    const job = parseJobYaml(
+      MACRO_WATCH.replace("\n    tz: America/New_York", ""),
+      "j.yaml",
+    );
+    expect(job.triggers[2]).toEqual({
+      kind: "cron",
+      schedule: "0 17 * * 1-5",
+      tz: "America/New_York",
+    });
+  });
 });
 
 describe("loadJobs", () => {
