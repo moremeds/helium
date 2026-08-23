@@ -66,4 +66,19 @@ describe("mcp selection", () => {
     ).map((t) => t.name);
     expect(namedMutatingAllowed).toEqual(["argon_rescan"]);
   });
+
+  it("silently drops a HELIUM_TOOLS name that matches no known tool", () => {
+    // selected() filters buildTools()'s own output by name -- a typo'd or
+    // retired tool name simply never matches anything. No error, no
+    // placeholder entry; the rest of a valid allow-list is unaffected.
+    const names = selected(
+      baseEnv({ HELIUM_TOOLS: "argon_api,not_a_real_tool" }),
+    ).map((t) => t.name);
+    expect(names).toEqual(["argon_api"]);
+
+    expect(() =>
+      selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" })),
+    ).not.toThrow();
+    expect(selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" }))).toEqual([]);
+  });
 });
