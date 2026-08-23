@@ -1,35 +1,51 @@
 /**
- * helium — placeholder cordis plugin. Phase 1 proves the packaging, profile,
- * and deploy loop; the real toolkit/sensor/dispatch/delivery plugins land in
- * phase 2. The optional tick timer exists only so the contract suite can
- * prove `ctx.effect` fires inside a booted profile without any LLM call.
+ * helium — umbrella cordis plugin. Wires each enabled job's state-change
+ * triggers onto their own `ctx.effect` interval; other trigger kinds land in
+ * later Phase 2 tasks.
  * @module dsh-plugin-helium
  */
-import { appendFileSync } from "node:fs";
 import type { Context } from "@deepseek-ai/cordis";
+import type {} from "@deepseek-ai/cordis-plugin-loader";
+import { JsonlWriter, RunLedger, StateStore, loadJobs } from "@helium/core";
+import { ConfigSchema, statePaths, type Config } from "./config.js";
+import { StateChangePoller, type TriggerEvent } from "./sensor.js";
 
 export const name = "helium";
+export const inject = ["agentDefaultModel", "agents", "sessions", "tools"];
+export { type Config } from "./config.js";
 
-export interface Config {
-  /** Contract-test hook: when set, append one line every 100 ms to this path. */
-  tickFile?: string;
-}
+export function apply(ctx: Context, raw: Config): void {
+  const cfg = ConfigSchema.parse(raw);
+  const paths = statePaths(cfg);
+  const store = new StateStore(paths.state);
+  const jsonl = new JsonlWriter(paths.jsonl);
+  const ledger = new RunLedger(jsonl);
+  ledger.reconcileStartup();
 
-/**
- * Mount the plugin.
- * @param ctx - the cordis context this plugin owns.
- * @param config - the row's config, composed from the profile patch layers.
- */
-export function apply(ctx: Context, config: Config): void {
-  console.log("helium plugin mounted");
-  const tickFile = config.tickFile;
-  if (tickFile === undefined || tickFile === "") return;
-  ctx.effect(() => {
-    const timer = setInterval(() => {
-      appendFileSync(tickFile, `${new Date().toISOString()}\n`);
-    }, 100);
-    return () => {
-      clearInterval(timer);
+  for (const job of loadJobs(cfg.jobsDir).filter((j) => j.enabled)) {
+    const onTrigger = (ev: TriggerEvent): void => {
+      jsonl.append("triggers", { ...ev });
     };
-  }, "helium.contract-tick()");
+    for (const trigger of job.triggers) {
+      if (trigger.kind !== "state-change") continue;
+      const poller = new StateChangePoller({
+        job: job.name,
+        trigger,
+        store,
+        onTrigger,
+      });
+      ctx.effect(() => {
+        const run = (): void => {
+          void poller.tick().catch((error: unknown) => {
+            console.error(`helium.sensor(${job.name}):`, error);
+          });
+        };
+        const timer = setInterval(run, trigger.intervalMs);
+        run();
+        return () => {
+          clearInterval(timer);
+        };
+      }, `helium.sensor.poll(${job.name})`);
+    }
+  }
 }
