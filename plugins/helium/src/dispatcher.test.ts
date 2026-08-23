@@ -1,17 +1,35 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { JsonlWriter, RunLedger, StateStore, type JobSpec } from "@helium/core";
+import {
+  JsonlWriter,
+  RunLedger,
+  StateStore,
+  jsonlFileName,
+  type JobSpec,
+} from "@helium/core";
 import { Dispatcher, budgetCheck, pruneFires, Semaphore } from "./dispatch.js";
 import { ev, job } from "./testing/fixtures.js";
+
+/** Every parsed row from one JSONL stream's file, in append order. */
+function readStream(dir: string, stream: string): Record<string, unknown>[] {
+  const path = join(dir, jsonlFileName(stream));
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
 
 function rig(
   overrides: Partial<{ triageSeverity: string; seniorDelayMs: number }> = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "helium-disp-"));
+  const jsonlDir = join(root, "jsonl");
   const store = new StateStore(root);
-  const ledger = new RunLedger(new JsonlWriter(join(root, "jsonl")));
+  const ledger = new RunLedger(new JsonlWriter(jsonlDir));
   const results: { tier: string; outcome: string }[] = [];
   const suppressed: string[] = [];
   const seniorPrompts: string[] = [];
@@ -52,6 +70,7 @@ function rig(
     dispatcher,
     store,
     root,
+    jsonlDir,
     results,
     suppressed,
     seniorPrompts,
@@ -191,15 +210,25 @@ describe("Dispatcher", () => {
     await r.dispatcher.drain();
     expect(r.suppressed).toEqual(["triage"]);
     expect(r.results).toHaveLength(0);
+    // "NO dispatch" (spec §8): a fully suppressed run never opens a ledger
+    // entry — nothing was ever appended to the runs stream.
+    expect(readStream(r.jsonlDir, "runs")).toHaveLength(0);
   });
 
-  it("records timed_out when a lane outlives the job timeout", async () => {
+  it("records timed_out when a lane outlives the job timeout, with both ledger phases", async () => {
     const r = rig({ seniorDelayMs: 200 });
     r.dispatcher.enqueue({ ...job, timeoutMs: 50 }, ev);
     await r.dispatcher.drain();
     expect(r.results.find((x) => x.tier === "senior")?.outcome).toBe(
       "timed_out",
     );
+    const seniorRows = readStream(r.jsonlDir, "runs").filter(
+      (row) => row.tier === "senior",
+    );
+    expect(seniorRows.map((row) => row.phase)).toEqual([
+      "run_started",
+      "timed_out",
+    ]);
   });
 
   it("persists pruned, incremented budget stamps that survive a restart", async () => {
@@ -275,9 +304,10 @@ describe("Dispatcher", () => {
       },
     } as unknown as JobSpec;
     let triageCalled = false;
+    const engineJsonlDir = join(r.root, "jsonl-2");
     const dispatcher = new Dispatcher({
       store: r.store,
-      ledger: new RunLedger(new JsonlWriter(join(r.root, "jsonl-2"))),
+      ledger: new RunLedger(new JsonlWriter(engineJsonlDir)),
       contextText: "CTX",
       triage: {
         dispatch: async () => {
@@ -295,5 +325,10 @@ describe("Dispatcher", () => {
     await dispatcher.drain();
     expect(triageCalled).toBe(false);
     expect(r.results).toEqual([{ tier: "triage", outcome: "run_failed" }]);
+    // Two-phase even for the config-drift guard, with a detail an operator can read.
+    const rows = readStream(engineJsonlDir, "runs");
+    expect(rows.map((row) => row.phase)).toEqual(["run_started", "run_failed"]);
+    const failRow = rows[1] as { detail?: { error?: string } };
+    expect(failRow.detail?.error).toContain("gpt5");
   });
 });
