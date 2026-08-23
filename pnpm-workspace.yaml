@@ -5,3 +5,8 @@ packages:
   - contracts/fixtures/plugin-live-dispatch
 allowBuilds:
   esbuild: true
+  koffi: true
+  node-pty: true
+  protobufjs: true
+  '@google/genai': true
+  '@deepseek-ai/dsh-subprocess-local': true
