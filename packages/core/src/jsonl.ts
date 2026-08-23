@@ -54,7 +54,8 @@ export class JsonlWriter {
     for (const entry of readdirSync(this.dir)) {
       const match = DATED_FILE.exec(entry);
       if (match === null) continue;
-      if (Date.parse(`${match[1]}T00:00:00.000Z`) >= cutoff) continue;
+      const fileTime = Date.parse(`${match[1]}T00:00:00.000Z`);
+      if (Number.isNaN(fileTime) || fileTime >= cutoff) continue;
       rmSync(join(this.dir, entry));
     }
   }

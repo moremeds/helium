@@ -74,4 +74,15 @@ describe("JsonlWriter", () => {
       "runs-latest.jsonl",
     ]);
   });
+
+  it("prune never deletes a file whose embedded date is not calendar-valid", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-23T10:00:00.000Z"));
+    const dir = makeDir();
+    const writer = new JsonlWriter(dir);
+    writeFileSync(join(dir, "runs-9999-99-99.jsonl"), "{}\n");
+    writeFileSync(join(dir, "runs-2026-01-01.jsonl"), "{}\n");
+    writer.prune(90);
+    expect(readdirSync(dir).sort()).toEqual(["runs-9999-99-99.jsonl"]);
+  });
 });
