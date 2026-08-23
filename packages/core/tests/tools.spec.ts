@@ -24,13 +24,21 @@ describe("isSelectOnly", () => {
 
 describe("ecosystem tools", () => {
   let fixture: Fixture;
-  let seen: { url: string; method: string }[];
+  let seen: { url: string; method: string; body: string }[];
 
   beforeEach(async () => {
     seen = [];
     fixture = await startFixture((req, res) => {
-      seen.push({ url: req.url ?? "", method: req.method ?? "" });
-      json(res, { ok: true, path: req.url });
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        seen.push({
+          url: req.url ?? "",
+          method: req.method ?? "",
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        json(res, { ok: true, path: req.url });
+      });
     });
   });
   afterEach(async () => {
@@ -77,7 +85,11 @@ describe("ecosystem tools", () => {
       await byName("argon_api").run({ path: "/api/rates/snapshot" }),
     );
     expect(out.status).toBe(200);
-    expect(seen[0]).toEqual({ url: "/api/rates/snapshot", method: "GET" });
+    expect(seen[0]).toEqual({
+      url: "/api/rates/snapshot",
+      method: "GET",
+      body: "",
+    });
     await expect(
       byName("argon_api").run({ path: "/api/admin/wipe" }),
     ).rejects.toThrow(/not an allow-listed/);
@@ -134,7 +146,9 @@ describe("ecosystem tools", () => {
     }
   });
 
-  it("argon_rescan POSTs to its one verified allow-listed route", async () => {
+  it("argon_rescan POSTs to its one verified allow-listed route with the required body", async () => {
+    // argon's real POST /api/watchlist/rescan-all returns 400 without a
+    // {"confirmed": true} JSON body (verified against the live route).
     const out = JSON.parse(
       await byName("argon_rescan").run({ path: "/api/watchlist/rescan-all" }),
     );
@@ -142,20 +156,27 @@ describe("ecosystem tools", () => {
     expect(seen[0]).toEqual({
       url: "/api/watchlist/rescan-all",
       method: "POST",
+      body: JSON.stringify({ confirmed: true }),
     });
   });
 
   it("apex_compute POSTs to each of its verified allow-listed routes", async () => {
-    for (const path of [
-      "/screener/momentum",
-      "/screener/pead",
-      "/backtest/run",
-    ]) {
+    // "/backtest/run" is deliberately absent: apex's real route requires a
+    // body with no defaults (422 bodyless) and macro v1 has no use for
+    // backtest — see the dedicated rejection test below.
+    for (const path of ["/screener/momentum", "/screener/pead"]) {
       seen.length = 0;
       const out = JSON.parse(await byName("apex_compute").run({ path }));
       expect(out.status).toBe(200);
-      expect(seen[0]).toEqual({ url: path, method: "POST" });
+      expect(seen[0]).toEqual({ url: path, method: "POST", body: "" });
     }
+  });
+
+  it("apex_compute refuses /backtest/run: apex's real route requires a body this allow-list can't supply", async () => {
+    await expect(
+      byName("apex_compute").run({ path: "/backtest/run" }),
+    ).rejects.toThrow(/not an allow-listed/);
+    expect(seen).toHaveLength(0);
   });
 
   it("thesis_write versions through ThesisStore and returns the diff", async () => {

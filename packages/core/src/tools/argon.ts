@@ -53,9 +53,15 @@ export async function call(
   url: string,
   method: "GET" | "POST",
   ctx?: ToolRunContext,
+  jsonBody?: unknown,
 ): Promise<string> {
   const impl = ctx?.fetchImpl ?? fetch;
-  const res = await impl(url, { method, signal: AbortSignal.timeout(30_000) });
+  const init: RequestInit = { method, signal: AbortSignal.timeout(30_000) };
+  if (jsonBody !== undefined) {
+    init.headers = { "content-type": "application/json" };
+    init.body = JSON.stringify(jsonBody);
+  }
+  const res = await impl(url, init);
   const text = await res.text();
   let body: unknown;
   try {
@@ -122,6 +128,13 @@ export function readTool(
  * match, this check is exact-string equality against literal allow-listed
  * paths (none of which contain ".."), so a traversal segment can only ever
  * make `path` fail to equal an allowed entry — it cannot forge a match.
+ *
+ * `bodies` maps an allow-listed path to the fixed JSON body its real route
+ * requires (e.g. argon's `/api/watchlist/rescan-all` 400s without
+ * `{"confirmed": true}`). A path with no entry gets no body — only add a
+ * route to `allowed` once its real body requirement (none, or a fixed
+ * literal one) is known; a route needing a caller-supplied body has no
+ * allow-listed entry at all (see apex.ts's `/backtest/run`).
  */
 export function postTool(
   name: string,
@@ -129,6 +142,7 @@ export function postTool(
   base: string,
   allowed: readonly string[],
   mutating: boolean,
+  bodies: Readonly<Record<string, unknown>> = {},
 ): EcosystemTool {
   return {
     name,
@@ -145,7 +159,7 @@ export function postTool(
           `${name}: "${path}" is not an allow-listed path for this tool`,
         );
       }
-      return await call(buildUrl(base, path, query), "POST", ctx);
+      return await call(buildUrl(base, path, query), "POST", ctx, bodies[path]);
     },
   };
 }
@@ -165,6 +179,7 @@ export function argonTools(argonBase: string): EcosystemTool[] {
       argonBase,
       ARGON_RESCAN_PATHS,
       true,
+      { "/api/watchlist/rescan-all": { confirmed: true } },
     ),
     postTool(
       "argon_ai_analysis",

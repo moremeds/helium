@@ -40,10 +40,11 @@ apex is the signal computation engine: bars, indicators, rule-based signals, con
 - `GET /v1/rates/{symbol}/series` — a rates-specific series read.
 - `GET /v1/instruments`, `GET /v1/{asset_class}/{symbol}`, `GET /v1/equity/{symbol}/actions`,
   `GET /v1/equity/{symbol}/delisting` — instrument metadata.
-- Screener (`POST /screener/momentum`, `POST /screener/pead`) and backtest
-  (`POST /backtest/run`) are POST-to-enqueue compute jobs (`apex_compute`, status 202). They
-  mutate no domain state but cost real compute: at most one per analysis, and only when the
-  question genuinely needs it.
+- Screener (`POST /screener/momentum`, `POST /screener/pead`) is a POST-to-enqueue compute job
+  (`apex_compute`, status 202). It mutates no domain state but costs real compute: at most one
+  per analysis, and only when the question genuinely needs it. `apex_compute` has no backtest
+  route — apex's real `/backtest/run` requires a caller-supplied JSON body (universe, date
+  range, ...) that this tool's fixed allow-list can't express; macro v1 doesn't need it.
 
 Semantics: apex is deterministic and mechanical. It tells you which rules fired, not what they
 mean. Use it to check whether a macro narrative has a price-level counterpart.
