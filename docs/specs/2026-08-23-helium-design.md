@@ -92,12 +92,21 @@ Security: dsh's web server has no TLS/auth/origin policy (upstream-documented).
 Bind loopback only; remote viewing goes through `ssh -L 3080:127.0.0.1:3080
 macmini`. Never bind non-loopback, including the tailnet.
 
-To verify in implementation phase 1: the web UI is provided by listing the
-`@deepseek-ai/dsh-web-app` bundle in the helium profile (source-verified
-2026-08-23: `web` is a hardcoded profile alias in the dsh CLI, not a subcommand —
-`dsh --profile helium web` is not a valid form). Remaining empirical check:
-that bundle serving 127.0.0.1:3080 while helium's plugins run in the same
-process.
+**Verified in implementation phase 1 (2026-08-23, dsh 0.1.1-rc.2):** YES — the
+web UI is provided by listing the `@deepseek-ai/dsh-web-app` bundle in the
+helium profile's `dsh.profile.bundles`, not by a `web` subcommand (`web` is a
+hardcoded top-level alias for `--profile web` and rejects the parent
+`--profile` flag: `dsh --profile helium web` fails with `error: web takes none
+of parent --profile, --patch, --dump-config, or --dump-default-config`). With
+`@deepseek-ai/dsh-web-app` added to the profile alongside `dsh-plugin-helium`,
+`dsh --profile helium --port 3080 --no-open` served `127.0.0.1:3080` (HTTP
+200) while the helium plugin's `ctx.effect` tick timer ran in the same process
+(122 ticks over 15s, mount log present). Note: the npm `latest` dist-tag for
+`@deepseek-ai/dsh-web-app` (`0.0.1-rc.1`) is stale and fails to install
+(404 on a renamed transitive dependency); the version matching core
+`@deepseek-ai/dsh@0.1.1-rc.2` is published under the `next` dist-tag,
+`0.1.1-rc.2` — pin that version explicitly. Full evidence: Task 1.7 Spike A in
+`docs/superpowers/plans/2026-08-23-helium-v1.md`.
 
 ## 4. Engines (both verified end-to-end on 2026-08-23)
 
