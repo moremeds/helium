@@ -23,6 +23,12 @@
     <key>HELIUM_NODE_BIN</key><string>__NODE_BIN_DIR__/node</string>
     <key>HELIUM_STATE_ROOT</key><string>/Users/moremeds/.helium/state</string>
     <key>HELIUM_ENV_FILE</key><string>/Users/moremeds/.config/helium/helium.env</string>
+    <!-- Mirrors com.helium.dsh.plist: the recipient is plist-supplied, not a
+         secret in the 0600 env file. Without it here the watchdog detects a
+         stale heartbeat and then dies at exit 12 with "missing config keys"
+         (found by the 3.4 live drill) — send-alert.mjs now falls back to the
+         process environment, and this is what fills it. -->
+    <key>HELIUM_EMAIL_TO</key><string>lcxxcllcx@gmail.com</string>
   </dict>
 </dict>
 </plist>

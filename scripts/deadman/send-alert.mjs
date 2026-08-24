@@ -38,6 +38,16 @@ const need = [
   "SMTP_FROM",
   "HELIUM_EMAIL_TO",
 ];
+// helium has TWO config surfaces and they do not carry the same keys: the 0600
+// env file holds the secrets, while HELIUM_EMAIL_TO is supplied by the launchd
+// plist (that is where plugins/helium/src/config.ts reads it from too). The
+// 3.4 mini drill caught the consequence — the deadman detected a genuinely
+// stale heartbeat and then exited 2 "missing config keys: HELIUM_EMAIL_TO",
+// i.e. a watchdog that can see the death but not report it. Fall back to the
+// process environment for anything the file did not supply, so either surface
+// works. The FILE deliberately wins: it is the 0600 one, so a secret can never
+// be shadowed by a stray exported variable.
+for (const k of need) if (!cfg[k] && process.env[k]) cfg[k] = process.env[k];
 const missing = need.filter((k) => !cfg[k]);
 if (missing.length > 0) {
   console.log(
