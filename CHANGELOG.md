@@ -1,3 +1,7 @@
+## v0.1.3 — 2026-08-24
+
+- fix(jobs): stop one malformed job file from killing every tenant
+
 ## v0.1.2 — 2026-08-24
 
 - chore(canary): record the AC#4 drill
