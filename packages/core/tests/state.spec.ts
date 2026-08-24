@@ -11,6 +11,7 @@ function makeRoot(): string {
 describe("StateStore", () => {
   it("returns an empty state for an unknown job", () => {
     expect(new StateStore(makeRoot()).loadSensor("macro-watch")).toEqual({
+      baselines: {},
       dedup: {},
       triageFires: [],
       seniorFires: [],
@@ -20,9 +21,11 @@ describe("StateStore", () => {
   it("round-trips a saved state", () => {
     const store = new StateStore(makeRoot());
     const state = {
-      baseline: {
-        hash: "abc123def456",
-        fields: { direction: "up", confidence: 0.7 },
+      baselines: {
+        "http://127.0.0.1:8400/api/regime": {
+          hash: "abc123def456",
+          fields: { direction: "up", confidence: 0.7 },
+        },
       },
       dedup: { "regime:up": "2026-08-24T00:00:00.000Z" },
       triageFires: ["2026-08-23T10:00:00.000Z"],
@@ -36,6 +39,7 @@ describe("StateStore", () => {
     const root = makeRoot();
     const store = new StateStore(root);
     store.saveSensor("macro-watch", {
+      baselines: {},
       dedup: {},
       triageFires: [],
       seniorFires: [],

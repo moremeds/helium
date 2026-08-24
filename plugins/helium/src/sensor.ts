@@ -137,20 +137,21 @@ export class StateChangePoller {
       if (Date.parse(expiry) <= now.getTime()) delete state.dedup[key];
     }
 
-    if (!state.baseline) {
-      state.baseline = { hash, fields };
+    const baseline = state.baselines[url];
+    if (!baseline) {
+      state.baselines[url] = { hash, fields };
       this.#store.saveSensor(this.#job, state);
       return { job: this.#job, url, state: "baseline", hash };
     }
-    if (state.baseline.hash === hash) {
+    if (baseline.hash === hash) {
       this.#store.saveSensor(this.#job, state);
       return { job: this.#job, url, state: "unchanged", hash };
     }
 
-    const previous = state.baseline.fields;
+    const previous = baseline.fields;
     const dedupKey = `${this.#job}:${url}:${hash}`;
     const suppressed = state.dedup[dedupKey] !== undefined;
-    state.baseline = { hash, fields };
+    state.baselines[url] = { hash, fields };
     if (!suppressed) {
       state.dedup[dedupKey] = new Date(
         now.getTime() + this.#trigger.dedupTtlMs,
