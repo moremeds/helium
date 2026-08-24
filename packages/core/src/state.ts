@@ -8,7 +8,17 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface SensorState {
-  baseline?: { hash: string; fields: Record<string, unknown> };
+  /**
+   * Trigger URL → the last fields/hash observed at that URL. Keyed per URL,
+   * not per job: a job may carry several `state-change` triggers (the shipped
+   * macro tenant watches both /api/rates/snapshot and /api/regime), and a
+   * single shared slot makes each trigger compare its payload against a
+   * DIFFERENT endpoint's fields — so every poll reports a change, fires on the
+   * very first one, and hands the agent an unrelated `previous`. Observed live
+   * on the mini during task 3.3; spec §8 requires the first poll after a cold
+   * start to establish the baseline and never fire.
+   */
+  baselines: Record<string, { hash: string; fields: Record<string, unknown> }>;
   /** dedupKey → expiry ISO. */
   dedup: Record<string, string>;
   /** ISO stamps, pruned to the rolling budget window. */
@@ -18,7 +28,7 @@ export interface SensorState {
 
 /** The state a job has before its first poll. */
 export function emptySensorState(): SensorState {
-  return { dedup: {}, triageFires: [], seniorFires: [] };
+  return { baselines: {}, dedup: {}, triageFires: [], seniorFires: [] };
 }
 
 /** Job names become file names, so they may not carry path syntax. */

@@ -1,35 +1,22 @@
 /**
- * helium — umbrella cordis plugin. Wires each enabled job's state-change,
- * calendar-window and cron triggers onto their own `ctx.effect` lifecycle,
- * and routes every fired trigger through the {@link Dispatcher}.
+ * helium — thin cordis adapter. Reads the pinned env contract into `Config`,
+ * builds the two dsh-aware engine ports (triage via a dsh agent, senior via
+ * the host `claude -p` binary) and the delivery port, then hands them to the
+ * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { readFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import {
-  buildTools,
-  JsonlWriter,
-  RunLedger,
-  StateStore,
-  ThesisStore,
-  loadJobs,
-  type TriggerCalendarWindow,
-} from "@helium/core";
-import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
+import { buildTools, JsonlWriter } from "@helium/core";
 import { buildChildEnv, runClaude } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
-import { CronTrigger } from "./cron.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
-import { Dispatcher, TriageRunner, type SeniorLane } from "./dispatch.js";
+import { TriageRunner, type SeniorLane } from "./dispatch.js";
 import { readEnvFile } from "./envfile.js";
-import {
-  scheduleLoop,
-  StateChangePoller,
-  type TriggerEvent,
-} from "./sensor.js";
+import { HeliumRuntime } from "./runtime.js";
 import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
@@ -51,27 +38,13 @@ export function runGuarded(label: string, fn: () => void): void {
   }
 }
 
-/** Fallback base cadence (spec has no bare interval when only calendar windows are armed). */
-const DEFAULT_WATCH_ONLY_INTERVAL_MS = 60_000;
-
 /**
  * Senior lane: spawns the host `claude -p` binary and translates its result
- * into the `SeniorLane` outcome shape the {@link Dispatcher} expects.
+ * into the `SeniorLane` outcome shape {@link HeliumRuntime}'s `Dispatcher`
+ * expects. `mcpConfigPath` is the file `apply()` writes once at startup
+ * (spec §4) so the child reaches the ecosystem tools over MCP stdio.
  */
-function buildSeniorLane(cfg: Config): SeniorLane {
-  // Carry-in decision (Task 2.7, correcting Task 2.5's flagged colocated-
-  // with-cfg.mcpBin guess): task-3.1-brief.md Step 10 is the authoritative
-  // source for this path — the mini's `cfg.mcpBin` points inside a versioned,
-  // symlink-swapped release tree
-  // (`.../helium-releases/current/node_modules/.bin/helium-mcp`, per
-  // task-3.3-brief.md), so writing a generated config file next to it would
-  // land inside a pnpm-managed node_modules/.bin — HELIUM_STATE_ROOT is the
-  // stable, writable directory that survives a release swap, and is where
-  // Task 3.1 actually writes mcp.json once at startup. Task 2.7 (this task)
-  // does not write that file's content — only Task 3.1 does — this line only
-  // makes the path this process passes to `claude -p --mcp-config` agree
-  // with where Task 3.1 will put it.
-  const mcpConfigPath = join(cfg.stateRoot, "mcp.json");
+function buildSeniorLane(cfg: Config, mcpConfigPath: string): SeniorLane {
   return {
     async dispatch(job, _ev, prompt) {
       const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
@@ -99,31 +72,55 @@ function buildSeniorLane(cfg: Config): SeniorLane {
   };
 }
 
+/**
+ * Writes the MCP stdio config the senior lane's `claude -p --mcp-config`
+ * child reads (spec §4): one server, `helium`, pointed at `config.mcpBin`
+ * with the ecosystem toolkit's env contract. Written once at startup to
+ * `<stateRoot>/mcp.json` — a stable, writable path that survives a
+ * symlink-swapped release deploy (task-2.7-report.md; task-3.3-brief.md).
+ */
+function writeMcpConfig(config: Config): string {
+  const path = join(config.stateRoot, "mcp.json");
+  writeFileSync(
+    path,
+    JSON.stringify(
+      {
+        mcpServers: {
+          helium: {
+            command: config.mcpBin,
+            args: [],
+            env: {
+              HELIUM_TOOLS:
+                "argon_api,apex_api,livewire_sql,thesis_read,thesis_write",
+              HELIUM_ALLOW_MUTATIONS: "0",
+              HELIUM_ARGON_BASE: config.argonBase,
+              HELIUM_APEX_BASE: config.apexBase,
+              ...(config.livewireDb
+                ? { HELIUM_LIVEWIRE_DB: config.livewireDb }
+                : {}),
+              HELIUM_STATE_ROOT: config.stateRoot,
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  return path;
+}
+
 export function apply(ctx: Context, raw: Config): void {
   const cfg = ConfigSchema.parse(raw);
   const paths = statePaths(cfg);
-  const store = new StateStore(paths.state);
   const jsonl = new JsonlWriter(paths.jsonl);
-  const ledger = new RunLedger(jsonl);
-  ledger.reconcileStartup();
-
-  const contextText = readFileSync(cfg.contextFile, "utf8");
   const delivery = new Delivery({
     jsonl,
     jsonlDir: paths.jsonl,
     reportsDir: paths.reports,
     emailTo: cfg.emailTo,
     smtp: smtpFromEnv(readEnvFile(cfg.envFile)),
-  });
-  const dispatcher = new Dispatcher({
-    store,
-    ledger,
-    contextText,
-    triage: new TriageRunner(ctx),
-    senior: buildSeniorLane(cfg),
-    thesis: new ThesisStore(cfg.stateRoot),
-    onResult: (job, ev, result) => delivery.deliver(job, ev, result),
-    onSuppressed: (job, ev, info) => delivery.budgetExhausted(job, ev, info),
   });
 
   // Global in-process registration for dsh agents / the interactive Web UI:
@@ -142,92 +139,26 @@ export function apply(ctx: Context, raw: Config): void {
     tools.filter((t) => !t.mutating),
   );
 
-  for (const job of loadJobs(cfg.jobsDir).filter((j) => j.enabled)) {
-    const onTrigger = (ev: TriggerEvent): void => {
-      dispatcher.enqueue(job, ev);
+  const mcpConfigPath = writeMcpConfig(cfg);
+  const runtime = new HeliumRuntime({
+    config: cfg,
+    engines: {
+      triage: new TriageRunner(ctx),
+      senior: buildSeniorLane(cfg, mcpConfigPath),
+    },
+    delivery: {
+      deliver: (job, ev, result) => delivery.deliver(job, ev, result),
+      budgetExhausted: (job, ev, info) =>
+        delivery.budgetExhausted(job, ev, info),
+      heartbeat: (row) => delivery.heartbeat(row),
+    },
+  });
+  ctx.effect(() => {
+    runtime.start();
+    return () => {
+      runtime.stop();
     };
-
-    const watchers = job.triggers
-      .filter((t): t is TriggerCalendarWindow => t.kind === "calendar-window")
-      .map((t) => ({
-        trigger: t,
-        watcher: new CalendarWindowWatcher({
-          job: job.name,
-          trigger: t,
-          events: loadCalendar(cfg.calendarsDir, t.calendar),
-          store,
-          onTrigger,
-        }),
-      }));
-
-    /** Tightest interval among the calendar windows currently open, else the base. */
-    const resolveInterval = (base: number): number => {
-      let interval = base;
-      for (const { trigger: t, watcher } of watchers) {
-        if (watcher.currentWindow() !== null)
-          interval = Math.min(interval, t.intervalDuringMs);
-      }
-      return interval;
-    };
-
-    const stateChangeTriggers = job.triggers.filter(
-      (t) => t.kind === "state-change",
-    );
-
-    for (const trigger of stateChangeTriggers) {
-      const poller = new StateChangePoller({
-        job: job.name,
-        trigger,
-        store,
-        onTrigger,
-      });
-      ctx.effect(
-        () =>
-          scheduleLoop(
-            () => resolveInterval(trigger.intervalMs),
-            async () => {
-              for (const { watcher } of watchers) await watcher.tick();
-              const status = await poller.tick();
-              // Spec §8: heartbeat is written every sensor cycle, including
-              // no-ops. `status` already carries `job` (the poller's job name).
-              delivery.heartbeat({ trigger: "state-change", ...status });
-            },
-          ),
-        `helium.sensor.poll(${job.name})`,
-      );
-    }
-
-    // A job with calendar windows but no state-change trigger still needs a loop to tick them.
-    if (stateChangeTriggers.length === 0 && watchers.length > 0) {
-      ctx.effect(
-        () =>
-          scheduleLoop(
-            () => resolveInterval(DEFAULT_WATCH_ONLY_INTERVAL_MS),
-            async () => {
-              for (const { watcher } of watchers) await watcher.tick();
-              // Spec §8: heartbeat is written every sensor cycle, including no-ops.
-              delivery.heartbeat({
-                job: job.name,
-                trigger: "calendar-window",
-                state: "watch-only",
-              });
-            },
-          ),
-        `helium.sensor.poll(${job.name})`,
-      );
-    }
-
-    for (const trigger of job.triggers) {
-      if (trigger.kind !== "cron") continue;
-      const cron = new CronTrigger({ job: job.name, trigger, onTrigger });
-      ctx.effect(() => {
-        cron.start();
-        return () => {
-          cron.stop();
-        };
-      }, `helium.sensor.cron(${job.name})`);
-    }
-  }
+  }, "helium.runtime()");
 
   // Daily synthesis (spec §8/§11): the floor, not the product. Also prunes
   // the JSONL trail to the 90-day retention window (controller-pinned

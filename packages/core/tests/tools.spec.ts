@@ -2,7 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { buildTools, isSelectOnly } from "../src/tools/index.js";
+import {
+  buildTools,
+  hasDeniedTableFunction,
+  isSelectOnly,
+} from "../src/tools/index.js";
 import {
   json,
   startFixture,
@@ -22,15 +26,76 @@ describe("isSelectOnly", () => {
   });
 });
 
+describe("hasDeniedTableFunction", () => {
+  it("flags DuckDB's raw file-reading and extension-management tokens inside an otherwise-valid SELECT", () => {
+    // DuckDB's core table functions read arbitrary local files from inside
+    // a SELECT even on a READ_ONLY connection; livewire lake access is via
+    // catalog views, so agent SQL never legitimately needs these.
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_csv('/etc/passwd')"),
+    ).toBe(true);
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_parquet('/etc/shadow')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM read_json('/x')")).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM glob('/**/*')")).toBe(true);
+    expect(hasDeniedTableFunction("INSTALL httpfs; SELECT 1")).toBe(true);
+    expect(hasDeniedTableFunction("LOAD httpfs")).toBe(true);
+    // Brief's full token list also names read_text, attach, and copy -- all
+    // three are additional DuckDB filesystem/extension surfaces (a raw text
+    // file read, opening a second database file, and exporting query
+    // results to disk) with the same "not through the lake's catalog views"
+    // problem as the six above.
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_text('/etc/passwd')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("ATTACH '/etc/passwd' AS x; SELECT 1")).toBe(
+      true,
+    );
+    expect(hasDeniedTableFunction("COPY (SELECT 1) TO '/tmp/x.csv'")).toBe(
+      true,
+    );
+    // `\b` does not treat "_" as a boundary, so a plain word-boundary match
+    // on "read_csv" alone does NOT match inside "read_csv_auto" -- and
+    // read_csv_auto/read_json_auto/read_ndjson are real, still-supported
+    // DuckDB functions with the same raw-file-read problem as their
+    // non-suffixed counterparts (fix round 1: this was a live bypass).
+    expect(
+      hasDeniedTableFunction("SELECT * FROM read_csv_auto('/etc/passwd')"),
+    ).toBe(true);
+    expect(hasDeniedTableFunction("SELECT * FROM read_json_auto('/x')")).toBe(
+      true,
+    );
+    expect(hasDeniedTableFunction("SELECT * FROM read_ndjson('/x')")).toBe(
+      true,
+    );
+    expect(hasDeniedTableFunction("-- read_csv\nSELECT 1")).toBe(false);
+    expect(hasDeniedTableFunction("SELECT * FROM bars")).toBe(false);
+    // Word-boundary match, not substring: none of these denied tokens are
+    // whole words here, so a column/table named this way is not caught.
+    expect(
+      hasDeniedTableFunction("SELECT close FROM bars WHERE symbol='SPY'"),
+    ).toBe(false);
+  });
+});
+
 describe("ecosystem tools", () => {
   let fixture: Fixture;
-  let seen: { url: string; method: string }[];
+  let seen: { url: string; method: string; body: string }[];
 
   beforeEach(async () => {
     seen = [];
     fixture = await startFixture((req, res) => {
-      seen.push({ url: req.url ?? "", method: req.method ?? "" });
-      json(res, { ok: true, path: req.url });
+      const chunks: Buffer[] = [];
+      req.on("data", (c: Buffer) => chunks.push(c));
+      req.on("end", () => {
+        seen.push({
+          url: req.url ?? "",
+          method: req.method ?? "",
+          body: Buffer.concat(chunks).toString("utf8"),
+        });
+        json(res, { ok: true, path: req.url });
+      });
     });
   });
   afterEach(async () => {
@@ -77,13 +142,87 @@ describe("ecosystem tools", () => {
       await byName("argon_api").run({ path: "/api/rates/snapshot" }),
     );
     expect(out.status).toBe(200);
-    expect(seen[0]).toEqual({ url: "/api/rates/snapshot", method: "GET" });
+    expect(seen[0]).toEqual({
+      url: "/api/rates/snapshot",
+      method: "GET",
+      body: "",
+    });
     await expect(
       byName("argon_api").run({ path: "/api/admin/wipe" }),
     ).rejects.toThrow(/not an allow-listed/);
     await expect(
       byName("argon_api").run({ path: "https://evil.example.com/x" }),
     ).rejects.toThrow(/must start with/);
+  });
+
+  it("argon_api rejects a literal path-traversal path before it ever reaches buildUrl's fetch", async () => {
+    // "/api/macro/../../../etc/passwd" starts with the allow-listed prefix
+    // "/api/macro/" as a RAW string; only buildUrl()'s new URL(...) would
+    // later collapse the ".." segments (RFC 3986 dot-segment removal),
+    // turning it into a request to "/etc/passwd" — a route the allow-list
+    // never approved. buildUrl() now requires the parsed URL's pathname to
+    // come back byte-identical to the requested path, so this is caught
+    // there and the upstream server is never reached.
+    await expect(
+      byName("argon_api").run({ path: "/api/macro/../../../etc/passwd" }),
+    ).rejects.toThrow(/traversal/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api rejects a percent-encoded path-traversal path (the raw-substring check on '..' alone can be out-encoded)", async () => {
+    // "%2e%2e" is the percent-encoded form of ".." — it contains no literal
+    // ".." substring, so a check limited to that literal would miss it, but
+    // the WHATWG URL parser decodes and collapses it exactly like a literal
+    // "..": new URL("http://h/api/stock/%2e%2e/%2e%2e/api/admin/x").pathname
+    // === "/api/admin/x" (verified live). "/api/stock/%2e%2e/%2e%2e/api/admin/x"
+    // starts with the allow-listed "/api/stock/" prefix as a raw string, so
+    // only buildUrl()'s pathname-equality check catches this.
+    await expect(
+      byName("argon_api").run({
+        path: "/api/stock/%2e%2e/%2e%2e/api/admin/x",
+      }),
+    ).rejects.toThrow(/traversal/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api rejects an encoded slash, which the real argon decodes into a path separator", async () => {
+    // Settled against the production argon on the mini (0.12.16, read-only
+    // GET): "/api%2fhealth" returns 200 — identical to "/api/health" — so
+    // Starlette decodes "%2f" into a separator. The WHATWG parser does NOT
+    // (new URL("http://h/api%2fhealth").pathname === "/api%2fhealth"), so
+    // the pathname-equality gate passes it while the server routes it
+    // somewhere else. buildUrl rejects "%2f" outright to keep "the path that
+    // is checked is the path that is sent" true.
+    await expect(
+      byName("argon_api").run({ path: "/api/macro/x%2f%2f..%2fadmin" }),
+    ).rejects.toThrow(/encoded slash/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api still allows a double-slash path to fail closed, just via the ordinary allow-list rejection", async () => {
+    // "//evil.example.com/x" does NOT change the resolved origin or get
+    // rewritten by the URL parser (verified live: new URL("http://h" +
+    // "//evil.example.com/x").host === "h", .pathname === the same string
+    // unchanged) — so buildUrl()'s pathname-equality guard has nothing to
+    // catch here. It's still safely refused: no allow-listed prefix starts
+    // with "//", so the ordinary prefix check rejects it before buildUrl
+    // (and therefore any fetch) ever runs.
+    await expect(
+      byName("argon_api").run({ path: "//evil.example.com/x" }),
+    ).rejects.toThrow(/not an allow-listed/);
+    expect(seen).toHaveLength(0);
+  });
+
+  it("argon_api still allows a normal templated path and a path+query combination", async () => {
+    // Regression guard for buildUrl()'s new pathname-equality check: a
+    // plain path with no characters the URL parser would ever rewrite must
+    // keep working, with or without a query string.
+    await byName("argon_api").run({ path: "/api/stock/AAPL/trade-insights" });
+    expect(seen[0]).toEqual({
+      url: "/api/stock/AAPL/trade-insights",
+      method: "GET",
+      body: "",
+    });
   });
 
   it("argon_api appends query parameters", async () => {
@@ -110,6 +249,32 @@ describe("ecosystem tools", () => {
     ).rejects.toThrow(/not an allow-listed/);
   });
 
+  it("apex_api also allows GET /screener/results/{run_id}", async () => {
+    // apex's real GET /screener/results/{run_id} reads back a screener run
+    // apex_compute enqueued; without this prefix an agent could kick off a
+    // screener job but never fetch its result.
+    await byName("apex_api").run({ path: "/screener/results/run-42" });
+    expect(seen[0]).toEqual({
+      url: "/screener/results/run-42",
+      method: "GET",
+      body: "",
+    });
+  });
+
+  it("apex_api also allows GET /backtest/results/{run_id}", async () => {
+    // apex's real GET /backtest/results/{run_id} reads back a backtest run's
+    // result the same way /screener/results/ does for screener runs — the
+    // brief names both prefixes explicitly, independent of whether
+    // apex_compute itself can enqueue a backtest (it can't; see the
+    // "refuses /backtest/run" test above).
+    await byName("apex_api").run({ path: "/backtest/results/run-7" });
+    expect(seen[0]).toEqual({
+      url: "/backtest/results/run-7",
+      method: "GET",
+      body: "",
+    });
+  });
+
   it("argon_rescan and apex_compute POST only to their own allow-lists", async () => {
     for (const name of ["argon_rescan", "argon_ai_analysis", "apex_compute"]) {
       await expect(byName(name).run({ path: "/api/anything" })).rejects.toThrow(
@@ -118,7 +283,9 @@ describe("ecosystem tools", () => {
     }
   });
 
-  it("argon_rescan POSTs to its one verified allow-listed route", async () => {
+  it("argon_rescan POSTs to its one verified allow-listed route with the required body", async () => {
+    // argon's real POST /api/watchlist/rescan-all returns 400 without a
+    // {"confirmed": true} JSON body (verified against the live route).
     const out = JSON.parse(
       await byName("argon_rescan").run({ path: "/api/watchlist/rescan-all" }),
     );
@@ -126,20 +293,27 @@ describe("ecosystem tools", () => {
     expect(seen[0]).toEqual({
       url: "/api/watchlist/rescan-all",
       method: "POST",
+      body: JSON.stringify({ confirmed: true }),
     });
   });
 
   it("apex_compute POSTs to each of its verified allow-listed routes", async () => {
-    for (const path of [
-      "/screener/momentum",
-      "/screener/pead",
-      "/backtest/run",
-    ]) {
+    // "/backtest/run" is deliberately absent: apex's real route requires a
+    // body with no defaults (422 bodyless) and macro v1 has no use for
+    // backtest — see the dedicated rejection test below.
+    for (const path of ["/screener/momentum", "/screener/pead"]) {
       seen.length = 0;
       const out = JSON.parse(await byName("apex_compute").run({ path }));
       expect(out.status).toBe(200);
-      expect(seen[0]).toEqual({ url: path, method: "POST" });
+      expect(seen[0]).toEqual({ url: path, method: "POST", body: "" });
     }
+  });
+
+  it("apex_compute refuses /backtest/run: apex's real route requires a body this allow-list can't supply", async () => {
+    await expect(
+      byName("apex_compute").run({ path: "/backtest/run" }),
+    ).rejects.toThrow(/not an allow-listed/);
+    expect(seen).toHaveLength(0);
   });
 
   it("thesis_write versions through ThesisStore and returns the diff", async () => {
@@ -163,5 +337,54 @@ describe("ecosystem tools", () => {
       stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
     }).find((x) => x.name === "livewire_sql")!;
     await expect(t.run({ sql: "DROP TABLE bars" })).rejects.toThrow(/SELECT/);
+  });
+
+  it("livewire_sql refuses raw file-reading table functions before touching DuckDB", async () => {
+    const t = buildTools({
+      argonBase: fixture.url,
+      apexBase: fixture.url,
+      livewireDb: "/nonexistent.duckdb",
+      stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
+    }).find((x) => x.name === "livewire_sql")!;
+    // Each is a well-formed single SELECT statement (passes isSelectOnly),
+    // so only the deny-list stands between it and DuckDB actually opening
+    // "/nonexistent.duckdb" -- which would surface as a different error.
+    await expect(
+      t.run({ sql: "SELECT * FROM read_csv('/etc/passwd')" }),
+    ).rejects.toThrow(/read_csv|denied|not allowed/i);
+    await expect(
+      t.run({ sql: "SELECT * FROM read_parquet('/etc/shadow')" }),
+    ).rejects.toThrow(/read_parquet|denied|not allowed/i);
+  });
+
+  it("caps an HTTP tool's response body at 64 KiB and flags truncation", async () => {
+    const oversized = await startFixture((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ big: "x".repeat(70 * 1024) }));
+    });
+    try {
+      const t = buildTools({
+        argonBase: oversized.url,
+        apexBase: oversized.url,
+        livewireDb: "/nonexistent.duckdb",
+        stateRoot: mkdtempSync(join(tmpdir(), "helium-tools-")),
+      }).find((x) => x.name === "argon_api")!;
+      const out = JSON.parse(await t.run({ path: "/api/health" }));
+      expect(out.status).toBe(200);
+      expect(out.truncated).toBe(true);
+      expect(typeof out.body).toBe("string");
+      expect(Buffer.byteLength(out.body, "utf8")).toBeLessThanOrEqual(
+        64 * 1024,
+      );
+    } finally {
+      await oversized.close();
+    }
+  });
+
+  it("does not flag truncation for a response under the cap", async () => {
+    const out = JSON.parse(
+      await byName("argon_api").run({ path: "/api/rates/snapshot" }),
+    );
+    expect(out.truncated).toBe(false);
   });
 });

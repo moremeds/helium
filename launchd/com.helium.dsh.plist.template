@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.helium.dsh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/moremeds/projects/helium-releases/current/scripts/launchd/run-dsh.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/moremeds/projects/helium-releases/current</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>ProcessType</key><string>Standard</string>
+  <key>StandardOutPath</key><string>/Users/moremeds/.helium/logs/dsh.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/moremeds/.helium/logs/dsh.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__NODE_BIN_DIR__:/Users/moremeds/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>/Users/moremeds</string>
+    <key>DSH_HOME</key><string>/Users/moremeds/.helium/dsh-home</string>
+    <key>HELIUM_JOBS_DIR</key><string>/Users/moremeds/projects/helium-releases/current/jobs</string>
+    <key>HELIUM_STATE_ROOT</key><string>/Users/moremeds/.helium/state</string>
+    <key>HELIUM_CONTEXT_FILE</key><string>/Users/moremeds/projects/helium-releases/current/context/ecosystem.md</string>
+    <key>HELIUM_CALENDARS_DIR</key><string>/Users/moremeds/projects/helium-releases/current/calendars</string>
+    <key>HELIUM_ARGON_BASE</key><string>http://127.0.0.1:8400</string>
+    <key>HELIUM_APEX_BASE</key><string>http://127.0.0.1:8322</string>
+    <key>HELIUM_ENV_FILE</key><string>/Users/moremeds/.config/helium/helium.env</string>
+    <key>HELIUM_CLAUDE_TOKEN_FILE</key><string>/Users/moremeds/.config/helium/claude-token.env</string>
+    <key>HELIUM_PROXY</key><string>http://127.0.0.1:7897</string>
+    <!-- The built server itself, not a pnpm bin shim: `lib/` is a tsc build
+         product, so at `pnpm install` time (which always precedes `pnpm build`
+         in deploy.sh) the bin target does not exist yet and pnpm silently
+         creates NO shim at all — verified on the mini during task 3.3, where
+         both candidate .bin paths were absent after a clean install+build. The
+         file carries a `#!/usr/bin/env node` shebang and `pnpm build` chmod +x's
+         it, and PATH above puts node first, so spawning it directly works and
+         has one less moving part. -->
+    <key>HELIUM_MCP_BIN</key><string>/Users/moremeds/projects/helium-releases/current/packages/core/lib/mcp/server.js</string>
+    <key>HELIUM_EMAIL_TO</key><string>lcxxcllcx@gmail.com</string>
+  </dict>
+</dict>
+</plist>

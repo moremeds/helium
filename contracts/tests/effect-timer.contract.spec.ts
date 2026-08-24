@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { deployHeliumProfile, dshBin, makeDshHome } from "../src/dsh.js";
@@ -18,45 +26,130 @@ async function waitFor(
   throw new Error(`timed out waiting for ${label}`);
 }
 
-// Skipped (found while shipping Task 2.7, task-2.7-report.md has full detail):
-// profile/cordis.patch.yml still only sets a stale `tickFile` field from the
-// Task-1.5-era plugin placeholder that this test observes. dsh-plugin-helium's
-// real Config (built out across Phase 2) requires jobsDir/stateRoot/
-// contextFile/calendarsDir/argonBase/apexBase/envFile/claudeTokenFile/proxy/
-// mcpBin/emailTo, none of which that patch file provides, so apply() throws
-// before ever reaching the sensor ctx.effect() wiring -- no ticks are ever
-// written, and this test always times out. HELIUM_CONTRACT_TICK_FILE has no
-// reader anywhere in plugins/helium/src/ any more (grepped; zero matches) --
-// the real sensor loop reports through jsonl heartbeats instead, a different
-// observable mechanism entirely. task-3.1-brief.md Step 11 explicitly owns
-// rewriting both plugins/helium/cordis.patch.yml (already correct, reads
-// real env vars) and profile/cordis.patch.yml (still stale) to the pinned
-// env contract; restore this test once that lands, rewritten against the
-// real observable (jsonl heartbeats), not the removed tickFile mechanism.
-describe.skip("contract: ctx.effect interval timers run inside a booted profile", () => {
+/**
+ * Re-enabled per task-3.1-brief.md Step 11 (carried in from task-2.7-report.md):
+ * `profile/cordis.patch.yml` now carries the same pinned env contract as
+ * `plugins/helium/cordis.patch.yml` instead of the stale Task-1.5-era
+ * `tickFile` field, so `apply()` receives a real `Config` and the runtime's
+ * per-job sensor loop actually starts. `HELIUM_CONTRACT_TICK_FILE` was
+ * dropped along with that placeholder mechanism (no reader anywhere in
+ * plugins/helium/src/ — grepped, zero matches); this contract now observes
+ * the real mechanism instead, the `heartbeat` JSONL stream `HeliumRuntime`
+ * appends to every sensor cycle (spec §8).
+ */
+/** An ephemeral loopback port, so a booted profile never collides with whatever already holds dsh's default :3080. */
+async function freePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const probe = createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+describe("contract: ctx.effect interval timers run inside a booted profile", () => {
   let dshHome: string;
+  let stateRoot: string;
+  let jobsDir: string;
 
   beforeAll(() => {
     dshHome = makeDshHome();
     deployHeliumProfile(dshHome);
+
+    stateRoot = join(dshHome, "helium-state");
+    jobsDir = join(dshHome, "helium-jobs");
+    mkdirSync(jobsDir, { recursive: true });
+    mkdirSync(join(dshHome, "helium-calendars"), { recursive: true });
+    writeFileSync(
+      join(dshHome, "ecosystem.md"),
+      "# ecosystem\ncontract fixture\n",
+      "utf8",
+    );
+    // A single fast state-change trigger against an address nothing listens
+    // on: StateChangePoller reports "unknown" and the runtime still writes a
+    // heartbeat row every cycle regardless of poll outcome (spec §8) — no
+    // live network dependency, no live LLM call.
+    writeFileSync(
+      join(jobsDir, "contract.yaml"),
+      [
+        "name: contract-watch",
+        "enabled: true",
+        "triggers:",
+        "  - kind: state-change",
+        "    url: http://127.0.0.1:1/api/snapshot",
+        "    fields: [state]",
+        "    interval: 500ms",
+        "engine:",
+        "  triage: { engine: deepseek, model: deepseek-v4-flash }",
+        "  senior: { engine: claude-max }",
+        "escalate_when: severity >= material",
+        "session: fresh",
+        "memory: none",
+        "tools: []",
+        "max_turns: { triage: 2, senior: 2 }",
+        "timeout: 60s",
+        "budget: { max_triage_per_hour: 60, max_senior_per_day: 60 }",
+        "delivery:",
+        "  jsonl: true",
+        "prompt: contract fixture job",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
   });
 
   afterAll(() => {
     rmSync(dshHome, { recursive: true, force: true });
   });
 
-  it("fires the plugin timer and stops cleanly on SIGTERM", async () => {
-    const tickFile = join(dshHome, "ticks.log");
+  it("starts the per-job sensor loop and stops cleanly on SIGTERM", async () => {
+    const heartbeatFile = (): string =>
+      join(
+        stateRoot,
+        "jsonl",
+        `heartbeat-${new Date().toISOString().slice(0, 10)}.jsonl`,
+      );
+    const rowCount = (): number => {
+      if (!existsSync(heartbeatFile())) return 0;
+      return readFileSync(heartbeatFile(), "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line !== "").length;
+    };
+
     const stderr: string[] = [];
     const stdout: string[] = [];
-    const child = spawn(dshBin, ["--profile", "helium"], {
-      env: {
-        ...process.env,
-        DSH_HOME: dshHome,
-        HELIUM_CONTRACT_TICK_FILE: tickFile,
+    // The helium profile carries the @deepseek-ai/dsh-web-app bundle, which
+    // binds :3080 by default and would also pop a browser window on every
+    // contract run. Neither belongs in a test that only cares about ctx.effect
+    // timers, and the default port is genuinely taken during bring-up work (an
+    // ssh -L tunnel to the mini's UI made this test hang for its full 60s
+    // timeout). Bind an ephemeral port instead and keep the browser shut.
+    const port = await freePort();
+    const child = spawn(
+      dshBin,
+      ["--profile", "helium", "--port", String(port), "--no-open"],
+      {
+        env: {
+          ...process.env,
+          DSH_HOME: dshHome,
+          HELIUM_JOBS_DIR: jobsDir,
+          HELIUM_STATE_ROOT: stateRoot,
+          HELIUM_CONTEXT_FILE: join(dshHome, "ecosystem.md"),
+          HELIUM_CALENDARS_DIR: join(dshHome, "helium-calendars"),
+          HELIUM_ARGON_BASE: "http://127.0.0.1:1",
+          HELIUM_APEX_BASE: "http://127.0.0.1:1",
+          HELIUM_ENV_FILE: join(dshHome, "helium.env"),
+          HELIUM_CLAUDE_TOKEN_FILE: join(dshHome, "claude-token.env"),
+          HELIUM_PROXY: "",
+          HELIUM_MCP_BIN: "true",
+          HELIUM_EMAIL_TO: "contract@example.invalid",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
     child.stdout.on("data", (chunk) => stdout.push(String(chunk)));
     child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
     const exited = new Promise<number | null>((resolve) =>
@@ -65,17 +158,14 @@ describe.skip("contract: ctx.effect interval timers run inside a booted profile"
 
     try {
       await waitFor(
-        () =>
-          existsSync(tickFile) &&
-          readFileSync(tickFile, "utf8").trim().split("\n").length >= 2,
+        () => rowCount() >= 2,
         60_000,
-        `two ticks in ${tickFile}; stderr was:\n${stderr.join("")}`,
+        `two heartbeat rows in ${heartbeatFile()}; stdout was:\n${stdout.join("")}\nstderr was:\n${stderr.join("")}`,
       );
     } finally {
       child.kill("SIGTERM");
     }
 
-    expect(stdout.join("")).toContain("helium plugin mounted");
     expect(await exited).toBe(0);
   });
 });

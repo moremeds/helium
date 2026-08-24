@@ -1,6 +1,6 @@
 {
   "name": "helium",
-  "version": "0.0.0",
+  "version": "0.1.4",
   "private": true,
   "type": "module",
   "engines": {
@@ -10,10 +10,16 @@
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "vitest run --project unit",
-    "test:contracts": "vitest run --project contracts"
+    "test:contracts": "vitest run --project contracts",
+    "test:e2e-local": "vitest run -c vitest.e2e.config.ts"
+  },
+  "dependencies": {
+    "nodemailer": "9.0.5",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
     "@deepseek-ai/dsh": "0.1.1-rc.2",
+    "@types/semver": "^7.8.0",
     "typescript": "^5",
     "vitest": "^3"
   }

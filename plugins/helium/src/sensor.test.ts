@@ -87,7 +87,40 @@ describe("StateChangePoller", () => {
     const status = await poller().tick();
     expect(status.state).toBe("baseline");
     expect(fired).toHaveLength(0);
-    expect(store.loadSensor("macro-watch").baseline?.hash).toBe(status.hash);
+    expect(
+      store.loadSensor("macro-watch").baselines[
+        `${fixture.url}/api/rates/snapshot`
+      ]?.hash,
+    ).toBe(status.hash);
+  });
+
+  it("keeps one baseline per trigger URL, so a second trigger on the same job still cold-starts", async () => {
+    // Regression: baselines used to be a single per-JOB slot while a job
+    // carries several state-change triggers (the shipped macro tenant watches
+    // /api/rates/snapshot AND /api/regime). The first trigger wrote the slot,
+    // the second then compared its own payload against the FIRST endpoint's
+    // fields, saw a hash mismatch and fired on its very first poll — handing
+    // the agent a `previous` from an unrelated URL, and re-firing forever as
+    // the two triggers overwrote each other. Observed live on the mini during
+    // task 3.3 bring-up; spec §8 requires a cold-start poll to establish the
+    // baseline and never fire.
+    const other = new StateChangePoller({
+      job: "macro-watch",
+      trigger: { ...trigger(`${fixture.url}/api/regime`), fields: ["cri"] },
+      store,
+      onTrigger: (ev) => {
+        fired.push(ev);
+      },
+      now: () => new Date(clock),
+    });
+    expect((await poller().tick()).state).toBe("baseline");
+    expect((await other.tick()).state).toBe("baseline");
+    expect(fired).toHaveLength(0);
+
+    // ...and neither trigger disturbs the other's baseline on a re-poll.
+    expect((await poller().tick()).state).toBe("unchanged");
+    expect((await other.tick()).state).toBe("unchanged");
+    expect(fired).toHaveLength(0);
   });
 
   it("does not fire when the watched fields are unchanged", async () => {

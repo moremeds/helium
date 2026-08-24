@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.helium.deadman</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/moremeds/projects/helium-releases/current/scripts/deadman/check-heartbeat.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict><key>Minute</key><integer>0</integer></dict>
+    <dict><key>Minute</key><integer>30</integer></dict>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>/Users/moremeds/.helium/logs/deadman.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/moremeds/.helium/logs/deadman.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__NODE_BIN_DIR__:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>/Users/moremeds</string>
+    <key>HELIUM_NODE_BIN</key><string>__NODE_BIN_DIR__/node</string>
+    <key>HELIUM_STATE_ROOT</key><string>/Users/moremeds/.helium/state</string>
+    <key>HELIUM_ENV_FILE</key><string>/Users/moremeds/.config/helium/helium.env</string>
+    <!-- Mirrors com.helium.dsh.plist: the recipient is plist-supplied, not a
+         secret in the 0600 env file. Without it here the watchdog detects a
+         stale heartbeat and then dies at exit 12 with "missing config keys"
+         (found by the 3.4 live drill) — send-alert.mjs now falls back to the
+         process environment, and this is what fills it. -->
+    <key>HELIUM_EMAIL_TO</key><string>lcxxcllcx@gmail.com</string>
+  </dict>
+</dict>
+</plist>

@@ -19,7 +19,11 @@ export {
   argonTools,
 } from "./argon.js";
 export { APEX_COMPUTE_PATHS, APEX_READ_PREFIXES, apexTools } from "./apex.js";
-export { isSelectOnly, livewireTools } from "./livewire.js";
+export {
+  hasDeniedTableFunction,
+  isSelectOnly,
+  livewireTools,
+} from "./livewire.js";
 export { thesisTools } from "./thesis.js";
 
 export function buildTools(cfg: {

@@ -36,6 +36,17 @@ export interface TriggerCron {
 
 export type Trigger = TriggerStateChange | TriggerCalendarWindow | TriggerCron;
 
+/**
+ * Task 3.6: a gated script action, run instead of the triage/senior engines
+ * when a job declares `script:` (spec §10, the dsh upgrade canary). `command`
+ * is absolute, or relative to the release root.
+ */
+export interface JobScriptAction {
+  command: string;
+  args: string[];
+  timeoutMs: number;
+}
+
 export interface JobSpec {
   name: string;
   enabled: boolean;
@@ -57,6 +68,13 @@ export interface JobSpec {
     email?: { to: string; subjectPrefix: string; maxPerHour: number };
   };
   prompt: string;
+  /**
+   * Optional script action (Task 3.6). A job carrying `script` still
+   * declares `engine`, `budget` and `delivery` in full — the triage/senior
+   * engines are simply unused for that job; the harness routes it to the
+   * script runner instead of a dsh agent turn.
+   */
+  script?: JobScriptAction;
 }
 
 /** Spec §8: dedup carries an explicit key and TTL; 6h when the file omits it. */
@@ -120,6 +138,15 @@ type TriggerYaml =
   | z.infer<typeof stateChangeYaml>
   | z.infer<typeof calendarWindowYaml>
   | z.infer<typeof cronYaml>;
+
+/** Task 3.6: `timeout` normalizes to `timeoutMs` via the shared `duration` schema, exactly like every other duration field. */
+const scriptYaml = z
+  .object({
+    command: z.string().min(1),
+    args: z.array(z.string()).default([]),
+    timeout: duration,
+  })
+  .strict();
 
 /** Normalize one parsed YAML trigger into its `Trigger` shape. */
 function toTrigger(raw: TriggerYaml): Trigger {
@@ -198,6 +225,7 @@ const jobYaml = z
       })
       .strict(),
     prompt: z.string().min(1),
+    script: scriptYaml.optional(),
   })
   .strict();
 
@@ -232,6 +260,15 @@ function toJobSpec(raw: z.infer<typeof jobYaml>): JobSpec {
           }),
     },
     prompt: raw.prompt,
+    ...(raw.script === undefined
+      ? {}
+      : {
+          script: {
+            command: raw.script.command,
+            args: raw.script.args,
+            timeoutMs: raw.script.timeout,
+          },
+        }),
   };
 }
 
@@ -268,12 +305,39 @@ export function parseJobYaml(text: string, source: string): JobSpec {
  * @param dir - the jobs directory.
  * @returns the parsed jobs.
  */
-export function loadJobs(dir: string): JobSpec[] {
-  return readdirSync(dir)
+/**
+ * Load every `*.yaml` job in `dir`.
+ *
+ * With no `onInvalid` handler a malformed file throws, which is what
+ * `deploy.sh`'s pre-flip gate wants: a typo fails the DEPLOY while `current`
+ * still points at the previous release, so a human sees it immediately.
+ *
+ * With a handler, the bad file is skipped and reported and the healthy jobs
+ * still load. That is what the running daemon wants. Before this existed, one
+ * malformed file threw here, which aborted the plugin's `apply()`, which killed
+ * the dsh process -- so a single typo in a single tenant took EVERY other tenant
+ * down, and launchd's KeepAlive turned it into a crash loop rather than a stable
+ * failure. Observed on the mini during the 3.7 AC#2 drill: a stray `dedup_ttl:`
+ * key froze the heartbeat for 2m12s across all jobs.
+ *
+ * The handler is not optional decoration -- a silently skipped tenant is its own
+ * hazard, so the caller is expected to make the skip loud.
+ */
+export function loadJobs(
+  dir: string,
+  onInvalid?: (path: string, error: Error) => void,
+): JobSpec[] {
+  const jobs: JobSpec[] = [];
+  for (const entry of readdirSync(dir)
     .filter((entry) => entry.endsWith(".yaml"))
-    .sort()
-    .map((entry) => {
-      const path = join(dir, entry);
-      return parseJobYaml(readFileSync(path, "utf8"), path);
-    });
+    .sort()) {
+    const path = join(dir, entry);
+    try {
+      jobs.push(parseJobYaml(readFileSync(path, "utf8"), path));
+    } catch (err) {
+      if (!onInvalid) throw err;
+      onInvalid(path, err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  return jobs;
 }

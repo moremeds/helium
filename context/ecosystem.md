@@ -9,7 +9,11 @@ of them except through the tools named below.
 argon reconstructs the macro regime: policy stance, inflation trend, the rate path, the dollar,
 and gold. It is the primary source for "what is the macro state right now".
 
-- `GET /api/regime` — the current regime classification (state, direction, confidence).
+- `GET /api/regime` — the crash-risk/vol regime read: a composite score and bucket (`cri.score`,
+  `cri.level`), the crash-trigger flag (`crash_trigger.fired`), and their vix/vvix/correlation/
+  momentum inputs. This is a volatility regime, not the rate-path one — the policy-rate state,
+  direction and confidence triple lives on `/api/rates/snapshot`'s `state` object instead
+  (`state.state`, `state.direction`, `state.confidence`).
 - `GET /api/rates/snapshot` — the rate-path snapshot: front end vs long end, implied path.
 - `GET /api/macro/policy` — policy stance evidence (FOMC language, dots, guidance).
 - `GET /api/macro/inflation` — inflation trend and its components.
@@ -40,10 +44,15 @@ apex is the signal computation engine: bars, indicators, rule-based signals, con
 - `GET /v1/rates/{symbol}/series` — a rates-specific series read.
 - `GET /v1/instruments`, `GET /v1/{asset_class}/{symbol}`, `GET /v1/equity/{symbol}/actions`,
   `GET /v1/equity/{symbol}/delisting` — instrument metadata.
-- Screener (`POST /screener/momentum`, `POST /screener/pead`) and backtest
-  (`POST /backtest/run`) are POST-to-enqueue compute jobs (`apex_compute`, status 202). They
-  mutate no domain state but cost real compute: at most one per analysis, and only when the
-  question genuinely needs it.
+- Screener (`POST /screener/momentum`, `POST /screener/pead`) is a POST-to-enqueue compute job
+  (`apex_compute`, status 202). It mutates no domain state but costs real compute: at most one
+  per analysis, and only when the question genuinely needs it. `apex_compute` has no backtest
+  route — apex's real `/backtest/run` requires a caller-supplied JSON body (universe, date
+  range, ...) that this tool's fixed allow-list can't express; macro v1 doesn't need it.
+- `GET /screener/results/{run_id}` — read back a screener run's result once `apex_compute` has
+  enqueued it.
+- `GET /backtest/results/{run_id}` — read back a backtest run's result. `apex_compute` cannot
+  enqueue a backtest itself (see above), but a run started some other way is still readable.
 
 Semantics: apex is deterministic and mechanical. It tells you which rules fired, not what they
 mean. Use it to check whether a macro narrative has a price-level counterpart.
@@ -52,7 +61,14 @@ mean. Use it to check whether a macro narrative has a price-level counterpart.
 
 livewire is the durable market-data warehouse. helium reads it through a read-only DuckDB
 connection over the Parquet lake with `livewire_sql`: one `SELECT` (or `WITH ... SELECT`) per
-call, row-capped. Writes are refused by the engine, not merely by policy.
+call, row-capped, through the lake's own catalog views only. Writes are refused by the engine,
+not merely by policy — but a READ_ONLY connection alone does not make raw file access safe:
+DuckDB's own table functions (`read_csv`, `read_parquet`, `read_json`, `read_text`, `read_ndjson`,
+`glob`, and underscore-suffixed variants like `read_csv_auto`) can still read any local file the
+process can see, `attach` can open a second database file, `copy` can export query results to
+disk, and `install`/`load` can pull in an extension that reintroduces write or network access.
+`livewire_sql` refuses all of these (matched as a prefix, so a variant is refused too) as a third
+layer. Query the catalog views by name; never pass a raw file path.
 
 Semantics: the lake is point-in-time history. It is the right place for "has this happened
 before", "what did the distribution look like", "how large is this move against its own

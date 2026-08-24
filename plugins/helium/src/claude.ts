@@ -105,12 +105,35 @@ export async function runClaude(opts: {
         resolve({ ok: false, classification: classify(stderr, stdout), raw: { stdout, stderr } });
         return;
       }
-      const body = parsed as { result?: string; is_error?: boolean };
-      if (body.is_error === true) {
-        resolve({ ok: false, text: body.result, classification: "error", raw: parsed });
+      // `claude -p --output-format json` streams the WHOLE run as a JSON
+      // ARRAY and puts the envelope last: on 2.1.241 a one-turn run comes
+      // back as [system, assistant, rate_limit_event, result] (captured live
+      // on the mini, task 3.3 step 22). Reading `.is_error` off the array
+      // yields undefined, which is not `true`, so every senior run -- the
+      // most expensive lane there is -- would have resolved ok:true with
+      // text:undefined, and a real is_error envelope would have been
+      // reported as a success. Take the terminal `result` event; fall back
+      // to the last element so a shape change still surfaces an envelope
+      // rather than silently succeeding. A bare object is still accepted.
+      const envelope = Array.isArray(parsed)
+        ? (parsed.findLast(
+            (e) => (e as { type?: string } | null)?.type === "result",
+          ) ?? parsed.at(-1))
+        : parsed;
+      if (typeof envelope !== "object" || envelope === null) {
+        resolve({
+          ok: false,
+          classification: classify(stderr, stdout),
+          raw: { stdout, stderr },
+        });
         return;
       }
-      resolve({ ok: true, text: body.result, raw: parsed });
+      const body = envelope as { result?: string; is_error?: boolean };
+      if (body.is_error === true) {
+        resolve({ ok: false, text: body.result, classification: "error", raw: envelope });
+        return;
+      }
+      resolve({ ok: true, text: body.result, raw: envelope });
     });
   });
 }

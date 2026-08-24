@@ -1,0 +1,60 @@
+name: dsh-canary
+enabled: true
+triggers:
+  # Sentinel (spec §10): hashes the ENTIRE `versions` map, not the `latest`
+  # dist-tag — @deepseek-ai/dsh is an RC-only developer preview and may
+  # never move `latest`, so dist-tag equality would silently never fire.
+  # Verified live 2026-08-24: registry.npmjs.org/@deepseek-ai/dsh resolves
+  # with dist-tags.latest = 0.1.1-rc.2 (the pin), 10 version keys present.
+  - kind: state-change
+    url: https://registry.npmjs.org/@deepseek-ai/dsh
+    fields: [versions]
+    interval: 6h
+    dedup: 24h
+  # Companion sentinel for dsh's Python-side counterpart. Verified live
+  # 2026-08-24: pypi.org/pypi/deepseek-harness-sdk/json resolves, current
+  # release 0.1.1rc1. helium does not depend on this package directly, but
+  # a breaking release here is the earliest signal of an upstream API shift
+  # in the same DeepSeek Harness generation the pinned dsh belongs to.
+  - kind: state-change
+    url: https://pypi.org/pypi/deepseek-harness-sdk/json
+    fields: [releases]
+    interval: 12h
+    dedup: 24h
+  # Weekly floor: catches a version bump the two state-change sentinels
+  # missed (e.g. a registry outage during the poll window) within a week.
+  - kind: cron
+    schedule: "0 9 * * 1"
+    tz: America/New_York
+engine:
+  # Unused for this job (see `script:` below) — still required by the job
+  # schema, which does not make engine/budget/delivery optional for a
+  # script-carrying job.
+  triage: { engine: deepseek, model: deepseek-v4-flash }
+  senior: { engine: claude-max }
+escalate_when: severity >= critical
+session: fresh
+memory: none
+tools: []
+allowMutations: false
+max_turns: { triage: 1, senior: 1 }
+timeout: 45m
+budget: { max_triage_per_hour: 4, max_senior_per_day: 1 }
+script:
+  command: /Users/moremeds/projects/helium-releases/current/scripts/canary/run.sh
+  args: []
+  timeout: 40m
+delivery:
+  jsonl: true
+  email:
+    to: operator
+    subject_prefix: "[helium/canary]"
+    max_per_hour: 2
+prompt: |
+  This job runs scripts/canary/run.sh as a gated script action; no model is
+  called by the harness itself for this job. The script decides on its own
+  whether a newer dsh candidate exists, runs the contract suite against it
+  in an isolated $DSH_HOME, and writes its own report — that report (not a
+  triage/senior verdict) is the delivery payload. See
+  scripts/canary/diff-intel.md for the full mechanism and how to promote a
+  pin once a candidate looks safe.
