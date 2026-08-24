@@ -30,7 +30,15 @@
     <key>HELIUM_ENV_FILE</key><string>/Users/moremeds/.config/helium/helium.env</string>
     <key>HELIUM_CLAUDE_TOKEN_FILE</key><string>/Users/moremeds/.config/helium/claude-token.env</string>
     <key>HELIUM_PROXY</key><string>http://127.0.0.1:7897</string>
-    <key>HELIUM_MCP_BIN</key><string>/Users/moremeds/projects/helium-releases/current/node_modules/.bin/helium-mcp</string>
+    <!-- The built server itself, not a pnpm bin shim: `lib/` is a tsc build
+         product, so at `pnpm install` time (which always precedes `pnpm build`
+         in deploy.sh) the bin target does not exist yet and pnpm silently
+         creates NO shim at all — verified on the mini during task 3.3, where
+         both candidate .bin paths were absent after a clean install+build. The
+         file carries a `#!/usr/bin/env node` shebang and `pnpm build` chmod +x's
+         it, and PATH above puts node first, so spawning it directly works and
+         has one less moving part. -->
+    <key>HELIUM_MCP_BIN</key><string>/Users/moremeds/projects/helium-releases/current/packages/core/lib/mcp/server.js</string>
     <key>HELIUM_EMAIL_TO</key><string>lcxxcllcx@gmail.com</string>
   </dict>
 </dict>

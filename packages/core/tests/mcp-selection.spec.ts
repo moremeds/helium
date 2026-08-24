@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -80,5 +80,27 @@ describe("mcp selection", () => {
       selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" })),
     ).not.toThrow();
     expect(selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" }))).toEqual([]);
+  });
+});
+
+// The senior lane spawns this file directly as an MCP stdio server
+// (writeMcpConfig -> {"command": HELIUM_MCP_BIN, "args": []}), because pnpm
+// cannot link a bin shim for it: `lib/` is a tsc build product and install
+// always runs before build, so pnpm warns ENOENT and creates nothing
+// (observed on the mini, task 3.3). Spawning the artifact directly therefore
+// depends on two properties tsc does not give us for free — the shebang has
+// to survive compilation, and `pnpm build` has to chmod +x the output. If
+// either regresses, the daemon still boots and only the senior lane's tools
+// break, silently, so assert them here where a normal `pnpm build && pnpm
+// test` catches it.
+describe("mcp server artifact", () => {
+  const built = new URL("../lib/mcp/server.js", import.meta.url);
+
+  it("is executable and keeps its node shebang after the build", () => {
+    const st = statSync(built);
+    expect(st.mode & 0o111).not.toBe(0);
+    expect(readFileSync(built, "utf8").split("\n", 1)[0]).toBe(
+      "#!/usr/bin/env node",
+    );
   });
 });
