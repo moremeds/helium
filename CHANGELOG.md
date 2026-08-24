@@ -1,3 +1,9 @@
+## v0.1.5 — 2026-08-24
+
+- fix(script): kill the script's process group, not just the direct child
+- test(script): stop the SIGTERM timeout test racing the test runner
+- docs(canary): record the dsh rc.2 interactive tool-execution defect
+
 ## v0.1.4 — 2026-08-24
 
 - feat(jobs): add apex-health tenant
