@@ -56,16 +56,27 @@ describe("runScriptProcess", () => {
     expect(out.analysis.length).toBe(8_000);
   });
 
-  it("kills a hung script with SIGTERM and resolves timedOut=true", async () => {
-    const bin = fakeScript(`sleep 5`);
-    const started = Date.now();
-    const out = await run(bin, [], 100);
-    expect(out.ok).toBe(false);
-    expect(out.timedOut).toBe(true);
-    expect(out.error).toContain("timeoutMs=100");
-    // Killed well under the 5s sleep, proving SIGTERM actually fired.
-    expect(Date.now() - started).toBeLessThan(4_000);
-  });
+  // The old version of this test ran `sleep 5` against vitest's 5000ms default
+  // ceiling, so the assertion raced the test runner with zero margin and lost on
+  // a slow CI machine (the run itself is bounded at 100ms; only scheduling delay
+  // separated pass from fail). The script now sleeps far longer than any
+  // assertion window and the vitest timeout is explicit and generous, so what
+  // enforces the behaviour is the elapsed-time assertion below and never the
+  // runner's ceiling.
+  it(
+    "kills a hung script with SIGTERM and resolves timedOut=true",
+    async () => {
+      const bin = fakeScript(`sleep 30`);
+      const started = Date.now();
+      const out = await run(bin, [], 100);
+      expect(out.ok).toBe(false);
+      expect(out.timedOut).toBe(true);
+      expect(out.error).toContain("timeoutMs=100");
+      // ~100ms if SIGTERM landed; ~30s if it did not.
+      expect(Date.now() - started).toBeLessThan(2_000);
+    },
+    15_000,
+  );
 
   it("resolves a spawn error (unknown command) without throwing", async () => {
     const out = await run("/no/such/binary/helium-canary-fixture");
