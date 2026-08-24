@@ -1,3 +1,7 @@
+## v0.1.1 — 2026-08-24
+
+- fix(release): give the remote shell a PATH that reaches node and pnpm
+
 ## v0.1.0 — 2026-08-24
 
 - fix(deadman): resolve the alert recipient from the process env too
