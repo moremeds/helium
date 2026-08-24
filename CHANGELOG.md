@@ -1,3 +1,7 @@
+## v0.1.4 — 2026-08-24
+
+- feat(jobs): add apex-health tenant
+
 ## v0.1.3 — 2026-08-24
 
 - fix(jobs): stop one malformed job file from killing every tenant
