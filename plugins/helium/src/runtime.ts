@@ -148,7 +148,16 @@ export class HeliumRuntime {
     this.ledger = new RunLedger(this.writer);
     this.store = new StateStore(c.stateRoot);
     this.theses = new ThesisStore(c.stateRoot);
-    this.jobs = loadJobs(c.jobsDir).filter((j) => j.enabled);
+    // Skip a malformed job rather than take the whole harness down with it, but
+    // make the skip loud: launchd captures stderr to dsh.err.log, and the job is
+    // simply absent from the heartbeat stream, which is the operator-visible
+    // symptom. deploy.sh refuses to ship a bad job file in the first place, so
+    // reaching this branch means a file arrived by some other route.
+    this.jobs = loadJobs(c.jobsDir, (path, err) => {
+      console.error(
+        `helium: SKIPPING malformed job ${path} -- this tenant is NOT running: ${err.message}`,
+      );
+    }).filter((j) => j.enabled);
 
     const contextText = readFileSync(c.contextFile, "utf8");
     this.dispatcher = new Dispatcher({

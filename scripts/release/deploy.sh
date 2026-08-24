@@ -52,6 +52,21 @@ installed=$(node -p "require('$DEST/node_modules/@deepseek-ai/dsh/package.json')
 [ "$installed" = "$DSH_PIN" ] || { echo "dsh pin drift: $installed" >&2; exit 66; }
 say "dsh pin ok: $installed"
 
+# Validate every job file BEFORE the flip. loadJobs() throws when called without
+# a handler, which is exactly what is wanted here: a typo fails the deploy with
+# `current` untouched, instead of reaching the daemon. At runtime the plugin
+# passes a handler and degrades gracefully, but a silently skipped tenant is its
+# own hazard -- this is the gate that keeps a bad file from ever getting there.
+# (3.7 AC#2 drill: a stray `dedup_ttl:` key crash-looped the daemon for 2m12s.)
+say "validating job files"
+if ! node -e '
+  const {loadJobs}=require(process.argv[1]+"/packages/core/lib/job.js");
+  const jobs=loadJobs(process.argv[1]+"/jobs");
+  console.log("  "+jobs.length+" job file(s) parse cleanly: "+jobs.map(j=>j.name).join(", "));' "$DEST"; then
+  echo "job validation FAILED — aborting before flip" >&2
+  exit 75
+fi
+
 say "contract smoke (one live deepseek-v4-flash call)"
 smoke_home="$(mktemp -d -t helium-smoke)"
 if ! (

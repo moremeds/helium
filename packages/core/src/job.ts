@@ -305,12 +305,39 @@ export function parseJobYaml(text: string, source: string): JobSpec {
  * @param dir - the jobs directory.
  * @returns the parsed jobs.
  */
-export function loadJobs(dir: string): JobSpec[] {
-  return readdirSync(dir)
+/**
+ * Load every `*.yaml` job in `dir`.
+ *
+ * With no `onInvalid` handler a malformed file throws, which is what
+ * `deploy.sh`'s pre-flip gate wants: a typo fails the DEPLOY while `current`
+ * still points at the previous release, so a human sees it immediately.
+ *
+ * With a handler, the bad file is skipped and reported and the healthy jobs
+ * still load. That is what the running daemon wants. Before this existed, one
+ * malformed file threw here, which aborted the plugin's `apply()`, which killed
+ * the dsh process -- so a single typo in a single tenant took EVERY other tenant
+ * down, and launchd's KeepAlive turned it into a crash loop rather than a stable
+ * failure. Observed on the mini during the 3.7 AC#2 drill: a stray `dedup_ttl:`
+ * key froze the heartbeat for 2m12s across all jobs.
+ *
+ * The handler is not optional decoration -- a silently skipped tenant is its own
+ * hazard, so the caller is expected to make the skip loud.
+ */
+export function loadJobs(
+  dir: string,
+  onInvalid?: (path: string, error: Error) => void,
+): JobSpec[] {
+  const jobs: JobSpec[] = [];
+  for (const entry of readdirSync(dir)
     .filter((entry) => entry.endsWith(".yaml"))
-    .sort()
-    .map((entry) => {
-      const path = join(dir, entry);
-      return parseJobYaml(readFileSync(path, "utf8"), path);
-    });
+    .sort()) {
+    const path = join(dir, entry);
+    try {
+      jobs.push(parseJobYaml(readFileSync(path, "utf8"), path));
+    } catch (err) {
+      if (!onInvalid) throw err;
+      onInvalid(path, err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+  return jobs;
 }

@@ -199,4 +199,38 @@ describe("loadJobs", () => {
       ["off-job", false],
     ]);
   });
+
+  // A malformed job file used to abort the whole load, which aborted the plugin's
+  // apply(), which killed the dsh process -- so ONE typo in ONE tenant took every
+  // other tenant down and launchd's KeepAlive turned it into a crash loop. Seen on
+  // the mini during the 3.7 AC#2 drill: a stray `dedup_ttl:` key froze the
+  // heartbeat for over two minutes across all jobs.
+  it("keeps the healthy jobs when one file is malformed, and reports the bad one", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-jobs-bad-"));
+    writeFileSync(join(dir, "a-macro.yaml"), MACRO_WATCH);
+    writeFileSync(
+      join(dir, "b-broken.yaml"),
+      MACRO_WATCH.replace("interval: 30s", "interval: 30s\n    dedup_ttl: 10m"),
+    );
+    const seen: string[] = [];
+    const jobs = loadJobs(dir, (path, err) => {
+      seen.push(`${path.split("/").pop()}: ${err.message}`);
+    });
+    expect(jobs.map((job) => job.name)).toEqual(["macro-watch"]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/b-broken\.yaml/);
+    expect(seen[0]).toMatch(/dedup_ttl|Unrecognized key/);
+  });
+
+  // Without a handler it still throws: deploy.sh's pre-flip gate calls it that way
+  // precisely so a bad job file fails the DEPLOY, while `current` still points at
+  // the previous release. Loud at deploy time, degraded-but-alive at runtime.
+  it("still throws when no handler is supplied, so the deploy gate can reject", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-jobs-throw-"));
+    writeFileSync(
+      join(dir, "broken.yaml"),
+      MACRO_WATCH.replace("interval: 30s", "interval: 30s\n    dedup_ttl: 10m"),
+    );
+    expect(() => loadJobs(dir)).toThrow(/broken\.yaml/);
+  });
 });
