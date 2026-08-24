@@ -18,12 +18,21 @@ report="$STATE_ROOT/reports/dsh-canary/$stamp.md"
 mkdir -p "$(dirname "$report")" "$STATE_ROOT/inbox" "$CACHE"
 
 pin="$(node -p "require('$release/package.json').devDependencies['@deepseek-ai/dsh']")"
+# semver is resolved explicitly from $release rather than by bare name: a bare
+# require() in `node -e` resolves against the CALLER's cwd, and semver is a
+# dependency of the release tree, not of wherever the operator happens to be
+# standing. Production survived that only by accident — runScript() spawns with
+# cwd=<release>/jobs, which walks up into <release>/node_modules — but the
+# documented by-hand invocation runs from $HOME and died with
+# "Cannot find module 'semver'" the first time the AC#4 drill ran it (task 3.6
+# step 15). require.resolve with an explicit paths[] is layout-agnostic, so it
+# keeps working whether pnpm hoists semver or nests it.
 candidate="$(node -e '
-  const semver=require("semver");
+  const semver=require(require.resolve("semver",{paths:[process.argv[3]]}));
   const cmd="npm view @deepseek-ai/dsh versions --json --registry="+process.argv[2];
   const list=JSON.parse(require("node:child_process").execSync(cmd,{encoding:"utf8"}));
   const newer=list.filter((v)=>semver.gt(v,process.argv[1])).sort(semver.rcompare);
-  process.stdout.write(newer[0] ?? "");' "$pin" "$REGISTRY")"
+  process.stdout.write(newer[0] ?? "");' "$pin" "$REGISTRY" "$release")"
 
 if [ -z "$candidate" ]; then
   echo "canary: no version newer than $pin"
@@ -49,27 +58,42 @@ cp -R "$release/packages" "$release/plugins" "$release/contracts" \
       "$release/pnpm-lock.yaml" "$release/tsconfig.base.json" "$work/"
 find "$work" -maxdepth 4 -type d -name node_modules -exec rm -rf {} + 2>/dev/null || true
 
-node -e '
-  const {readFileSync,writeFileSync}=require("node:fs");
-  const p=JSON.parse(readFileSync(process.argv[1],"utf8"));
-  p.pnpm=p.pnpm||{}; p.pnpm.overrides=p.pnpm.overrides||{};
-  p.pnpm.overrides["@deepseek-ai/dsh"]=process.argv[2];
-  writeFileSync(process.argv[1],JSON.stringify(p,null,2)+"\n");' \
-  "$work/package.json" "$candidate"
+# The override goes in pnpm-workspace.yaml, NOT package.json. pnpm 11.0.3
+# SILENTLY IGNORES `pnpm.overrides` in package.json — no warning, no error, it
+# just resolves the original version. Verified on the mini with two real
+# published versions: depend on 0.1.1-rc.2 and override to 0.1.1-rc.1, and the
+# lockfile still says rc.2 from package.json but says rc.1 from
+# pnpm-workspace.yaml. This is why the AC#4 drill's first run reported
+# `contracts=PASS` against a candidate whose tarball does not even exist: the
+# isolated tree had quietly installed the PINNED version, so the canary was
+# testing production's own dsh and would have green-lit any breaking upgrade.
+printf '\noverrides:\n  "@deepseek-ai/dsh": %s\n' "$candidate" >> "$work/pnpm-workspace.yaml"
 
 contracts_status=FAIL
 contracts_log="$work/contracts.log"
+installed_dsh=""
 if ( cd "$work" && pnpm install --no-frozen-lockfile >"$contracts_log" 2>&1 \
      && pnpm build >>"$contracts_log" 2>&1 ); then
-  if [ -r "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090 # operator-supplied path, never present in this repo.
-    . "$ENV_FILE"
-    set +a
-  fi
-  if ( cd "$work" && HELIUM_LIVE=1 HELIUM_DSH_VERSION="$candidate" \
-       pnpm -F @helium/contracts test >>"$contracts_log" 2>&1 ); then
-    contracts_status=PASS
+  # A successful install is NOT evidence the candidate was installed. Whatever
+  # the override mechanism happens to do in some future pnpm, the only thing
+  # worth trusting is the version actually on disk — assert it, so a silently
+  # ignored override can never again be reported as a passing contract run.
+  installed_dsh="$(node -p "require('$work/node_modules/@deepseek-ai/dsh/package.json').version" 2>/dev/null || true)"
+  if [ "$installed_dsh" != "$candidate" ]; then
+    contracts_status=INVALID
+    echo "canary: ABORT — asked for $candidate but the isolated tree installed '${installed_dsh:-nothing}'." >&2
+    echo "canary: the contract suite was NOT run; a result would have described the wrong version." >&2
+  else
+    if [ -r "$ENV_FILE" ]; then
+      set -a
+      # shellcheck disable=SC1090 # operator-supplied path, never present in this repo.
+      . "$ENV_FILE"
+      set +a
+    fi
+    if ( cd "$work" && HELIUM_LIVE=1 HELIUM_DSH_VERSION="$candidate" \
+         pnpm -F @helium/contracts test >>"$contracts_log" 2>&1 ); then
+      contracts_status=PASS
+    fi
   fi
 fi
 echo "canary: contracts=$contracts_status"
@@ -146,6 +170,7 @@ rm -f "$curlcfg"
   echo
   echo "- checked: $stamp"
   echo "- contract suite: **$contracts_status**"
+  echo "- dsh actually installed in the isolated tree: ${installed_dsh:-none} (candidate $candidate)"
   echo "- mirror: ${mirror:-none}"
   echo "- production profile: untouched (isolated DSH_HOME=$DSH_HOME)"
   echo
