@@ -37,6 +37,16 @@ export async function runScriptProcess(
       cwd: opts.cwd,
       env: opts.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // Give the script its own process group so the timeout below can signal
+      // the whole tree. child.kill() reaches ONLY the direct child, and this
+      // promise resolves on "close", which does not fire until every process
+      // holding the stdout pipe has exited -- so a script that backgrounds
+      // anything, or whose shell does not exec its last command, keeps a
+      // timed-out run pending long past its declared timeout. Platform-
+      // dependent and therefore easy to miss: macOS closes the streams when the
+      // direct child exits and looks fine, while Linux waits for pipe EOF (CI
+      // caught a run still pending 15s after a 100ms timeout).
+      detached: true,
     });
     let stdout = "";
     let stderr = "";
@@ -49,11 +59,29 @@ export async function runScriptProcess(
       stderr += d.toString();
     });
 
+    /**
+     * Signal the script's whole process group. A negative pid means "the group"
+     * to kill(2); the fallback covers the case where the group is already gone
+     * (ESRCH) or the platform refused the negative form.
+     */
+    const killTree = (signal: NodeJS.Signals): void => {
+      if (child.pid === undefined) return;
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
+        try {
+          child.kill(signal);
+        } catch {
+          // Already reaped -- nothing left to signal.
+        }
+      }
+    };
+
     let kill: NodeJS.Timeout | undefined;
     const term = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      kill = setTimeout(() => child.kill("SIGKILL"), SIGKILL_GRACE_MS);
+      killTree("SIGTERM");
+      kill = setTimeout(() => killTree("SIGKILL"), SIGKILL_GRACE_MS);
     }, action.timeoutMs);
 
     child.on("error", (error: Error) => {
