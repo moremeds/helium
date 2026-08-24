@@ -8,7 +8,14 @@ RELEASES=/Users/moremeds/projects/helium-releases
 DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
-  ssh macmini 'export PATH="$HOME/.local/bin:$PATH"; HELIUM_REMOTE=1 bash -s' < "$0"
+  # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
+  # no Homebrew, so no `node` and no `pnpm` (verified on the mini: the 3.5 drill's
+  # first deploy died at `pnpm: command not found`, exit 127). Only ~/.local/bin
+  # was prepended here, which holds `claude` but not the toolchain. Both Homebrew
+  # prefixes are listed so this does not silently depend on the CPU architecture.
+  # It fails closed if ever dropped again: this runs before any flip, so a missing
+  # toolchain aborts the deploy with `current` still pointing at the old release.
+  ssh macmini 'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"; HELIUM_REMOTE=1 bash -s' < "$0"
   exit $?
 fi
 started=$(date -u +%s)

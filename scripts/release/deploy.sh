@@ -20,7 +20,14 @@ KEEP=5
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # shellcheck disable=SC2029 # $VERSION deliberately expands client-side: it
   # is the argv the mini's `bash -s --` receives, already validated above.
-  ssh macmini "export PATH=\"\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
+  # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
+  # no Homebrew, so no `node` and no `pnpm` (verified on the mini: the 3.5 drill's
+  # first deploy died at `pnpm: command not found`, exit 127). Only ~/.local/bin
+  # was prepended here, which holds `claude` but not the toolchain. Both Homebrew
+  # prefixes are listed so this does not silently depend on the CPU architecture.
+  # It fails closed if ever dropped again: this runs before any flip, so a missing
+  # toolchain aborts the deploy with `current` still pointing at the old release.
+  ssh macmini "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
   exit $?
 fi
 # ---- everything below runs ON the mini ----
