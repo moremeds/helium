@@ -10,8 +10,10 @@ triggers:
     # state.direction="UNKNOWN", state.confidence="0.850". Excluded as noisy:
     # as_of/computed_at/age_hours (timestamps), velocity/confidence_reasons
     # (recompute every poll), evidence_count (a counter).
-    # VERIFY against live argon at Task 3.3 (re-confirm on the deployed instance;
-    # this dev-laptop check was a point-in-time read, not a standing contract).
+    # RE-CONFIRMED on the deployed argon at Task 3.3 bring-up (0.12.16, mini):
+    # state.state="ON_HOLD", state.direction="UNKNOWN", state.confidence="0.850",
+    # and the live daemon reports "unchanged" across consecutive polls -- so the
+    # exclusions above really do keep the per-poll churn out of the hash.
     fields: [state.state, state.direction, state.confidence]
     interval: 30s
     dedup: 45m
@@ -25,8 +27,9 @@ triggers:
     # bucket) and crash_trigger.fired=false (the crash-trigger flag; a redundant
     # `triggered` alias exists too, left unwatched). Excluded as noisy: cri.score
     # and the raw vix/vvix/spy/realized_vol series, which move on every poll.
-    # VERIFY against live argon at Task 3.3 (re-confirm on the deployed instance;
-    # this dev-laptop check was a point-in-time read, not a standing contract).
+    # RE-CONFIRMED on the deployed argon at Task 3.3 bring-up (0.12.16, mini):
+    # cri.level="LOW", crash_trigger.fired=false, and the live daemon reports
+    # "unchanged" across consecutive polls.
     fields: [cri.level, crash_trigger.fired]
     interval: 60s
     dedup: 45m

@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
+import type { AddressInfo } from "node:net";
 import {
   existsSync,
   mkdirSync,
@@ -35,6 +37,18 @@ async function waitFor(
  * the real mechanism instead, the `heartbeat` JSONL stream `HeliumRuntime`
  * appends to every sensor cycle (spec §8).
  */
+/** An ephemeral loopback port, so a booted profile never collides with whatever already holds dsh's default :3080. */
+async function freePort(): Promise<number> {
+  return await new Promise<number>((resolve, reject) => {
+    const probe = createServer();
+    probe.on("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address() as AddressInfo;
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
 describe("contract: ctx.effect interval timers run inside a booted profile", () => {
   let dshHome: string;
   let stateRoot: string;
@@ -107,24 +121,35 @@ describe("contract: ctx.effect interval timers run inside a booted profile", () 
 
     const stderr: string[] = [];
     const stdout: string[] = [];
-    const child = spawn(dshBin, ["--profile", "helium"], {
-      env: {
-        ...process.env,
-        DSH_HOME: dshHome,
-        HELIUM_JOBS_DIR: jobsDir,
-        HELIUM_STATE_ROOT: stateRoot,
-        HELIUM_CONTEXT_FILE: join(dshHome, "ecosystem.md"),
-        HELIUM_CALENDARS_DIR: join(dshHome, "helium-calendars"),
-        HELIUM_ARGON_BASE: "http://127.0.0.1:1",
-        HELIUM_APEX_BASE: "http://127.0.0.1:1",
-        HELIUM_ENV_FILE: join(dshHome, "helium.env"),
-        HELIUM_CLAUDE_TOKEN_FILE: join(dshHome, "claude-token.env"),
-        HELIUM_PROXY: "",
-        HELIUM_MCP_BIN: "true",
-        HELIUM_EMAIL_TO: "contract@example.invalid",
+    // The helium profile carries the @deepseek-ai/dsh-web-app bundle, which
+    // binds :3080 by default and would also pop a browser window on every
+    // contract run. Neither belongs in a test that only cares about ctx.effect
+    // timers, and the default port is genuinely taken during bring-up work (an
+    // ssh -L tunnel to the mini's UI made this test hang for its full 60s
+    // timeout). Bind an ephemeral port instead and keep the browser shut.
+    const port = await freePort();
+    const child = spawn(
+      dshBin,
+      ["--profile", "helium", "--port", String(port), "--no-open"],
+      {
+        env: {
+          ...process.env,
+          DSH_HOME: dshHome,
+          HELIUM_JOBS_DIR: jobsDir,
+          HELIUM_STATE_ROOT: stateRoot,
+          HELIUM_CONTEXT_FILE: join(dshHome, "ecosystem.md"),
+          HELIUM_CALENDARS_DIR: join(dshHome, "helium-calendars"),
+          HELIUM_ARGON_BASE: "http://127.0.0.1:1",
+          HELIUM_APEX_BASE: "http://127.0.0.1:1",
+          HELIUM_ENV_FILE: join(dshHome, "helium.env"),
+          HELIUM_CLAUDE_TOKEN_FILE: join(dshHome, "claude-token.env"),
+          HELIUM_PROXY: "",
+          HELIUM_MCP_BIN: "true",
+          HELIUM_EMAIL_TO: "contract@example.invalid",
+        },
+        stdio: ["ignore", "pipe", "pipe"],
       },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    );
     child.stdout.on("data", (chunk) => stdout.push(String(chunk)));
     child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
     const exited = new Promise<number | null>((resolve) =>
