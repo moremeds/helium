@@ -40,6 +40,13 @@ fi
 PROFILE_DIR="$DSH_HOME_ABS/profiles/helium"
 mkdir -p "$PROFILE_DIR"
 
+# profile/package.json lists @deepseek-ai/dsh-web-app in BOTH dsh.profile.bundles
+# and dependencies: the bundle list alone is not resolvable by pnpm, and without
+# the bundle nothing serves :3080 — the daemon boots and runs jobs perfectly
+# silently, which is how it went unnoticed until the mini brought it up (task
+# 3.3 step 18). The version is pinned deliberately: the package's npm `latest`
+# dist-tag (0.0.1-rc.1) is stale and 404s on a renamed dependency, so the build
+# matching dsh 0.1.1-rc.2 must be taken from the `next` tag (Spike A, task 1.7).
 sed "s|__HELIUM_PLUGIN_DIR__|$PLUGIN_ABS|" "$REPO_ROOT/profile/package.json" > "$PROFILE_DIR/package.json"
 cp "$REPO_ROOT/profile/cordis.yml" "$PROFILE_DIR/cordis.yml"
 cp "$REPO_ROOT/profile/cordis.patch.yml" "$PROFILE_DIR/cordis.patch.yml"
@@ -47,12 +54,24 @@ cp "$REPO_ROOT/profile/cordis.patch.yml" "$PROFILE_DIR/cordis.patch.yml"
 # dsh's own initProfile writes exactly this file
 # (packages/boot/app-boot/src/profile.ts). A hand-built profile that omits it
 # gets duplicate cordis copies instead of the installation's single instance.
+# allowBuilds mirrors the root workspace's list (task 1.7 ruling: exactly these
+# packages, never a wildcard). The profile install pulls the same dsh native
+# tree, and pnpm 11 FAILS the install outright (ERR_PNPM_IGNORED_BUILDS) rather
+# than warning when a dependency wants a build script and no policy covers it —
+# so omitting them here aborts deploy-profile.sh under set -e.
 cat > "$PROFILE_DIR/pnpm-workspace.yaml" <<'YAML'
 packages:
   - .
 
 nodeLinker: hoisted
 autoInstallPeers: false
+allowBuilds:
+  esbuild: true
+  koffi: true
+  node-pty: true
+  protobufjs: true
+  "@google/genai": true
+  "@deepseek-ai/dsh-subprocess-local": true
 YAML
 
 rm -rf "$PROFILE_DIR/node_modules" "$PROFILE_DIR/pnpm-lock.yaml"
