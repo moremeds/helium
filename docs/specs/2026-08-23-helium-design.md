@@ -1,6 +1,6 @@
 # Helium — Reactive Agent Harness (Design Spec)
 
-> Status: approved design, pre-implementation. Owner: chenxi. Date: 2026-08-23.
+> Status: v1 deployed, AC#1 observation running. Owner: chenxi. Date: 2026-08-23.
 > **Helium** is the harness the masterplan names as the stack's sixth component
 > (livewire → signal-lab → apex → argon → xenon + harness; radon legacy).
 > Design tenets inherited from `argon/docs/masterplan/2026-07-12-stack-master-plan.md`:
