@@ -185,6 +185,20 @@ describe("ecosystem tools", () => {
     expect(seen).toHaveLength(0);
   });
 
+  it("argon_api rejects an encoded slash, which the real argon decodes into a path separator", async () => {
+    // Settled against the production argon on the mini (0.12.16, read-only
+    // GET): "/api%2fhealth" returns 200 — identical to "/api/health" — so
+    // Starlette decodes "%2f" into a separator. The WHATWG parser does NOT
+    // (new URL("http://h/api%2fhealth").pathname === "/api%2fhealth"), so
+    // the pathname-equality gate passes it while the server routes it
+    // somewhere else. buildUrl rejects "%2f" outright to keep "the path that
+    // is checked is the path that is sent" true.
+    await expect(
+      byName("argon_api").run({ path: "/api/macro/x%2f%2f..%2fadmin" }),
+    ).rejects.toThrow(/encoded slash/);
+    expect(seen).toHaveLength(0);
+  });
+
   it("argon_api still allows a double-slash path to fail closed, just via the ordinary allow-list rejection", async () => {
     // "//evil.example.com/x" does NOT change the resolved origin or get
     // rewritten by the URL parser (verified live: new URL("http://h" +

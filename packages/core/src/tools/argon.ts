@@ -44,6 +44,17 @@ export function buildUrl(
 ): string {
   if (!path.startsWith("/"))
     throw new Error(`path must start with "/", got: ${path}`);
+  // An encoded slash is the one character the pathname-equality gate below
+  // cannot police: the WHATWG parser leaves "%2f" alone in .pathname, but
+  // argon's Starlette router DECODES it into a real separator (verified
+  // read-only on the mini, argon 0.12.16: GET /api%2fhealth -> 200, same
+  // response as /api/health). That makes the path we check and the path the
+  // server routes disagree — precisely what the equality gate exists to
+  // prevent — so refuse it outright rather than reasoning per-route.
+  if (/%2f/i.test(path))
+    throw new Error(
+      `path "${path}" contains an encoded slash ("%2f"), which the upstream server decodes into a path separator -- refused as a likely path-traversal escape`,
+    );
   const baseOrigin = new URL(base).origin;
   const url = new URL(base.replace(/\/$/, "") + path);
   // The URL parser silently rewrites the path via RFC 3986 dot-segment
