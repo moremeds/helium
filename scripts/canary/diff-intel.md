@@ -62,3 +62,37 @@ decided the candidate is safe:
 4. Cut a release the normal way (`scripts/release/cut.sh`) and deploy it
    (`scripts/release/deploy.sh`) — the pin promotion ships like any other
    change, with the same drain/flip/health-window/rollback safety net.
+
+## Known defects in the current pin (0.1.1-rc.2)
+
+Recheck these when promoting the pin — a candidate that fixes one of them is a
+reason to upgrade, and a candidate that still carries it is not a regression.
+
+### Interactive sessions cannot execute ANY tool
+
+Every tool call in an interactive dsh session (the web UI on :3080) dies with:
+
+```
+This turn failed  Cannot read properties of undefined (reading 'prepare')
+```
+
+`scheduler.prepare(` lives in `@deepseek-ai/dsh-session`; the scheduler is
+undefined on the tool-execution path. Isolated by controlled comparison during
+the 3.7 AC#7 pass:
+
+| session does | result |
+|---|---|
+| no tool at all ("reply PONG") | works, 0s |
+| calls a helium tool (`argon_api`) | fails, `scheduler.prepare` undefined |
+| calls dsh's OWN built-in `Bash` tool | fails, identically |
+
+It is dsh's own defect, not the helium toolkit's: `.prepare(` appears nowhere in
+helium's source, helium's tools register correctly (they appear in the session
+and are selected before the turn dies), and dsh's built-in tools break exactly as
+much as ours.
+
+**No production lane is affected.** Triage reaches the model through the agents
+API and calls no tools by design; the senior lane reaches tools through the MCP
+stdio server under `claude -p`, which is proven working end to end. Only the
+interactive UI is impaired, and only for tool calls — reading sessions,
+trajectories and telemetry all work.
