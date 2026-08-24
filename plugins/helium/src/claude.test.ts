@@ -53,6 +53,32 @@ describe("runClaude", () => {
     expect(out.text).toContain("--allowedTools Read");
   });
 
+  it("reads the envelope out of the real CLI's streamed JSON array", async () => {
+    // The shape below is the real one, captured from `claude -p
+    // --output-format json --max-turns 2` on CLI 2.1.241 on the mini (task
+    // 3.3 step 22): the whole run streams back as an ARRAY whose LAST element
+    // is the result envelope. Reading is_error/result off the array itself
+    // gives undefined, so the old parser resolved ok:true with no text on
+    // every senior run.
+    const dir = fakeClaude(
+      `echo '[{"type":"system","subtype":"init"},{"type":"assistant"},{"type":"rate_limit_event"},{"type":"result","subtype":"success","is_error":false,"result":"HELIUM-OK","num_turns":1}]'`,
+    );
+    const out = await run(dir);
+    expect(out.ok).toBe(true);
+    expect(out.text).toBe("HELIUM-OK");
+    expect((out.raw as { num_turns: number }).num_turns).toBe(1);
+  });
+
+  it("still fails a streamed array whose terminal envelope reports is_error", async () => {
+    const dir = fakeClaude(
+      `echo '[{"type":"system"},{"type":"result","subtype":"error_max_turns","is_error":true,"result":"turn cap hit"}]'`,
+    );
+    const out = await run(dir);
+    expect(out.ok).toBe(false);
+    expect(out.text).toBe("turn cap hit");
+    expect(out.classification).toBe("error");
+  });
+
   it("treats is_error as a failed run and keeps the text", async () => {
     const dir = fakeClaude(
       `echo '{"result":"tool blew up","is_error":true,"num_turns":1}'`,
