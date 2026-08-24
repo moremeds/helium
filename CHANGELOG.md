@@ -1,3 +1,9 @@
+## v0.1.2 — 2026-08-24
+
+- chore(canary): record the AC#4 drill
+- fix(canary): install the candidate for real, and prove it landed
+- chore(release): record the AC#6 drill
+
 ## v0.1.1 — 2026-08-24
 
 - fix(release): give the remote shell a PATH that reaches node and pnpm
