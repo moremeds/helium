@@ -33,6 +33,13 @@ inflation through rates and USD to gold, run in shadow mode against the existing
 single-senior lane, and be promoted only when it demonstrates better evidence
 quality without violating safety, recovery, latency, or cost gates.
 
+The Ops Agent is the second reference team and the first continuous, mutating
+team. It will observe Livewire, Argon, Apex, Colima, PostgreSQL, and host
+resources, diagnose incidents, and execute only versioned SOP scripts whose
+individual authority permits it. Deterministic incident, lease, execution, and
+verification controls remain functional when no model provider is available.
+The initial component list is required coverage, not a hard-coded boundary.
+
 ## Program outcome
 
 The program is complete when Helium can:
@@ -45,6 +52,10 @@ The program is complete when Helium can:
 - cross-check material claims using fresh evidence;
 - audit every decision back to an exact execution snapshot;
 - bound cost, time, tools, spawning, and mutations;
+- add a component, probe, dependency, or SOP without editing core;
+- execute a certified automatic SOP exactly once and prove its postconditions;
+- attribute recovery truthfully to Helium, an operator, or an external actor;
+- preserve deterministic monitoring and recovery when model providers fail;
 - preserve the v1 compatibility path and rollback; and
 - add a new ecosystem team without changing core.
 
@@ -56,9 +67,14 @@ The program is complete when Helium can:
 4. No production dependency on unpublished DSH experimental packages.
 5. No provider or model names in core schemas or branching logic.
 6. No model majority vote as an acceptance mechanism.
-7. No externally material mutation without deterministic policy and approval.
+7. No externally material mutation without an exact versioned SOP,
+   deterministic policy, and durable authority decision. Per-incident approval
+   is required unless that exact SOP version has reviewed `auto` authority.
 8. No promotion based only on unit tests; restart, failure, and live shadow
    evidence are required.
+9. No agent-generated shell command. Mutations use typed arguments and a
+   certified script/action registry.
+10. No production trajectory may grant itself new tools, SOPs, or authority.
 
 ## Delivery strategy
 
@@ -69,8 +85,9 @@ the production path until the shadow team passes its promotion gate.
 P0 hardening
    -> P1 provider-neutral contracts
    -> P2 durable team kernel
+   -> P2.5 operations safety substrate and Ops shadow
    -> P3 macro shadow team
-   -> P4 controlled production promotion
+   -> P4 controlled reference-team promotion
    -> P5 ecosystem plugin expansion
    -> P6 evaluated evolution
 ```
@@ -175,6 +192,71 @@ Every restart must converge without duplicate tasks, messages, artifacts,
 budget charges, or external delivery. Cancellation must leave no descendant
 agent or provider process alive.
 
+## Phase 2.5: operations safety substrate and Ops shadow
+
+### Objective
+
+Prove the generic observation, incident, SOP, action, and verification contracts
+needed by every mutating team, using the Ops Agent as the reference plugin.
+
+### Core work
+
+- Define provider- and domain-neutral `Observation`, `Incident`,
+  `SopDefinition`, `ActionProposal`, `ActionLease`, `ActionOutcome`, and
+  `VerificationResult` contracts.
+- Add a versioned component and dependency graph with cycle detection.
+- Add deterministic incident correlation, deduplication, grouping, and parent
+  inhibition.
+- Add per-SOP `observe`, `auto`, `approve`, and `forbidden` authority.
+- Add write-ahead action intent, compare-and-swap leases, idempotency,
+  recovery budgets, cooldowns, and circuit breakers.
+- Add postcondition grace windows and startup reconciliation.
+- Represent operator and external interventions as durable events.
+- Add a resource-pressure admission-control input to the team scheduler.
+
+### Ops plugin work
+
+- Add a host-native `helium-opsd` service that owns collection, deterministic
+  policy, leases, execution, and verification and remains alive when Colima or
+  DSH is down.
+- Register initial component adapters for Livewire, Argon, Apex, Colima,
+  PostgreSQL, CPU, memory, disk/mounts, and Helium itself.
+- Inventory existing sweep, reconcile, watchdog, health, quality, repair, and
+  backup scripts.
+- Certify scripts individually with typed inputs, exact identity, preconditions,
+  postconditions, timeouts, attempt limits, and owner.
+- Specify the future diagnostician, independent verifier, incident lead, and
+  reporter contracts, but keep the Phase 2.5 production path deterministic and
+  observe-only.
+- Freeze sanitized fixtures from the observed Colima manual recovery,
+  Livewire Parquet/coverage failure, Argon backup failure, Apex healthy state,
+  parser drift, and host memory pressure.
+
+### Shadow constraints
+
+- Observe-only first; no SOP execution.
+- Existing watchdogs, restart policies, and dead-man remain authoritative.
+- No production component or host mutation during AC#1.
+- A parser failure yields `unknown`, never an automatic restart.
+- Agents receive read-only evidence tools and eligible SOP IDs, never a generic
+  shell tool.
+
+### Exit gate
+
+- The full deterministic path works with all model providers disabled.
+- A fixture component installs without core changes.
+- Parent dependency faults inhibit child alert storms without losing evidence.
+- Two controllers cannot acquire the same action attempt.
+- Crash and restart at every action boundary produce no duplicate side effect.
+- Command exit alone cannot mark recovery; all configured postconditions pass.
+- A failed automatic attempt followed by operator recovery is attributed to the
+  operator.
+- Host pressure can prevent new team fan-out while collectors and deterministic
+  recovery remain available.
+- The Ops design and exact gates in
+  `docs/plans/2026-08-25-helium-ops-agent-design.md` pass their adversarial
+  review.
+
 ## Phase 3: capability routing and macro shadow team
 
 ### Objective
@@ -194,6 +276,9 @@ the v1 single-senior control.
   reservation, and routing audit.
 - Detect capability shortage without silently relaxing requirements.
 - Support task-scoped cross-reference and adjudication policy.
+- Activate the Ops diagnostician, independent verifier, incident lead, and
+  reporter in shadow mode after the shared team-manifest and evidence contracts
+  exist. The deterministic `opsd` path remains independent of them.
 
 ### Macro team
 
@@ -258,11 +343,12 @@ Include:
 - The accepted cost and latency envelopes are documented before promotion.
 - No criterion is passed solely because several models agree.
 
-## Phase 4: controlled production promotion
+## Phase 4: controlled reference-team promotion
 
 ### Objective
 
-Promote the macro team without losing the v1 fallback or operational controls.
+Promote the macro and Ops reference teams through separate risk ladders without
+losing the v1 fallback, deterministic recovery path, or operational controls.
 
 ### Work
 
@@ -274,6 +360,16 @@ Promote the macro team without losing the v1 fallback or operational controls.
 - Add provider-specific circuit breakers without leaking provider identity into
   core policy.
 - Exercise tagged rollback and state-schema compatibility.
+- Keep the Ops Agent observe-only for at least seven days after its collector is
+  installed.
+- Run Ops suggest-only for at least seven days and record operator
+  accept/reject/alternate decisions.
+- Enable only one certified `auto` SOP at a time, with one attempt, narrow blast
+  radius, and a reviewed maintenance window.
+- Transfer mutation ownership from the prior component watchdog before enabling
+  the corresponding Ops SOP; never leave two restart controllers active.
+- Keep approval and forbidden SOP decisions fail-closed when providers or the
+  approval channel are unavailable.
 
 ### Exit gate
 
@@ -284,6 +380,13 @@ Promote the macro team without losing the v1 fallback or operational controls.
 - No duplicate delivery or orphan agent.
 - Rollback within 60 seconds.
 - Exact execution and evidence lineage available for every delivered claim.
+- Zero false recovery attribution, duplicate action, or unauthorized command.
+- Colima automatic recovery passes a controlled drill without operator help
+  before it is credited as automatic recovery.
+- Livewire targeted data repair passes integrity, freshness, and coverage
+  postconditions before automatic authority is considered.
+- Resource alerts are sustained, deduplicated, dependency-aware, and do not
+  create an agent fan-out during host pressure.
 
 ## Phase 5: ecosystem plugin expansion
 
@@ -293,11 +396,15 @@ Prove that Helium is an ecosystem harness rather than a macro-specific runner.
 
 ### Candidate teams
 
-- operations and service health;
 - fundamental research;
 - options and market-structure research;
 - release and compatibility analysis; and
 - document production.
+
+Macro and operations are the two reference teams: macro proves causal research
+and evidence delivery; operations proves continuous observation, typed actions,
+and safe recovery. Later teams reuse both contracts rather than inventing new
+execution paths.
 
 ### Plugin package contract
 
@@ -313,6 +420,10 @@ Each team package owns:
 - delivery policy.
 
 It does not own model selection or modify core.
+
+Mutating team packages additionally own their component adapters, SOPs,
+preconditions, postconditions, and evaluation fixtures. They cannot grant
+authority outside the core policy contract.
 
 ### Exit gate
 
@@ -379,6 +490,19 @@ self-modification.
 - control-versus-team comparison;
 - provider-degradation fallback.
 
+### Operations safety
+
+- observation freshness and parser-drift classification;
+- dependency correlation and inhibition;
+- SOP schema and script-identity enforcement;
+- authority fail-closed behavior;
+- action lease exclusivity and recovery-budget accounting;
+- write-ahead intent and uncertain-side-effect reconciliation;
+- command-versus-postcondition disagreement;
+- operator and external recovery attribution;
+- host-pressure admission control; and
+- model-provider outage during an active incident.
+
 ## Risk register
 
 | Risk | Consequence | Control |
@@ -391,6 +515,12 @@ self-modification.
 | Manager becomes bottleneck | Bad decomposition limits the team | Deterministic DAG validation and independent verifier |
 | Agent spawning runs away | Cost and latency explosion | Depth, count, time, token, and monetary budgets |
 | Restart duplicates work | Duplicate side effects and inconsistent state | Append-only state, leases, idempotency, reconciliation |
+| Text runbook or script drifts from production | Automation executes an obsolete target | Versioned component registry, exact script identity, preflight and postconditions |
+| Parent outage creates child recovery storm | Controllers amplify a Colima, database, or mount failure | Dependency correlation, inhibition, recovery budget |
+| Command exit is treated as recovery | False green or false critical state | Independent postcondition grace window and reconciliation |
+| Operator and agent act concurrently | Duplicate mutation or false attribution | Durable operator event, action lease, supersession rules |
+| Resource incident spawns more agents | Helium worsens memory or CPU pressure | Host-native collector and admission control before analysis |
+| Log content instructs the agent to mutate | Prompt injection reaches operations | Logs are untrusted artifacts; no generic shell; eligible SOP IDs only |
 | Experimental DSH API changes | Production breakage | Pin, contract suite, adapters, no unpublished dependency |
 | V1 and v2 drift | Rollback becomes unsafe | Frozen compatibility adapter and dual-path tests |
 
@@ -404,10 +534,12 @@ Recommended PR sequence:
 4. V1 compatibility adapter
 5. Durable case/task/mailbox kernel
 6. DSH subagent integration and recovery
-7. Capability catalog, evaluations, and router
-8. Macro shadow team
-9. Production canary and promotion
-10. Ecosystem team plugins
+7. Operations contracts, fake executor, and adversarial fixtures
+8. Host collector, component registry, and Ops observe-only plugin
+9. Capability catalog, evaluations, and router
+10. Macro shadow team and Ops suggest-only
+11. Separate production canaries and promotion ladders
+12. Ecosystem team plugins
 
 Each PR must be independently green and reversible. Merge commits or the
 repository's established PR convention preserve drill and release history.
@@ -415,7 +547,8 @@ After merge, local `master` is fetched and aligned to the remote merge commit.
 
 ## Immediate next action
 
-Do not deploy during AC#1. Land the reviewed design and implementation plan,
+Do not deploy during AC#1. Land the reviewed designs and implementation plans,
 then prepare Phase 0 on an isolated feature branch. The first code change must
-be an executable failing contract for the current senior isolation gap, not a
-new multi-agent feature.
+remain an executable failing contract for the current senior isolation gap, not
+a new multi-agent or Ops feature. Operations execution begins only after its
+named Phase 0, Phase 1, and Phase 2 prerequisites are green.

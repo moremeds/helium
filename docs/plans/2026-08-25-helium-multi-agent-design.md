@@ -432,7 +432,19 @@ Read-only execution is the default. Mutation requires all of:
 - a narrow tool and resource scope;
 - a write-ahead audit intent;
 - idempotency or compensation behavior; and
-- human approval when the action is externally material.
+- a versioned authority decision for the exact action definition.
+
+Externally material actions are approval-required unless a reviewed,
+versioned SOP grants that exact action `auto` authority. Automatic authority is
+not a generic task flag: it is scoped to a certified executable identity,
+typed arguments, preconditions, postconditions, attempt limit, cooldown,
+recovery budget, and owner. Agents cannot generate shell commands or promote
+their own authority.
+
+The generic operations action, lease, attribution, and verification contracts
+are defined in the
+[Ops Agent design](2026-08-25-helium-ops-agent-design.md). They remain core
+safety primitives when another team uses them.
 
 The first multi-agent macro release remains read-only and cannot place trades.
 
@@ -449,6 +461,11 @@ result.
 Cascading cancellation stops descendants and provider process trees. Recovery
 marks uncertain external side effects for reconciliation rather than retrying
 blindly.
+
+An executor exit code never establishes recovery on its own. A mutating action
+reaches a successful terminal state only after its independent postconditions
+pass. Operator and external interventions are durable events so the controller
+does not claim another actor's recovery.
 
 Per-tenant liveness detects a missing or invalid team even while other teams
 continue to emit global heartbeats.
@@ -495,6 +512,12 @@ Evaluation is task-specific. Metrics include task acceptance, claim provenance,
 contradictions caught, external information gain, structured-output fidelity,
 unauthorized calls, latency, cost, recovery, and human preference.
 
+For continuous operations, evaluation additionally measures false-green and
+false-critical rates, parser-drift classification, dependency inhibition,
+time-to-correct-SOP, duplicate actions, postcondition success, recovery
+attribution, and resource-pressure behavior. The deterministic observation and
+recovery path is evaluated with every model provider disabled.
+
 Production trajectories may generate offline candidate capability scores,
 prompts, skills, or policies. Promotion requires a normal pull request and
 regression, safety, and retention evaluations. The safety root is not
@@ -532,6 +555,14 @@ The architecture is accepted only when:
    a majority vote.
 10. Shadow evaluation demonstrates a measured benefit over the v1 control path
     at an accepted cost and latency envelope.
+11. A mutating team cannot execute an action outside a versioned eligible SOP,
+    durable authority decision, and exclusive action lease.
+12. Recovery requires verified postconditions and is attributed to the actual
+    agent, operator, or external actor.
+13. A host resource incident reduces optional team concurrency before creating
+    additional model fan-out.
+14. Component and SOP plugins can be installed without adding domain names to
+    core.
 
 ## 19. Research basis
 
