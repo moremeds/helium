@@ -24,6 +24,8 @@ Harness/Cordis `0.1.1-rc.2`, append-only JSONL, MCP, nodemailer.
 - Keep every commit green for all previously completed tasks.
 - Do not add a provider/model name to `packages/core`.
 - Do not silently relax a capability, safety, or budget requirement.
+- Do not give a mutating team a generic shell or treat command exit as
+  verified recovery.
 - Stop at every phase gate for code review and evidence review.
 
 ## Phase 0: certify the v1 boundary
@@ -1174,6 +1176,17 @@ Then run the persisted crash matrix against a temporary state root. Expected:
 replay converges, all leases are terminal or ready, all acknowledged messages
 remain acknowledged, and the process table contains no child from the test.
 
+## Phase 2.5: operations safety substrate and Ops reference team
+
+After the Phase 2 gate passes, execute the separate
+[Helium Ops Agent Implementation Plan](2026-08-25-helium-ops-agent-implementation.md).
+Its core observation, incident, SOP, action, lease, verification, attribution,
+and admission contracts must land before any automatic recovery is enabled.
+
+The Ops plan has its own contracts-only, executor, observe-only, suggest-only,
+and post-AC#1 promotion gates. Completing its code does not authorize production
+installation or promote any SOP to automatic authority.
+
 ## Phase 3: cross-reference and macro shadow team
 
 ### Task 17: Add claim sets and evidence-based adjudication
@@ -1495,6 +1508,11 @@ catalog, cost envelope, and failure behavior. That plan must include:
 - five uninterrupted trading days;
 - one real material macro case; and
 - rollback within 60 seconds.
+
+Ops promotion follows the independent ladder in the Ops implementation plan:
+observe-only, suggest-only, then one certified automatic SOP at a time. Macro
+promotion does not imply Ops mutation authority, and Ops promotion does not
+retire the v1 macro lane.
 
 Do not pre-authorize production email, mutations, or v1 retirement in this
 implementation plan.
