@@ -255,6 +255,10 @@ DeepSeek APIs, Anthropic APIs or CLI entitlements, OpenAI Responses, Codex CLI,
 local inference, or future runtimes. These examples never appear in core
 branching logic.
 
+The initial Mac mini entitlement and model-name observations are versioned in
+the [model-selection probe](../reviews/2026-08-25-model-selection-probe.md).
+That file is a provider-catalog seed, not a core routing table.
+
 Removing every production provider and installing a fake provider must leave
 all core tests runnable.
 

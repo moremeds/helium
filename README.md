@@ -56,6 +56,7 @@ edge of the system. They are never fixed roles inside Helium core.
 See:
 
 - [Helium v1 review](docs/reviews/2026-08-25-helium-v1-review.md)
+- [Mac mini model-selection probe](docs/reviews/2026-08-25-model-selection-probe.md)
 - [Multi-agent design](docs/plans/2026-08-25-helium-multi-agent-design.md)
 - [Multi-agent master plan](docs/plans/2026-08-25-helium-multi-agent-master-plan.md)
 - [Multi-agent implementation plan](docs/plans/2026-08-25-helium-multi-agent-implementation.md)
