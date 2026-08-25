@@ -144,3 +144,6 @@ Every execution snapshot records:
 7. Router evaluations distinguish model-effort variants.
 8. Exact-target replay reproduces both model and effort without changing the
    original work order.
+
+Implementation sequencing and repository touchpoints are defined in the
+[provider effort-selection implementation plan](2026-08-25-provider-effort-selection-implementation.md).
