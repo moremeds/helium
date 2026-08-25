@@ -50,15 +50,20 @@ and [chat-completion API](https://api-docs.deepseek.com/api/create-chat-completi
 Both the stable aliases and the resolved exact IDs were tested. The exact IDs
 below all returned the expected response.
 
-| UI alias | Exact selected model | Result | Wall time | Initial capability seed |
-|---|---|---:|---:|---|
-| `haiku` | `claude-haiku-4-5-20251001` | PASS | 4.751 s | fast, simple work |
-| `sonnet` | `claude-sonnet-5` | PASS | 4.387 s | balanced daily work |
-| `opus` | `claude-opus-5` | PASS | 3.995 s | complex reasoning |
+| UI alias | Exact selected model | Effort options | Default | Result | Wall time |
+|---|---|---|---|---:|---:|
+| `haiku` | `claude-haiku-4-5-20251001` | unsupported | none | PASS | 4.751 s |
+| `sonnet` | `claude-sonnet-5` | `low`, `medium`, `high`, `xhigh`, `max` | `high` | PASS | 4.387 s |
+| `opus` | `claude-opus-5` | `low`, `medium`, `high`, `xhigh`, `max` | `high` | PASS | 3.995 s |
 
 Claude Code also reported Haiku usage during the Sonnet and Opus calls. The
 provider adapter must therefore persist the complete `modelUsage` map, not
 only the requested foreground model.
+
+Effort remains provider-owned. The router chooses among measured model-effort
+variants, while normal work orders and team manifests cannot name either field.
+Claude's `ultracode` is a separate orchestration mode and is disabled because
+Helium owns multi-agent decomposition and spawning.
 
 The official picker also exposes dynamic or composite choices such as `best`,
 `fable`, `sonnet[1m]`, `opus[1m]`, and `opusplan`. They should not be registered
@@ -110,12 +115,26 @@ providers:
       - model: claude-haiku-4-5-20251001
         invoke_as: haiku
         enabled: true
+        effort:
+          supported: false
       - model: claude-sonnet-5
         invoke_as: sonnet
         enabled: true
+        effort:
+          supported: true
+          options: [low, medium, high, xhigh, max]
+          default: high
       - model: claude-opus-5
         invoke_as: opus
         enabled: true
+        effort:
+          supported: true
+          options: [low, medium, high, xhigh, max]
+          default: high
+    execution_modes:
+      ultracode:
+        enabled: false
+        reason: provider-owned-agent-orchestration
 
   codex-subscription:
     access: chatgpt-oauth

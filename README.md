@@ -58,6 +58,7 @@ See:
 - [Helium v1 review](docs/reviews/2026-08-25-helium-v1-review.md)
 - [Mac mini model-selection probe](docs/reviews/2026-08-25-model-selection-probe.md)
 - [Multi-agent design](docs/plans/2026-08-25-helium-multi-agent-design.md)
+- [Provider effort-selection design](docs/plans/2026-08-25-provider-effort-selection-design.md)
 - [Multi-agent master plan](docs/plans/2026-08-25-helium-multi-agent-master-plan.md)
 - [Multi-agent implementation plan](docs/plans/2026-08-25-helium-multi-agent-implementation.md)
 

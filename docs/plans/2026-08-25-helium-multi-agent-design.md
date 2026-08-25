@@ -259,6 +259,10 @@ The initial Mac mini entitlement and model-name observations are versioned in
 the [model-selection probe](../reviews/2026-08-25-model-selection-probe.md).
 That file is a provider-catalog seed, not a core routing table.
 
+Provider-native reasoning levels follow the separate
+[effort-selection design](2026-08-25-provider-effort-selection-design.md).
+Normal work orders and team manifests cannot name an effort level.
+
 Removing every production provider and installing a fake provider must leave
 all core tests runnable.
 
