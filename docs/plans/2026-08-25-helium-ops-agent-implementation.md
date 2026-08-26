@@ -39,6 +39,8 @@ processes, existing ecosystem health and recovery scripts.
 - Do not promote an SOP from `approve` to `auto` in the same PR that first
   implements or certifies it.
 - Stop at each phase gate for code review and evidence review.
+- Reuse the canonical `EvidenceBundle` and accepted-ledger contracts; do not
+  create an Ops-only definition of proven, partial, failed, or blocked.
 
 ## Phase A: evidence fixtures and operations contracts
 
@@ -111,13 +113,22 @@ must encode:
   "expected": {
     "terminal": "recovered",
     "attribution": "operator",
-    "automaticRecoverySucceeded": false
+    "automaticRecoverySucceeded": false,
+    "assertions": {
+      "detection": "PROVEN",
+      "automaticRecovery": "FAILED",
+      "finalDockerHealth": "PROVEN",
+      "automaticAttribution": "FAILED",
+      "operatorAttribution": "PROVEN"
+    }
   }
 }
 ```
 
 The Livewire corruption fixture must require a data-integrity SOP and reject a
-generic process restart. Document what was removed or normalized in
+generic process restart. Its targeted-repair assertion remains `BLOCKED` until
+both the corrupt fixture and controlled drill pass integrity, freshness, and
+coverage. Document what was removed or normalized in
 `evals/fixtures/ops/README.md`.
 
 **Step 4: Re-run the fixture contract**
@@ -590,8 +601,10 @@ git commit -m "feat: execute certified ops scripts"
 
 - Create: `packages/core/src/operations/verify.ts`
 - Create: `packages/core/src/operations/reconcile.ts`
+- Create: `packages/core/src/operations/recovery-evidence.ts`
 - Create: `packages/core/tests/operations-verify.spec.ts`
 - Create: `packages/core/tests/operations-reconcile.spec.ts`
+- Create: `packages/core/tests/recovery-evidence-bundle.spec.ts`
 - Modify: `packages/core/src/operations/events.ts`
 - Modify: `packages/core/src/operations/reducer.ts`
 
@@ -609,11 +622,15 @@ Table-drive these cases:
 | timeout | unknown | none | uncertain |
 
 Use `colima-operator-recovery.json` as a regression fixture.
+Assert its evidence decisions independently: detection `PROVEN`, automatic
+recovery `FAILED`, final Docker health `PROVEN`, automatic attribution
+`FAILED`, and operator attribution `PROVEN`. A later healthy observation must
+not rewrite the failed automatic assertions.
 
 **Step 2: Run the tests and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts
+pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts
 ```
 
 Expected: FAIL because verification and reconciliation do not exist.
@@ -626,10 +643,17 @@ reconcile non-terminal intents from receipts, live process evidence, operator
 events, and current postconditions. Never rerun an uncertain side effect during
 reconciliation.
 
+Build the recovery specialization of the canonical `EvidenceBundle`. Require
+raw observation hashes, incident/dependency snapshot, exact SOP digest,
+eligibility, authority, lease, intent, receipt, postcondition samples,
+attribution, verifier version, replay or drill reference, final status, and
+remaining limitations. Use explicit `notApplicableReason` values for a no-action
+operator or external recovery; never fabricate action evidence.
+
 **Step 4: Run the crash and attribution suite repeatedly**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts --repeat=20
+pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts --repeat=20
 ```
 
 Expected: PASS; the production-derived Colima fixture is attributed only to the
@@ -638,7 +662,7 @@ operator.
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/operations packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts
+git add packages/core/src/operations packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts
 git commit -m "feat: verify and attribute operations recovery"
 ```
 
@@ -658,7 +682,10 @@ git diff --check
 ```
 
 Expected: no duplicate spawn, attempt, receipt, or terminal state; no result is
-classified as recovery from an exit code alone. Merge through a dedicated PR.
+classified as recovery from an exit code alone. The phase evidence manifest
+must link the crash matrix, Colima attribution decisions, recovery-bundle
+validation, verifier versions, and remaining live-drill gate. Merge through a
+dedicated PR.
 
 ## Phase C: Ops plugin, host collector, and component adapters
 
@@ -1214,7 +1241,12 @@ Cover at least:
 - alert delivery outage;
 - clock/timezone jump;
 - operator and controller act concurrently; and
-- host memory pressure during attempted team fan-out.
+- host memory pressure during attempted team fan-out;
+- a healthy final observation attempting to overwrite a failed automatic
+  recovery assertion;
+- an incomplete recovery bundle attempting to enter the accepted ledger; and
+- a reporter attempting to promote `PARTIAL`, `FAILED`, or `BLOCKED` to
+  `PROVEN`.
 
 **Step 2: Run the contracts and verify failure**
 
@@ -1238,7 +1270,8 @@ pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract
 ```
 
 Expected: PASS with one or zero authorized side effects per case, truthful
-attribution, and no forbidden command.
+attribution, no forbidden command, immutable evidence decisions, and no
+terminal recovery assertion without a policy-complete evidence bundle.
 
 **Step 5: Commit**
 
@@ -1343,7 +1376,9 @@ Expected:
 - all initial recovery SOPs remain `approve` unless a separate reviewed drill
   record already promoted one;
 - observe/suggest modes cannot execute; and
-- no deployment or mini mutation occurs from CI or merge.
+- no deployment or mini mutation occurs from CI or merge; and
+- the phase evidence manifest distinguishes fixture proof, contract proof, and
+  still-unopened production proof.
 
 ## Post-AC#1 production promotion plan
 
@@ -1358,7 +1393,9 @@ merged. It must not be folded into the coding PR.
   dependency-inhibition rates;
 - verify the collector remains observable when DSH and Colima are stopped in a
   controlled drill; and
-- make no recovery action.
+- make no recovery action; and
+- publish an evidence manifest with raw observation hashes, comparison cases,
+  false-state classifications, verifier versions, and remaining gaps.
 
 ### Suggest-only gate
 
@@ -1367,7 +1404,9 @@ merged. It must not be folded into the coding PR.
   recovery attribution;
 - resolve every wrong or obsolete SOP mapping;
 - certify the exact target scripts and postconditions; and
-- require zero suggestion of a forbidden action.
+- require zero suggestion of a forbidden action; and
+- publish an evidence manifest linking each suggestion, deterministic eligible
+  set, operator decision, actual intervention, and attribution.
 
 ### First automatic SOP gate
 
@@ -1381,6 +1420,8 @@ merged. It must not be folded into the coding PR.
 - conduct a controlled failure without operator intervention;
 - prove the action receipt and all postconditions;
 - prove duplicate controllers cannot repeat it; and
+- publish the complete recovery evidence bundle and controlled-drill replay;
+  and
 - roll back authority to `approve` on any false recovery, unexpected effect,
   attribution error, or verification gap.
 
