@@ -40,14 +40,32 @@ targets and measured capability profiles. A router selects an eligible target
 from task requirements, safety constraints, budget, latency, evaluations, and
 operator preferences.
 
-```text
-Case event
-   -> durable team controller
-   -> capability router
-   -> isolated agents
-   -> evidence and cross-checks
-   -> verified synthesis
-   -> delivery gate
+The diagram below is the planned v2 topology, not the currently deployed v1
+execution path. The
+[canonical design](docs/plans/2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology)
+is normative.
+
+```mermaid
+flowchart TB
+    E[CaseEvent] --> C[Deterministic Team Controller]
+    C --> W[WorkOrder and CapabilityContract]
+    W --> R[Capability Router]
+    R --> L[Opaque ExecutionLease]
+    L --> P["Provider Edge<br/>model details live here only"]
+    P --> A[Isolated Agent Identity]
+    A --> AR[AgentResult and ClaimSet]
+    AR --> V[Deterministic Verification Gates]
+    V --> AC[Accepted Claim Ledger]
+    AC --> D[Delivery Gate]
+
+    O[Observation] --> I[Incident]
+    I --> OD["helium-opsd<br/>deterministic safety path"]
+    OD --> S[SOP Eligibility and Authority]
+    S --> X[Certified Action]
+    X --> PC[Postconditions and Attribution]
+    PC --> V
+
+    I -. optional diagnosis .-> C
 ```
 
 DeepSeek, Claude, Codex, local models, and future providers are inventory at the
