@@ -186,6 +186,32 @@ This section is normative. The master plan and reference-team plans may
 summarize it, but they must link back here and may not define a competing
 topology.
 
+The following diagram is the planned v2 topology, not the currently deployed
+v1 execution path:
+
+```mermaid
+flowchart TB
+    E[CaseEvent] --> C[Deterministic Team Controller]
+    C --> W[WorkOrder and CapabilityContract]
+    W --> R[Capability Router]
+    R --> L[Opaque ExecutionLease]
+    L --> P["Provider Edge<br/>model details live here only"]
+    P --> A[Isolated Agent Identity]
+    A --> AR[AgentResult and ClaimSet]
+    AR --> V[Deterministic Verification Gates]
+    V --> AC[Accepted Claim Ledger]
+    AC --> D[Delivery Gate]
+
+    O[Observation] --> I[Incident]
+    I --> OD["helium-opsd<br/>deterministic safety path"]
+    OD --> S[SOP Eligibility and Authority]
+    S --> X[Certified Action]
+    X --> PC[Postconditions and Attribution]
+    PC --> V
+
+    I -. optional diagnosis .-> C
+```
+
 The canonical agent topology is:
 
 ```text
