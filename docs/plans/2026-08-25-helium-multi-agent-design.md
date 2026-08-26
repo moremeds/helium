@@ -2,6 +2,8 @@
 
 **Date:** 2026-08-25
 
+**Last revised:** 2026-08-26 — canonical topology and verification evidence
+
 **Status:** Approved architecture direction
 
 **Scope:** Helium v2 control plane, provider boundary, capability routing, and
@@ -178,6 +180,114 @@ Business records are append-only JSONL in the first implementation, with
 snapshots for faster recovery. External side effects use write-ahead intent and
 append-only outcome rows.
 
+### 5.5 Canonical agent and verification-evidence topology
+
+This section is normative. The master plan and reference-team plans may
+summarize it, but they must link back here and may not define a competing
+topology.
+
+The canonical agent topology is:
+
+```text
+CaseEvent
+  -> deterministic Team Controller
+  -> WorkOrder + CapabilityContract
+  -> Capability Router
+  -> opaque ExecutionLease
+  -> Provider Edge
+  -> isolated Agent identity
+  -> AgentResult + ClaimSet + ArtifactManifest
+  -> deterministic Verification Gates
+  -> AcceptedClaimLedger
+  -> DeliveryIntent -> DeliveryOutcome
+```
+
+Provider and model names are not stable topology roles. The provider edge may
+resolve a lease to any installed, eligible execution target. Team manifests
+may add, remove, or reorder capability-defined agent tasks, but sensors,
+controller state transitions, routing eligibility, evidence acceptance,
+authority, and delivery remain deterministic control-plane responsibilities.
+
+A run qualifies as multi-agent only when the requirements in Section 10 are
+met. Calling several providers for three similar answers is neither required
+nor sufficient. Independence must come from distinct identities, isolated
+context, explicit task ownership, durable messages, and verification that can
+introduce fresh evidence.
+
+The canonical verification-evidence topology is:
+
+```text
+Claim, capability assertion, or incident assertion
+  -> raw evidence
+  -> reproduction or replay
+  -> root-cause record, when applicable
+  -> fix, control, or disposition
+  -> regression or adversarial proof
+  -> production or bounded-shadow verification
+  -> remaining limitations
+  -> accepted evidence decision
+```
+
+An evidence policy declares which stages are required for each assertion
+class. A non-applicable stage requires an explicit reason; it is never silently
+omitted. Evidence decisions use only these durable statuses:
+
+| Status | Meaning |
+|---|---|
+| `PLANNED` | work or proof is specified but has not run |
+| `PARTIAL` | some required proof exists and the missing proof is named |
+| `PROVEN` | every required proof is present, fresh enough, and accepted by its verifier |
+| `FAILED` | a required assertion or acceptance bound was disproved |
+| `BLOCKED` | the next proof cannot currently run and the external blocker is named |
+
+`AgentResult` success does not imply `PROVEN`. The accepted ledger stores the
+assertion, assertion class, evidence policy and version, raw artifact hashes,
+reproduction command or procedure, verifier identity and version, decision,
+freshness, limitations, and exact execution snapshot. Material factual claims
+cannot reach delivery without accepted provenance. A renderer may report a
+clearly labelled `PARTIAL`, `FAILED`, or `BLOCKED` conclusion, but cannot
+promote its status or add a fact outside the accepted ledger.
+
+Every topology node has a testable contract:
+
+| Node | Required durable output | Fail-closed state |
+|---|---|---|
+| Sensor | immutable, freshness-bounded event or observation | `unknown`, never a model call |
+| Controller | case, roster, DAG, mailbox, budgets, revision | no task advance |
+| Router | candidates, exclusions, policy snapshot, lease | capability shortage |
+| Provider edge | result plus adapter-attested execution snapshot | normalized execution failure |
+| Agent task | schema-valid result, artifacts, claims, limitations | schema invalid |
+| Comparator | agreement, contradiction, unique and missing evidence | verification task required |
+| Verifier | independently acquired proof and decision | not accepted |
+| Delivery gate | accepted-ledger and intent references | no delivery |
+
+Every edge carries provenance, content hash, schema version, producer,
+consumer, creation time, freshness or expiry, authorization when applicable,
+and replay/idempotency identity. A test must prove that no sensor can bypass the
+controller to call a provider and that no agent can bypass verification,
+authority, or delivery gates.
+
+Operations specialize the same topology without putting a model in the safety
+path:
+
+```text
+Observation -> Incident -> SOP eligibility -> Authority decision
+  -> Action lease -> Write-ahead intent -> exact-argv executor -> Receipt
+  -> Postconditions -> Attribution -> Incident closure
+```
+
+`helium-opsd` owns this deterministic chain and is not an agent. Optional Ops
+agents may diagnose, challenge evidence, or render a report, but cannot create
+eligibility, authority, action, recovery, or attribution facts.
+
+Finally, each agent-capable node must carry an `AutonomyDecisionRecord` with
+the deterministic-baseline coverage, ambiguity, measured agent lift, failure
+cost, verification strength, latency and cost delta, and human-takeover rule.
+Use a workflow when the deterministic baseline satisfies the acceptance bound;
+use an agent only when a versioned evaluation shows material lift and the
+result can be independently verified; require a human when the risk or
+remaining uncertainty exceeds the configured authority.
+
 ## 6. Model-blind core contracts
 
 ### 6.1 WorkOrder
@@ -231,7 +341,8 @@ The provider returns:
 - usage and timing;
 - normalized completion or failure classification;
 - opaque provider runtime metadata; and
-- a provider-signed execution snapshot for audit.
+- a provider-adapter-attested execution snapshot for audit, cryptographically
+  signed only when the transport supports a trustworthy signature.
 
 Core persists the runtime metadata without interpreting provider-specific
 fields.
@@ -563,6 +674,15 @@ The architecture is accepted only when:
     additional model fan-out.
 14. Component and SOP plugins can be installed without adding domain names to
     core.
+15. No sensor can call a provider directly, and no agent result can bypass the
+    evidence, authority, or delivery gates.
+16. Every delivered material factual claim links to an accepted, hashed,
+    freshness-bounded evidence bundle and exact execution snapshot.
+17. Planned, partial, failed, blocked, and proven capability states remain
+    distinguishable in APIs, reports, and promotion gates.
+18. Every agent-capable topology node has a reviewed autonomy decision that
+    compares it with a deterministic workflow baseline and defines human
+    takeover.
 
 ## 19. Research basis
 

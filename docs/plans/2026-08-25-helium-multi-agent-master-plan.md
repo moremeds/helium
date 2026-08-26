@@ -2,6 +2,8 @@
 
 **Date:** 2026-08-25
 
+**Last revised:** 2026-08-26 — evidence-gated program topology
+
 **Status:** Approved program direction
 
 **Production constraint:** Do not change the mini during the active AC#1
@@ -57,7 +59,9 @@ The program is complete when Helium can:
 - attribute recovery truthfully to Helium, an operator, or an external actor;
 - preserve deterministic monitoring and recovery when model providers fail;
 - preserve the v1 compatibility path and rollback; and
-- add a new ecosystem team without changing core.
+- add a new ecosystem team without changing core; and
+- attach every claimed capability, incident resolution, and promotion decision
+  to a reproducible evidence manifest rather than an agent self-report.
 
 ## Program rules
 
@@ -75,6 +79,12 @@ The program is complete when Helium can:
 9. No agent-generated shell command. Mutations use typed arguments and a
    certified script/action registry.
 10. No production trajectory may grant itself new tools, SOPs, or authority.
+11. No document, dashboard, or release may collapse `PLANNED`, `PARTIAL`,
+    `PROVEN`, `FAILED`, and `BLOCKED` into a generic complete state.
+12. No phase passes because agents agree. Its evidence manifest must satisfy
+    the verifier and freshness policy defined for every material assertion.
+13. No team or plugin may bypass the canonical topology in the
+    [multi-agent design](2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology).
 
 ## Delivery strategy
 
@@ -91,6 +101,47 @@ P0 hardening
    -> P5 ecosystem plugin expansion
    -> P6 evaluated evolution
 ```
+
+### Canonical topology and evidence gates
+
+The normative agent, control-plane, operations, and verification-evidence
+topology is defined in
+[Section 5.5 of the multi-agent design](2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology).
+This master plan controls sequencing and promotion; it does not redefine that
+topology.
+
+Every phase exit produces a versioned `EvidenceManifest`. Each manifest names:
+
+- the exact assertion and acceptance bound;
+- assertion class and evidence-policy version;
+- raw artifact references and hashes;
+- reproduction or replay procedure;
+- baseline or control snapshot;
+- verifier identity, version, and decision;
+- sample count, latency, cost, and confidence when statistical;
+- failures and bad-case categories;
+- production, shadow, drill, or offline scope;
+- current status from the canonical vocabulary; and
+- remaining limitation and next unopened gate.
+
+The minimum evidence ladder is:
+
+| Phase | Required evidence before exit |
+|---|---|
+| P0 | adversarial isolation, delivery-boundary crash replay, and v1 behavior comparison |
+| P1 | fake-provider core suite, neutrality scan, catalog replay, and exact execution snapshot |
+| P2 | controller kill matrix, deterministic replay, duplicate-work proof, and cancellation drain |
+| P2.5 | production-derived incident fixtures, SOP/authority/lease proof, postconditions, and truthful attribution |
+| P3 | frozen offline evaluation, v1-control comparison, evidence-completeness score, and shadow-only proof |
+| P4 | bounded production window, real case or controlled drill, rollback, cost, latency, and human takeover evidence |
+| P5 | plugin conformance, isolation, no-core-change proof, and independent promotion record |
+| P6 | reproducible before/after evaluation, reviewed policy change, and rollback-compatible snapshot |
+
+Passing lower layers does not imply a higher-layer claim. A unit or fixture pass
+may prove a contract while production capability remains `PARTIAL` or
+`PLANNED`. Conversely, a healthy production observation does not prove that an
+agent or controller caused recovery unless the action and attribution chain is
+complete.
 
 ## Phase 0: certify the existing boundary
 
@@ -490,6 +541,20 @@ self-modification.
 - control-versus-team comparison;
 - provider-degradation fallback.
 
+### Topology and verification evidence
+
+- sensors cannot invoke providers;
+- agents cannot advance controller state or delivery directly;
+- provider/model/effort identity appears only at the provider edge and audit
+  snapshot;
+- every accepted material claim references a policy-complete evidence bundle;
+- artifact hashes, schema versions, freshness, producer, consumer, and replay
+  identity survive restart;
+- `PLANNED`, `PARTIAL`, `PROVEN`, `FAILED`, and `BLOCKED` remain distinct;
+- a renderer cannot add or promote factual claims; and
+- every agent-capable node has an autonomy decision against a deterministic
+  baseline plus a human-takeover rule.
+
 ### Operations safety
 
 - observation freshness and parser-drift classification;
@@ -519,6 +584,9 @@ self-modification.
 | Parent outage creates child recovery storm | Controllers amplify a Colima, database, or mount failure | Dependency correlation, inhibition, recovery budget |
 | Command exit is treated as recovery | False green or false critical state | Independent postcondition grace window and reconciliation |
 | Operator and agent act concurrently | Duplicate mutation or false attribution | Durable operator event, action lease, supersession rules |
+| Agent or document self-reports success | Demo state is mistaken for proof | Evidence manifest, independent verifier, and status vocabulary |
+| Three models repeat the same unsupported claim | False consensus looks reliable | Claim lineage, source independence, and fresh verification |
+| Topology drifts across reference teams | Safety gates become optional conventions | One normative topology plus conformance contracts |
 | Resource incident spawns more agents | Helium worsens memory or CPU pressure | Host-native collector and admission control before analysis |
 | Log content instructs the agent to mutate | Prompt injection reaches operations | Logs are untrusted artifacts; no generic shell; eligible SOP IDs only |
 | Experimental DSH API changes | Production breakage | Pin, contract suite, adapters, no unpublished dependency |

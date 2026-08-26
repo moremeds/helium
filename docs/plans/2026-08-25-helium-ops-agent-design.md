@@ -2,6 +2,8 @@
 
 **Date:** 2026-08-25
 
+**Last revised:** 2026-08-26 — recovery evidence and attribution topology
+
 **Status:** Approved design direction
 
 **Production constraint:** design and implementation work may proceed, but no
@@ -144,6 +146,38 @@ per-container CPU, memory, or PID limits.
 
 These facts require trend- and pressure-based alerts, plus Helium admission
 control, rather than alerts based only on percentage of RAM used.
+
+### 3.6 Verification interpretation of the observed cases
+
+The observations above are not one binary statement that "Ops works" or "Ops
+failed." They are separate assertions with separate evidence decisions:
+
+| Assertion | Decision | Evidence or missing proof |
+|---|---|---|
+| Existing Colima watchdog detected an unhealthy state | `PROVEN` | watchdog log reached `recovery_exhausted` |
+| Existing watchdog automatically restored Colima | `FAILED` | the automated window ended without verified recovery |
+| Docker and the expected 20 containers were later healthy | `PROVEN` | independent post-incident inventory |
+| Automatic action caused that recovery | `FAILED` | no complete action-to-postcondition attribution chain |
+| Operator intervention caused the final recovery | `PROVEN` for this review record | explicit operator correction; future runtime attribution must use a durable signed operator event |
+| Livewire detected a Parquet integrity failure | `PROVEN` | coverage task exit and invalid-footer evidence |
+| Restarting the Livewire process is an eligible repair | `FAILED` | the failure is data integrity, not process liveness |
+| A particular targeted repair restores integrity, freshness, and coverage | `BLOCKED` | exact repair fixture and controlled drill have not passed |
+
+These decisions apply to the named assertions, not to the whole component. A
+healthy Docker inventory does not erase the failed automation claim, and a
+running Livewire process does not close an integrity or coverage incident.
+
+Every future incident follows the canonical chain from the
+[multi-agent design](2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology):
+
+```text
+incident claim -> raw observations -> replay/reproduction -> root cause
+  -> eligible SOP and authority -> action evidence -> postconditions
+  -> attribution -> regression/drill -> remaining limitation -> closure
+```
+
+An incident report may expose `PARTIAL`, `FAILED`, or `BLOCKED` assertions, but
+neither an agent nor a renderer may relabel them as recovered.
 
 ## 4. Design principles
 
@@ -374,6 +408,15 @@ through the SOP's grace policy and re-runs postconditions. It classifies:
 Startup reconciliation never blindly reruns an uncertain side effect. It first
 rechecks the lease, process evidence, action receipt, operator events, and
 postconditions.
+
+Incident closure writes a `RecoveryEvidenceBundle` containing the raw
+observation hashes, incident and dependency snapshot, exact SOP digest,
+eligibility and authority decisions, action lease and intent, executor receipt,
+every postcondition sample, actor attribution, verifier version, replay or
+drill reference, final status, and remaining limitations. A no-action recovery
+still requires observations and attribution as operator or external recovery.
+Missing required evidence leaves the assertion `PARTIAL`, `FAILED`, or
+`BLOCKED`; it never defaults to automatic success.
 
 ### 6.6 Multi-agent analysis plane
 
@@ -682,6 +725,13 @@ The Ops Agent is accepted only when:
     reboot remain impossible through the Ops Agent.
 15. Every recovery report links to raw observations, SOP identity, action
     receipt, attribution, and postcondition evidence.
+16. The Colima production-derived fixture records detection as proven,
+    automatic recovery and attribution as failed, final health as proven, and
+    operator recovery as the accepted attribution.
+17. Livewire cannot close from process liveness alone; integrity, freshness,
+    and coverage postconditions must all satisfy the exact repair policy.
+18. Every terminal incident assertion has a policy-complete recovery evidence
+    bundle, or remains explicitly partial, failed, or blocked.
 
 ## 16. Research basis
 

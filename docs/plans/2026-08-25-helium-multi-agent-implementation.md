@@ -23,6 +23,9 @@ Harness/Cordis `0.1.1-rc.2`, append-only JSONL, MCP, nodemailer.
 - Run the focused failing test before writing production code.
 - Keep every commit green for all previously completed tasks.
 - Do not add a provider/model name to `packages/core`.
+- Treat the canonical topology and evidence status vocabulary in the design as
+  contract surfaces; implementation may not add a sensor-to-provider,
+  agent-to-delivery, or agent-to-authority shortcut.
 - Do not silently relax a capability, safety, or budget requirement.
 - Do not give a mutating team a generic shell or treat command exit as
   verified recovery.
@@ -471,12 +474,18 @@ git add packages/core packages/v1-compat plugins/helium vitest.config.ts contrac
 git commit -m "refactor: isolate v1 model-specific job contract"
 ```
 
-### Task 7: Define provider-neutral work and result schemas
+### Task 7: Define provider-neutral work, result, and evidence schemas
 
 **Files:**
 
 - Create: `packages/core/src/work.ts`
+- Create: `packages/core/src/evidence/bundle.ts`
+- Create: `packages/core/src/evidence/ledger.ts`
+- Create: `packages/core/src/evidence/manifest.ts`
 - Create: `packages/core/tests/work.spec.ts`
+- Create: `packages/core/tests/evidence-bundle.spec.ts`
+- Create: `packages/core/tests/evidence-ledger.spec.ts`
+- Create: `packages/core/tests/evidence-manifest.spec.ts`
 - Modify: `packages/core/src/index.ts`
 
 **Step 1: Write failing schema tests**
@@ -501,12 +510,27 @@ const work = WorkOrderSchema.parse({
 });
 expect(work.role).toBe("evidence-verifier");
 expect(() => WorkOrderSchema.parse({ ...raw, model: "anything" })).toThrow();
+
+expect(() => acceptEvidence({
+  assertionClass: "capability",
+  status: "PROVEN",
+  rawEvidenceRefs: ["artifact://run/raw"],
+  requiredStages: ["raw", "replay", "regression", "bounded-production"],
+  replayRefs: [],
+})).toThrow(/missing required evidence stage: replay/);
 ```
+
+Also reject an unknown evidence status, an omitted required stage without an
+accepted `notApplicableReason`, expired proof, a missing artifact hash, and a
+status promotion that has no new verifier decision. Reject an evidence manifest
+that lacks an exact assertion, acceptance bound, evidence-policy version,
+baseline/control reference, verifier decision, scope, limitations, or next
+gate.
 
 **Step 2: Run the test and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/work.spec.ts
+pnpm exec vitest run --project unit packages/core/tests/work.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/tests/evidence-manifest.spec.ts
 ```
 
 Expected: FAIL because the module does not exist.
@@ -535,10 +559,30 @@ export interface AgentResult {
 Use strict Zod objects at every persistence and provider boundary. Keep provider
 identity out of the schema.
 
+Define the generic `EvidenceBundle` and append-only `EvidenceLedger` here so
+both Ops Phase 2.5 and research Phase 3 use one contract. A bundle binds an
+assertion to an assertion-class policy, raw artifact hashes, required proof
+stages, verifier decision and version, freshness, execution snapshot, status,
+and remaining limitations. The policy declares required stages; a factual
+claim, capability evaluation, and incident recovery may specialize the generic
+contract without redefining its status semantics.
+
+Only `PLANNED`, `PARTIAL`, `PROVEN`, `FAILED`, and `BLOCKED` are valid. The
+ledger validates completeness and freshness and records every new decision.
+`AgentResult.outcome === "completed"` is never an evidence verdict.
+
+`EvidenceManifest` is the phase/release index over one or more bundles. It
+records the assertion and bound, evidence-policy version, immutable bundle
+references, baseline/control snapshot, verifier decision, statistical fields
+when applicable, offline/shadow/drill/production scope, current status,
+limitations, and next unopened gate. Runtime manifests live under the owned
+state/artifact root; reviewed promotion summaries link their hashes rather than
+copying or rewriting raw evidence.
+
 **Step 4: Run tests and typecheck**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/work.spec.ts
+pnpm exec vitest run --project unit packages/core/tests/work.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/tests/evidence-manifest.spec.ts
 pnpm typecheck
 ```
 
@@ -547,8 +591,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/work.ts packages/core/tests/work.spec.ts packages/core/src/index.ts
-git commit -m "feat: define model-blind work contracts"
+git add packages/core/src/work.ts packages/core/src/evidence packages/core/tests/work.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/src/index.ts
+git commit -m "feat: define model-blind work and evidence contracts"
 ```
 
 ### Task 8: Define the capability catalog and evaluation evidence
@@ -1197,9 +1241,11 @@ installation or promote any SOP to automatic authority.
 - Create: `packages/core/src/evidence/compare.ts`
 - Create: `packages/core/tests/claims.spec.ts`
 - Create: `packages/core/tests/claim-compare.spec.ts`
+- Create: `packages/core/tests/accepted-claim-ledger.spec.ts`
+- Modify: `packages/core/src/evidence/ledger.ts`
 - Modify: `packages/core/src/index.ts`
 
-**Step 1: Write failing claim comparison tests**
+**Step 1: Write failing evidence and claim tests**
 
 ```ts
 const comparison = compareClaimSets(primary, reviewer);
@@ -1209,21 +1255,32 @@ expect(comparison.contradictions).toEqual([
 expect(comparison.uniqueEvidence).toContainEqual(
   expect.objectContaining({ sourceRef: "artifact://source/new" }),
 );
+
+expect(() => acceptedClaims.publish(rendererResult)).toThrow(
+  /renderer cannot add or promote claims/,
+);
 ```
 
 Test same conclusion with different evidence, direct contradiction, missing
 provenance, stale evidence, subjective judgment, and three-agent false
-consensus using the same bad source.
+consensus using the same bad source. Also test that:
+
+- an expired or incomplete claim bundle cannot enter the accepted claim view;
+- a renderer cannot add, remove, or promote a claim;
+- a `PARTIAL` claim remains labelled when delivery policy permits it; and
+- replay preserves artifact hashes, verifier version, execution snapshot, and
+  remaining limitations.
 
 **Step 2: Run tests and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts
+pnpm exec vitest run --project unit packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts packages/core/tests/accepted-claim-ledger.spec.ts
 ```
 
-Expected: FAIL because the evidence modules do not exist.
+Expected: FAIL because the claim comparison and adjudication modules do not
+exist.
 
-**Step 3: Implement normalized claim sets**
+**Step 3: Implement normalized claims and adjudication**
 
 Each claim contains:
 
@@ -1243,10 +1300,16 @@ The comparator emits agreement, contradiction, unique evidence, and evidence
 gaps. It never chooses a winner. Material contradictions create verification
 work orders that require fresh evidence capabilities.
 
+Specialize the Phase 1 evidence policy for factual claims, inferences, and
+judgments. The accepted claim view is derived from the generic append-only
+ledger. It validates claim-specific completeness and freshness and rejects a
+status promotion without a new evidence decision. `AgentResult.outcome` is
+never an evidence verdict.
+
 **Step 4: Run tests and neutrality contract**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts
+pnpm exec vitest run --project unit packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts packages/core/tests/accepted-claim-ledger.spec.ts
 pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts
 ```
 
@@ -1255,8 +1318,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/evidence packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts packages/core/src/index.ts
-git commit -m "feat: compare agent claims against evidence"
+git add packages/core/src/evidence packages/core/tests/claims.spec.ts packages/core/tests/claim-compare.spec.ts packages/core/tests/accepted-claim-ledger.spec.ts packages/core/src/index.ts
+git commit -m "feat: adjudicate agent claims through evidence"
 ```
 
 ### Task 18: Define provider-neutral team manifests
@@ -1335,6 +1398,7 @@ git commit -m "feat: define capability-based macro team"
 - Create: `plugins/helium/src/team-controller.test.ts`
 - Create: `plugins/helium/src/shadow.ts`
 - Create: `plugins/helium/src/shadow.test.ts`
+- Create: `contracts/tests/topology-boundary.contract.spec.ts`
 - Modify: `plugins/helium/src/runtime.ts`
 - Modify: `plugins/helium/src/config.ts`
 - Modify: `plugins/helium/src/index.ts`
@@ -1357,7 +1421,10 @@ expect(mutationTools.calls).toHaveLength(0);
 ```
 
 Test capability shortage, one failed evidence role, contradiction requiring a
-verifier, cancellation, and restart between every DAG layer.
+verifier, cancellation, and restart between every DAG layer. Add topology
+guards proving that a sensor cannot call an executor, a provider result cannot
+advance the DAG before schema and evidence checks, and delivery cannot read an
+unaccepted claim or bypass write-ahead intent.
 
 **Step 2: Run the focused tests and verify failure**
 
@@ -1389,16 +1456,19 @@ No configuration accepts a provider or model name.
 
 ```bash
 pnpm exec vitest run --project unit plugins/helium/src/team-controller.test.ts plugins/helium/src/shadow.test.ts
+pnpm exec vitest run --project contracts contracts/tests/topology-boundary.contract.spec.ts
 pnpm test:e2e-local
 ```
 
 Expected: PASS; enabling shadow adds records but does not change v1 reports or
-email.
+email. The event log must demonstrate the canonical sequence from `CaseEvent`
+through lease, agent result, accepted evidence decision, and terminal shadow
+outcome; no shortcut edge is accepted.
 
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/team-controller.ts plugins/helium/src/team-controller.test.ts plugins/helium/src/shadow.ts plugins/helium/src/shadow.test.ts plugins/helium/src/runtime.ts plugins/helium/src/config.ts plugins/helium/src/index.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml
+git add plugins/helium/src/team-controller.ts plugins/helium/src/team-controller.test.ts plugins/helium/src/shadow.ts plugins/helium/src/shadow.test.ts plugins/helium/src/runtime.ts plugins/helium/src/config.ts plugins/helium/src/index.ts contracts/tests/topology-boundary.contract.spec.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml
 git commit -m "feat: run macro team in shadow mode"
 ```
 
@@ -1410,7 +1480,9 @@ git commit -m "feat: run macro team in shadow mode"
 - Create: `packages/evals/tsconfig.json`
 - Create: `packages/evals/src/run.ts`
 - Create: `packages/evals/src/score.ts`
+- Create: `packages/evals/src/autonomy.ts`
 - Create: `packages/evals/tests/score.spec.ts`
+- Create: `packages/evals/tests/autonomy.spec.ts`
 - Create: `evals/fixtures/routing/`
 - Create: `evals/fixtures/macro/`
 - Create: `evals/README.md`
@@ -1431,10 +1503,15 @@ expect(scoreRun(fixture)).toEqual(expect.objectContaining({
 }));
 ```
 
+Table-drive autonomy decisions for a deterministic workflow, an agent-assisted
+node, and a human-required node. Assert that the agent path cannot be selected
+without measured lift and an independent verifier, and that high failure cost
+plus weak verification selects human takeover.
+
 **Step 2: Run the scorer test and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts
+pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts packages/evals/tests/autonomy.spec.ts
 ```
 
 Expected: FAIL because the eval package does not exist.
@@ -1450,10 +1527,17 @@ versioned catalog updates.
 Do not derive capability scores directly from production success counts. Store
 sample size, confidence, suite version, and known failure categories.
 
+Emit a versioned `AutonomyDecisionRecord` for every agent-capable node. It
+contains deterministic-baseline coverage, ambiguity, measured lift, failure
+cost, verification strength, latency and cost delta, chosen mode, and the human
+takeover condition. The decision engine chooses `workflow` when the baseline
+meets the bound, `agent` only when lift and verification gates pass, and
+`human` when risk or unresolved uncertainty exceeds authority.
+
 **Step 4: Run offline evaluations**
 
 ```bash
-pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts
+pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts packages/evals/tests/autonomy.spec.ts
 pnpm --filter @helium/evals run evaluate -- --fixtures evals/fixtures/macro
 ```
 
@@ -1486,7 +1570,12 @@ Expected:
 - zero unauthorized capability calls;
 - no provider/model names in core or team manifests;
 - every material factual claim has provenance;
+- every accepted claim has a policy-complete, freshness-bounded evidence bundle
+  and exact execution snapshot;
+- evidence states remain distinct and no renderer can promote them;
 - contradictions create evidence verification rather than majority vote;
+- every agent-capable node has an autonomy decision against the deterministic
+  baseline and a human-takeover condition;
 - crash/restart and cascading cancellation pass;
 - shadow mode performs no email or mutation; and
 - the scorecard compares the team with the frozen v1 control.

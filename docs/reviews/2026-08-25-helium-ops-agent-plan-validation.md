@@ -1,9 +1,10 @@
 # Helium Ops Agent Plan Validation and Adversarial Review
 
 - Plan name: Helium Ops Agent Design and Implementation Plan
-- Date: 2026-08-25
+- Date: 2026-08-26
 - Repository: `moremeds/helium`
-- Review type: second-pass plan validation plus adversarial review
+- Review type: third-pass plan validation, canonical-topology review, and
+  adversarial evidence review
 - Production activity: read-only audit only; no recovery, restart, install, or
   deployment was performed
 
@@ -28,11 +29,14 @@ The revised fixture and acceptance criteria preserve that fact.
 - **Plan artifact:** `ready-with-prerequisites`
 - **Immediate production execution:** `not-ready`
 - **Rationale:** the plan is technically coherent after the second-pass fixes,
-  has exact tasks and gates, and preserves model blindness. Execution is
-  intentionally blocked on the existing Phase 0/1/2 harness work, completion of
-  AC#1, certification of actual deployed scripts, and separate staged promotion
-  evidence.
-- **Coverage:** 18 items reviewed; 11 valid, 7 partial because they depend on
+  has exact tasks and gates, preserves model blindness, and now defines one
+  normative agent and verification-evidence topology. Execution is intentionally
+  blocked on the existing Phase 0/1/2 harness work, completion of AC#1,
+  certification of actual deployed scripts, and separate staged promotion
+  evidence. A reviewed plan is `PROVEN` as a plan artifact only; its future
+  runtime capabilities remain `PLANNED`, `PARTIAL`, `FAILED`, or `BLOCKED` as
+  their individual evidence states require.
+- **Coverage:** 25 items reviewed; 18 valid, 7 partial because they depend on
   future interfaces or live certification, 0 invalid.
 - **Critical pre-execution gates:**
   1. Close the existing senior isolation, delivery, mutation, and per-tenant
@@ -67,6 +71,13 @@ The revised fixture and acceptance criteria preserve that fact.
 | P16 | Existing-script inventory/certification | partial | critical | Task 16; first SOPs remain `approve` | Requires post-AC live version and maintenance evidence |
 | P17 | Adversarial contract suite | valid | critical | Task 17; persisted fake host and executor | Add failures discovered during observe/suggest stages |
 | P18 | Reversible observe-only packaging | partial | high | Task 18; independent dead-man check | No install until separate post-AC deployment approval |
+| E1 | One normative agent and verification topology | valid | critical | multi-agent design:181-287 | Keep reference teams linked to this section |
+| E2 | Generic evidence bundle, ledger, and manifest before reference teams | valid | high | multi-agent implementation:477-580 | Implement in Phase 1 before Ops Phase 2.5 |
+| E3 | Evidence-based claim adjudication | valid | high | multi-agent implementation:1236-1277 | Requires Phase 1 evidence contracts |
+| E4 | Topology bypass guards | valid | critical | multi-agent implementation:1421-1463 | Run with fake executor and delivery spies |
+| E5 | Workflow/agent/human autonomy decision | valid | high | multi-agent implementation:1472-1532 | Calibrate lift and risk bounds from versioned evals |
+| E6 | Ops recovery evidence specialization | valid | critical | Ops implementation:600-687 | Live proof remains behind staged promotion |
+| E7 | Per-phase evidence manifests | valid | high | master plan:103-142; multi-agent implementation:574-580 | Promotion summaries must link immutable raw bundles |
 
 ## 4. Findings by Severity
 
@@ -138,6 +149,36 @@ The revised fixture and acceptance criteria preserve that fact.
   integrity runs in a low-impact window; isolated restore rehearsal is a
   separate approval-required SOP.
 
+### F-8: the first evidence-contract draft was sequenced after Ops needed it
+
+- **Severity:** high
+- **Impact:** Ops Phase 2.5 would either depend on a Phase 3 interface that did
+  not exist or create a second, incompatible definition of evidence.
+- **Evidence:** Ops starts after the durable-kernel gate, before Macro Phase 3;
+  the current v1 core has no evidence module (`packages/core/src/index.ts:5-12`).
+- **Correction made:** generic `EvidenceBundle`, `EvidenceLedger`, and
+  `EvidenceManifest` contracts now land in provider-neutral Phase 1 Task 7.
+  Ops and Macro only add assertion-class specializations.
+
+### F-9: phase evidence manifests were initially a prose-only requirement
+
+- **Severity:** high
+- **Impact:** each phase could produce a different summary format and still
+  claim to satisfy the evidence gate.
+- **Correction made:** Phase 1 now has an exact `evidence/manifest.ts` file,
+  schema tests, required fields, immutable bundle references, and a rule that
+  reviewed summaries link hashes instead of rewriting raw evidence.
+
+### F-10: provider-signed snapshots are not portable across subscription CLIs
+
+- **Severity:** medium
+- **Impact:** Claude or Codex subscription execution could fail an impossible
+  cryptographic requirement even when the adapter can faithfully capture the
+  target and configuration.
+- **Correction made:** the contract requires an adapter-attested exact execution
+  snapshot and uses a cryptographic provider signature only when the transport
+  exposes a trustworthy one.
+
 ## 5. Adversarial Review
 
 | Attack or failure | Required system behavior | Plan proof |
@@ -186,6 +227,9 @@ deterministic state, permission, side-effect, or postcondition assertion.
 | P1 | Keep memory incident from spawning agents | Added admission control |
 | P1 | Avoid backup-monitoring I/O amplification | Added tiered integrity checks |
 | P1 | Preserve plugin extensibility | Component kinds remain open-ended and outside core |
+| P0 | Sequence generic evidence before Ops and Macro | Moved bundle, ledger, and manifest to Phase 1 Task 7 |
+| P0 | Make evidence manifests executable contracts | Added schema, tests, immutable references, and next-gate field |
+| P1 | Keep execution attestation provider-portable | Replaced mandatory provider signature with adapter attestation |
 
 ## 7. Suggested Execution Sequence
 
@@ -249,6 +293,33 @@ weaken the plan or hard-code the current component list.
   seven days, compare suggestions with operator decisions, and promote only one
   automatic SOP per reviewed drill.
 
+## 11. Canonical Topology and Evidence Review
+
+The revised plan now has one normative topology in the multi-agent design and
+uses the master and implementation plans only for sequencing and executable
+proof. This closes the prior risk that each reference team could treat safety
+and verification as optional local conventions.
+
+| Assertion | Required proof encoded in the plan | Current program state |
+|---|---|---|
+| Sensors cannot call providers | topology guard with a fake executor spy | `PLANNED` |
+| Agents cannot deliver or authorize directly | controller, accepted-ledger, intent, and authority contract tests | `PLANNED` |
+| Core remains model-blind | neutrality scan, fake-provider suite, opaque execution snapshot | `PLANNED`; v1 does not yet satisfy v2 design |
+| Multi-agent agreement is not truth | claim lineage, false-consensus fixture, fresh verifier task | `PLANNED` |
+| "Agent works" is auditable | policy-complete evidence bundle, frozen baseline, bad cases, cost, latency, limitations | `PLANNED` |
+| Agent is preferable to workflow | `AutonomyDecisionRecord` with measured lift and human takeover | `PLANNED` |
+| Colima watchdog detected failure | production-derived log fixture | `PROVEN` for the reviewed incident |
+| Colima watchdog recovered automatically | action-to-postcondition chain | `FAILED` for the reviewed incident |
+| Colima final recovery was automatic | attribution chain | `FAILED`; operator correction is accepted |
+| Livewire generic restart repairs corruption | integrity/freshness/coverage proof | `FAILED` as an eligible repair |
+| Livewire targeted repair is effective | corrupted fixture plus controlled drill | `BLOCKED` |
+
+Adversarially, the important property is monotonic evidence truth: later health
+cannot overwrite a failed automatic-recovery assertion; three agreeing agents
+cannot promote a shared unsupported source; and a renderer cannot upgrade
+`PARTIAL`, `FAILED`, or `BLOCKED`. The implementation plan now contains explicit
+tests for all three attacks.
+
 ## Final verdict
 
 The revised plan is suitable to merge as the program contract. It is not a
@@ -256,4 +327,3 @@ claim that autonomous recovery is already implemented or safe to deploy. The
 first implementation work remains Phase 0 hardening; the first production Ops
 step remains post-AC observe-only; and the first automatic recovery remains a
 separate, single-SOP promotion decision.
-
