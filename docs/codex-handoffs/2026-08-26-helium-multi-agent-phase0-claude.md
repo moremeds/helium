@@ -47,6 +47,32 @@ git log -3 --oneline --decorate
 If the branch has changes beyond this committed handoff note, inspect and
 preserve them. Do not reset or overwrite work that appeared after this note.
 
+## Claude Code dispatch status
+
+Dispatch was attempted twice at 2026-08-26 22:14 WITA. Neither attempt read or
+modified the Phase 0 code:
+
+1. The inherited `ANTHROPIC_API_KEY` took precedence over the Claude
+   subscription and the API route rejected the request for low credit. That
+   attempt was stopped; no fallback to paid API is authorized.
+2. Relaunching with `ANTHROPIC_API_KEY` removed correctly selected the
+   subscription path, which returned `You've hit your session limit · resets
+   1:30am (Asia/Makassar)`.
+
+After the subscription window resets, start Claude Code from this worktree with
+the API key removed from only the child process:
+
+```bash
+cd /Users/chenxi/projects/helium/.worktrees/multi-agent-phase0
+env -u ANTHROPIC_API_KEY claude --effort max --permission-mode acceptEdits
+```
+
+Then send: `Read docs/codex-handoffs/2026-08-26-helium-multi-agent-phase0-claude.md in full and execute it exactly.`
+
+Do not omit `env -u ANTHROPIC_API_KEY`: the current parent environment contains
+that variable, and leaving it set silently changes the requested subscription
+transport into the API transport.
+
 ## Source-of-truth order
 
 Read these before implementation, in this order:
