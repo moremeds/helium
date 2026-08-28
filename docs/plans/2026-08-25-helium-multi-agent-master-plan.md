@@ -366,6 +366,21 @@ Rules that hold from P0 onward:
   above survives with the same meaning, P1 may only add fields or tighten
   types, and a P0 manifest must validate against the P1 schema without being
   rewritten.
+- **Every `outputHash` is recorded from CI, at the Node version pinned in
+  `.github/workflows/ci.yml`.** Three runtimes exist in this program right now
+  and the same command hashes differently under each: CI pins `22.19.0`
+  (`.github/workflows/ci.yml:21,41`), the development machine runs `25.1.0`,
+  and the Phase 0 handover recorded its baseline on `26.7.0`
+  (`docs/codex-handoffs/2026-08-26-helium-multi-agent-phase0-claude.md:74`, on
+  `feat/multi-agent-phase0`). An unpinned recording environment therefore makes
+  `outputHash` unfalsifiable — a re-run disagrees with the record and neither
+  side is wrong. So: the manifest's `toolVersion` names the exact version
+  pinned in `.github/workflows/ci.yml`, and the `outputHash` beside it is the
+  hash of that CI run's captured output. **A hash captured on a developer
+  machine is not admissible** and must be re-recorded from CI before the gate
+  is claimed. This is a **recording procedure stated beside the template, not a
+  change to it**: `manifestVersion: p0-1` and the field set above are frozen and
+  unchanged.
 
 The minimum evidence ladder is:
 
@@ -487,8 +502,19 @@ provider in a multi-agent system.
 - Session-window exhaustion classifies as `quota-exhausted` with `retryAfter`,
   never as a generic `error` and never as a capability change.
 - Existing v1 tests and behavior remain green.
-- The exit evidence is a completed P0 manifest whose deterministic claims each
-  name a command, its version, and its output hash.
+- The exit evidence is a completed P0 manifest committed at
+  **`docs/evidence/p0-manifest.yaml`**, whose deterministic claims each name a
+  command, its version, and its output hash. The path is part of the gate: a PR
+  description is not hashable, not diffable, and not reproducible, so naming
+  one as the destination leaves the exit evidence unaddressable. MA Task 5
+  creates that file; it is the first thing in `docs/evidence/`, and MA Task 7's
+  `docs/evidence/claims.yaml` register lands in the same directory, with this
+  manifest's deterministic claims appended as that register's first rows.
+- Every `outputHash` in that manifest is recorded from a CI run at the Node
+  version pinned in `.github/workflows/ci.yml`, and `toolVersion` names that
+  version — per the recording procedure stated beside the
+  [frozen P0 template](#frozen-p0-evidence-manifest-template). A hash captured
+  on a developer machine does not open this gate.
 
 ### Deployment rule
 
@@ -1174,9 +1200,18 @@ Do not deploy during AC#1. The adjudicated mainline is:
    `feat/multi-agent-phase0`), which stays paused until step 1 lands.
 3. **Execute full Phase 0, including `quota-exhausted`.**
 
-The first Phase 0 code change is now the reusable execution-boundary
-conformance harness: an executable failing contract for the current senior
-isolation gap, written so that every later executor class inherits it. It is
-deliberately not generic over an `Executor` type, which does not exist until
-P1, and it is not a new multi-agent or Ops feature. Operations execution begins
-only after its named Phase 0, Phase 1, and Phase 2 prerequisites are green.
+The first Phase 0 code change is **MA Task 1's failing isolation test**, not the
+conformance harness. The harness (MA Task 2) is written against the boundary
+Task 1 establishes, so it cannot come first. The order of record is the task
+numbering in
+[the multi-agent implementation plan](2026-08-25-helium-multi-agent-implementation.md):
+Task 1's red test, then Task 2's red conformance contract, then Task 1's
+implementation, then Task 2 green. Where any prose here and that plan's task
+numbering disagree about sequence, **the task numbering wins**.
+
+The harness itself is still the Phase 0 artifact that outlives Phase 0: an
+executable contract for the current senior isolation gap, written so that every
+later executor class inherits it. It is deliberately not generic over an
+`Executor` type, which does not exist until P1, and it is not a new multi-agent
+or Ops feature. Operations execution begins only after its named Phase 0,
+Phase 1, and Phase 2 prerequisites are green.

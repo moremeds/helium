@@ -1604,10 +1604,17 @@ Assert:
   executes;
 - `approve` can execute only after a matching unexpired approval;
 - `auto` executes only an eligible automatic SOP;
-- a runtime mode cannot elevate an SOP's configured authority; and
+- a runtime mode cannot elevate an SOP's configured authority;
 - no mode executes an SOP whose signed authority manifest entry is missing or
   invalid — `opsd` starts, serves observations, and holds that SOP at
-  `observe`, rather than refusing to start or executing anyway.
+  `observe`, rather than refusing to start or executing anyway; and
+- **an installation carrying no authority manifest at all still starts `opsd`
+  with every SOP at `observe`**, rather than failing open into a higher
+  authority or refusing to start. **Moved here from Task 18 Step 1**, which
+  asserted it against a binary its own phase does not build: `opsd` and
+  `mode.ts` are created by this task, and Task 18 is packaging-only. Task 18
+  keeps the packaging half — that the installer renders the manifest path into
+  the configuration and never fabricates a manifest.
 
 Add a process-boundary test that stops the DSH fixture while `opsd` continues
 to collect, correlate, and execute a fake eligible automatic SOP. Test owner-only
@@ -1858,23 +1865,56 @@ git commit -m "test: adversarially verify ops recovery"
 
 **Step 1: Write failing packaging tests**
 
-Run against a temporary fake home and launchd directory. Assert install defaults
-to `observe`, refuses during a configured freeze window, renders no secret,
-preserves existing watchdogs, and uninstall removes only its exact labels and
-files. The configured freeze window ends **2026-08-31**: that is the value the
-refusal reads, and design section 13.4 is where it is stated normatively. A
-freeze guard with no configured value is not a guard, so assert both directions
-— an install attempt dated before that date refuses, and one dated after it does
-not refuse on freeze grounds. The fake home and launchd root here are exactly
-what section 13.4's Window 1 permits: this test runs on a developer machine, and
-nothing in this task may touch the mini. Assert rollback restores the prior compatible collector/plugin pair.
-Assert the existing dead-man reports stale `opsd` observations even when the
-main DSH heartbeat is current.
-Assert the rendered `opsd` configuration contains only the operator public key
-path and cannot read or install a private signing key. Assert it also names the
-authority manifest path, that installing without a manifest still starts `opsd`
-with every SOP at `observe` rather than failing open, and that the installer
-never writes or regenerates a manifest itself.
+**Scope: packaging only. This task asserts nothing about `opsd` at runtime.**
+The `helium-opsd` binary and its mode module are created by Task 14
+(`plugins/ops-agent/src/bin/opsd.ts`, `plugins/ops-agent/src/mode.ts`), and
+Task 14 is outside the authoritative near-term subset the master plan
+enumerates ("Near-term subset — stated as task IDs"), which admits Ops
+Tasks 9-12 and 18 only. A test here that started `opsd` would either be
+asserting against a binary this subset never builds, or asserting nothing at
+all. Everything below is therefore an assertion about **files, exit codes, and
+filesystem effects** — text the installer renders, syntax of the scripts it
+installs, and what appears and disappears under a redirected root.
+
+The whole suite runs against a **process-local temporary directory** with `HOME`
+and the launchd root redirected into it and removed on exit — exactly and only
+what section 13.4's Window 1 permits. This test runs on a developer machine;
+nothing in this task may put a byte on the mini or start a process there.
+
+Assert:
+
+- **Static syntax.** `bash -n` parses `scripts/ops/install-observe-only.sh`,
+  `scripts/ops/uninstall-observe-only.sh`, and `scripts/ops/run-opsd.sh`
+  without error, and `plutil -lint` accepts the rendered
+  `launchd/com.helium.opsd.plist.template`. A plist that does not lint is a
+  packaging defect discoverable without ever loading it.
+- **Install/uninstall round trip.** Install writes exactly its declared file
+  set under the redirected root and nothing outside it; uninstall removes only
+  its exact labels and files and leaves the redirected root byte-identical to
+  its pre-install state. No test invokes the real `launchctl`.
+- **Freeze-window refusal, both directions.** The configured freeze window ends
+  **2026-08-31**: that is the value the refusal reads, and design section 13.4
+  is where it is stated normatively. A freeze guard with no configured value is
+  not a guard, so assert both directions — an install attempt dated before that
+  date exits non-zero and writes nothing, and one dated after it does not
+  refuse on freeze grounds.
+- **Rendered configuration text.** The rendered `opsd` configuration names
+  `observe` as the default mode, contains no secret, names the operator public
+  key **path** and no private key material, and names the authority manifest
+  path. The installer never writes or regenerates a manifest itself.
+- **Neighboring packaging.** Existing watchdogs and their plists are untouched
+  by install and by uninstall; `scripts/release/rollback.sh` restores the prior
+  compatible collector/plugin pair; and `scripts/deadman/check-heartbeat.sh`,
+  run against a fixture state file carrying a stale `opsd` observation
+  timestamp and a current DSH heartbeat, reports the `opsd` staleness.
+
+**Moved out of this task.** The assertion that *installing without an authority
+manifest still starts `opsd` with every SOP held at `observe` rather than
+failing open* is a runtime property of a binary this task does not build. It now
+lives in **Task 14 Step 1**, where `plugins/ops-agent/src/mode.ts` and
+`plugins/ops-agent/src/bin/opsd.ts` exist and the mode tests can actually
+observe it. What survives here is only the packaging half: the installer renders
+the manifest path into the configuration and never fabricates a manifest.
 
 **Step 2: Run tests and verify failure**
 

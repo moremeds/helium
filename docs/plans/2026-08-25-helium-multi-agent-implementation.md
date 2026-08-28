@@ -60,37 +60,98 @@ Harness/Cordis `0.1.1-rc.2`, append-only JSONL, MCP, nodemailer.
 - Modify: `plugins/helium/src/index.test.ts`
 - Modify: `profile/cordis.patch.yml`
 - Modify: `plugins/helium/cordis.patch.yml`
+- Modify: `vitest.e2e.config.ts`
+
+**Flag semantics (verified, not assumed).** The two flags are not
+interchangeable, and swapping one for the other is a functional regression.
+Verified against the installed Claude Code **2.1.250** help output on
+2026-08-28:
+
+- `--allowedTools, --allowed-tools <tools...>` — "Comma or space-separated list
+  of tool names to allow". This is the **permission allow-list**, and it is the
+  only flag that accepts `mcp__helium__*` names.
+- `--tools <tools...>` — "Specify the list of available tools **from the
+  built-in set**. Use `""` to disable all tools, `default` to use all tools, or
+  specify tool names." MCP tool names are not in the built-in set, so routing
+  `mcp__helium__*` through `--tools` drops them.
+- `--strict-mcp-config` — "Only use MCP servers from `--mcp-config`, ignoring
+  all other MCP configurations."
+- `--restricted` — removes the built-in command/code-running tools (Bash,
+  PowerShell, REPL, WebFetch) unless `--tools` names them, and ignores user,
+  project and local settings files.
+
+Production today passes `mcp__helium__<tool>` names into the `allowedTools`
+field (`plugins/helium/src/index.ts:56`). Sending those through `--tools`
+instead would silently drop **both** the MCP tools and the permission gate. The
+correct composition is all three flags together:
+
+- `--tools ""` — disable the entire **built-in** tool set; that is what `--tools`
+  is for.
+- `--allowedTools <declared mcp__helium__* names>` — the permission allow-list,
+  carrying exactly the tools the job declared and nothing else.
+- `--strict-mcp-config` alongside the per-attempt `--mcp-config` — so no ambient
+  MCP server from a user, project, or local configuration is inherited.
+
+`--restricted` was considered and rejected as a substitute: it is complementary,
+not equivalent, because it constrains built-in tools and settings sources but
+places **no constraint on MCP tools**, which is the surface this task exists to
+gate. Any future change to these flags must be re-verified against the installed
+CLI's help output rather than assumed from this note.
 
 **Interface note (frozen):** `runClaude()`'s option field keeps the name
-`allowedTools`. Only the emitted CLI flag changes — from `--allowedTools` to
-`--tools`. Do **not** rename the field to `tools`; downstream plans (the
-provider-effort-selection plan resumes at exactly this seam) must extend this
-signature, not redefine it. Any snippet that passes `tools:` to `runClaude()`
-is wrong and must be corrected to `allowedTools:`.
+`allowedTools`, and D3 froze that as the interface field name — it is not a
+naming defect to re-file later. Do **not** rename the field to `tools`;
+downstream plans (the provider-effort-selection plan resumes at exactly this
+seam) must extend this signature, not redefine it. Any snippet that passes
+`tools:` to `runClaude()` is wrong and must be corrected to `allowedTools:`.
 
 **Step 1: Write the failing argument-isolation test**
 
 Extend `plugins/helium/src/claude.test.ts` so the fake CLI captures and asserts
-all restrictive flags, including an empty tool set:
+the full argv composition, including an empty declared tool set.
+
+The echo-only fixture proves nothing about semantics — it can only show which
+argv the harness composed, never what the CLI did with it. So the harness must
+assert **argv composition**, positively and exactly, and must never assert the
+mere _absence_ of a flag name. An earlier draft of this task asserted that the
+allow-list flag was not present at all; a negative assertion of that shape is
+satisfied by a build that emits no permission gate whatsoever, which is exactly
+the regression it let through. Assert what the argv contains, never what it
+lacks.
 
 ```ts
-it("restricts tools, MCP and setting sources even when no tools are allowed", async () => {
+it("disables built-ins, allow-lists only declared MCP tools, and pins MCP config", async () => {
   const dir = fakeClaude(`echo "{\\"result\\":\\"$*\\",\\"is_error\\":false}"`);
   const out = await runClaude({
     prompt: "PROMPTBODY",
     cwd: "/tmp/helium-owned-workspace",
     maxTurns: 4,
     timeoutMs: 5_000,
-    allowedTools: [],
+    allowedTools: ["mcp__helium__argon_api", "mcp__helium__apex_api"],
     mcpConfigPath: "/tmp/mcp.json",
     env: { PATH: dir },
   });
-  expect(out.text).toContain("--tools ");
-  expect(out.text).toContain("--strict-mcp-config");
-  expect(out.text).toContain("--setting-sources ");
-  expect(out.text).not.toContain("--allowedTools");
+  const argv = parseArgv(out.text!);
+
+  // 1. every built-in tool is disabled
+  expect(argv.valuesOf("--tools")).toEqual([""]);
+
+  // 2. the MCP allow-list equals the declared set exactly — no more, no less
+  expect(argv.valuesOf("--allowedTools")).toEqual([
+    "mcp__helium__argon_api",
+    "mcp__helium__apex_api",
+  ]);
+
+  // 3. no ambient MCP server is inherited
+  expect(argv).toContainFlag("--strict-mcp-config");
+  expect(argv.valuesOf("--mcp-config")).toEqual(["/tmp/mcp.json"]);
+  expect(argv.valuesOf("--setting-sources")).toEqual([""]);
 });
 ```
+
+Add a companion case for the empty declared set: `allowedTools: []` must still
+emit `--tools ""` and `--strict-mcp-config`, and must emit an **empty**
+allow-list rather than omitting the flag and falling back to a provider default.
 
 Add a second fixture that spawns a child process and records its PID. After a
 timeout, assert both the CLI and descendant are gone.
@@ -103,8 +164,9 @@ Run:
 pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts
 ```
 
-Expected: FAIL because `runClaude()` does not pass `--tools`, strict MCP, or
-isolated setting sources and does not kill the process group.
+Expected: FAIL because `runClaude()` does not disable the built-in tool set, does
+not pass strict MCP or isolated setting sources, and does not kill the process
+group.
 
 **Step 3: Implement the restrictive invocation**
 
@@ -118,7 +180,11 @@ const args = [
   "json",
   "--max-turns",
   String(opts.maxTurns),
+  // disable the entire built-in tool set
   "--tools",
+  "",
+  // permission allow-list: exactly the declared mcp__helium__* names
+  "--allowedTools",
   opts.allowedTools.join(","),
   "--setting-sources",
   "",
@@ -128,10 +194,14 @@ if (opts.mcpConfigPath) {
 }
 ```
 
-Do not use `--allowedTools` as a restriction. The option field stays
-`opts.allowedTools`; only the flag it produces changes. Spawn a detached process
-group on macOS/Linux and send TERM then KILL to the group, falling back to
-direct child termination only when no group exists.
+All three restrictions ship together: `--tools ""` disables built-ins,
+`--allowedTools` carries the MCP permission gate, `--strict-mcp-config` pins the
+per-attempt `--mcp-config`. Do **not** route `mcp__helium__*` names through
+`--tools` — they are not in the built-in set and would be dropped along with the
+permission gate. Emit `--allowedTools` even when the declared set is empty, so
+an empty list stays empty instead of becoming the provider default. Spawn a
+detached process group on macOS/Linux and send TERM then KILL to the group,
+falling back to direct child termination only when no group exists.
 
 Create a per-attempt workspace below `stateRoot/workspaces/<job>/`, pass that
 path as `cwd`, and remove it after the child reaches quiescence. Add
@@ -176,21 +246,48 @@ produce `classification: "quota-exhausted"` with `retryAfter` preserved
 verbatim, and `plugins/helium/src/index.ts` must not report it as a plain
 `error`.
 
+**Step 3c: Stop the e2e gate from scanning `.worktrees/`**
+
+`vitest.e2e.config.ts` declares `include: ["**/*.e2e.test.ts"]` with **no
+`exclude`**, so a run from the primary checkout also collects
+`.worktrees/*/plugins/helium/test/e2e/*.e2e.test.ts` — today both
+`plugins/helium/test/e2e/harness.e2e.test.ts` and
+`.worktrees/multi-agent-phase0/plugins/helium/test/e2e/harness.e2e.test.ts` are
+picked up. The gate would then execute whatever a worktree happens to contain,
+at whatever commit it happens to sit on, and fold that into the evidence hash.
+Add the exclusion:
+
+```ts
+export default defineConfig({
+  test: {
+    include: ["**/*.e2e.test.ts"],
+    exclude: [".worktrees/**"],
+    testTimeout: 30_000,
+  },
+});
+```
+
+This lands in Task 1 because Task 1 is the first P0 task and every later P0 gate
+run depends on it. Until the exclusion exists, `pnpm test:e2e-local` is not a
+reproducible command and the Phase 0 exit evidence derived from it is invalid.
+
 **Step 4: Run focused and plugin tests**
 
 Run:
 
 ```bash
 pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts plugins/helium/src/index.test.ts
+pnpm test:e2e-local
 pnpm typecheck
 ```
 
-Expected: PASS; no descendant process remains after the timeout test.
+Expected: PASS; no descendant process remains after the timeout test; the e2e
+run collects only files from the primary checkout, never from `.worktrees/`.
 
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/claude.ts plugins/helium/src/claude.test.ts plugins/helium/src/index.ts plugins/helium/src/config.ts plugins/helium/src/index.test.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml
+git add plugins/helium/src/claude.ts plugins/helium/src/claude.test.ts plugins/helium/src/index.ts plugins/helium/src/config.ts plugins/helium/src/index.test.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml vitest.e2e.config.ts
 git commit -m "fix: isolate senior execution capabilities"
 ```
 
@@ -203,6 +300,19 @@ git commit -m "fix: isolate senior execution capabilities"
 - Create: `contracts/fixtures/senior-isolation/forbidden.txt`
 - Create: `contracts/harness/execution-boundary.ts`
 - Create: `contracts/tests/senior-isolation.contract.spec.ts`
+- Modify: `pnpm-workspace.yaml`
+- Modify: `pnpm-lock.yaml`
+
+**Workspace registration (required).** The fixture carries its own
+`package.json`, which makes it a workspace package, and all three existing
+fixtures are registered explicitly — `pnpm-workspace.yaml:5-7` lists
+`contracts/fixtures/plugin-live-dispatch`, `contracts/fixtures/mcp-ping`, and
+`contracts/fixtures/plugin-restrict-proof` one per line rather than globbing
+`contracts/fixtures/*`. CI runs `pnpm install --frozen-lockfile`, so an
+unregistered fixture or a lockfile that has not been refreshed fails CI, not the
+local run. Register `contracts/fixtures/senior-isolation` in `pnpm-workspace.yaml`,
+run `pnpm install` to refresh `pnpm-lock.yaml`, and commit both in the same
+commit as the fixture — never as a follow-up.
 
 **Scope note (sequencing).** This task delivers a _reusable_ harness, not a
 one-off test for the senior lane. The formal `Executor` interface does not exist
@@ -234,6 +344,27 @@ export function runExecutionBoundaryConformance(
 Task 10 adapts the P1 `Executor` to this same subject shape and inherits the
 contract; it does not fork a second suite. The harness owns the assertions, each
 subject owns only its `invoke`.
+
+**Step 0: Register the fixture as a workspace package**
+
+Before writing the contract, create `contracts/fixtures/senior-isolation/` with
+its `package.json`, add the path to `pnpm-workspace.yaml` next to the three
+existing fixtures, and refresh the lockfile:
+
+```bash
+pnpm install
+git diff --stat pnpm-workspace.yaml pnpm-lock.yaml
+```
+
+Expected: `pnpm-lock.yaml` records the new workspace member. Verify the CI
+invocation succeeds against the refreshed lockfile:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+Expected: PASS. A failure here means the lockfile was not refreshed and CI would
+have failed instead.
 
 **Step 1: Write the failing contract**
 
@@ -292,7 +423,7 @@ Expected: both cases PASS.
 **Step 5: Commit**
 
 ```bash
-git add contracts/fixtures/senior-isolation contracts/harness/execution-boundary.ts contracts/tests/senior-isolation.contract.spec.ts plugins/helium/src/claude.ts
+git add contracts/fixtures/senior-isolation contracts/harness/execution-boundary.ts contracts/tests/senior-isolation.contract.spec.ts plugins/helium/src/claude.ts pnpm-workspace.yaml pnpm-lock.yaml
 git commit -m "test: add reusable execution-boundary conformance harness"
 ```
 
@@ -303,9 +434,30 @@ git commit -m "test: add reusable execution-boundary conformance harness"
 - Modify: `packages/core/src/mcp/selection.ts`
 - Modify: `packages/core/tests/mcp-selection.spec.ts`
 - Modify: `packages/core/src/tools/types.ts`
+- Modify: `packages/core/src/tools/index.ts`
+- Modify: `packages/core/src/mcp/server.ts`
+- Modify: `packages/core/src/job.ts`
+- Modify: `packages/core/tests/job.spec.ts`
 - Modify: `plugins/helium/src/index.ts`
 - Modify: `plugins/helium/src/index.test.ts`
+- Modify: `plugins/helium/src/runtime.ts`
 - Modify: `plugins/helium/src/runtime.test.ts`
+
+**File-list note.** Step 3 rejects `allowMutations: true` at job load, and
+`allowMutations` lives in `packages/core/src/job.ts` — typed at `job.ts:62`,
+parsed at `job.ts:200` and `job.ts:243` — and is asserted in
+`packages/core/tests/job.spec.ts:30,50`; neither file can be left out of a task
+that changes that behaviour. `plugins/helium/src/runtime.ts` is listed alongside
+`runtime.test.ts` for the same reason: runtime behaviour cannot be changed by
+editing only its test. `packages/core/src/tools/index.ts` and
+`packages/core/src/mcp/server.ts` are required by the two fixes below.
+
+**Caution (Task 6 collision).** `packages/core/src/job.ts` and
+`packages/core/tests/job.spec.ts` are **moved** to `packages/v1-compat/` by
+Task 6. Task 3's edit to them must therefore stay small and behaviour-preserving
+for the shipped snake_case/camelCase field contract that round-2 adjudication
+(R2) fixed — add the `allowMutations: true` rejection and nothing else. Do not
+restructure the schema here; Task 6 has to move this file cleanly.
 
 **Step 1: Replace the "silently drops" test with failing selection tests**
 
@@ -316,31 +468,96 @@ removes. That test is **replaced**, not extended: delete it and write the
 fail-loud expectations in its place. Extending the file while leaving the old
 case in would make the suite assert both behaviours at once and fail.
 
+**Two conditions, two behaviours (do not collapse them).** "Fail loud" is not a
+single rule here, and collapsing the two conditions turns a one-capability
+rejection into a total outage:
+
+1. **Unknown capability name** — a name that is not in the tool vocabulary at
+   all, i.e. a typo. Fail loud, at **job load / config validation** time:
+   reject the affected tenant and raise its health state. This is the P0 exit
+   gate's own requirement — "a misspelled capability rejects only the affected
+   tenant and raises its health state".
+2. **Declared but unconfigured** — a real tool name whose backing configuration
+   is absent. `livewire_sql` is the shipped instance:
+   `packages/core/src/tools/livewire.ts:56-57` has `livewireTools()` return `[]`
+   when `livewireDb` is falsy, so the tool is not in the catalog at all when
+   `HELIUM_LIVEWIRE_DB` is unset. This must **not** throw. Degrade that tenant's
+   health with a named reason, omit the tool, and let the server start with the
+   rest.
+
+The distinction is load-bearing because of where the code runs.
+`packages/core/src/mcp/server.ts:21` calls `selected()` at **module top level**,
+so any throw from `selected()` happens during module initialization: the MCP
+server never starts and the senior lane loses **every** tool rather than one
+capability. And condition 2 is not hypothetical — it is the shipped
+`macro-watch` shape today: `plugins/helium/src/index.ts:93-94` writes a static
+`HELIUM_TOOLS: "argon_api,apex_api,livewire_sql,thesis_read,thesis_write"` while
+`index.ts:98-100` omits `HELIUM_LIVEWIRE_DB` unless `config.livewireDb` is set,
+and `packages/core/src/mcp/selection.ts:42-44` filters on
+`names.includes(t.name)`, so `livewire_sql` is silently dropped. A naive
+`throw new Error(\`unknown tools: ...\`)`inside`selected()` converts that
+silent drop into a dead server.
+
+**Requirement:** whatever `packages/core/src/mcp/server.ts` calls at import time
+must never throw for condition 2. Unknown-name rejection belongs to the job-load
+validator, which runs before the server process is spawned.
+
 Add tests for unknown names and mutation mismatch. Use a genuinely mutating
 tool: `thesis_write` is declared `mutating: false` by explicit design
 (`packages/core/src/tools/thesis.ts`) and would never trip the mutation branch.
 The real mutating tools are `argon_rescan` and `argon_ai_analysis`
 (`packages/core/src/tools/argon.ts`, both registered with `mutating: true`).
 
+Condition 1 — validated at job load, against the tool **vocabulary**, not
+against the configured catalog:
+
 ```ts
-expect(() => selected({ HELIUM_TOOLS: "argon_api,typo_tool" })).toThrow(
-  /unknown tools: typo_tool/,
-);
+expect(() =>
+  validateToolSelection(["argon_api", "typo_tool"], { allowMutations: false }),
+).toThrow(/unknown tools: typo_tool/);
 
 expect(() =>
-  selected({
-    HELIUM_TOOLS: "argon_rescan",
-    HELIUM_ALLOW_MUTATIONS: "0",
-  }),
+  validateToolSelection(["argon_rescan"], { allowMutations: false }),
 ).toThrow(/requires mutation permission/);
 
 expect(() =>
-  selected({
-    HELIUM_TOOLS: "argon_ai_analysis",
-    HELIUM_ALLOW_MUTATIONS: "0",
-  }),
+  validateToolSelection(["argon_ai_analysis"], { allowMutations: false }),
 ).toThrow(/requires mutation permission/);
+
+// `livewire_sql` is a real name: it is never an unknown-tool error,
+// regardless of whether HELIUM_LIVEWIRE_DB is set.
+expect(() =>
+  validateToolSelection(["livewire_sql"], { allowMutations: false }),
+).not.toThrow();
 ```
+
+Condition 2 — the shipped `macro-watch` regression case, which must start:
+
+```ts
+it("starts with the remaining tools when a declared tool is unconfigured", () => {
+  const env = {
+    HELIUM_TOOLS: "argon_api,apex_api,livewire_sql,thesis_read,thesis_write",
+    HELIUM_ALLOW_MUTATIONS: "0",
+    // HELIUM_LIVEWIRE_DB deliberately absent
+  };
+  const result = selected(env);
+
+  expect(() => selected(env)).not.toThrow();
+  expect(result.tools.map((t) => t.name)).toEqual([
+    "argon_api",
+    "apex_api",
+    "thesis_read",
+    "thesis_write",
+  ]);
+  expect(result.degraded).toEqual([
+    { tool: "livewire_sql", reason: "unconfigured: HELIUM_LIVEWIRE_DB" },
+  ]);
+});
+```
+
+Never an empty tool set, never a crash, and the degradation carries a **named**
+reason rather than a bare boolean — the tenant health row has to say which
+capability is missing and why.
 
 Keep the existing positive cases (`HELIUM_ALLOW_MUTATIONS: "1"` admits
 `argon_rescan`) unchanged — only the silent-drop assertions are inverted.
@@ -351,42 +568,91 @@ Keep the existing positive cases (`HELIUM_ALLOW_MUTATIONS: "1"` admits
 pnpm exec vitest run --project unit packages/core/tests/mcp-selection.spec.ts
 ```
 
-Expected: FAIL because unknown or disallowed names are silently filtered.
+Expected: FAIL — `validateToolSelection` does not exist, and `selected()`
+silently filters unconfigured names with no degradation signal.
 
 **Step 3: Implement fail-loud catalog validation**
 
-Build a map from `buildTools()` before filtering:
+Split validation from selection along the two conditions.
+
+Job-load validation (fail loud, never reached at server import time) checks
+names against the full tool **vocabulary** — every name the build knows about,
+independent of which are configured in this environment. Export that vocabulary
+from `packages/core/src/tools/index.ts` so a name like `livewire_sql` is known
+even when `livewireTools()` returns `[]`:
 
 ```ts
-const byName = new Map(tools.map((tool) => [tool.name, tool]));
-const unknown = names.filter((name) => !byName.has(name));
-if (unknown.length > 0) throw new Error(`unknown tools: ${unknown.join(", ")}`);
-const forbidden = names.filter(
-  (name) => byName.get(name)?.mutating && !allowMutations,
+// packages/core/src/tools/index.ts — names, not instances
+export const TOOL_VOCABULARY = new Map<string, { mutating: boolean }>(
+  /* ... */
 );
-if (forbidden.length > 0) {
-  throw new Error(`tools require mutation permission: ${forbidden.join(", ")}`);
+
+// job-load validator
+export function validateToolSelection(
+  names: string[],
+  opts: { allowMutations: boolean },
+): void {
+  const unknown = names.filter((name) => !TOOL_VOCABULARY.has(name));
+  if (unknown.length > 0) {
+    throw new Error(`unknown tools: ${unknown.join(", ")}`);
+  }
+  const forbidden = names.filter(
+    (name) => TOOL_VOCABULARY.get(name)?.mutating && !opts.allowMutations,
+  );
+  if (forbidden.length > 0) {
+    throw new Error(
+      `tools require mutation permission: ${forbidden.join(", ")}`,
+    );
+  }
 }
 ```
 
+Server-side selection (import-safe, never throws for condition 2) returns the
+configured subset plus a named degradation list:
+
+```ts
+// packages/core/src/mcp/selection.ts
+export function selected(env = process.env): {
+  tools: EcosystemTool[];
+  degraded: { tool: string; reason: string }[];
+} {
+  // names present in the vocabulary but absent from the built catalog are
+  // reported as degraded, never thrown
+}
+```
+
+`packages/core/src/mcp/server.ts` registers `result.tools` and emits
+`result.degraded` as a health signal; its import-time path has no throw on it.
+
+Derive the tool list from the tenant, not from a constant. `HELIUM_TOOLS` is
+hardcoded in `plugins/helium/src/index.ts:93-94` as a static five-name string,
+so a job that declares a bad name never produces a bad `HELIUM_TOOLS` and
+condition 1 can never fire. Derive `HELIUM_TOOLS` from the job spec's declared
+`tools` (the same list already used at `index.ts:56`), so a misspelled
+capability in the job YAML is exactly what trips the job-load validator and
+rejects that tenant.
+
 Generate a per-attempt MCP config from the job's exact tool list and
 `allowMutations` value. Delete the static all-tools MCP config. If mutation is
-not intended for v1 production, reject `allowMutations: true` at job load until
-a mutating provider contract is certified; do not advertise a no-op flag.
+not intended for v1 production, reject `allowMutations: true` at job load
+(`packages/core/src/job.ts`) until a mutating provider contract is certified; do
+not advertise a no-op flag. Keep that edit minimal — Task 6 moves this file.
 
-**Step 4: Run selection, runtime, and type tests**
+**Step 4: Run selection, job, runtime, and type tests**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/mcp-selection.spec.ts plugins/helium/src/index.test.ts plugins/helium/src/runtime.test.ts
+pnpm exec vitest run --project unit packages/core/tests/mcp-selection.spec.ts packages/core/tests/job.spec.ts plugins/helium/src/index.test.ts plugins/helium/src/runtime.test.ts
 pnpm typecheck
 ```
 
-Expected: PASS; a bad tool name fails only its tenant load path.
+Expected: PASS; a misspelled tool name fails only its tenant load path, and the
+shipped `macro-watch` shape with `HELIUM_LIVEWIRE_DB` absent still starts a
+server carrying the other four tools plus a degraded-health signal.
 
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/mcp/selection.ts packages/core/tests/mcp-selection.spec.ts packages/core/src/tools/types.ts plugins/helium/src/index.ts plugins/helium/src/index.test.ts plugins/helium/src/runtime.test.ts
+git add packages/core/src/mcp/selection.ts packages/core/tests/mcp-selection.spec.ts packages/core/src/tools/types.ts packages/core/src/tools/index.ts packages/core/src/mcp/server.ts packages/core/src/job.ts packages/core/tests/job.spec.ts plugins/helium/src/index.ts plugins/helium/src/index.test.ts plugins/helium/src/runtime.ts plugins/helium/src/runtime.test.ts
 git commit -m "fix: validate execution tool contracts"
 ```
 
@@ -490,7 +756,22 @@ git commit -m "fix: write delivery intent before side effects"
 - Modify: `plugins/helium/src/runtime.test.ts`
 - Create: `scripts/deadman/check-tenant-heartbeats.mjs`
 - Create: `scripts/deadman/check-tenant-heartbeats.test.mjs`
+- Create: `scripts/deadman/check-heartbeat.test.sh`
 - Modify: `scripts/deadman/check-heartbeat.sh`
+- Create: `docs/evidence/p0-manifest.yaml`
+
+**Phase 0 exit artifact.** Task 5 is the last P0 task, so it is the task that
+produces the filled-in P0 evidence manifest at **`docs/evidence/p0-manifest.yaml`**
+and creates the `docs/evidence/` directory that holds it — no earlier P0 task
+creates a manifest file, and the directory does not exist in the repo today.
+Phase 1 Task 7 lands `docs/evidence/claims.yaml` in the **same directory**, and
+the P0 manifest's deterministic claims are the first rows later appended to that
+register; the directory is created once, here, and Task 7 adds to it rather than
+establishing it.
+
+`scripts/deadman/check-heartbeat.test.sh` is listed as a `Create:` because Step 4
+runs it and it does not exist today — the dead-man wrapper's own regression test
+ships with the wrapper change, not after it.
 
 **Step 1: Write failing reducer and script tests**
 
@@ -535,10 +816,28 @@ bash scripts/deadman/check-heartbeat.test.sh
 
 Expected: PASS.
 
+**Step 4b: Write the P0 evidence manifest**
+
+Create `docs/evidence/` and fill in `docs/evidence/p0-manifest.yaml` using the
+frozen P0 EvidenceManifest template recorded in the
+[multi-agent master plan](2026-08-25-helium-multi-agent-master-plan.md). Fill the
+template in; do not redesign its field list.
+
+```bash
+mkdir -p docs/evidence
+```
+
+Every P0 assertion is deterministic, so each row records the exact command, the
+tool version that ran it, and the hash of that command's output — the command is
+the verifier, never a model and never the author. Assertions that are not
+deterministically checkable are recorded as `PARTIAL` with the missing proof
+named. Task 7 later creates `docs/evidence/claims.yaml` beside this file and
+appends these deterministic claims as its first rows.
+
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/tenant-health.ts packages/core/tests/tenant-health.spec.ts packages/core/src/index.ts plugins/helium/src/runtime.ts plugins/helium/src/runtime.test.ts scripts/deadman
+git add packages/core/src/tenant-health.ts packages/core/tests/tenant-health.spec.ts packages/core/src/index.ts plugins/helium/src/runtime.ts plugins/helium/src/runtime.test.ts scripts/deadman docs/evidence/p0-manifest.yaml
 git commit -m "feat: monitor liveness per tenant"
 ```
 
@@ -552,8 +851,22 @@ pnpm typecheck
 pnpm test
 pnpm test:contracts
 pnpm test:e2e-local
+node --test scripts/deadman/check-tenant-heartbeats.test.mjs
+bash scripts/deadman/check-heartbeat.test.sh
 git diff --check
 ```
+
+The two `scripts/deadman/` tests are listed explicitly because neither is wired
+into a `package.json` script or into CI: `pnpm test` does not reach them, so a
+gate that runs only the `pnpm` commands never executes two of the tests Task 5
+creates. Run them by hand until they are wired up.
+
+**The gate's evidence is invalid until Task 1 Step 3c has landed.** Without
+`exclude: [".worktrees/**"]` in `vitest.e2e.config.ts`, `pnpm test:e2e-local`
+also collects `*.e2e.test.ts` files from any `.worktrees/` checkout, at whatever
+commit those sit on — the command is then not reproducible and its output hash
+does not describe this tree. Confirm the exclusion is present before recording
+any e2e row in the manifest.
 
 Expected: all commands pass. Do not deploy. Open a PR and obtain review of the
 isolation proof and delivery crash matrix before starting Phase 1.
@@ -562,9 +875,13 @@ isolation proof and delivery crash matrix before starting Phase 1.
 deliverable, so P0 cannot produce one. P0's exit artifact is instead the **frozen
 P0 EvidenceManifest template** recorded in the
 [multi-agent master plan](2026-08-25-helium-multi-agent-master-plan.md)
-("frozen P0 template"). It is hand-writable, requires no P1 code, and its field
-list is fixed — fill it in, do not redesign it, and do not defer P0's exit
-evidence to Phase 1.
+("frozen P0 template"), filled in and committed as
+**`docs/evidence/p0-manifest.yaml`** by Task 5 Step 4b — the same commit that
+creates the `docs/evidence/` directory. It is hand-writable, requires no P1 code,
+and its field list is fixed — fill it in, do not redesign it, and do not defer
+P0's exit evidence to Phase 1. Phase 1 Task 7's `docs/evidence/claims.yaml`
+lands in that same directory and takes this manifest's deterministic claims as
+its first rows.
 
 For every deterministic assertion in that manifest, **the verifier is a command
 plus its version plus the hash of its output — never a model, and never the
@@ -1377,7 +1694,15 @@ git commit -m "feat: add opaque executor leases and isolation classes"
 **Files:**
 
 - Create: `contracts/tests/topology-structure.contract.spec.ts`
+- Create: `packages/core/src/sensor-context.ts`
 - Modify: `packages/core/src/index.ts`
+
+**File-list note.** Step 3 requires core to export the context type a sensor
+receives, and no such type exists today — there is no `SensorContext` anywhere in
+the tree and `packages/core/src/sensors/` does not exist. The type is therefore
+an explicit `Create:`, in its own module `packages/core/src/sensor-context.ts`,
+re-exported from `packages/core/src/index.ts`. It is a type-only module: it
+declares the sensor context, not any sensor.
 
 **Scope note (scheduling).** This is the **static** half of the design §5.5 edge
 rule — "no sensor can bypass the controller to call a provider" — and of
@@ -1425,22 +1750,42 @@ module under `packages/core/src/sensors` and `plugins/ops-agent/src` — the
 collector and every probe — and fail on transitive reachability of the executor
 registry, any `Executor` implementation, or a provider adapter:
 
+Both the roots and the forbidden targets are **declared names that must
+resolve**. A bare `expect(reachable).not.toContain("plugins/helium/src/executor-registry.ts")`
+is vacuously true whenever that path does not exist in the tree — it asserts
+nothing, and it would keep passing if the file were renamed. Resolve every
+declared name to a real module identity first, and fail the lint on any name
+that cannot be resolved:
+
 ```ts
-const reachable = transitiveStaticImports([
-  "packages/core/src/sensors",
-  "plugins/ops-agent/src",
-]);
-expect(reachable).not.toContain("plugins/helium/src/executor-registry.ts");
+// Every declared name must resolve. An unresolvable root or an unresolvable
+// forbidden target is a lint FAILURE, never a silent pass.
+const roots = resolveRoots(DECLARED_SENSOR_ROOTS); // throws on a missing root
+const forbidden = resolveModules(DECLARED_FORBIDDEN_TARGETS); // throws on a miss
+
+const reachable = transitiveStaticImports(roots);
+expect(reachable).toEqual(expect.not.arrayContaining(forbidden));
 expect(reachable.filter(isExecutorImplementation)).toEqual([]);
 expect(reachable.filter(isProviderAdapter)).toEqual([]);
 ```
 
-Declare both roots explicitly rather than globbing for them: at P1
-`packages/core/src/sensors` does not exist yet and `plugins/ops-agent/src`
-arrives with Ops Task 7 in P2.5a. The lint must therefore report a declared root
-it could not enumerate instead of walking an empty set and passing — a guard
-that goes green because it found nothing to check is the failure mode this task
-exists to prevent.
+Declare both root sets explicitly rather than globbing for them, and **declare a
+root only once the task that creates it has run**: at P1 neither
+`packages/core/src/sensors` nor `plugins/ops-agent/src` exists —
+`plugins/ops-agent/src` arrives with Ops Task 7 in P2.5a and the sensor modules
+with Ops Task 10. `DECLARED_SENSOR_ROOTS` is therefore **empty at P1** and each
+later task adds its own root as it creates it. The rule the lint enforces is
+that a _declared_ root must be enumerable: it reports a declared root it could
+not enumerate instead of walking an empty set and passing. A guard that goes
+green because it found nothing to check is the failure mode this task exists to
+prevent — which is why an empty declaration list at P1 is not a loophole, but a
+declared-then-missing root is a hard failure.
+
+The same rule applies to `DECLARED_FORBIDDEN_TARGETS`: it names only modules
+that exist at the phase in which it is declared, so at P1 it names the executor
+registry and provider adapters **only if** MA Task 10 has already landed them;
+otherwise the import-graph half declares nothing and the type-level exclusion
+carries the guard.
 
 **Step 2: Run the contract and verify failure**
 
@@ -1449,22 +1794,27 @@ pnpm exec vitest run --project contracts contracts/tests/topology-structure.cont
 pnpm typecheck
 ```
 
-Expected: FAIL because core exports no sensor context type and the lint has no
-root it can enumerate.
+Expected: FAIL because core exports no sensor context type — the type-level
+exclusion cannot compile against a `SensorContext` that does not exist. This is
+the assertion that is falsifiable at P1; the import-graph half has no roots to
+walk yet and must not be relied on for the red.
 
 **Step 3: Export a neutral sensor context**
 
-Export from `packages/core/src/index.ts` the context type a sensor receives: the
-event or observation it is normalizing, its freshness bound, its clock, and its
-append-only sink. Nothing else. An executor, a registry handle, a lease, a run,
-or a provider adapter reaching a sensor is what the type-level exclusion refuses,
-and the sensor's fail-closed state stays `unknown` — never a model call.
+Create `packages/core/src/sensor-context.ts` declaring `SensorContext` — the
+context type a sensor receives: the event or observation it is normalizing, its
+freshness bound, its clock, and its append-only sink. Nothing else. Re-export it
+from `packages/core/src/index.ts`. An executor, a registry handle, a lease, a
+run, or a provider adapter reaching a sensor is what the type-level exclusion
+refuses, and the sensor's fail-closed state stays `unknown` — never a model call.
 
-The import-graph lint needs no production code; it needs a root it can walk.
-Point it at the roots above and record, in the test itself, which roots existed
-at the run. Ops Task 10 Step 4 is where the collector and the probes are
-required to pass this contract, and Phase 3 Task 19's behavioral suite layers on
-top of it without weakening it.
+The import-graph lint needs no production code; it needs roots it can walk, and
+at P1 it has none. Ship the resolver and the declaration lists with an empty
+`DECLARED_SENSOR_ROOTS`, and record in the test itself which roots were declared
+at the run. Ops Task 7 adds `plugins/ops-agent/src` to the declaration when it
+creates that tree, and Ops Task 10 Step 4 adds the sensor modules and is where
+the collector and the probes are required to pass this contract; Phase 3
+Task 19's behavioral suite layers on top without weakening it.
 
 **Step 4: Run the contract and the typecheck**
 
@@ -1473,13 +1823,20 @@ pnpm exec vitest run --project contracts contracts/tests/topology-structure.cont
 pnpm typecheck
 ```
 
-Expected: PASS, and adding an executor, provider, lease, or run member to the
-sensor context breaks `pnpm typecheck` rather than only this suite.
+Expected: PASS, on the strength of the type-level exclusion — that is the half
+this task actually proves at P1. Adding an executor, provider, lease, or run
+member to `SensorContext` must break `pnpm typecheck`, not merely this suite.
+The import-graph half passes at P1 because it has nothing declared to walk, and
+gains its force in P2.5a as Ops Task 7 and Ops Task 10 declare their roots; the
+resolver's fail-on-unresolvable rule is what keeps that later addition honest.
+Verify both halves before moving on: temporarily add a `lease` member to
+`SensorContext` and confirm `pnpm typecheck` fails, and temporarily declare a
+nonexistent root and confirm the contract fails rather than passing empty.
 
 **Step 5: Commit**
 
 ```bash
-git add contracts/tests/topology-structure.contract.spec.ts packages/core/src/index.ts
+git add contracts/tests/topology-structure.contract.spec.ts packages/core/src/sensor-context.ts packages/core/src/index.ts
 git commit -m "test: guard the sensor-to-executor topology edge statically"
 ```
 
