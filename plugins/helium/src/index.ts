@@ -11,7 +11,12 @@ import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { buildTools, JsonlWriter, type RunOutcome } from "@helium/core";
+import {
+  buildTools,
+  JsonlWriter,
+  type JobSpec,
+  type RunOutcome,
+} from "@helium/core";
 import { buildChildEnv, runClaude, type ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
@@ -75,8 +80,9 @@ export function seniorOutcome(result: ClaudeResult): {
 /**
  * Senior lane: spawns the host `claude -p` binary and translates its result
  * into the `SeniorLane` outcome shape {@link HeliumRuntime}'s `Dispatcher`
- * expects. `mcpConfigPath` is the file `apply()` writes once at startup
- * (spec §4) so the child reaches the ecosystem tools over MCP stdio.
+ * expects. The MCP stdio config the child reads (spec §4) is written per
+ * attempt, into that attempt's workspace, from the job's own declared tool
+ * contract — see {@link writeMcpConfig}.
  *
  * Each attempt runs in its OWN empty directory below
  * `<stateRoot>/workspaces/<job>/`, never `process.cwd()`: the senior child is
@@ -85,11 +91,7 @@ export function seniorOutcome(result: ClaudeResult): {
  * the child has reached quiescence (`runClaude()` resolves only after the
  * process group has closed).
  */
-function buildSeniorLane(
-  cfg: Config,
-  mcpConfigPath: string,
-  workspacesDir: string,
-): SeniorLane {
+function buildSeniorLane(cfg: Config, workspacesDir: string): SeniorLane {
   return {
     async dispatch(job, _ev, prompt) {
       const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
@@ -103,7 +105,7 @@ function buildSeniorLane(
             maxTurns: job.maxTurns.senior,
             timeoutMs: job.timeoutMs,
             allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
-            mcpConfigPath,
+            mcpConfigPath: writeMcpConfig(cfg, job, workspace),
             env,
           }),
         );
@@ -115,14 +117,28 @@ function buildSeniorLane(
 }
 
 /**
- * Writes the MCP stdio config the senior lane's `claude -p --mcp-config`
- * child reads (spec §4): one server, `helium`, pointed at `config.mcpBin`
- * with the ecosystem toolkit's env contract. Written once at startup to
- * `<stateRoot>/mcp.json` — a stable, writable path that survives a
- * symlink-swapped release deploy (task-2.7-report.md; task-3.3-brief.md).
+ * Writes the MCP stdio config for ONE senior attempt, into that attempt's own
+ * workspace, derived from the job's declared contract.
+ *
+ * Previously this was written once at startup to `<stateRoot>/mcp.json` with a
+ * hardcoded five-name `HELIUM_TOOLS` string. That made the tool contract a
+ * constant rather than a property of the tenant: a job could declare any tool
+ * list it liked and the child still received the same fixed set, so a
+ * misspelled capability in a job's YAML could never produce a bad
+ * `HELIUM_TOOLS` and never trip the job-load validator. Deriving it from
+ * `job.tools` — the same list already used to build the `mcp__helium__*`
+ * allow-list — is what makes that validator reachable.
+ *
+ * `HELIUM_ALLOW_MUTATIONS` likewise follows the job rather than a literal `0`.
+ * Job load currently refuses `allowMutations: true` outright, so it is always
+ * `"0"` today; writing it truthfully means the flag is never a no-op that
+ * merely looks like a granted permission.
+ *
+ * Per-attempt rather than per-daemon because the file now varies by job, and
+ * the attempt workspace is already created and removed around the child.
  */
-function writeMcpConfig(config: Config): string {
-  const path = join(config.stateRoot, "mcp.json");
+function writeMcpConfig(config: Config, job: JobSpec, dir: string): string {
+  const path = join(dir, "mcp.json");
   writeFileSync(
     path,
     JSON.stringify(
@@ -132,9 +148,8 @@ function writeMcpConfig(config: Config): string {
             command: config.mcpBin,
             args: [],
             env: {
-              HELIUM_TOOLS:
-                "argon_api,apex_api,livewire_sql,thesis_read,thesis_write",
-              HELIUM_ALLOW_MUTATIONS: "0",
+              HELIUM_TOOLS: job.tools.join(","),
+              HELIUM_ALLOW_MUTATIONS: job.allowMutations ? "1" : "0",
               HELIUM_ARGON_BASE: config.argonBase,
               HELIUM_APEX_BASE: config.apexBase,
               ...(config.livewireDb
@@ -181,12 +196,11 @@ export function apply(ctx: Context, raw: Config): void {
     tools.filter((t) => !t.mutating),
   );
 
-  const mcpConfigPath = writeMcpConfig(cfg);
   const runtime = new HeliumRuntime({
     config: cfg,
     engines: {
       triage: new TriageRunner(ctx),
-      senior: buildSeniorLane(cfg, mcpConfigPath, paths.workspaces),
+      senior: buildSeniorLane(cfg, paths.workspaces),
     },
     delivery: {
       deliver: (job, ev, result) => delivery.deliver(job, ev, result),

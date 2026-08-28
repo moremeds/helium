@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { selected, type SelectionEnv } from "../src/mcp/selection.js";
+import { TOOL_VOCABULARY, validateToolSelection } from "../src/tools/index.js";
 
 // Extracted out of mcp/server.ts (Task 2.7 post-merge hardening item 5/6):
 // server.ts's own top-level code connects a real StdioServerTransport on
@@ -18,7 +19,7 @@ describe("mcp selection", () => {
 
   it("defaults to every non-mutating tool, with livewire_sql absent when no lake is configured", () => {
     const names = selected(baseEnv())
-      .map((t) => t.name)
+      .tools.map((t) => t.name)
       .sort();
     expect(names).toEqual([
       "apex_api",
@@ -32,54 +33,109 @@ describe("mcp selection", () => {
   it("includes livewire_sql once HELIUM_LIVEWIRE_DB is set", () => {
     const names = selected(
       baseEnv({ HELIUM_LIVEWIRE_DB: "/nonexistent.duckdb" }),
-    ).map((t) => t.name);
+    ).tools.map((t) => t.name);
     expect(names).toContain("livewire_sql");
   });
 
   it("admits mutating tools only under HELIUM_ALLOW_MUTATIONS=1", () => {
-    const withoutFlag = selected(baseEnv()).map((t) => t.name);
+    const withoutFlag = selected(baseEnv()).tools.map((t) => t.name);
     expect(withoutFlag).not.toContain("argon_rescan");
 
-    const withFlag = selected(baseEnv({ HELIUM_ALLOW_MUTATIONS: "1" })).map(
-      (t) => t.name,
-    );
+    const withFlag = selected(
+      baseEnv({ HELIUM_ALLOW_MUTATIONS: "1" }),
+    ).tools.map((t) => t.name);
     expect(withFlag).toContain("argon_rescan");
     expect(withFlag).toContain("argon_ai_analysis");
   });
 
   it("HELIUM_TOOLS narrows the set, and the mutation filter still wins even when a mutating tool is named", () => {
     const named = selected(baseEnv({ HELIUM_TOOLS: "argon_api,thesis_read" }))
-      .map((t) => t.name)
+      .tools.map((t) => t.name)
       .sort();
     expect(named).toEqual(["argon_api", "thesis_read"]);
 
     // Naming a mutating tool without HELIUM_ALLOW_MUTATIONS=1 drops it: the
     // mutation filter runs first, fail-closed even under an explicit
-    // allow-list.
-    const namedMutating = selected(
-      baseEnv({ HELIUM_TOOLS: "argon_rescan" }),
-    ).map((t) => t.name);
-    expect(namedMutating).toEqual([]);
+    // allow-list. That is policy, not a configuration gap, so it is NOT
+    // reported as a degradation.
+    const namedMutating = selected(baseEnv({ HELIUM_TOOLS: "argon_rescan" }));
+    expect(namedMutating.tools).toEqual([]);
+    expect(namedMutating.degraded).toEqual([]);
 
     const namedMutatingAllowed = selected(
       baseEnv({ HELIUM_TOOLS: "argon_rescan", HELIUM_ALLOW_MUTATIONS: "1" }),
-    ).map((t) => t.name);
+    ).tools.map((t) => t.name);
     expect(namedMutatingAllowed).toEqual(["argon_rescan"]);
   });
 
-  it("silently drops a HELIUM_TOOLS name that matches no known tool", () => {
-    // selected() filters buildTools()'s own output by name -- a typo'd or
-    // retired tool name simply never matches anything. No error, no
-    // placeholder entry; the rest of a valid allow-list is unaffected.
-    const names = selected(
-      baseEnv({ HELIUM_TOOLS: "argon_api,not_a_real_tool" }),
-    ).map((t) => t.name);
-    expect(names).toEqual(["argon_api"]);
+  // Replaces "silently drops a HELIUM_TOOLS name that matches no known tool".
+  // That test asserted `.not.toThrow()` around a silent drop and locked in
+  // exactly the behaviour this task removes. The two conditions below are
+  // deliberately NOT collapsed into one rule: see selection.ts's own comment.
+  it("starts with the remaining tools when a declared tool is unconfigured", () => {
+    const env = baseEnv({
+      HELIUM_TOOLS: "argon_api,apex_api,livewire_sql,thesis_read,thesis_write",
+      HELIUM_ALLOW_MUTATIONS: "0",
+      // HELIUM_LIVEWIRE_DB deliberately absent
+    });
+    const result = selected(env);
 
+    expect(() => selected(env)).not.toThrow();
+    expect(result.tools.map((t) => t.name)).toEqual([
+      "argon_api",
+      "apex_api",
+      "thesis_read",
+      "thesis_write",
+    ]);
+    expect(result.degraded).toEqual([
+      { tool: "livewire_sql", reason: "unconfigured: HELIUM_LIVEWIRE_DB" },
+    ]);
+  });
+
+  it("never throws for an unknown name either — the job-load validator is that gate, and server.ts calls this at import time", () => {
+    const env = baseEnv({ HELIUM_TOOLS: "argon_api,not_a_real_tool" });
+    expect(() => selected(env)).not.toThrow();
+    const result = selected(env);
+    expect(result.tools.map((t) => t.name)).toEqual(["argon_api"]);
+    expect(result.degraded).toEqual([
+      { tool: "not_a_real_tool", reason: "unknown tool name" },
+    ]);
+  });
+});
+
+describe("validateToolSelection", () => {
+  it("rejects an unknown name", () => {
     expect(() =>
-      selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" })),
+      validateToolSelection(["argon_api", "typo_tool"], {
+        allowMutations: false,
+      }),
+    ).toThrow(/unknown tools: typo_tool/);
+  });
+
+  it("rejects a mutating tool when the job does not permit mutation", () => {
+    expect(() =>
+      validateToolSelection(["argon_rescan"], { allowMutations: false }),
+    ).toThrow(/require mutation permission/);
+    expect(() =>
+      validateToolSelection(["argon_ai_analysis"], { allowMutations: false }),
+    ).toThrow(/require mutation permission/);
+  });
+
+  it("admits a mutating tool when the job does permit mutation", () => {
+    expect(() =>
+      validateToolSelection(["argon_rescan"], { allowMutations: true }),
     ).not.toThrow();
-    expect(selected(baseEnv({ HELIUM_TOOLS: "not_a_real_tool" }))).toEqual([]);
+  });
+
+  it("treats livewire_sql as a real name regardless of whether the lake is configured", () => {
+    // The vocabulary is every name the BUILD knows about, not the subset this
+    // environment happens to have configured. livewireTools() returns [] with
+    // no HELIUM_LIVEWIRE_DB, so a catalog-based check would call this a typo
+    // and reject the shipped macro-watch job.
+    expect(TOOL_VOCABULARY.has("livewire_sql")).toBe(true);
+    expect(() =>
+      validateToolSelection(["livewire_sql"], { allowMutations: false }),
+    ).not.toThrow();
   });
 });
 

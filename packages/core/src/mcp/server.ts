@@ -18,7 +18,22 @@ import { z } from "zod";
 import { selected } from "./selection.js";
 
 const server = new McpServer({ name: "helium", version: "0.2.0" });
-for (const tool of selected()) {
+// `selected()` is called at module top level, so it is contractually
+// non-throwing: a throw here would mean the server never starts and the senior
+// lane loses every tool over one missing capability. Unknown names are rejected
+// far earlier, at job load. A declared-but-unconfigured tool arrives as a named
+// degradation instead, reported on stderr -- never stdout, which is the MCP
+// protocol channel -- so the tenant's health row can say which capability is
+// missing and why.
+const selection = selected();
+if (selection.degraded.length > 0) {
+  console.error(
+    `helium-mcp: DEGRADED -- ${selection.degraded
+      .map((d) => `${d.tool} (${d.reason})`)
+      .join(", ")}`,
+  );
+}
+for (const tool of selection.tools) {
   const shape =
     tool.paramsSchema instanceof z.ZodObject
       ? (tool.paramsSchema.shape as z.ZodRawShape)
