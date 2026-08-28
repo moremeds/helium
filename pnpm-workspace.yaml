@@ -5,6 +5,7 @@ packages:
   - contracts/fixtures/plugin-live-dispatch
   - contracts/fixtures/mcp-ping
   - contracts/fixtures/plugin-restrict-proof
+  - contracts/fixtures/senior-isolation
 allowBuilds:
   esbuild: true
   koffi: true

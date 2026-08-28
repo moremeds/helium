@@ -100,6 +100,8 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  contracts/fixtures/senior-isolation: {}
+
   packages/core:
     dependencies:
       '@duckdb/node-api':
