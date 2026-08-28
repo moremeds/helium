@@ -756,7 +756,7 @@ git commit -m "fix: write delivery intent before side effects"
 - Modify: `plugins/helium/src/runtime.test.ts`
 - Create: `scripts/deadman/check-tenant-heartbeats.mjs`
 - Create: `scripts/deadman/check-tenant-heartbeats.test.mjs`
-- Create: `scripts/deadman/check-heartbeat.test.sh`
+- Modify: `scripts/deadman/check-heartbeat.test.sh`
 - Modify: `scripts/deadman/check-heartbeat.sh`
 - Create: `docs/evidence/p0-manifest.yaml`
 
@@ -769,9 +769,10 @@ the P0 manifest's deterministic claims are the first rows later appended to that
 register; the directory is created once, here, and Task 7 adds to it rather than
 establishing it.
 
-`scripts/deadman/check-heartbeat.test.sh` is listed as a `Create:` because Step 4
-runs it and it does not exist today — the dead-man wrapper's own regression test
-ships with the wrapper change, not after it.
+`scripts/deadman/check-heartbeat.test.sh` already exists (added by `1c7dfa3`,
+last changed by `847b8cf`) and passes today, so it is a `Modify:` — Step 4 runs
+it and this task changes the wrapper it covers, so the wrapper's own regression
+test is extended in the same commit rather than after it.
 
 **Step 1: Write failing reducer and script tests**
 
