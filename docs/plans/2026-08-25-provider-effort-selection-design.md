@@ -4,6 +4,39 @@
 
 **Status:** Approved
 
+**Revision:** 2026-08-28 — rescoped per adjudication D3: thin selector v1 now,
+scoring/learning deferred to v2.
+
+## Scope tiers
+
+This document is split into two tiers. Everything outside the explicitly marked
+deferred section is **v1, in scope now**. The deferred section is preserved
+design work that must not be implemented yet.
+
+**v1 — the thin selector:**
+
+```
+WorkOrder capability requirements
+  -> isolation / tools / quota / availability hard filter
+  -> configured opaque target preference
+  -> ordered fallback
+  -> ExecutionLease
+```
+
+Kept in v1: the opaque target registry; capability tags; an `isolationClass` per
+target; quota availability as a **dynamic provider-availability state** (the
+`quota-exhausted` failure class and `retryAfter` enter the vocabulary at
+multi-agent Phase 0, and this plan only consumes them); per-role preference and
+fallback ordering configured in the plugin composition root; and a
+provider-neutral `ExecutionLease`.
+
+Effort and model choices live **only** in the provider catalog and the
+privileged admin override. Core code never sees a provider or model name — it
+sees opaque target references.
+
+Deferred to v2: see
+[Deferred (v2)](#deferred-v2--do-not-implement-until-real-usage-data-exists).
+
 ## Decision
 
 Reasoning effort is provider-owned execution metadata. It belongs in the
@@ -11,10 +44,11 @@ provider catalog, router candidate inventory, execution lease audit snapshot,
 and privileged exact-target override. It does not belong in Helium core work
 orders, roles, team manifests, or task graphs.
 
-Normal routing chooses an execution target from measured combinations of model
-and effort. A team asks for capabilities, evidence quality, latency, cost, and
-safety constraints; it never asks for `claude-opus-5` at `xhigh` or any other
-provider-specific combination.
+Normal routing selects an execution target by hard-filtering opaque targets and
+then applying a configured preference with ordered fallback; the model and
+effort behind a target stay at the provider edge. A team asks for capabilities,
+latency, cost, and safety constraints; it never asks for `claude-opus-5` at
+`xhigh` or any other provider-specific combination.
 
 ## Why
 
@@ -35,11 +69,11 @@ choices before Helium has measured them.
 
 The initial Claude subscription catalog is:
 
-| Exact model | Invocation alias | Effort options | Catalog default |
-|---|---|---|---|
-| `claude-haiku-4-5-20251001` | `haiku` | unsupported | none |
-| `claude-sonnet-5` | `sonnet` | `low`, `medium`, `high`, `xhigh`, `max` | `high` |
-| `claude-opus-5` | `opus` | `low`, `medium`, `high`, `xhigh`, `max` | `high` |
+| Exact model                 | Invocation alias | Effort options                          | Catalog default |
+| --------------------------- | ---------------- | --------------------------------------- | --------------- |
+| `claude-haiku-4-5-20251001` | `haiku`          | unsupported                             | none            |
+| `claude-sonnet-5`           | `sonnet`         | `low`, `medium`, `high`, `xhigh`, `max` | `high`          |
+| `claude-opus-5`             | `opus`           | `low`, `medium`, `high`, `xhigh`, `max` | `high`          |
 
 The provider must reject an effort that the selected model does not advertise.
 It must not depend on Claude Code silently clamping an unsupported level.
@@ -86,25 +120,32 @@ execution_modes:
 ```
 
 The provider registry expands or otherwise represents each valid
-`(model, effort)` combination as an independently measurable execution target.
-The core router sees only an opaque target reference plus normalized capability,
-latency, reliability, cost, and safety evidence.
+`(model, effort)` combination as an independent execution target. The core
+selector sees only an opaque target reference plus its declared capability tags,
+`isolationClass`, entitlement, and current availability state. Measured quality,
+latency, reliability, and cost profiles per variant are deferred to v2.
 
-## Routing behavior
+## Routing behavior (v1 thin selector)
 
 1. A work order declares capability and operational requirements only.
-2. The router filters opaque targets against those requirements.
-3. Measured model-effort variants compete on quality, latency, reliability,
-   cost, and preference evidence.
-4. The selected lease pins an exact provider target and effort outside the core
-   task schema.
+2. The selector hard-filters opaque targets on isolation class, tool
+   requirements, quota availability, and current provider availability. A target
+   whose provider is in the `quota-exhausted` availability state is filtered out
+   until its `retryAfter` has elapsed.
+3. Among the surviving targets, the selector takes the configured per-role
+   preference, then walks the configured ordered fallback. There is no scoring,
+   no weighting, and no tie-break arithmetic.
+4. The issued `ExecutionLease` is provider-neutral; it pins an exact provider
+   target and effort at the provider edge, outside the core task schema.
 5. The provider invokes the selected effort explicitly rather than relying on
    a drifting CLI default.
 6. The result records requested and applied effort with the full runtime model
    usage map.
 
-If no model-effort variant satisfies the original requirements, routing returns
+If no target satisfies the original requirements, routing returns
 `capability-shortage`; it does not silently reduce effort or safety constraints.
+Preference and fallback order are configuration, owned by the plugin composition
+root, never by core.
 
 ## Administrator override
 
@@ -130,9 +171,10 @@ Every execution snapshot records:
 - complete provider `modelUsage`, including background models;
 - provider and CLI version;
 - latency, token use, cost metadata, and completion status; and
-- catalog and evaluation versions used by the routing decision.
+- the catalog version used by the selection decision (plus the evaluation
+  version once v2 evaluations exist).
 
-## Acceptance criteria
+## Acceptance criteria (v1)
 
 1. Core and team schemas reject `provider`, `model`, and `effort` fields.
 2. Provider catalogs validate effort per model.
@@ -141,9 +183,41 @@ Every execution snapshot records:
    `max` in the initial catalog.
 5. Unsupported or capped effort is visible in routing and audit evidence.
 6. `ultracode` cannot be selected through the effort field.
-7. Router evaluations distinguish model-effort variants.
+7. Selection is reproducible from configuration alone: the same catalog, the
+   same availability state, and the same per-role preference and fallback order
+   select the same target, with no scored input.
 8. Exact-target replay reproduces both model and effort without changing the
    original work order.
 
+## Deferred (v2) — do not implement until real usage data exists
+
+Everything in this section is preserved design work that is **out of scope**.
+Do not build it, do not write tests against it, and do not let a v1 acceptance
+criterion depend on it. It unblocks only when real usage data exists — per
+adjudication D3 and D5.7.
+
+Deferred mechanisms:
+
+- the 31-item capability ontology (v1 uses a flat set of capability tags);
+- measured capability scores and confidence intervals;
+- weighted scoring, preference weighting, and tie-break arithmetic (v1 uses a
+  configured preference plus an ordered fallback list);
+- automatic learning of routing preference from outcomes; and
+- the full effort-evaluation harness, kept as deferred task D1 in the
+  implementation plan.
+
+Deferred routing behavior — what step 3 of
+[Routing behavior](#routing-behavior-v1-thin-selector) becomes in v2:
+
+> Measured model-effort variants compete on quality, latency, reliability,
+> cost, and preference evidence.
+
+Deferred acceptance criterion:
+
+> Router evaluations distinguish model-effort variants — separately scored per
+> `(model, effort)` variant, never pooled, with sample count and confidence
+> recorded per opaque target ID.
+
 Implementation sequencing and repository touchpoints are defined in the
-[provider effort-selection implementation plan](2026-08-25-provider-effort-selection-implementation.md).
+[provider effort-selection implementation plan](2026-08-25-provider-effort-selection-implementation.md),
+which carries the same v1/v2 split and lists the deferred tasks separately.
