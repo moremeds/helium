@@ -597,6 +597,7 @@ codes), so no P0 assertion needs a model verifier at all.
 - Move: `packages/core/src/mcp/server.ts` -> `packages/v1-compat/src/mcp/server.ts`
 - Move: `packages/core/tests/tools.spec.ts` -> `packages/v1-compat/tests/tools.spec.ts`
 - Create: `packages/v1-compat/src/tools/index.ts`
+- Create: `contracts/tests/core-neutrality.contract.spec.ts`
 - Modify: `packages/core/src/tools/index.ts`
 - Modify: `packages/core/src/mcp/selection.ts`
 - Modify: `packages/core/tests/mcp-selection.spec.ts`
@@ -653,7 +654,12 @@ reading "a `claude -p` senior-lane child". That one line is the leak the narrowe
 list was hiding, and Step 3 rewords it. **Do not add a file or line allow-list**
 — an allow-list is how `mcp/server.ts:3` survived four reviewers. The scan reads
 whole files, comments included: do not exclude documentation comments and do not
-exclude whole source files.
+exclude whole source files. Match each token on **word boundaries** over
+camelCase-split identifiers, never as a raw substring, so `apex` does not fire
+on `apexes` and a short token cannot false-positive inside a longer unrelated
+identifier, while `runClaude` still splits to `run` + `claude` and fails. A
+boundary-anchored pattern is a matching rule, not an allow-list; the ban above
+stands unchanged.
 
 **Step 2: Run the contract and verify failure**
 
@@ -733,6 +739,8 @@ git commit -m "refactor: isolate v1 model-specific job contract"
 - Create: `packages/core/tests/evidence-bundle.spec.ts`
 - Create: `packages/core/tests/evidence-ledger.spec.ts`
 - Create: `packages/core/tests/evidence-manifest.spec.ts`
+- Create: `docs/evidence/claims.yaml`
+- Create: `contracts/tests/claims-register.contract.spec.ts`
 - Modify: `packages/core/src/index.ts`
 
 **Step 1: Write failing schema tests**
@@ -969,9 +977,9 @@ under `src/operations/`, because it is not an operations concept: Ops Task 5
 
 That shared consumption is why it is defined in P1 rather than in Task 13, where
 it was first specified. The corrected execution order is
-`P0 -> P1 -> P2.5a -> P2 -> P3`, which runs P2.5a **before** P2, so a P2.5a
-consumer cannot depend on a P2 primitive — Ops Phase B would otherwise block on
-the durable team kernel, the exact circularity XDOC-1 was raised to kill. The
+`P0 -> P1 -> P2.5a -> P2 -> P3 -> P3.5 -> P4`, which runs P2.5a **before** P2,
+so a P2.5a consumer cannot depend on a P2 primitive — Ops Phase B would
+otherwise block on the durable team kernel, the exact circularity XDOC-1 was raised to kill. The
 primitive is not team-specific: the discipline it encodes is the same atomic
 file and hash discipline existing state already uses. This follows the precedent
 in the paragraph above, where `EvidenceBundle` and `EvidenceLedger` are defined
@@ -983,10 +991,37 @@ no replay; `packages/core/src/state.ts` has only tmp-write-then-rename. Task 13
 then persists team streams through this module rather than shipping a second
 implementation of it, and Ops Task 5 reuses the same one.
 
+**Step 3b: Seed the closed claims register and its contract test**
+
+The `EvidenceLedger` above records decisions; it does not bound the population
+those decisions are drawn from. The master plan's closed-population rule
+(`master-plan.md`, program outcomes, final bullet) requires a committed
+register, and no task owned it until now. This task owns it because it defines
+the evidence contracts the register indexes.
+
+Create `docs/evidence/claims.yaml` seeded with **one id per already-decided
+claim**: every P0 exit-gate assertion and every Phase 1 exit-gate bullet. Each
+entry carries the assertion text, its assertion class, the deterministic
+command that proves it, the pinned tool version that command runs under, and
+the recorded `sha256` of that command's output. Each later phase gate appends
+its own claims to this same file; no phase creates a second register.
+
+Create `contracts/tests/claims-register.contract.spec.ts`, which:
+
+- **fails on an empty or unparseable register** — zero entries is a failure,
+  not a vacuous pass, because an open claim set has no denominator and nothing
+  in it can be found missing;
+- re-runs each deterministic claim's command at its **pinned tool version** and
+  compares the `sha256` of the output against the recorded hash, failing on any
+  mismatch;
+- records a claim whose proof is not deterministically checkable as `PARTIAL`
+  with the missing proof named, never as `PROVEN`.
+
 **Step 4: Run tests and typecheck**
 
 ```bash
 pnpm exec vitest run --project unit packages/core/tests/work.spec.ts packages/core/tests/event-store.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/tests/evidence-manifest.spec.ts
+pnpm exec vitest run --project contracts contracts/tests/claims-register.contract.spec.ts
 pnpm typecheck
 ```
 
@@ -995,7 +1030,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add packages/core/src/work.ts packages/core/src/event-store.ts packages/core/src/evidence packages/core/tests/work.spec.ts packages/core/tests/event-store.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/src/index.ts
+git add packages/core/src/work.ts packages/core/src/event-store.ts packages/core/src/evidence packages/core/tests/work.spec.ts packages/core/tests/event-store.spec.ts packages/core/tests/evidence-bundle.spec.ts packages/core/tests/evidence-ledger.spec.ts packages/core/src/index.ts docs/evidence/claims.yaml contracts/tests/claims-register.contract.spec.ts
 git commit -m "feat: define model-blind work and evidence contracts"
 ```
 
@@ -1349,10 +1384,11 @@ rule — "no sensor can bypass the controller to call a provider" — and of
 acceptance criterion 15. It is scheduled here rather than in Phase 3 because
 both of its assertions are decidable from types and the import graph: it needs
 no task DAG, no evidence ledger, and no team controller, none of which exist at
-P1. The corrected execution order is `P0 -> P1 -> P2.5a -> P2 -> P3`, and P2.5a
-runs Ops Task 10, which creates the collector and every probe — that is every
-sensor in the program. A guard that first appears in Phase 3 Task 19 would be
-written two phases after its own subjects, and the Ops adversarial matrix is not
+P1. The corrected execution order is
+`P0 -> P1 -> P2.5a -> P2 -> P3 -> P3.5 -> P4`, and P2.5a runs Ops Task 10,
+which creates the collector and every probe — that is every sensor in the
+program. A guard that first appears in Phase 3 Task 19 would be written two
+phases after its own subjects, and the Ops adversarial matrix is not
 a substitute: it has no sensor-to-executor case. The **behavioral** half, which
 does need an advancing DAG and an accepted-claim ledger, stays in Task 19.
 
@@ -2221,6 +2257,7 @@ git commit -m "feat: define capability-based macro team"
 - Create: `plugins/helium/src/shadow.ts`
 - Create: `plugins/helium/src/shadow.test.ts`
 - Create: `contracts/tests/topology-boundary.contract.spec.ts`
+- Modify: `docs/evidence/claims.yaml`
 - Modify: `plugins/helium/src/runtime.ts`
 - Modify: `plugins/helium/src/config.ts`
 - Modify: `plugins/helium/src/index.ts`
@@ -2289,6 +2326,18 @@ The controller:
 Add `teamShadowEnabled` and `teamsDir` configuration. Default shadow to false.
 No configuration accepts a provider or model name.
 
+**Step 3b: Pre-register and freeze the evaluation fixture set**
+
+This runs **before the first shadow run**, not after it. Compute the `sha256`
+of the `evals/fixtures/macro` directory and append it to
+`docs/evidence/claims.yaml` (the register Task 7 created) as the Phase 3
+primary-metric claim, together with the metric name — `unsupported-claim rate`,
+lower is better — and the pinned command that recomputes the hash. The hash is
+frozen from that moment: Task 20's gate re-verifies it and a changed hash fails
+the gate rather than being re-baselined. Recording the hash after a shadow run,
+or re-recording it once results are visible, is the failure this step exists to
+prevent.
+
 **Step 4: Run fake-executor end-to-end tests**
 
 ```bash
@@ -2305,7 +2354,7 @@ outcome; no shortcut edge is accepted.
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/team-controller.ts plugins/helium/src/team-controller.test.ts plugins/helium/src/shadow.ts plugins/helium/src/shadow.test.ts plugins/helium/src/runtime.ts plugins/helium/src/config.ts plugins/helium/src/index.ts contracts/tests/topology-boundary.contract.spec.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml
+git add plugins/helium/src/team-controller.ts plugins/helium/src/team-controller.test.ts plugins/helium/src/shadow.ts plugins/helium/src/shadow.test.ts plugins/helium/src/runtime.ts plugins/helium/src/config.ts plugins/helium/src/index.ts contracts/tests/topology-boundary.contract.spec.ts profile/cordis.patch.yml plugins/helium/cordis.patch.yml docs/evidence/claims.yaml
 git commit -m "feat: run macro team in shadow mode"
 ```
 
@@ -2318,8 +2367,10 @@ git commit -m "feat: run macro team in shadow mode"
 - Create: `packages/evals/src/run.ts`
 - Create: `packages/evals/src/score.ts`
 - Create: `packages/evals/src/autonomy.ts`
+- Create: `packages/evals/src/paired-gate.ts`
 - Create: `packages/evals/tests/score.spec.ts`
 - Create: `packages/evals/tests/autonomy.spec.ts`
+- Create: `packages/evals/tests/paired-gate.spec.ts`
 - Create: `evals/fixtures/routing/`
 - Create: `evals/fixtures/macro/`
 - Create: `evals/README.md`
@@ -2384,10 +2435,32 @@ takeover condition. The decision engine chooses `workflow` when the baseline
 meets the bound, `agent` only when lift and verification gates pass, and
 `human` when risk or unresolved uncertainty exceeds authority.
 
+**Step 3b: Implement the paired evaluation gate**
+
+`packages/evals/src/paired-gate.ts` decides the Phase 3 primary-metric gate the
+master plan states, and it is the only thing that decides it. It:
+
+1. re-verifies the `evals/fixtures/macro` directory `sha256` against the value
+   Task 19 pre-registered in `docs/evidence/claims.yaml`, and **fails the gate
+   on any mismatch** — a changed fixture set is never re-baselined;
+2. pairs each fixture case's multi-agent run with the frozen v1 control run;
+3. fails unless there are at least **30 paired cases** (`n >= 30`);
+4. fails unless the multi-agent path shows at least a **20% relative
+   reduction** in unsupported-claim rate at **p < 0.05** on a **two-sided
+   Wilcoxon signed-rank** test over the paired differences; and
+5. emits human preference as a descriptive secondary that can never gate.
+
+The three thresholds in points 3 and 4 are **`PROVISIONAL`** — parameters
+**P-1** and **P-2** of
+[the round-2 adjudication](../reviews/2026-08-28-adjudication-round-2.md) — and
+must be ratified or replaced by the operator before this phase's gate is run.
+`packages/evals/tests/paired-gate.spec.ts` covers each failure mode: hash
+mismatch, `n < 30`, reduction below threshold, and `p >= 0.05`.
+
 **Step 4: Run offline evaluations**
 
 ```bash
-pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts packages/evals/tests/autonomy.spec.ts
+pnpm exec vitest run --project unit packages/evals/tests/score.spec.ts packages/evals/tests/autonomy.spec.ts packages/evals/tests/paired-gate.spec.ts
 pnpm --filter @helium/evals run evaluate -- --fixtures evals/fixtures/macro
 ```
 
@@ -2433,7 +2506,11 @@ Expected:
   baseline and a human-takeover condition;
 - crash/restart and cascading cancellation pass;
 - shadow mode performs no email or mutation; and
-- the scorecard compares the team with the frozen v1 control.
+- the scorecard compares the team with the frozen v1 control, and the paired
+  gate in `packages/evals/src/paired-gate.ts` passes: the pre-registered
+  fixture-set `sha256` still matches, `n >= 30` paired cases, and at least a
+  20% relative reduction in unsupported-claim rate at p < 0.05 on a
+  two-sided Wilcoxon signed-rank test (thresholds `PROVISIONAL`, P-1/P-2).
 
 Open a PR for shadow-mode code only. Do not enable it on the mini until Phase 0,
 Phase 1, and Phase 2 evidence is reviewed and AC#1 is complete.

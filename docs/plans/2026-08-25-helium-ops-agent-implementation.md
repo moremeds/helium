@@ -26,10 +26,12 @@ processes, existing ecosystem health and recovery scripts.
   request; never push directly to `master`.
 - Do not deploy, install launchd jobs, restart services, run repairs, or execute
   recovery drills on the mini during AC#1.
-- Complete and merge the multi-agent plan's Phase 0 and Phase 1 Tasks 6-7
-  before starting the action controller in this plan. That is the whole
-  prerequisite, and it matches the near-term subset the master plan enumerates;
-  do not re-inflate it to MA Tasks 8-15.
+- Complete and merge the multi-agent plan's Phase 0 and Phase 1
+  Tasks 6-7 and 10b before starting the action controller in this plan. That
+  is the whole prerequisite, and it matches the near-term subset the master
+  plan enumerates; do not re-inflate it to the full MA Tasks 8-15 block — only
+  Task 10b, the structural topology guard Ops Task 10 runs against, is required
+  out of that range.
 - Re-read the actual post-prerequisite interfaces before creating the first
   Ops branch. Update paths in this plan through a reviewed documentation PR if
   those interfaces moved; do not create parallel stores or lease systems.
@@ -56,13 +58,13 @@ processes, existing ecosystem health and recovery scripts.
 The A-E phases below are internal to this plan. They map onto the master plan's
 program phases as follows:
 
-| Ops work                      | Program phase | Blocking dependency                                                    |
-| ----------------------------- | ------------- | ---------------------------------------------------------------------- |
-| Phase A, Tasks 1-4            | P2.5a         | MA Phase 0-1 contracts                                                 |
-| Phase B, Tasks 5-8 (incl. 7b) | P2.5a         | MA Phase 0-1 contracts                                                 |
-| Phase C, Tasks 9-12 and 13a   | P2.5a         | Ops Phase B                                                            |
-| Phase D, Tasks 14, 16, 17, 18 | P2.5a         | Ops Phase C                                                            |
-| Phase E, Tasks 13b and 15     | P3.5          | MA Phase 3 Task 18 (team manifests) and Task 19 (`team-controller.ts`) |
+| Ops work                                      | Program phase | Blocking dependency                                                                                                  |
+| --------------------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Phase A, Tasks 1-4 (execute 2 -> 1 -> 3 -> 4) | P2.5a         | MA Phase 0-1 contracts                                                                                               |
+| Phase B, Tasks 5-8 (incl. 7b)                 | P2.5a         | MA Phase 0-1 contracts                                                                                               |
+| Phase C, Tasks 9-12 and 13a                   | P2.5a         | Ops Phase B; Task 10 additionally requires MA Task 10b — `contracts/tests/topology-structure.contract.spec.ts` exists and passes |
+| Phase D, Tasks 14, 16, 17, 18                 | P2.5a         | Ops Phase C                                                                                                          |
+| Phase E, Tasks 13b and 15                     | P3.5          | MA Phase 3 Task 18 (team manifests) and Task 19 (`team-controller.ts`)                                               |
 
 Phase B blocks on MA Phase 0-1 only, exactly like Phase A. A P2.5a row cannot
 block on P2: the program order is `P0 -> P1 -> P2.5a -> P2 -> P3 -> P3.5 -> P4`.
@@ -89,6 +91,11 @@ all of this plan inside a single pre-P3 block was circular; do not restore it.
 
 ## Phase A: evidence fixtures and operations contracts
 
+**Execution order inside Phase A is Task 2 -> Task 1 -> Task 3 -> Task 4.** The
+task headings keep their numbering, but Task 2 lands the `ObservationSchema`
+export first because Task 1's fixture contract parses every fixture through it.
+No draft or placeholder schema is committed to unblock Task 1.
+
 ### Task 1: Freeze sanitized production-derived fixtures
 
 **Files:**
@@ -105,9 +112,10 @@ all of this plan inside a single pre-P3 block was circular; do not restore it.
 **Step 1: Write the failing fixture contract**
 
 **Schema first.** This test parses every fixture observation through
-`ObservationSchema`, which Task 2 defines. Either land Task 2 before this task,
-or commit a frozen draft of the observation schema alongside these fixtures and
-let Task 2 replace the draft with the real export of the same shape. Do not
+`ObservationSchema`, which Task 2 defines, so Task 2 lands before this task:
+Phase A executes in the order Task 2 -> Task 1 -> Task 3 -> Task 4. The fixture
+contract therefore validates against the real `ObservationSchema` export from
+day one; no frozen-draft variant of the schema is ever committed. Do not
 write this test against `expect.any(Array)`: an assertion that a key holds an
 array can never fail, and these fixtures are the only encoding of the two
 production incidents this whole program exists to prevent. A contract that

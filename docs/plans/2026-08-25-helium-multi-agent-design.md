@@ -233,7 +233,7 @@ v1 execution path:
 ```mermaid
 flowchart TB
     E[CaseEvent] --> C[Deterministic Team Controller]
-    C --> W[WorkOrder and CapabilityContract]
+    C --> W["WorkOrder<br/>carries capability requirements"]
     W --> R["Capability Selector<br/>thin hard filter, v1"]
     R --> L[Opaque ExecutionLease]
     L --> P["Provider-Executor Registry<br/>isolationClass declared here"]
@@ -259,7 +259,7 @@ The canonical agent topology is:
 ```text
 CaseEvent
   -> deterministic Team Controller
-  -> WorkOrder + CapabilityContract
+  -> WorkOrder (carries capability requirements)
   -> Capability Selector (thin hard filter, v1)
   -> opaque ExecutionLease
   -> provider-executor registry (isolationClass admitted by conformance)

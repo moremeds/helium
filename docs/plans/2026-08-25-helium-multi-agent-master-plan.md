@@ -110,7 +110,7 @@ Substantive changes in this revision:
   models and termination states.
 - **D4.2** — "exactly once" is removed from program vocabulary.
 - **D4.1 / §4** — deferred and cut scope, and the near-term subset (enumerated
-  by task ID: 20 of the 46 originally planned tasks, 21 of the 48 task units
+  by task ID: 21 of the 46 originally planned tasks, 22 of the 48 task units
   this revision leaves behind), are recorded so scope cannot silently
   re-inflate.
 - **D5** — the near-term execution order (P0 → P1 → P2.5a → P2 → P3 → P3.5 →
@@ -426,17 +426,21 @@ registry with its conformance suite — not the deferred scoring machinery.
 is exactly:
 
 - multi-agent Phase 0: Tasks 1–5;
-- multi-agent Tasks 6–7;
+- multi-agent Tasks 6–7 and 10b (the structural topology guard, which Ops
+  Task 10 runs against);
 - Ops Tasks 1–8, including Task 7b (single mutation ownership);
 - Ops Tasks 9–12 and 18, which are reversible observe-only **packaging** — no
   install until AC#1 closes, under the presence test stated in
   [Phase 2.5a](#phase-25a-deterministic-operations-safety-substrate-and-ops-shadow).
 
-Both framings of the size, stated honestly: this is **20 of the 46 tasks
-originally planned**, and **21 of the 48 task units the plan set now carries**
-after Revision 2 added Ops Task 7b and split Ops Task 13 into 13a (P2.5a) and
-13b (P3.5). The enumeration above is authoritative; where a count elsewhere
-disagrees, the enumeration wins. Everything else waits behind the gates above.
+Both framings of the size, stated honestly: this is **21 of the 46 tasks
+originally planned**, and **22 of the 48 task units the plan set now carries**.
+The 46 → 48 delta is the net of four Revision 2 changes: Ops Task 7b was
+added, Ops Task 13 was split into 13a (P2.5a) and 13b (P3.5), multi-agent
+Task 10b was added, and effort-plan Task 7 (offline effort certification) was
+moved into Deferred (v2). The enumeration above is authoritative; where a count
+elsewhere disagrees, the enumeration wins. Everything else waits behind the
+gates above.
 
 ## Phase 0: certify the existing boundary
 
@@ -500,7 +504,8 @@ changing production behavior.
 
 ### Work
 
-- Define `WorkOrder`, `CapabilityContract`, `RoutingPolicy`, `ExecutionLease`,
+- Define `WorkOrder` — which carries the capability requirements itself, so no
+  separate contract or routing-policy object exists — plus `ExecutionLease`,
   `AgentResult`, and normalized failure schemas, including `quota-exhausted`
   and `retryAfter` as carried over from P0.
 - Define provider registration and executor services on DSH/Cordis seams. The
@@ -518,6 +523,12 @@ changing production behavior.
   path.
 - Add a source/contract guard that rejects provider names from core schemas and
   logic.
+- Add the **structural** half of the topology guard (multi-agent Task 10b) as
+  `contracts/tests/topology-structure.contract.spec.ts`: a compile-time
+  exclusion on the sensor context type plus an import-graph lint, so no sensor
+  or collector module can statically reach an executor, a provider adapter, or
+  a lease. It lands in P1 because P2.5a Ops Task 10 writes the first collector
+  and every probe against it; the behavioral half stays in P3.
 - Add a typed `AgentResult.executionSnapshot` — provider, model, effort,
   provider version, and the `isolationClass` as executed — written at the
   provider edge and stored as evidence. Core never branches on it, so rule 5

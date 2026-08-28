@@ -48,7 +48,7 @@ is normative.
 ```mermaid
 flowchart TB
     E[CaseEvent] --> C[Deterministic Team Controller]
-    C --> W[WorkOrder and CapabilityContract]
+    C --> W["WorkOrder<br/>carries capability requirements"]
     W --> R[Capability Router]
     R --> L[Opaque ExecutionLease]
     L --> P["Provider Edge<br/>model details live here only"]

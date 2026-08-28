@@ -1,6 +1,6 @@
 # Multi-Agent Program Plan Review — Adjudication
 
-_2026-08-28. Decision record adjudicating `docs/reviews/2026-08-28-multi-agent-program-plan-review.md`. Authority: project owner. This document is the canonical input for the docs-only revision of the plan set; where it conflicts with the review, this document wins._
+_2026-08-28. Decision record adjudicating `docs/reviews/2026-08-28-multi-agent-program-plan-review.md`. Authority: project owner. This document is the canonical input for the docs-only revision of the plan set; where it conflicts with the review, this document wins. Superseded in part by `2026-08-28-adjudication-round-2.md`: in particular R3 resolves the `superseded` / `not-needed` naming in D1/OPS-3 as a single `not-needed` state, and R1–R8 rule on the conflicts and unadjudicated findings that the round-1 revision of this record surfaced._
 
 **Program status: `not-ready`.** The design direction is sound; the blockers are unclosed safety contracts and sequencing conflicts, not a wrong architecture. The Claude Phase 0 handoff (`docs/codex-handoffs/2026-08-26-helium-multi-agent-phase0-claude.md`) is **paused** until this docs-only revision lands and the handover is resynced.
 
