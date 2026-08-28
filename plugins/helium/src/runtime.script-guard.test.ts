@@ -107,6 +107,7 @@ function rig() {
       },
       budgetExhausted: () => {},
       heartbeat: () => {},
+      reconcileDeliveries: () => 0,
     },
     fetchImpl,
   };

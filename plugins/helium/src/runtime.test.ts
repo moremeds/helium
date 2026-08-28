@@ -13,6 +13,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
@@ -101,6 +102,7 @@ function rig(jobYaml: string, calendarYaml?: string) {
       deliver: () => {},
       budgetExhausted: () => {},
       heartbeat: () => {},
+      reconcileDeliveries: () => 0,
     },
   };
   return { root, jobsDir, deps };
@@ -359,6 +361,75 @@ describe("HeliumRuntime", () => {
 
       expect(delivered[0].outcome).toBe("run_failed");
       expect(delivered[0].error).toContain("candidate install failed");
+    });
+  });
+  // Task 5: per-tenant liveness. The global dead-man check is satisfied by ANY
+  // tenant's heartbeat, so these rows are what make a single silent or
+  // unparseable tenant visible at all.
+  describe("expected-tenant inventory", () => {
+    it("emits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid", () => {
+      const r = rig(
+        JOB_YAML("test-job", STATE_CHANGE("http://127.0.0.1:1", "state", 1000)),
+      );
+      // A second tenant file that does not parse. loadJobs() skips it, so it is
+      // absent from `jobNames` — but it must NOT be absent from the inventory,
+      // or the fleet reads as fully healthy while this tenant is not running.
+      writeFileSync(join(r.jobsDir, "b-broken.yaml"), "this: [is not a job", "utf8");
+
+      const runtime = new HeliumRuntime(r.deps);
+      runtime.start();
+      runtime.stop();
+
+      const dir = join(r.root, "state", "jsonl");
+      const file = readdirSync(dir).find((f) => f.startsWith("tenant-health-"));
+      expect(file, "no tenant-health stream was written").toBeDefined();
+      const rows = readFileSync(join(dir, file!), "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as { tenant: string; load: string });
+
+      expect(rows.map((x) => [x.tenant, x.load])).toEqual([
+        ["b-broken", "invalid"],
+        ["test-job", "loaded"],
+      ]);
+      // The malformed tenant is skipped for execution but still inventoried.
+      expect(runtime.jobNames).toEqual(["test-job"]);
+    });
+
+    it("closes crash-orphaned delivery intents at boot", () => {
+      // The write-ahead intent row is only half the property: without this call
+      // at startup, an intent orphaned by a crash stays `pending` forever and
+      // the `uncertain` terminal row is never actually written in production.
+      const r = rig(
+        JOB_YAML("test-job", STATE_CHANGE("http://127.0.0.1:1", "state", 1000)),
+      );
+      let calls = 0;
+      const runtime = new HeliumRuntime({
+        ...r.deps,
+        delivery: {
+          ...r.deps.delivery,
+          reconcileDeliveries: () => {
+            calls += 1;
+            return 2;
+          },
+        },
+      });
+      runtime.start();
+      runtime.stop();
+      expect(calls).toBe(1);
+
+      const runs = readFileSync(
+        join(
+          r.root,
+          "state",
+          "jsonl",
+          readdirSync(join(r.root, "state", "jsonl")).find((f) =>
+            f.startsWith("runs-"),
+          )!,
+        ),
+        "utf8",
+      );
+      expect(runs).toContain('"orphanedDeliveries":2');
     });
   });
 });

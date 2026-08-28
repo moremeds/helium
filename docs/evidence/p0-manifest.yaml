@@ -1,0 +1,179 @@
+# Phase 0 exit evidence — filled-in frozen `p0-1` template
+#
+# The field list below is FROZEN by the multi-agent master plan
+# ("Frozen P0 evidence-manifest template"). It is filled in here, not
+# redesigned. Phase 1 Task 7 lands `claims.yaml` beside this file and takes
+# these deterministic claims as its first rows.
+#
+# WHY EVERY CLAIM IS `PARTIAL` RATHER THAN `PROVEN`
+# -------------------------------------------------
+# The master plan requires that every `outputHash` be recorded from CI at the
+# Node version pinned in `.github/workflows/ci.yml` (22.19.0), and states
+# plainly that "a hash captured on a developer machine is not admissible".
+# Every command below has been run, and every one passes — but on the
+# development machine (node 25.1.0), not in CI. Recording those local hashes
+# here would be exactly the unfalsifiable record the rule exists to prevent, so
+# `outputHash` is left `pending` and `decision` is `inconclusive`.
+#
+# A SECOND, STRUCTURAL GAP — three gate commands CI never runs
+# ------------------------------------------------------------
+# CI runs only `pnpm install --frozen-lockfile`, `build`, `typecheck`, `test`
+# (job 1) and `build`, `test:contracts` (job 2). The Phase 0 gate additionally
+# requires `pnpm test:e2e-local` and both `scripts/deadman/` tests, and NO CI
+# job executes any of the three. The implementation plan concedes this for the
+# dead-man pair ("neither is wired into a package.json script or into CI ...
+# run them by hand until they are wired up"). So for
+# P0-TENANT-LIVENESS, and for the e2e portion of P0-V1-BEHAVIOR-PRESERVED,
+# there is currently no admissible hash source at all — not merely an unrecorded
+# one. Closing that needs an operator decision: either wire the three commands
+# into `.github/workflows/ci.yml`, or accept those claims as permanently
+# PARTIAL. That decision is not taken here.
+#
+# To finish this manifest: run CI on this branch, then replace each
+# `outputHash` and `artifacts[].sha256` with the values from that run and flip
+# `decision` to `pass` and `status` to `PROVEN` for the four claims CI covers.
+manifestVersion: p0-1
+phase: P0
+scope: offline
+recordedAt: 2026-08-28T16:59:36Z
+claims:
+  - id: P0-ISOLATION-UNDECLARED-TOOL
+    assertion: "An execution target cannot invoke a tool outside its declared contract."
+    acceptanceBound: "Zero undeclared tool invocations across the adversarial suite; the built-in tool set is disabled, the MCP allow-list equals the declared set exactly, and no ambient MCP server, setting source or environment secret reaches the child."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project contracts contracts/tests/senior-isolation.contract.spec.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm exec vitest run --project contracts contracts/tests/senior-isolation.contract.spec.ts"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "This proves the ARGUMENTS the harness composes and what the child observes of its environment. It does NOT prove the real Claude CLI honours those flags — every fixture is a fake binary. The flag semantics rest on the 2.1.250 help output verified on 2026-08-28, recorded in the implementation plan's Task 1. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P1 Task 10: the formal Executor adapts to this same subject shape and inherits this contract."
+  - id: P0-EXECUTION-BOUNDARY-CONFORMANCE
+    assertion: "The execution-boundary contract is a reusable suite parameterized over a subject, not a one-off test of the senior lane, and a subject cannot declare a stronger isolation class than the harness can demonstrate."
+    acceptanceBound: "The senior lane registers as the first subject and passes every assertion under both a one-tool and a zero-tool declaration; raising its declaredIsolationClass to `sandboxed` fails the suite."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project contracts contracts/tests/senior-isolation.contract.spec.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm exec vitest run --project contracts contracts/tests/senior-isolation.contract.spec.ts"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "The senior lane is a PROCESS boundary, not a filesystem sandbox: the child can read and write outside its workspace. The harness grades that honestly rather than asserting containment it cannot demonstrate. A sandboxed subject does not exist yet, so the sandboxed branch of the grader is unexercised by any real subject. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P1 Task 10: a second subject (the fake executor) exercises the harness's genericity."
+  - id: P0-QUOTA-EXHAUSTED-CLASSIFICATION
+    assertion: "Subscription session-window exhaustion is classified as `quota-exhausted` with the provider's reset hint carried verbatim, never as a generic error and never folded into a budget."
+    acceptanceBound: "A rate-limit envelope and a bare 429 both classify as `quota-exhausted`; the reset hint is preserved when given and never invented when absent."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts plugins/helium/src/index.test.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts plugins/helium/src/index.test.ts"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "Proven against fixture envelopes, not against a live provider rate-limit response. The `retryAfter` string is deliberately opaque at P0 — nothing parses it into a duration yet, and no selector consumes it. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P1 Task 9: the thin selector filters a quota-exhausted target until `retryAfter` and falls back."
+  - id: P0-TOOL-CONTRACT-FAIL-LOUD
+    assertion: "A misspelled capability rejects only the affected tenant and raises its health state, while a declared-but-unconfigured capability degrades that tenant without stopping the MCP server."
+    acceptanceBound: "An unknown tool name throws at job load and is skipped by loadJobs()'s handler with the other tenants still loading; the shipped macro-watch shape with HELIUM_LIVEWIRE_DB absent starts a server carrying the other four tools and one named degradation."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project unit packages/core/tests/mcp-selection.spec.ts packages/core/tests/job.spec.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm exec vitest run --project unit packages/core/tests/mcp-selection.spec.ts packages/core/tests/job.spec.ts"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "The two conditions are proven separately in unit tests and confirmed by starting the real built server binary under both shapes. Not proven under a live senior-lane dispatch against a real MCP client. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P1 Task 11: v1 jobs run through the new boundary end to end."
+  - id: P0-DELIVERY-WRITE-AHEAD-CRASH-REPLAY
+    assertion: "No external delivery side effect occurs that the audit trail has not already announced, and an intent orphaned by a crash reaches a durable terminal state rather than silently disappearing."
+    acceptanceBound: "The transport observes a durable `delivery-intent` row on every send; failure after intent, failure after SMTP acceptance, and crash before the outcome append each terminate in a real row; a restart closes an orphaned intent as `uncertain` and sends no additional mail."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project unit packages/core/tests/jsonl.spec.ts plugins/helium/src/delivery.test.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm exec vitest run --project unit packages/core/tests/jsonl.spec.ts plugins/helium/src/delivery.test.ts"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "This is NOT exactly-once delivery and must never be described as such: SMTP acceptance followed by a crash before the outcome append is genuinely indeterminate, which is precisely why `uncertain` is a terminal state. What is proven is write-ahead ordering, at most one unresolved intent per deliveryId, no blind retry, and a durable uncertain outcome. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P2 Task 15: recovery reconciliation across the team kernel."
+  - id: P0-TENANT-LIVENESS
+    assertion: "Per-tenant liveness is observable: a single silent tenant in an otherwise healthy fleet is detected, and a malformed tenant stays visible rather than vanishing from the expected inventory."
+    acceptanceBound: "The reducer never credits one tenant's heartbeat to another; the dead-man wrapper exits non-zero naming only the stale tenant while the global check is still green; a malformed tenant is reported `invalid`."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "Exercised against fixture job directories and fixture heartbeat files, with a fake mailer. No real launchd agent, no real SMTP, and no run on the mini — the AC#1 freeze window forbids touching it before 2026-08-31. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P2.5a: the operations safety substrate consumes these health rows."
+  - id: P0-V1-BEHAVIOR-PRESERVED
+    assertion: "Every Phase 0 change preserves the shipped v1 behavior it did not deliberately alter."
+    acceptanceBound: "The full unit, contract and local end-to-end suites pass with no test deleted except the one that asserted the behavior this phase deliberately removed (the silent-drop of an unknown tool name)."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "pending: not yet recorded from a CI run of this branch"
+      decision: inconclusive
+    artifacts:
+      - path: "pending: the CI run's captured output for this command"
+        sha256: "pending"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout feat/multi-agent-phase0 && pnpm install --frozen-lockfile && pnpm build && pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local"
+    failures: "none observed on the development machine; see limitation for why that is not the record"
+    status: PARTIAL
+    limitation: "A green suite proves no REGRESSION the suite covers. It is not a production-equivalence proof: nothing in Phase 0 has run on the mini, and the v1 daemon has not been restarted under these changes. Additionally, no outputHash has been recorded from CI on this branch yet, so this claim is PARTIAL on recording grounds regardless of its content."
+    nextGate: "P1 Task 11: v1 jobs adapted through the new boundary."

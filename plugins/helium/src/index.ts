@@ -207,6 +207,7 @@ export function apply(ctx: Context, raw: Config): void {
       budgetExhausted: (job, ev, info) =>
         delivery.budgetExhausted(job, ev, info),
       heartbeat: (row) => delivery.heartbeat(row),
+      reconcileDeliveries: () => delivery.reconcileDeliveries(),
     },
   });
   ctx.effect(() => {

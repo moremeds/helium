@@ -24,6 +24,7 @@ import {
   RunLedger,
   StateStore,
   ThesisStore,
+  inventoryTenants,
   loadJobs,
   type JobSpec,
   type RunOutcome,
@@ -69,6 +70,15 @@ export interface DeliveryPorts {
   ): void | Promise<void>;
   /** Appended every sensor cycle, including no-ops (spec §8). */
   heartbeat(row: Record<string, unknown>): void;
+  /**
+   * Close any delivery intent orphaned by a crash before its outcome row was
+   * appended, as `uncertain`. Required, not optional: the write-ahead intent
+   * row is only half of the property — without a reconciliation pass at boot,
+   * an orphaned intent stays `pending` on disk forever and the `uncertain`
+   * terminal row is never actually written in production.
+   * @returns how many intents were closed.
+   */
+  reconcileDeliveries(): number;
 }
 
 export interface RuntimeDeps {
@@ -181,14 +191,32 @@ export class HeliumRuntime {
 
   start(): void {
     const interrupted = this.ledger.reconcileStartup();
+    const orphanedDeliveries = this.deps.delivery.reconcileDeliveries();
+    // Expected-tenant inventory, taken from the FILES rather than from the
+    // jobs that happened to parse: a tenant whose YAML is malformed has to stay
+    // visible as `invalid`, because the operator-visible symptom of it silently
+    // vanishing is a fleet that looks entirely healthy while one tenant is not
+    // running at all.
+    const inventory = inventoryTenants(this.deps.config.jobsDir);
+    for (const tenant of inventory) {
+      this.writer.append("tenant-health", {
+        tenant: tenant.tenant,
+        load: tenant.load,
+        phase: "startup",
+      });
+    }
     this.log("startup reconciled", {
       interrupted,
+      orphanedDeliveries,
       jobs: this.jobNames,
+      tenants: inventory.length,
     });
     this.writer.append("runs", {
       phase: "harness_started",
       interrupted,
+      orphanedDeliveries,
       jobs: this.jobs.length,
+      tenants: inventory.length,
     });
     for (const job of this.jobs) this.startJob(job);
   }

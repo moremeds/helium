@@ -178,6 +178,10 @@ describe("harness e2e", () => {
             heartbeats.push(row);
             delivery.heartbeat(row);
           },
+          // The REAL reconciliation, not a stub: this is the only place the
+          // boot-time close-out of a crash-orphaned delivery intent is
+          // exercised against a real Delivery over a real JSONL directory.
+          reconcileDeliveries: () => delivery.reconcileDeliveries(),
         },
       });
     };
