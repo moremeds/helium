@@ -5,13 +5,14 @@
  * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { buildTools, JsonlWriter } from "@helium/core";
-import { buildChildEnv, runClaude } from "./claude.js";
+import { buildTools, JsonlWriter, type RunOutcome } from "@helium/core";
+import { buildChildEnv, runClaude, type ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
 import { TriageRunner, type SeniorLane } from "./dispatch.js";
@@ -39,35 +40,76 @@ export function runGuarded(label: string, fn: () => void): void {
 }
 
 /**
+ * Translates one `runClaude()` result into the `SeniorLane` outcome shape
+ * {@link HeliumRuntime}'s `Dispatcher` expects. `quota-exhausted` is reported
+ * under its own label with the provider's opaque reset hint attached — never
+ * as a plain `error` — because it is dynamic provider-availability state, not
+ * a capability change and not a budget: the target is simply unavailable until
+ * `retryAfter`.
+ */
+export function seniorOutcome(result: ClaudeResult): {
+  outcome: RunOutcome;
+  analysis?: string;
+  error?: string;
+} {
+  if (result.ok) return { outcome: "run_completed", analysis: result.text };
+  if (result.classification === "timeout") {
+    return {
+      outcome: "timed_out",
+      error: "senior lane exceeded its wall clock",
+    };
+  }
+  if (result.classification === "quota-exhausted") {
+    const until = result.retryAfter ? ` (retry after ${result.retryAfter})` : "";
+    return {
+      outcome: "run_failed",
+      error: `quota-exhausted${until}${result.text ? `: ${result.text}` : ""}`,
+    };
+  }
+  return {
+    outcome: "run_failed",
+    error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
+  };
+}
+
+/**
  * Senior lane: spawns the host `claude -p` binary and translates its result
  * into the `SeniorLane` outcome shape {@link HeliumRuntime}'s `Dispatcher`
  * expects. `mcpConfigPath` is the file `apply()` writes once at startup
  * (spec §4) so the child reaches the ecosystem tools over MCP stdio.
+ *
+ * Each attempt runs in its OWN empty directory below
+ * `<stateRoot>/workspaces/<job>/`, never `process.cwd()`: the senior child is
+ * the least-trusted thing this daemon starts, and handing it the daemon's
+ * working directory hands it the whole checkout. The directory is removed once
+ * the child has reached quiescence (`runClaude()` resolves only after the
+ * process group has closed).
  */
-function buildSeniorLane(cfg: Config, mcpConfigPath: string): SeniorLane {
+function buildSeniorLane(
+  cfg: Config,
+  mcpConfigPath: string,
+  workspacesDir: string,
+): SeniorLane {
   return {
     async dispatch(job, _ev, prompt) {
       const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
-      const result = await runClaude({
-        prompt,
-        cwd: process.cwd(),
-        maxTurns: job.maxTurns.senior,
-        timeoutMs: job.timeoutMs,
-        allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
-        mcpConfigPath,
-        env,
-      });
-      if (result.ok) return { outcome: "run_completed", analysis: result.text };
-      if (result.classification === "timeout") {
-        return {
-          outcome: "timed_out",
-          error: "senior lane exceeded its wall clock",
-        };
+      const workspace = join(workspacesDir, job.name, randomUUID());
+      mkdirSync(workspace, { recursive: true });
+      try {
+        return seniorOutcome(
+          await runClaude({
+            prompt,
+            cwd: workspace,
+            maxTurns: job.maxTurns.senior,
+            timeoutMs: job.timeoutMs,
+            allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
+            mcpConfigPath,
+            env,
+          }),
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
       }
-      return {
-        outcome: "run_failed",
-        error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
-      };
     },
   };
 }
@@ -144,7 +186,7 @@ export function apply(ctx: Context, raw: Config): void {
     config: cfg,
     engines: {
       triage: new TriageRunner(ctx),
-      senior: buildSeniorLane(cfg, mcpConfigPath),
+      senior: buildSeniorLane(cfg, mcpConfigPath, paths.workspaces),
     },
     delivery: {
       deliver: (job, ev, result) => delivery.deliver(job, ev, result),

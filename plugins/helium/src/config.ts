@@ -37,6 +37,8 @@ export interface StatePaths {
   jsonl: string;
   reports: string;
   theses: string;
+  /** Parent of the per-attempt senior workspaces; never `process.cwd()`. */
+  workspaces: string;
 }
 
 /** HELIUM_STATE_ROOT points directly at the harness state dir (e.g. ~/.helium/state). */
@@ -48,5 +50,6 @@ export function statePaths(cfg: Config): StatePaths {
     jsonl: join(state, "jsonl"),
     reports: join(state, "reports"),
     theses: join(state, "theses"),
+    workspaces: join(state, "workspaces"),
   };
 }
