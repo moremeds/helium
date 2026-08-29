@@ -311,9 +311,9 @@ claims:
     evidencePolicyVersion: p0-1
     verification:
       verifier: command
-      command: "live mini snapshot recorded in docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log; parser regression: pnpm exec vitest run --project unit plugins/ops-agent/src/probes/macos-resource.test.ts"
+      command: "live mini snapshots recorded in docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log and phase-d-live-adapters-2026-08-30.log; regression: pnpm exec vitest run plugins/ops-agent/src/production-observations.test.ts plugins/ops-agent/src/probes/macos-resource.test.ts"
       toolVersion: "mini macOS 26.5.1; node 25.9.0; pnpm 11.0.3; local vitest 3.2.7"
-      outputHash: "sha256:0a596ee4b6b1623e5118f6a56ea1e5c534c79bfc17c7a5f640b95679f6818cc9"
+      outputHash: "sha256:696151e7ce6049aefe149559516a854876a723ad15ac83d6abd9524cb337a198"
       decision: inconclusive
     artifacts:
       - path: "docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log"
@@ -322,12 +322,14 @@ claims:
         sha256: "b31136843ac8091fbe687a8b8e401bcb6cb20aa77e83a23f079f54f0c3a9f258"
       - path: "docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log"
         sha256: "df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578"
+      - path: "docs/evidence/p2.5a/phase-d-live-adapters-2026-08-30.log"
+        sha256: "2bf55bd2f01aaa39504c1a47fe45aaf0ecaa837229c28c82cf4db59b4d661e22"
     baseline: "The 2026-08-25 sanitized audit plus the 2026-08-30 operator waiver that leaves v1 AC#1 uncredited and authorizes isolated observe-only commissioning."
-    reproduction: "Inspect the owner-only mini event log and raw artifact directory, verify config mode observe and zero authority entries/action events, and run the live macOS 26 parser regression locally."
-    failures: "The first two live cycles exposed CPU parser shape drift: macOS 26 top retains spaces in the fixed-width COMMAND column. Commit 5637b97 added the captured shape; the next two cycles reported CPU ok with 19.69% and 22.01% busy, memory degraded with a 2.007 pageout/s rate, and zero collection failures."
+    reproduction: "Inspect the owner-only mini event log and raw artifact directory, verify config mode observe and zero authority entries/action events, and run the production observation plus live macOS parser regressions locally."
+    failures: "Commissioning exposed and closed macOS 26 top and df parser drift, sub-second Argon heartbeat timing against a collector-wide timestamp, quiet pg_isready success, and the missing Livewire integrity measurement. The latest full sample has 43 typed observations, zero unknown, zero collection failure and zero action events; its real failed/degraded business observations remain visible."
     status: PARTIAL
-    limitation: "Only host memory/CPU and fail-closed authority observations are live. The independent opsd-only dead-man is enabled, but the six application/database adapters are not composed into opsd and the seven-day observation window has only started."
-    nextGate: "Wire and compare every initial live adapter, and complete seven continuous observe days with zero action events."
+    limitation: "Every initial production component and host dimension is now live with persisted raw evidence and no parser-generated unknown in the latest full sample, but the seven-day observation window has only started."
+    nextGate: "Complete seven continuous observe days with zero action events and no unresolved collection failure."
 
   - id: P2.5A-OPSD-MODE-AUTHORITY
     assertion: "The standalone operations controller remains deterministic and fail-closed across observe, suggest, approve and auto modes, with scoped durable approval and authority decisions."
@@ -452,7 +454,7 @@ claims:
       verifier: command
       command: "bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh"
       toolVersion: "macOS runner; node 22.19.0; pnpm 11.24.0"
-      outputHash: "sha256:101c90602a0b5f749a3be3cb164abf4a41d1d2d235a7ed44383e2baa133a1ac5"
+      outputHash: "sha256:79e441c26a0879d985c5e7fccc98528b9eaa05c8e7e92f47aea2bcefd20cae52"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-d-macos-packaging.log"
@@ -465,12 +467,14 @@ claims:
         sha256: "e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b"
       - path: "docs/evidence/p2.5a/phase-d-live-deadman-2026-08-30.log"
         sha256: "b31136843ac8091fbe687a8b8e401bcb6cb20aa77e83a23f079f54f0c3a9f258"
+      - path: "docs/evidence/p2.5a/phase-d-live-adapters-2026-08-30.log"
+        sha256: "2bf55bd2f01aaa39504c1a47fe45aaf0ecaa837229c28c82cf4db59b4d661e22"
     baseline: "Ops Phase C, which contained no opsd launchd template, installer, release compatibility gate or independent opsd dead-man check."
     reproduction: "bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh && bash -n scripts/ops/install-observe-only.sh scripts/ops/uninstall-observe-only.sh scripts/ops/run-opsd.sh scripts/release/deploy.sh scripts/release/rollback.sh"
-    failures: "Offline packaging gates pass. Live commissioning found and fixed the macOS 26 CPU parser drift. Reusing the legacy dead-man caused one version-skewed dsh-canary alert; it was immediately restored byte-for-byte. The replacement standalone opsd label ignores tenant state, ran against the live event path and exited 0 with explicit opsd-fresh output."
+    failures: "Offline packaging gates pass. Live commissioning found and fixed the macOS 26 CPU/disk parser drift plus two adapter interpretation gaps. Reusing the legacy dead-man caused one version-skewed dsh-canary alert; it was immediately restored byte-for-byte. The replacement standalone opsd label ignores tenant state, runs against the live event path and exits 0 with explicit opsd-fresh output."
     status: PROVEN
-    limitation: "The isolated aed7293 candidate is installed and running with empty authority. Scoped bootout/uninstall/reinstall demonstrated rollback across candidates, and the independent opsd-only dead-man is live. This packaging claim does not satisfy the separate seven-day observation or live adapter coverage gates."
-    nextGate: "Complete live adapter composition and accrue seven continuous observe days before suggest mode."
+    limitation: "The isolated e6b0a87 candidate is installed and running with empty authority. Scoped bootout/uninstall/reinstall demonstrated rollback across four candidates, and the independent opsd-only dead-man is live. This packaging claim does not satisfy the separate seven-day observation gate."
+    nextGate: "Accrue seven continuous observe days before suggest mode."
 
   - id: P2.5A-PHASE-D-OFFLINE-GATE
     assertion: "The Phase D code tree, excluding explicitly blocked live commissioning, passes the complete repository and macOS offline gate at the pinned runtime."
