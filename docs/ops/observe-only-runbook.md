@@ -81,6 +81,15 @@ atomic move, and retain the reverse restore/reload command as rollback. Do not
 declare the controller expected until the log path has been verified. A fresh
 DSH heartbeat cannot suppress an opsd-stale alert.
 
+The selected v0.1.5 dead-man script predates the opsd check. For this weekend
+candidate, also pin only `ProgramArguments[1]` to
+`/Users/moremeds/projects/helium-ops-candidates/5637b97/scripts/deadman/check-heartbeat.sh`
+after verifying SHA-256
+`f67896b3585f1feb81e3d7889023d92cdba74be0dfefdee3c9ede968f3baeaa2`.
+Do not credit the integration until a real scheduled-label run exits 0 and its
+stdout contains `opsd fresh:`. Restoring the preserved whole plist reverses both
+the environment and program-path changes.
+
 Observe for at least seven days before considering any authority promotion.
 Track observation freshness, collection failures, incident noise, daemon
 restarts, log rotation, and dead-man delivery. Provider/model availability is

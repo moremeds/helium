@@ -30,6 +30,12 @@ SOP grant, ownership handoff, repair, or controlled mutation drill. After a
 valid opsd event path exists, it permits one narrowly reversible dead-man
 integration: preserve the original `com.helium.deadman.plist`, add only
 `HELIUM_OPSD_EXPECTED=1` and the exact opsd event-log path, lint it, and reload
-that exact scheduled label. Rollback restores the preserved plist and reloads
-the same label. Opsd rollback is exact-label `launchctl bootout` followed by the
-scoped uninstaller; evidence is preserved before state removal if needed.
+that exact scheduled label. Live preflight found that v0.1.5's selected dead-man
+script predates the opsd check. The same preserved-plist rollback therefore also
+permits changing only `ProgramArguments[1]` to the tested candidate script at
+commit `5637b97` (SHA-256
+`f67896b3585f1feb81e3d7889023d92cdba74be0dfefdee3c9ede968f3baeaa2`).
+Success requires a real run to emit `opsd fresh:` and exit 0. Rollback restores
+the preserved plist and reloads the same label. Opsd rollback is exact-label
+`launchctl bootout` followed by the scoped uninstaller; evidence is preserved
+before state removal if needed.

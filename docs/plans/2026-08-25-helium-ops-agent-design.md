@@ -956,7 +956,10 @@ uninstaller is the required rollback.
 Once a valid opsd event path is observed, the waiver also permits adding only
 the opsd expected/event-log keys to the existing scheduled Helium dead-man,
 with the original plist preserved and exact-label reload/restore as rollback.
-This adds independent liveness coverage; it grants no recovery authority.
+If the selected release's dead-man predates that check, the exact script path
+may instead point at the tested immutable Ops candidate, with its hash recorded
+and the same full-plist rollback. This adds independent liveness coverage; it
+grants no recovery authority.
 
 **Window 2 — installed and observing.** P4: rollout Stage 1's observe-only days
 and Stage 2's suggest-only days, at least seven of each. Here `opsd` **is**
