@@ -83,3 +83,6 @@ export {
   type ObservationProbe,
   type ObservationSink,
 } from "./collector.js";
+export { adaptLivewire, type LivewireSnapshot } from "./adapters/livewire.js";
+export { adaptArgon, type ArgonSnapshot } from "./adapters/argon.js";
+export { adaptApex, type ApexSnapshot } from "./adapters/apex.js";

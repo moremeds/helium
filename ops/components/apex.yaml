@@ -1,0 +1,10 @@
+version: 1
+id: apex
+kind: application
+displayName: Apex
+dimensions: [readiness, freshness, dependency]
+mutationOwner:
+  owner: none
+  competingLabels: []
+  changedAt: "2026-08-29T00:00:00.000Z"
+  changeRef: "ops/components/apex.yaml"
