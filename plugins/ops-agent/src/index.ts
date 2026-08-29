@@ -86,3 +86,15 @@ export {
 export { adaptLivewire, type LivewireSnapshot } from "./adapters/livewire.js";
 export { adaptArgon, type ArgonSnapshot } from "./adapters/argon.js";
 export { adaptApex, type ApexSnapshot } from "./adapters/apex.js";
+export {
+  COLIMA_READ_COMMANDS,
+  adaptColima,
+  type ColimaSnapshot,
+} from "./adapters/colima.js";
+export {
+  POSTGRES_READ_PROBES,
+  adaptPostgres,
+  type BackupIntegrityTier,
+  type PostgresSnapshot,
+} from "./adapters/postgres.js";
+export { adaptHelium, type HeliumSnapshot } from "./adapters/helium.js";

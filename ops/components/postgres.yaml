@@ -1,0 +1,10 @@
+version: 1
+id: postgres
+kind: database
+displayName: PostgreSQL
+dimensions: [readiness, capacity, contention, durability, controller]
+mutationOwner:
+  owner: none
+  competingLabels: []
+  changedAt: "2026-08-29T00:00:00.000Z"
+  changeRef: "ops/components/postgres.yaml"
