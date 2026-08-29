@@ -15,6 +15,15 @@ const sample = {
   observedAt: "2026-08-25T04:05:00.000Z",
   evidenceRefs: ["artifact://check/runtime-up"],
 };
+const verificationCheck = {
+  id: "runtime-up",
+  kind: "business" as const,
+  probe: { probeId: "runtime.probe.v1", args: {} },
+  expect: { dimension: "readiness", operator: "eq" as const, value: true },
+  onUnavailable: "unknown" as const,
+  timeoutMs: 5_000,
+  owner: "ops",
+};
 const at = (n: number) => `2026-08-25T04:0${n}:00.000Z`;
 
 const opened: OperationsEvent = {
@@ -74,7 +83,7 @@ const intentRecorded: OperationsEvent = {
     changeRef: "artifact://ownership/1",
   },
   dependencyIds: ["host"],
-  verificationPolicy: { postconditionIds: ["runtime-up"], graceMs: 0 },
+  verificationPolicy: { postconditions: [verificationCheck], graceMs: 0 },
 };
 const operatorIntervened: OperationsEvent = {
   v: 1,

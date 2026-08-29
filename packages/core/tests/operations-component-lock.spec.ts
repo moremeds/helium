@@ -271,4 +271,52 @@ describe("two real processes", () => {
     writeFileSync(b.release, "");
     await Promise.all([a.done, b.done]);
   }, 30_000);
+
+  it("ignores a coordination ticket left by a process killed in its critical section", async () => {
+    const module = fileURLToPath(
+      new URL("../lib/operations/component-lock.js", import.meta.url),
+    );
+    if (!existsSync(module)) {
+      throw new Error(
+        `built lock module missing at ${module}; run pnpm build before this suite`,
+      );
+    }
+
+    const d = dir();
+    const stalePid = 9_999_998;
+    expect(acquireComponentLock(d, receipt({ pid: stalePid })).ok).toBe(true);
+    const ready = join(d, "crash-ready");
+    const script = `
+      import { writeFileSync } from "node:fs";
+      import { reclaimComponentLock } from ${JSON.stringify(module)};
+      reclaimComponentLock(${JSON.stringify(d)}, "runtime", {
+        bootId: "boot-1",
+        isAlive(pid) {
+          if (pid !== ${stalePid}) return true;
+          writeFileSync(${JSON.stringify(ready)}, "");
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);
+          return false;
+        },
+      });
+    `;
+    const proc = spawn(process.execPath, ["--input-type=module", "-e", script], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(ready)) {
+      if (Date.now() >= deadline) throw new Error("child never entered coordination");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    proc.kill("SIGKILL");
+    await new Promise<void>((resolve, reject) => {
+      proc.on("error", reject);
+      proc.on("close", () => resolve());
+    });
+
+    expect(reclaimComponentLock(d, "runtime", {
+      bootId: "boot-1",
+      isAlive: () => false,
+    })).toEqual({ reclaimed: true, reason: "dead-process" });
+    expect(acquireComponentLock(d, receipt({ leaseId: "after-crash" })).ok).toBe(true);
+  }, 30_000);
 });

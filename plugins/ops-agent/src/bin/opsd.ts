@@ -384,7 +384,7 @@ export function composeObserveOnlyOpsDaemon(
     now,
     runChecks: async (ids) =>
       Object.fromEntries(ids.map((id) => [id, "unknown" as const])),
-    sampleChecks: async (ids, phase) => unavailableSamples(ids, phase, now()),
+    sampleChecks: async (checks, phase) => unavailableSamples(checks, phase, now()),
     controllerProbe: {
       async check() {
         return {
@@ -499,15 +499,15 @@ function discoverConfiguredProbeIds(config: OpsdRuntimeConfig): string[] {
 }
 
 function unavailableSamples(
-  ids: readonly string[],
+  checks: readonly { id: string }[],
   phase: "baseline" | "postcondition",
   at: Date,
 ): PostconditionSample[] {
-  return ids.map((checkId) => ({
-    checkId,
+  return checks.map((check) => ({
+    checkId: check.id,
     state: "unknown",
     observedAt: at.toISOString(),
-    evidenceRefs: [`artifact://ops/check-unavailable/${phase}/${checkId}`],
+    evidenceRefs: [`artifact://ops/check-unavailable/${phase}/${check.id}`],
   }));
 }
 

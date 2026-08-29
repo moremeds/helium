@@ -250,6 +250,15 @@ export class ComponentRegistry {
     return [...this.#sops.values()];
   }
 
+  /** Resolve the exact immutable check definitions used by an action decision. */
+  checks(ids: readonly string[]): CheckDefinition[] {
+    const missing = ids.filter((id) => !this.#checks.has(id));
+    if (missing.length > 0) {
+      throw new Error(`unknown check reference: ${missing.join(", ")}`);
+    }
+    return ids.map((id) => this.#checks.get(id) as CheckDefinition);
+  }
+
   graph(): DependencyGraph {
     return DependencyGraph.from(this.components(), this.#edges);
   }

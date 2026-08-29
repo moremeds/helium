@@ -10,6 +10,7 @@
  */
 import { z } from "zod";
 import { ACTION_OUTCOMES, PostconditionSampleSchema } from "./action.js";
+import { CheckDefinitionSchema } from "./check.js";
 import { EvidenceRefSchema } from "../evidence/bundle.js";
 import { CONTROLLER_PROBE_RESULTS } from "./mutation-owner.js";
 import { MutationOwnershipSchema, OpsIdSchema } from "./component.js";
@@ -110,7 +111,7 @@ export const ActionIntentRecordedSchema = z.strictObject({
   /** Decision-time dependency and verification policy, immutable across releases. */
   dependencyIds: z.array(OpsIdSchema).max(500),
   verificationPolicy: z.strictObject({
-    postconditionIds: z.array(OpsIdSchema).min(1).max(500),
+    postconditions: z.array(CheckDefinitionSchema).min(1).max(500),
     graceMs: z.number().int().nonnegative().max(86_400_000),
   }),
 });

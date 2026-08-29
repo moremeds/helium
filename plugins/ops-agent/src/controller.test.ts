@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
+import type { CheckDefinition } from "@helium/core/operations/check.js";
 import {
   ActionLeaseController,
   ActionLeaseTable,
@@ -124,6 +125,7 @@ function registry(
     manifest?: boolean;
     graceMs?: number;
     componentOwner?: "opsd" | "external" | "none";
+    checkExpectedValue?: boolean;
   } = { manifest: true },
 ): ComponentRegistry {
   const definition = sop(authority, options.graceMs);
@@ -160,7 +162,13 @@ function registry(
         owner: options.componentOwner ?? "opsd",
       },
     }],
-    checks: [check],
+    checks: [{
+      ...check,
+      expect: {
+        ...check.expect,
+        value: options.checkExpectedValue ?? check.expect.value,
+      },
+    }],
     sops: [definition],
   } satisfies OpsBundle);
   return r;
@@ -227,6 +235,11 @@ interface HarnessOptions {
   stateDir?: string;
   componentOwner?: "opsd" | "external" | "none";
   emptyRegistry?: boolean;
+  checkExpectedValue?: boolean;
+  sampledChecks?: CheckDefinition[][];
+  postconditionStateFor?: (
+    checks: readonly CheckDefinition[],
+  ) => "pass" | "fail" | "unknown";
 }
 
 function harness(options: HarnessOptions) {
@@ -242,9 +255,12 @@ function harness(options: HarnessOptions) {
   let postconditionIndex = 0;
   const controllerResults = options.controllerResults ?? ["clear"];
 
-  const sample = (state: "pass" | "fail" | "unknown"): PostconditionSample[] => [
+  const sample = (
+    state: "pass" | "fail" | "unknown",
+    checkId = check.id,
+  ): PostconditionSample[] => [
     {
-      checkId: check.id,
+      checkId,
       state,
       observedAt: NOW.toISOString(),
       evidenceRefs: [`artifact://check/${state}`],
@@ -263,6 +279,7 @@ function harness(options: HarnessOptions) {
           manifest: options.manifest,
           graceMs: options.graceMs,
           componentOwner: options.componentOwner,
+          checkExpectedValue: options.checkExpectedValue,
         }),
     store,
     now,
@@ -273,17 +290,21 @@ function harness(options: HarnessOptions) {
       return { observations: [observation], failures: [] };
     },
     runChecks: async () => ({}),
-    sampleChecks: async (_ids, phase) =>
-      phase === "baseline"
-        ? (() => {
-            rivalAppeared = options.rivalAppearsDuringBaseline === true;
-            return sample(options.baselinePassing === true ? "pass" : "fail");
-          })()
-        : sample(
-            options.postconditionStates?.[
-              Math.min(postconditionIndex++, options.postconditionStates.length - 1)
-            ] ?? "pass",
-          ),
+    sampleChecks: async (checks, phase) => {
+      options.sampledChecks?.push(checks.map((definition) => structuredClone(definition)));
+      const checkId = checks[0]?.id ?? check.id;
+      if (phase === "baseline") {
+        rivalAppeared = options.rivalAppearsDuringBaseline === true;
+        return sample(options.baselinePassing === true ? "pass" : "fail", checkId);
+      }
+      return sample(
+        options.postconditionStateFor?.(checks) ??
+          options.postconditionStates?.[
+            Math.min(postconditionIndex++, options.postconditionStates.length - 1)
+          ] ?? "pass",
+        checkId,
+      );
+    },
     controllerProbe: {
       async check() {
         const result = rivalAppeared
@@ -594,7 +615,7 @@ describe("OpsController modes", () => {
       { v: 1, id: "restart-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-99"] },
       { v: 1, id: "restart-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-restart", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "restart-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-restart", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
-      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner, dependencyIds: ["decision-time-dependency"], verificationPolicy: { postconditionIds: [check.id], graceMs: 0 } },
+      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner, dependencyIds: ["decision-time-dependency"], verificationPolicy: { postconditions: [check], graceMs: 0 } },
     ]) seed.store.append(event);
 
     const restarted = harness({
@@ -622,5 +643,45 @@ describe("OpsController modes", () => {
       "utf8",
     ));
     expect(incidentSnapshot.dependencyIds).toEqual(["decision-time-dependency"]);
+  });
+
+  it("reconciles an executed action against its persisted check definition, not a same-id replacement", async () => {
+    const seed = harness({ mode: "auto" });
+    const incidentKey = "fixture-service|integrity|failed|fixture-service";
+    const incidentId = `inc-${createHash("sha256").update(incidentKey).digest("hex").slice(0, 32)}`;
+    const baseline = {
+      checkId: check.id,
+      state: "fail" as const,
+      observedAt: NOW.toISOString(),
+      evidenceRefs: ["artifact://check/fail"],
+    };
+    for (const event of [
+      { v: 1, id: "changed-observation", at: NOW.toISOString(), type: "observation-recorded", observation: failingObservation(100) },
+      { v: 1, id: "changed-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-100"] },
+      { v: 1, id: "changed-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-changed", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
+      { v: 1, id: "changed-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-changed", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
+      { v: 1, id: "changed-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-changed", leaseId: "lease-changed", operationId: "op-changed", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/changed" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner, dependencyIds: [], verificationPolicy: { postconditions: [check], graceMs: 0 } },
+      { v: 1, id: "changed-receipt", at: NOW.toISOString(), type: "action-receipt-recorded", actionId: "act-changed", exitCode: 0, timedOut: false, outputDigest: `sha256:${"c".repeat(64)}`, outputTail: "ok", outputBytes: 2, startedAt: NOW.toISOString(), finishedAt: NOW.toISOString() },
+    ]) seed.store.append(event);
+
+    const sampledChecks: CheckDefinition[][] = [];
+    const restarted = harness({
+      mode: "auto",
+      store: seed.store,
+      stateDir: seed.stateDir,
+      // The new release reuses the id but reverses the expected value. Its
+      // definition would pass; the original probe is unavailable and must be
+      // unknown, making the interrupted action uncertain rather than success.
+      checkExpectedValue: false,
+      sampledChecks,
+      postconditionStateFor: (definitions) =>
+        definitions[0]?.expect.value === true ? "unknown" : "pass",
+    });
+    await restarted.controller.tick();
+
+    expect(seed.store.state().actions["act-changed"]?.state).toBe("uncertain");
+    expect(restarted.executor.runs).toBe(0);
+    expect(sampledChecks).toHaveLength(1);
+    expect(sampledChecks[0]?.[0]).toEqual(check);
   });
 });

@@ -115,7 +115,11 @@ grep -q -- '--check-config' "$repo/scripts/release/deploy.sh"
 grep -q -- '--check-config' "$repo/scripts/release/rollback.sh"
 grep -q 'controller-cycle-recorded' "$repo/scripts/release/opsd-cycle-after.mjs"
 grep -q 'opsd-cycle-after.mjs' "$repo/scripts/release/deploy.sh"
-grep -q 'opsd-cycle-after.mjs' "$repo/scripts/release/rollback.sh"
+grep -Fq 'node "$current/scripts/release/opsd-cycle-after.mjs"' "$repo/scripts/release/rollback.sh"
+if grep -Fq 'node "$target/scripts/release/opsd-cycle-after.mjs"' "$repo/scripts/release/rollback.sh"; then
+  echo "FAIL: rollback depends on a helper the preceding target release may not contain"
+  exit 1
+fi
 node --test "$repo/scripts/release/opsd-cycle-after.test.mjs"
 grep -q 'ops/executors' "$repo/scripts/release/deploy.sh"
 grep -q 'ops/executors' "$repo/scripts/release/rollback.sh"

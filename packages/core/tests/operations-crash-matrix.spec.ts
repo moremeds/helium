@@ -31,6 +31,15 @@ const evidence = {
 const noSync = () => {};
 const at = (n: number) =>
   `2026-08-25T04:${String(n).padStart(2, "0")}:00.000Z`;
+const verificationCheck = {
+  id: "runtime-up",
+  kind: "business" as const,
+  probe: { probeId: "runtime.probe.v1", args: {} },
+  expect: { dimension: "readiness", operator: "eq" as const, value: true },
+  onUnavailable: "unknown" as const,
+  timeoutMs: 5_000,
+  owner: "ops",
+};
 
 /** One complete attempt, in the order a real run would append it. */
 const SEQUENCE: OperationsEvent[] = [
@@ -51,7 +60,7 @@ const SEQUENCE: OperationsEvent[] = [
     controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" },
     eligibility: { eligible: true, reasons: [] },
     mutationOwner: { owner: "opsd", competingLabels: [], changedAt: at(5), changeRef: "artifact://own/intent" },
-    dependencyIds: [], verificationPolicy: { postconditionIds: ["runtime-up"], graceMs: 0 } },
+    dependencyIds: [], verificationPolicy: { postconditions: [verificationCheck], graceMs: 0 } },
   { v: 1, id: "e7", at: at(6), type: "action-receipt-recorded", actionId: "act-1",
     exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2,
     startedAt: at(6), finishedAt: at(6) },

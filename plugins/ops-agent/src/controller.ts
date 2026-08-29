@@ -6,6 +6,7 @@ import {
   type AttemptRecord,
 } from "@helium/core/operations/authority.js";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
+import type { CheckDefinition } from "@helium/core/operations/check.js";
 import { correlate } from "@helium/core/operations/correlate.js";
 import type { OperationsEvent } from "@helium/core/operations/events.js";
 import type { Incident } from "@helium/core/operations/incident.js";
@@ -69,7 +70,7 @@ export interface OpsControllerOptions {
   collect: (sink: ObservationSink) => Promise<CollectionResult>;
   runChecks: (ids: readonly string[]) => Promise<Record<string, "pass" | "fail" | "unknown">>;
   sampleChecks: (
-    ids: readonly string[],
+    checks: readonly CheckDefinition[],
     phase: "baseline" | "postcondition",
   ) => Promise<PostconditionSample[]>;
   controllerProbe: ControllerProbePort;
@@ -341,6 +342,10 @@ export class OpsController {
     }
 
     const argv = this.options.argvFor(candidate.sop, candidate.incident);
+    const verificationPolicy = {
+      postconditions: this.options.registry.checks(candidate.sop.postconditions),
+      graceMs: candidate.sop.graceMs,
+    };
     let leaseId: string | undefined;
     let componentLock: { release(): void } | undefined;
     let boundaryRef = initialProbe.evidenceRef;
@@ -385,7 +390,7 @@ export class OpsController {
 
       const baselineCapturedAt = this.options.now().toISOString();
       const samples = await this.options.sampleChecks(
-        candidate.sop.postconditions,
+        verificationPolicy.postconditions,
         "baseline",
       );
       if (samples.length !== candidate.sop.postconditions.length) {
@@ -458,8 +463,8 @@ export class OpsController {
               .graph()
               .transitiveDependenciesOf(component.id),
             verificationPolicy: {
-              postconditionIds: [...candidate.sop.postconditions],
-              graceMs: candidate.sop.graceMs,
+              postconditions: verificationPolicy.postconditions,
+              graceMs: verificationPolicy.graceMs,
             },
           });
           return { admitted: true };
@@ -480,7 +485,7 @@ export class OpsController {
         startedAt: receipt.startedAt,
         finishedAt: receipt.finishedAt,
       });
-      const verified = await this.#sampleGrace(candidate.sop);
+      const verified = await this.#sampleGrace(verificationPolicy);
       const verdict = verifyAction({
         baseline,
         intentRecorded: true,
@@ -761,7 +766,7 @@ export class OpsController {
   }
 
   async #sampleGrace(policy: {
-    postconditions: readonly string[];
+    postconditions: readonly CheckDefinition[];
     graceMs: number;
   }): Promise<{
     verdict: "pass" | "fail" | "unknown";
@@ -804,14 +809,15 @@ export class OpsController {
     for (const action of actions) {
       const policy = action.verificationPolicy;
       const loaded = policy === undefined ? this.options.registry.sop(action.sopId) : undefined;
-      const postconditions = policy === undefined && loaded === undefined
+      const currentPolicy = loaded === undefined
+        ? undefined
+        : {
+            postconditions: this.options.registry.checks(loaded.definition.postconditions),
+            graceMs: loaded.definition.graceMs,
+          };
+      const postconditions = policy === undefined && currentPolicy === undefined
         ? []
-        : (await this.#sampleGrace(policy === undefined
-            ? loaded!.definition
-            : {
-                postconditions: policy.postconditionIds,
-                graceMs: policy.graceMs,
-              })).samples;
+        : (await this.#sampleGrace(policy ?? currentPolicy!)).samples;
       const [decision] = reconcileOnStartup({
         actions: [action],
         evidence: {

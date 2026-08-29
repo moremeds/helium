@@ -18,6 +18,7 @@ import type { Observation } from "./observation.js";
 import type { PostconditionSample } from "./action.js";
 import type { ControllerProbeOutcome } from "./mutation-owner.js";
 import type { EvidenceRef } from "../evidence/bundle.js";
+import type { CheckDefinition } from "./check.js";
 
 /** Non-terminal action states, plus the six terminal outcomes. */
 export const ACTION_PROGRESS = [
@@ -48,7 +49,7 @@ export interface ActionProjection {
   eligibility?: { eligible: boolean; reasons: string[] };
   mutationOwner?: MutationOwnership;
   dependencyIds?: string[];
-  verificationPolicy?: { postconditionIds: string[]; graceMs: number };
+  verificationPolicy?: { postconditions: CheckDefinition[]; graceMs: number };
   exitCode?: number | null;
   timedOut?: boolean;
   outputDigest?: string;
@@ -254,7 +255,11 @@ export function reduceOperations(
         };
         action.dependencyIds = [...event.dependencyIds];
         action.verificationPolicy = {
-          postconditionIds: [...event.verificationPolicy.postconditionIds],
+          postconditions: event.verificationPolicy.postconditions.map((check) => ({
+            ...check,
+            probe: { ...check.probe, args: { ...check.probe.args } },
+            expect: { ...check.expect },
+          })),
           graceMs: event.verificationPolicy.graceMs,
         };
         break;

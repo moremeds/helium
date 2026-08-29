@@ -151,6 +151,12 @@ describe("FileRecoveryEvidenceStore", () => {
     writeFileSync(path, `${original} `, { mode: 0o600 });
     expect(() => store.verifyHistory([event])).toThrow(/hash mismatch/);
     expect(() => store.persistBundle({ ...bundle, observations: [] })).toThrow();
+    expect(() => store.persistBundle({
+      ...bundle,
+      outcome: "failed",
+      status: "PROVEN",
+      verifier: { ...bundle.verifier, decision: "pass" },
+    } as RecoveryEvidence)).toThrow(/failed outcome requires FAILED status/);
   });
 
   it("rejects missing nested artifacts and terminal fields that disagree with the bundle", () => {
