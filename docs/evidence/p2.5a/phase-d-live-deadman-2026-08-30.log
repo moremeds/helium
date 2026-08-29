@@ -1,0 +1,28 @@
+Helium Ops Phase D independent deadman commissioning
+captured_at=2026-08-29T22:37:33Z
+capture_date_hkt=2026-08-30
+
+legacy_attempt.result=ROLLED_BACK
+legacy_attempt.reason=v0.1.5 script ignored opsd keys; candidate script also enabled version-skewed tenant checks
+legacy_attempt.side_effect=one dsh-canary missing alert email sent before rollback
+legacy_attempt.message_id=<e268418f-842b-1a91-c64e-889917153ea5@gmail.com>
+legacy_attempt.followup=original com.helium.deadman plist restored byte-for-byte and real run exited 0
+legacy.plist=/Users/moremeds/Library/LaunchAgents/com.helium.deadman.plist uid=501 mode=644 size=1675 sha256=ae0e56d228520ff780a61881cfc4ee6297d1fb422d4330d5c6bd0775763f9612
+
+independent.label=com.helium.opsd-deadman
+independent.candidate=/Users/moremeds/projects/helium-ops-candidates/aed7293
+independent.plist=/Users/moremeds/Library/LaunchAgents/com.helium.opsd-deadman.plist uid=501 mode=644 size=1619 sha256=ce778199948b0c5c5851194f26baa1d412d77c849bee02e1cfde646d529c2f14
+independent.script=/Users/moremeds/projects/helium-ops-candidates/aed7293/scripts/deadman/check-opsd-heartbeat.sh uid=501 mode=700 size=3175 sha256=5aeb54c75c8a1b5a377083a40d72ce97ba0bb32396778e36755dbe8492dcd854
+independent.scope=opsd event log and private opsd-deadman sentinel only; no DSH or tenant reads
+independent.interval_s=120
+independent.stale_s=180
+independent.realert_s=3600
+independent.run_count=1
+independent.last_exit_code=0
+independent.stdout=opsd fresh: last observation 16s ago (2026-08-29T22:37:00.914Z)
+independent.stdout_path=/Users/moremeds/.helium/ops/logs/opsd-deadman.out.log uid=501 mode=600 size=64 sha256=54600fb2dd29022511730fb6aa3a97180f626b2750e3ad9e28c4a3f06de015d4
+independent.stderr_path=/Users/moremeds/.helium/ops/logs/opsd-deadman.err.log uid=501 mode=600 size=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+offline_regression=fresh passes without alert; unrelated tenant state ignored; future timestamp alerts; repeat suppressed; fresh recovery clears sentinel
+rollback=launchctl bootout gui/501/com.helium.opsd-deadman then scoped uninstall; legacy com.helium.deadman is not part of this rollback
+result=PROVEN

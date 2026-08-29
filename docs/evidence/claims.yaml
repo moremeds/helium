@@ -585,11 +585,10 @@ claims:
     decision: inconclusive
     status: PARTIAL
     limitation: Only host memory/CPU and fail-closed authority observations are
-      live. The six application/database adapters are not composed into opsd,
-      independent dead-man expectation is not enabled, and the seven-day
-      observation window has only started.
-    nextGate: Wire and compare every initial live adapter, enable independent
-      opsd dead-man only after its event path is stable, and complete seven
+      live. The independent opsd-only dead-man is enabled, but the six
+      application/database adapters are not composed into opsd and the
+      seven-day observation window has only started.
+    nextGate: Wire and compare every initial live adapter, and complete seven
       continuous observe days with zero action events.
     outputHash: sha256:e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
     artifacts:
@@ -714,14 +713,14 @@ claims:
     command: bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh
     toolVersion: macOS runner; node 22.19.0; pnpm 11.24.0
     decision: pass
-    status: PARTIAL
-    limitation: The isolated candidate is installed and running with empty
-      authority; one scoped bootout/uninstall/reinstall demonstrated rollback
-      between candidates. The independent dead-man expectation is not yet
-      enabled and seven observe days have not elapsed.
-    nextGate: Complete adapter composition, enable independent dead-man after
-      the event path is stable, and accrue seven continuous observe days before
-      suggest mode.
+    status: PROVEN
+    limitation: The isolated aed7293 candidate is installed and running with
+      empty authority. Scoped bootout/uninstall/reinstall demonstrated rollback
+      across candidates, and the independent opsd-only dead-man is live. This
+      packaging claim does not satisfy the separate seven-day observation or
+      live adapter coverage gates.
+    nextGate: Complete live adapter composition and accrue seven continuous
+      observe days before suggest mode.
     outputHash: sha256:c82415675c95661d4dabb6444e514c5d068a47bf655ec320152d8f8b52465d9c
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
@@ -732,6 +731,8 @@ claims:
         sha256: da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3
       - path: docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log
         sha256: e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
+      - path: docs/evidence/p2.5a/phase-d-live-deadman-2026-08-30.log
+        sha256: 51f28b31c4708df34e5ad7f52bb5422b53922e4e87df96ef0f85f7de156b93b2
   - id: P2.5A-PHASE-D-OFFLINE-GATE
     phase: P2.5a
     assertion: The Phase D code tree, excluding explicitly blocked live

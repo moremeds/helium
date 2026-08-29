@@ -145,7 +145,7 @@ describe("EvidenceManifestSchema", () => {
   it.each([
     ["p0-manifest.yaml", 7, 2],
     ["p1-manifest.yaml", 6, 2],
-    ["p2.5a-manifest.yaml", 20, 3],
+    ["p2.5a-manifest.yaml", 20, 2],
   ])("validates the committed %s unchanged", (file, claims, partial) => {
     const path = fileURLToPath(
       new URL(`../../../docs/evidence/${file}`, import.meta.url),
