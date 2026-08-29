@@ -13,16 +13,34 @@ const third = { kind: "c", n: 3 };
 
 const dir = () => mkdtempSync(join(tmpdir(), "helium-events-"));
 
+/**
+ * Most of these cases are about append/replay/snapshot SEMANTICS, not about
+ * durability, and a real `fsync` per append made them contend on CI: with 36
+ * unit files fanned across workers, one run stalled past the 5s default and
+ * failed. `fsync` latency on shared runner storage is unbounded, so the
+ * default was a wrong assumption rather than a bug in the store.
+ *
+ * The fsync boundary itself stays under test two ways: one case asserts it is
+ * crossed once per append using a spy, and "appends and replays in order"
+ * deliberately keeps the real `fsyncSync` default with a timeout that reflects
+ * what shared storage can actually cost.
+ */
+const noSync = () => {};
+
 describe("event store", () => {
-  it("appends and replays in order", () => {
-    const store = openEventStore(dir(), { schema: RecordSchema });
-    store.append(first);
-    store.append(second);
-    expect(store.replay()).toEqual([first, second]);
-  });
+  it(
+    "appends and replays in order, across a real fsync",
+    () => {
+      const store = openEventStore(dir(), { schema: RecordSchema });
+      store.append(first);
+      store.append(second);
+      expect(store.replay()).toEqual([first, second]);
+    },
+    30_000,
+  );
 
   it("hashes each record canonically, independent of key order", () => {
-    const store = openEventStore(dir(), { schema: RecordSchema });
+    const store = openEventStore(dir(), { schema: RecordSchema, sync: noSync });
     const expected = createHash("sha256")
       .update(canonicalJson(first))
       .digest("hex");
@@ -40,7 +58,7 @@ describe("event store", () => {
 
   it("drops a truncated final line and recovers, never repairing the record", () => {
     const d = dir();
-    const store = openEventStore(d, { schema: RecordSchema });
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
     store.append(second);
     store.snapshot();
@@ -49,20 +67,20 @@ describe("event store", () => {
     const raw = readFileSync(store.logPath, "utf8");
     truncateSync(store.logPath, raw.length - 12);
 
-    const reopened = openEventStore(d, { schema: RecordSchema });
+    const reopened = openEventStore(d, { schema: RecordSchema, sync: noSync });
     expect(reopened.replay()).toEqual([first, second]);
   });
 
   it("replays through a snapshot plus its tail", () => {
     const d = dir();
-    const store = openEventStore(d, { schema: RecordSchema });
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
     store.append(second);
     const snap = store.snapshot();
     expect(snap.lastSeq).toBe(2);
     expect(snap.lastHash).toBe(store.contentHash(second));
     store.append(third);
-    expect(openEventStore(d, { schema: RecordSchema }).replay()).toEqual([
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([
       first,
       second,
       third,
@@ -71,7 +89,7 @@ describe("event store", () => {
 
   it("discards a snapshot whose hash disagrees with the log — the log is authoritative", () => {
     const d = dir();
-    const store = openEventStore(d, { schema: RecordSchema });
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
     store.append(second);
     store.snapshot();
@@ -79,7 +97,7 @@ describe("event store", () => {
     tampered.lastHash = "sha256:0000";
     writeFileSync(store.snapshotPath, JSON.stringify(tampered));
 
-    expect(openEventStore(d, { schema: RecordSchema }).replay()).toEqual([
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([
       first,
       second,
     ]);
@@ -87,18 +105,18 @@ describe("event store", () => {
 
   it("discards a snapshot at an unsupported version — the log is authoritative", () => {
     const d = dir();
-    const store = openEventStore(d, { schema: RecordSchema });
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
     store.snapshot();
     const bumped = JSON.parse(readFileSync(store.snapshotPath, "utf8"));
     bumped.v = 999;
     writeFileSync(store.snapshotPath, JSON.stringify(bumped));
 
-    expect(openEventStore(d, { schema: RecordSchema }).replay()).toEqual([first]);
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([first]);
   });
 
   it("refuses a record the caller's schema rejects", () => {
-    const store = openEventStore(dir(), { schema: RecordSchema });
+    const store = openEventStore(dir(), { schema: RecordSchema, sync: noSync });
     expect(() => store.append({ kind: "a" } as never)).toThrow();
   });
 });
