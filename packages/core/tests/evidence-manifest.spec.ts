@@ -113,15 +113,20 @@ describe("EvidenceManifestSchema", () => {
   // P1 inherits the frozen template: every field survives with the same
   // meaning, P1 may only add fields or tighten types, and the hand-written P0
   // manifest must validate against this schema WITHOUT being rewritten.
-  it("validates the committed P0 manifest unchanged", () => {
+  it.each([
+    ["p0-manifest.yaml", 7, 2],
+    ["p1-manifest.yaml", 6, 2],
+  ])("validates the committed %s unchanged", (file, claims, partial) => {
     const path = fileURLToPath(
-      new URL("../../../docs/evidence/p0-manifest.yaml", import.meta.url),
+      new URL(`../../../docs/evidence/${file}`, import.meta.url),
     );
     const parsed = EvidenceManifestSchema.parse(
       parseYaml(readFileSync(path, "utf8")),
     );
     expect(parsed.manifestVersion).toBe("p0-1");
-    expect(parsed.claims).toHaveLength(7);
-    expect(parsed.claims.filter((c) => c.status === "PARTIAL")).toHaveLength(2);
+    expect(parsed.claims).toHaveLength(claims);
+    expect(parsed.claims.filter((c) => c.status === "PARTIAL")).toHaveLength(
+      partial,
+    );
   });
 });

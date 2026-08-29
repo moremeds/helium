@@ -44,21 +44,35 @@ const register = parseYaml(
   readFileSync(at("docs/evidence/claims.yaml"), "utf8"),
 ) as { registerVersion: number; claims: Claim[] };
 
-const manifest = parseYaml(
-  readFileSync(at("docs/evidence/p0-manifest.yaml"), "utf8"),
-) as {
-  claims: {
-    id: string;
-    verification: {
-      command: string;
-      toolVersion: string;
-      outputHash: string;
-      decision: string;
-    };
-    status: string;
-    artifacts: Artifact[];
-  }[];
+interface ManifestClaim {
+  id: string;
+  verification: {
+    command: string;
+    toolVersion: string;
+    outputHash: string;
+    decision: string;
+  };
+  status: string;
+  artifacts: Artifact[];
+}
+
+/**
+ * Every phase manifest, by the phase whose rows it owns in the register. A
+ * phase that lands a manifest and forgets to add it here would have its rows
+ * go uncross-checked, so the count is asserted below.
+ */
+const MANIFESTS: Record<string, string> = {
+  P0: "docs/evidence/p0-manifest.yaml",
+  P1: "docs/evidence/p1-manifest.yaml",
 };
+
+const manifests = Object.fromEntries(
+  Object.entries(MANIFESTS).map(([phase, path]) => [
+    phase,
+    (parseYaml(readFileSync(at(path), "utf8")) as { claims: ManifestClaim[] })
+      .claims,
+  ]),
+);
 
 const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
@@ -74,14 +88,25 @@ describe("closed claims register", () => {
     expect(ids).toEqual([...new Set(ids)]);
   });
 
-  it("contains exactly the P0 manifest's claims, and agrees with it field by field", () => {
+  it("covers every phase that has landed a manifest", () => {
+    // A phase whose manifest is not listed would have its rows silently
+    // uncross-checked. Assert the composition rather than trusting the loop.
+    expect(Object.keys(MANIFESTS).sort()).toEqual(["P0", "P1"]);
+    const phases = [...new Set(register.claims.map((c) => c.phase))].sort();
+    expect(phases).toEqual(["P0", "P1"]);
+  });
+
+  it.each(Object.keys(MANIFESTS))(
+    "contains exactly the %s manifest's claims, and agrees with it field by field",
+    (phase) => {
+    const claims = manifests[phase];
     const registered = new Map(
-      register.claims.filter((c) => c.phase === "P0").map((c) => [c.id, c]),
+      register.claims.filter((c) => c.phase === phase).map((c) => [c.id, c]),
     );
     expect([...registered.keys()].sort()).toEqual(
-      manifest.claims.map((c) => c.id).sort(),
+      claims.map((c) => c.id).sort(),
     );
-    for (const claim of manifest.claims) {
+    for (const claim of claims) {
       const row = registered.get(claim.id);
       expect(row, `${claim.id} is missing from the register`).toBeDefined();
       expect({
@@ -98,7 +123,8 @@ describe("closed claims register", () => {
         status: claim.status,
       });
     }
-  });
+  },
+  );
 
   it("re-hashes every artifact a decided claim cites", () => {
     let checked = 0;

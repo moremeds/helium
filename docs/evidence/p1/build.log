@@ -1,0 +1,22 @@
+##[group]Run pnpm run build
+pnpm run build
+shell: /usr/bin/bash -e {0}
+env:
+  PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+##[endgroup]
+$ pnpm -r --if-present run build
+Scope: 10 of 11 workspace projects
+contracts/fixtures/plugin-live-dispatch build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-restrict-proof build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-restrict-proof build: Done
+packages/core build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-live-dispatch build: Done
+packages/core build: Done
+packages/fake-flat-rate build$ tsc -p tsconfig.json
+packages/fake-metered build$ tsc -p tsconfig.json
+packages/fake-metered build: Done
+packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
+packages/fake-flat-rate build: Done
+packages/v1-compat build: Done
+plugins/helium build$ tsc -p tsconfig.json
+plugins/helium build: Done

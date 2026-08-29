@@ -1,0 +1,169 @@
+# Phase 1 exit evidence — frozen `p0-1` template, now schema-validated
+#
+# Phase 0's manifest was hand-written because the EvidenceManifest schema did
+# not exist yet. It does now (Task 7), and this file validates against it:
+# `packages/core/tests/evidence-manifest.spec.ts` parses BOTH committed
+# manifests, so a field a later phase renames or over-tightens breaks a test
+# rather than quietly invalidating a phase's exit artifact.
+#
+# WHERE THE HASHES COME FROM
+# --------------------------
+#   run:    https://github.com/moremeds/helium/actions/runs/33242022904
+#   commit: 2da8847  (feat/multi-agent-phase1)
+#   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49)
+#   pnpm:   11.24.0   vitest: 3.2.7
+#
+# A hash captured on a developer machine is not admissible. That rule is why
+# the install/removal drill was wired into CI in 2da8847 rather than recorded
+# from the terminal it was first run in: it had passed by hand, and by hand is
+# not evidence.
+#
+# The captured output carries wall-clock durations, so re-running the same
+# commit produces a DIFFERENT hash. The hash pins this run's output as an
+# immutable record; `reproduction` re-runs the assertion, never the hash.
+#
+# STATUS IS JUDGED AGAINST `acceptanceBound`
+# ------------------------------------------
+# PROVEN means the artifact demonstrates everything the claim's own
+# acceptanceBound names. Two claims are PARTIAL because part of their bound is
+# not demonstrated, and each says which part. Neither was rounded up.
+manifestVersion: p0-1
+phase: P1
+scope: offline
+recordedAt: 2026-08-29T08:05:00Z
+claims:
+  - id: P1-CORE-NEUTRALITY
+    assertion: "packages/core/src names no provider and no business domain."
+    acceptanceBound: "Zero matches for either forbidden word list across every .ts file under packages/core/src, matched on word boundaries over camelCase-split identifiers, with no file and no comment exempted."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test:contracts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/test-contracts.log"
+        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts"
+    failures: "None. The scan's own matching rule is under test alongside it, so a loosened regex fails rather than silently admitting every violation."
+    status: PROVEN
+    limitation: "Proves the source scan only. It says nothing about a provider name arriving at runtime through a typed audit field, which is permitted by design."
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+
+  - id: P1-FAKE-PROVIDER-SUITE
+    assertion: "Every registered executor passes the shared execution-boundary conformance suite at its declared isolationClass."
+    acceptanceBound: "Both registered fake executors are graded by the one shared suite at the class each declares, and an executor declaring more than it demonstrates fails registration."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test:contracts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/test-contracts.log"
+        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project contracts contracts/tests/executor-conformance.contract.spec.ts"
+    failures: "None observed. The over-claim case is exercised directly: an executor declaring sandboxed against a process-class record is refused."
+    status: PARTIAL
+    limitation: "Only @helium/fake-metered is graded by the suite. @helium/fake-flat-rate declares in-process and is admitted at the floor WITHOUT a suite run, because every assertion in that suite reads a boundary report written by a spawned CLI child and an in-process executor has no child to write one. The floor cannot be over-claimed, which is the only thing the suite catches, but the second half of the bound -- 'both executors graded by the suite' -- is not demonstrated and is not claimed."
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+
+  - id: P1-CATALOG-REPLAY
+    assertion: "A recorded catalog and policy replay to the same selection decision on every repeat."
+    acceptanceBound: "Twenty consecutive selections over one catalog snapshot and policy produce byte-identical decisions, including candidate order, exclusion reasons and fallback position."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/test.log"
+        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/router.spec.ts --repeat=20"
+    failures: "None. select() is pure and takes an availability-resolved snapshot, so there is no clock or catalog mutation to make a repeat diverge."
+    status: PROVEN
+    limitation: "Proves determinism over a snapshot. It does not prove the snapshot itself is reproducible from a running catalog, which needs the durable event log Phase 2 adds."
+    nextGate: "Phase 2 exit: deterministic replay across a restart."
+
+  - id: P1-EXECUTION-SNAPSHOT-TYPED
+    assertion: "Every recorded run carries a parsed AgentResult.executionSnapshot, not an uninterpreted runtimeMetadata entry."
+    acceptanceBound: "The schema refuses a result without a snapshot or with an unusable isolation class, the registry parses every executor result through that schema, and every recorded run carries one."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test && pnpm run test:contracts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:f12997fcb1208e858e9800b945e2c64227c646fb5e0d9c6672da9268f3bdc303"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/test.log"
+        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+      - path: "docs/evidence/p1/test-contracts.log"
+        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/work.spec.ts plugins/helium/src/executor-registry.test.ts"
+    failures: "A result carrying an extra top-level key -- the shape a leaked model name would arrive in -- is refused by the strict schema at the registry boundary."
+    status: PARTIAL
+    limitation: "Every run THROUGH THE EXECUTOR REGISTRY carries a parsed snapshot. The v1 triage and senior lanes do not route through the registry at Phase 1 -- they still return the legacy DispatchResult -- so 'every recorded run' is not yet true of the production path. Phase 2 moves them onto the registry."
+    nextGate: "Phase 2 exit: provider executors registered behind the lifecycle seam."
+
+  - id: P1-PLUGIN-INSTALL-NO-CORE-EDIT
+    assertion: "Each fake executor package can be removed and re-added without editing packages/core or plugins/helium."
+    acceptanceBound: "pnpm remove then pnpm add for each package exits 0, and git diff --name-only over packages/core and plugins/helium prints nothing."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "bash: pnpm --filter @helium/contracts remove/add each fake package, then git diff --name-only -- packages/core plugins/helium"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0"
+      outputHash: "sha256:3043112ecea97cad77697c1f9afe6cdd0fce451c9992420883f1c4708970e5d2"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/install-removal-drill.log"
+        sha256: "3043112ecea97cad77697c1f9afe6cdd0fce451c9992420883f1c4708970e5d2"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "The `fake executor packages install and remove with no core edit` step in .github/workflows/ci.yml"
+    failures: "None. The drill fails the job if the diff is non-empty, printing the offending paths."
+    status: PROVEN
+    limitation: "Proves the two fake packages. It does not prove an arbitrary third-party executor plugin installs cleanly, which is a Phase 5 claim."
+    nextGate: "Phase 5: plugin conformance and independent promotion."
+
+  - id: P1-V1-BEHAVIOR-PRESERVED
+    assertion: "The v1 regression suite passes in both legacy-direct and work-order-adapter runtime modes."
+    acceptanceBound: "build, typecheck, the unit suite, the contract suite and the local end-to-end suite all pass, and the end-to-end golden path -- poll, triage, escalate, deliver, dedup, restart -- passes in BOTH runtime modes."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run build && pnpm run typecheck && pnpm run test && pnpm run test:contracts && pnpm run test:e2e-local"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:cc653cfaca8f431c9de712007d99f63863b04271546abf1970b7c86da37539eb"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p1/build.log"
+        sha256: "e978c83b1b057d662f008e79f8a0d47edd656014772550ab65882e40632e5461"
+      - path: "docs/evidence/p1/typecheck.log"
+        sha256: "d1274a63faa549eddff2d946e1676fe3a65cf9fd76ba743f77c88792aa3f1351"
+      - path: "docs/evidence/p1/test.log"
+        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+      - path: "docs/evidence/p1/test-contracts.log"
+        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+      - path: "docs/evidence/p1/test-e2e-local.log"
+        sha256: "824b331ac0c85b846a51ba6a3ebfa0f0f21d18c4f3d4dad3f7500a0846cbd078"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "git checkout 2da8847 && pnpm install --frozen-lockfile && pnpm run build && pnpm run typecheck && pnpm run test && pnpm run test:contracts && pnpm run test:e2e-local"
+    failures: "None. The adapter round trip is asserted to deep-equal the original for every shipped tenant, so a dropped field changes a golden delivery record rather than going unnoticed."
+    status: PROVEN
+    limitation: "Proves equivalence on the shipped tenants under the local end-to-end harness with stubbed engines. It does not prove equivalence against a live provider, and work-order-adapter is not the default mode."
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
