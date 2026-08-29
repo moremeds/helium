@@ -1578,11 +1578,11 @@ yet. Run it once with provider packages disabled as a continuity check. This
 gate does **not** assert that host pressure prevents team fan-out —
 that requires the team controller and is asserted at the Phase E gate. Open and
 merge an observe-only plugin PR. Do not install `opsd` until AC#1 is complete
-and a separate deployment plan is approved. "Do not install" here is design
-section 13.4's Window 1, where the boundary is the **host** and the test is
-**presence**, not mutation: merging this code is permitted, and putting a byte
-on the mini or starting any process there — including one manual one-shot probe
-run — is not, until 2026-08-31 has passed and the AC#1 evidence is recorded.
+and a separate deployment plan is approved. Under the 2026-08-30 operator
+amendment to design section 13.4, bounded read-only SSH inspection may capture
+identity/configuration evidence during Window 1. It may not install or start
+`opsd`, invoke a production probe or repair, write application/configuration/
+state files, deploy a release, or change a managed service before AC#1 closes.
 
 ## Phase D: true multi-agent analysis and SOP certification
 

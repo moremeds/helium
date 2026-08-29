@@ -3,9 +3,10 @@
 This is the pre-deployment inventory required by Ops Task 16. It is deliberately
 truthful about the boundary of the 2026-08-25 sanitized audit: the evidence
 proved incident symptoms, but did not retain executable paths, owners, release
-hashes, or a successful controlled repair. AC#1 forbids refreshing those facts
-from the mini before 2026-08-31, and any later host inspection still requires a
-separate approved deployment plan.
+hashes, or a successful controlled repair. The 2026-08-30 operator amendment
+permits bounded read-only identity/configuration inspection during AC#1, while
+installation, repair, deployment, service lifecycle changes and application/
+configuration/state writes remain frozen through 2026-08-31.
 
 The YAML registrations therefore use the impossible
 `/__HELIUM_UNCERTIFIED__/` prefix. They exercise exact-argv and policy contracts
@@ -17,8 +18,8 @@ The signing-host policy remains deliberately uncommissioned. On 2026-08-30 the
 approved off-mini operator workstation was recorded as a SHA-256 hardware hash
 in `allowedOperatorHostHashes`; its raw hardware UUID was not retained. The mini
 hash remains absent because reading it would start a process during AC#1 and
-irreversibly contaminate that unattended window. After the freeze, the approved
-inventory must place the mini hash only in `forbiddenMiniHostHashes`. Both
+was forbidden by the superseded zero-process rule. The approved inventory must
+place the mini hash only in `forbiddenMiniHostHashes`. Both
 approval signing and authority-manifest signing continue to fail closed until
 both lists are populated. The manifest signer also revalidates component
 ownership, business postconditions, executor registration, and the executable

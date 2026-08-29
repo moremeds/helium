@@ -2,15 +2,16 @@
 
 **Date:** 2026-08-25
 
-**Last revised:** 2026-08-29 — Revision 4, P4 takeover and provider-capacity
-adjudication
+**Last revised:** 2026-08-30 — Revision 4 plus the operator's bounded read-only
+AC#1 inspection amendment
 
 **Status:** Architecture and execution through P4 approved. The next unopened
 gate is Ops Phase C; no later phase inherits a pass from an earlier phase.
 
-**Production constraint:** Do not change the mini during the active AC#1
-observation window, which closes 2026-08-31. The test is **presence**, not
-mutation — see section 13.4 of the
+**Production constraint:** Do not deploy, install, repair, reconfigure or change
+managed-service state on the mini during the active AC#1 observation window,
+which closes 2026-08-31. Bounded read-only identity/configuration inspection is
+permitted by the 2026-08-30 operator amendment; see section 13.4 of the
 [ops-agent design](2026-08-25-helium-ops-agent-design.md)
 
 ## Revision 4 — 2026-08-29
@@ -822,17 +823,16 @@ anything that must modify it moves to [Phase 3.5](#phase-35-team-admission-enfor
 
 - Observe-only first; no SOP execution.
 - Existing watchdogs, restart policies, and dead-man remain authoritative.
-- During AC#1 the test is **presence**, not mutation: if it puts a byte on the
-  mini or starts a process there, it is forbidden — including a single manual
-  one-shot run, any `launchctl` load of a `com.helium.opsd*` label, any package
-  install or upgrade, any Helium deploy, and any probe executed against the mini
-  from another host. "No production component or host mutation" was too weak to
-  refuse a LaunchAgent install on a literal reading. Both windows — this
-  pre-install one and the later installed-and-observing one — are enumerated as
-  verb lists in §13.4 of the
+- During AC#1 bounded read-only SSH inspection may collect identity,
+  configuration, ownership, mode, release-target and executable-hash evidence.
+  It may not invoke Helium/DSH/opsd, run a repair, write application or state
+  files, install or upgrade a package, deploy Helium, or change any managed
+  service. Both windows — this pre-install one and the later
+  installed-and-observing one — are enumerated as verb lists in §13.4 of the
   [Ops Agent design](2026-08-25-helium-ops-agent-design.md). The freeze closes
   **2026-08-31**, and that date is the value the installer's freeze-window
-  refusal reads.
+  refusal reads. This 2026-08-30 amendment changes only the earlier zero-process
+  presence rule; the v1 five-trading-day acceptance conditions are unchanged.
 - A parser failure yields `unknown`, never an automatic restart.
 - Agents receive read-only evidence tools and eligible SOP IDs, never a generic
   shell tool.

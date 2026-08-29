@@ -6,8 +6,11 @@ Mac mini change.
 
 ## Current boundary
 
-- AC#1 freezes all Mac mini installs, starts, and configuration changes through
-  **2026-08-31**. The installer also enforces this date.
+- AC#1 freezes all Mac mini installs, managed-service starts/stops, repairs,
+  deployments, and application/configuration/state writes through
+  **2026-08-31**. The installer also enforces this date. The 2026-08-30 operator
+  amendment permits bounded read-only SSH identity/configuration inspection;
+  it does not permit running `opsd` or a production probe.
 - Merging or deploying the repository does not install `opsd`.
 - The committed authority manifest grants no mutation authority. The unresolved
   production script paths, hashes, owners, live postconditions, drill evidence,
