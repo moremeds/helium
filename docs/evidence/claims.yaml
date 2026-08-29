@@ -732,7 +732,7 @@ claims:
       - path: docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log
         sha256: e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
       - path: docs/evidence/p2.5a/phase-d-live-deadman-2026-08-30.log
-        sha256: 51f28b31c4708df34e5ad7f52bb5422b53922e4e87df96ef0f85f7de156b93b2
+        sha256: b31136843ac8091fbe687a8b8e401bcb6cb20aa77e83a23f079f54f0c3a9f258
   - id: P2.5A-PHASE-D-OFFLINE-GATE
     phase: P2.5a
     assertion: The Phase D code tree, excluding explicitly blocked live

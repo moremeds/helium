@@ -17,10 +17,11 @@ independent.scope=opsd event log and private opsd-deadman sentinel only; no DSH 
 independent.interval_s=120
 independent.stale_s=180
 independent.realert_s=3600
-independent.run_count=1
+independent.run_count=2
 independent.last_exit_code=0
-independent.stdout=opsd fresh: last observation 16s ago (2026-08-29T22:37:00.914Z)
-independent.stdout_path=/Users/moremeds/.helium/ops/logs/opsd-deadman.out.log uid=501 mode=600 size=64 sha256=54600fb2dd29022511730fb6aa3a97180f626b2750e3ad9e28c4a3f06de015d4
+independent.stdout.1=opsd fresh: last observation 16s ago (2026-08-29T22:37:00.914Z)
+independent.stdout.2=opsd fresh: last observation 15s ago (2026-08-29T22:39:01.187Z)
+independent.stdout_path=/Users/moremeds/.helium/ops/logs/opsd-deadman.out.log uid=501 mode=600 size=128 sha256=7408017b234efa6f06f5d037b1eb14afe301aa1c8877785a9e18cbc0f53b1deb
 independent.stderr_path=/Users/moremeds/.helium/ops/logs/opsd-deadman.err.log uid=501 mode=600 size=0 sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
 offline_regression=fresh passes without alert; unrelated tenant state ignored; future timestamp alerts; repeat suppressed; fresh recovery clears sentinel
