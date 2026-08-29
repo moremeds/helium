@@ -1,0 +1,20 @@
+# Host resource observations remain distinct dimensions. A healthy boot volume
+# must never hide a full data, container, backup, or Helium state volume.
+version: 1
+id: host
+kind: host
+displayName: Helium host
+dimensions:
+  - memory-pressure
+  - cpu-load
+  - volume-internal-data
+  - volume-data-lake
+  - volume-colima
+  - volume-backup
+  - volume-helium-state
+  - process-liveness
+mutationOwner:
+  owner: none
+  competingLabels: []
+  changedAt: "2026-08-29T00:00:00.000Z"
+  changeRef: "ops/components/host.yaml"

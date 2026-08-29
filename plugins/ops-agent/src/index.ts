@@ -75,3 +75,11 @@ export {
   type CommandRunner,
   type ProcessProbeOptions,
 } from "./probes/process.js";
+export {
+  Collector,
+  type CollectionResult,
+  type CollectorFailure,
+  type CollectorOptions,
+  type ObservationProbe,
+  type ObservationSink,
+} from "./collector.js";

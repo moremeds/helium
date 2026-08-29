@@ -65,7 +65,10 @@ const sensorContextIsNeutral: [SensorContextIsNeutral] extends [never]
  * lands it is declared alongside these, and until then this list must not be
  * read as covering it.
  */
-const DECLARED_SENSOR_ROOTS: string[] = ["plugins/ops-agent/src/probes"];
+const DECLARED_SENSOR_ROOTS: string[] = [
+  "plugins/ops-agent/src/probes",
+  "plugins/ops-agent/src/collector.ts",
+];
 
 /**
  * Modules a sensor may never transitively reach. Declared only once the task
@@ -97,11 +100,15 @@ function tsFilesUnder(dir: string): string[] {
  */
 export function resolveRoots(names: string[]): string[] {
   return names.flatMap((name) => {
-    const dir = resolve(repoRoot, name);
-    if (!existsSync(dir)) {
+    const path = resolve(repoRoot, name);
+    if (!existsSync(path)) {
       throw new Error(`declared sensor root does not resolve: ${name}`);
     }
-    const files = tsFilesUnder(dir);
+    const files = statSync(path).isDirectory()
+      ? tsFilesUnder(path)
+      : path.endsWith(".ts")
+        ? [path]
+        : [];
     if (files.length === 0) {
       throw new Error(`declared sensor root enumerates no modules: ${name}`);
     }
@@ -185,7 +192,10 @@ describe("topology: no sensor reaches an executor", () => {
     // This assertion exists so that the day a root is added or dropped, the
     // change is visible here rather than silently widening -- or quietly
     // emptying -- a lint that had been passing.
-    expect(DECLARED_SENSOR_ROOTS).toEqual(["plugins/ops-agent/src/probes"]);
+    expect(DECLARED_SENSOR_ROOTS).toEqual([
+      "plugins/ops-agent/src/probes",
+      "plugins/ops-agent/src/collector.ts",
+    ]);
   });
 
   it("walks a non-empty set of sensor modules", () => {
