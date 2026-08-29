@@ -587,3 +587,161 @@ claims:
       prevents the offline green gate from being misread as live observation
       proof.
     nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."
+  - id: P2.5A-OPSD-MODE-AUTHORITY
+    phase: P2.5a
+    assertion: The standalone operations controller remains deterministic and
+      fail-closed across observe, suggest, approve and auto modes, with scoped
+      durable approval and authority decisions.
+    assertionClass: deterministic
+    command: pnpm test && node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proven with temporary state, fake launchctl output, generated
+      test keys and fake executors. No control socket, approval key, authority
+      manifest or executor was installed on the mini.
+    nextGate: Task 16 live identity commissioning and the post-AC#1 controlled drill.
+    outputHash: sha256:8dd20900b599b95387ffa96759b3a6dd0f8dfc1863023e9175dd4cae13b38de2
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-test.log
+        sha256: 13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091
+      - path: docs/evidence/p2.5a/phase-d-signing.log
+        sha256: da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3
+  - id: P2.5A-PROVIDER-OUTAGE-CONTINUITY
+    phase: P2.5a
+    assertion: Exhausting every configured model-provider quota domain cannot
+      stop operations collection or deterministic recovery and cannot create a
+      provider retry busy loop.
+    assertionClass: deterministic
+    command: pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts && pnpm exec vitest run --project unit plugins/ops-agent/src/analysis-client.test.ts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: All three providers are deterministic fakes; this proves outage
+      semantics and retry control, not the live providers' quota APIs. Claude
+      remains included only as a fake domain, so no Claude quota was consumed.
+    nextGate: P3 paired evaluation against available Codex and DeepSeek models;
+      add Claude live coverage only after its quota returns.
+    outputHash: sha256:02096e386fb180547383d25ae7a0ab74c103edd772653138064d4fc7dcdfd746
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-test-contracts.log
+        sha256: e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c
+      - path: docs/evidence/p2.5a/phase-d-test.log
+        sha256: 13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091
+  - id: P2.5A-ACTION-BOUNDARY-DURABLE
+    phase: P2.5a
+    assertion: A recovery action is single-owner, crash-convergent and
+      evidence-complete across process races, torn writes, restarts and
+      release/configuration drift.
+    assertionClass: deterministic
+    command: pnpm test && bash scripts/test-repeat.sh 20 pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Crashes, signals, raw artifacts and competing processes use
+      temporary local fixtures. This does not claim a real recovery, real
+      launchd ownership handoff or production evidence bundle.
+    nextGate: Post-AC#1 controlled ownership handoff and drill, after Task 16 is commissioned.
+    outputHash: sha256:a97e14e646e6d775011f779b585d6faa4cbf44ea5f981453414cef12d30c6406
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-test.log
+        sha256: 13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091
+      - path: docs/evidence/p2.5a/phase-d-test-contracts.log
+        sha256: e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c
+      - path: docs/evidence/p2.5a/phase-d-ops-repeat.log
+        sha256: 5bce667ec30c326386f85ee0199aaa4eef1593b5e3de6bfca62a6abb3f1e5726
+  - id: P2.5A-SIGNING-BOUNDARY-FAIL-CLOSED
+    phase: P2.5a
+    assertion: Offline approval and authority-manifest tooling signs only
+      canonical, exactly identified and structurally certified grants, and
+      otherwise refuses or downgrades to observe.
+    assertionClass: deterministic
+    command: node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs && pnpm exec vitest run --project unit plugins/ops-agent/tests/script-certification.spec.ts packages/core/tests/operations-authority-manifest.spec.ts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Only generated fixture keys and fixture scripts were signed. No
+      operator key, mini identity, live executable hash or production grant was
+      created.
+    nextGate: P2.5A-LIVE-SCRIPT-CERTIFICATION.
+    outputHash: sha256:e399726a6764f7ebc7862affae1639cc48496c3808dae3a3a28747ef56e9a280
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-signing.log
+        sha256: da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3
+      - path: docs/evidence/p2.5a/phase-d-test.log
+        sha256: 13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091
+  - id: P2.5A-LIVE-SCRIPT-CERTIFICATION
+    phase: P2.5a
+    assertion: The first existing production recovery scripts are inventoried
+      against their live deployment identities, owned by opsd, drill-bounded
+      and covered by an operator-signed authority manifest.
+    assertionClass: deterministic
+    command: "not yet runnable: live paths, hashes, owner UIDs, mutation owners, drill records and the operator signature are intentionally unresolved"
+    toolVersion: n/a
+    decision: inconclusive
+    status: BLOCKED
+    limitation: Task 16 is not complete. The authority manifest remains empty,
+      production mutation owners remain external or none, executor identities
+      are sentinels, and no controlled drill or operator signature exists.
+    nextGate: "After 2026-08-31 and separate approval: read-only identity capture first; reviewed ownership handoff second; controlled drill and off-mini signature last."
+  - id: P2.5A-OBSERVE-PACKAGING
+    phase: P2.5a
+    assertion: The observe-only macOS package is freeze-guarded, private,
+      reversible, release-compatible and independently dead-man monitored
+      without installing or starting anything.
+    assertionClass: deterministic
+    command: bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh
+    toolVersion: macOS runner; node 22.19.0; pnpm 11.24.0
+    decision: pass
+    status: PROVEN
+    limitation: All filesystem effects were redirected into temporary
+      directories. Packaging has not been installed, loaded or observed on the
+      mini, and passing this claim is not deployment approval.
+    nextGate: AC#1 completion evidence plus a separate observe-only deployment
+      approval after Task 16 identity capture.
+    outputHash: sha256:c82415675c95661d4dabb6444e514c5d068a47bf655ec320152d8f8b52465d9c
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
+        sha256: 19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e
+      - path: docs/evidence/p2.5a/phase-d-deadman.log
+        sha256: 461a454aa5b9fd60c198c286e9ed7b9da519123a305e8026c361ad255e763b58
+      - path: docs/evidence/p2.5a/phase-d-signing.log
+        sha256: da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3
+  - id: P2.5A-PHASE-D-OFFLINE-GATE
+    phase: P2.5a
+    assertion: The Phase D code tree, excluding explicitly blocked live
+      commissioning, passes the complete repository and macOS offline gate at
+      the pinned runtime.
+    assertionClass: deterministic
+    command: pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && bash scripts/ops/install-observe-only.test.sh && git diff --check
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: This is an offline code gate, not the Phase D commissioning
+      gate. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED;
+      no production proof was opened and no byte or process touched the mini.
+    nextGate: Keep PR 19 draft until Task 16 and the controlled live drill are
+      completed after AC#1 with separate approval.
+    outputHash: sha256:22ea5de56c519a1b100189f73ebedfcbc46a9a4d7622e64bda8acb8c9c88fb47
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-ci-gate.log
+        sha256: a6e30a5c0756a61a56548cdb5d8be0348549235cc94cceea8167593ac1e69923
+      - path: docs/evidence/p2.5a/phase-d-build.log
+        sha256: dd2ae7a7688c08d108d111077082f4f46bf722f52c81c4daacdddc1db71795b2
+      - path: docs/evidence/p2.5a/phase-d-typecheck.log
+        sha256: e0d7048384a8c2967731ae78ddbdfd3c0f884eedfd6fdce4c9e4abe53fdfcf98
+      - path: docs/evidence/p2.5a/phase-d-test.log
+        sha256: 13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091
+      - path: docs/evidence/p2.5a/phase-d-test-contracts.log
+        sha256: e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c
+      - path: docs/evidence/p2.5a/phase-d-test-e2e-local.log
+        sha256: c242cd2c45e9b1502c43eaef5bde81826e3bb07886d8c005d2a918bb4d9b8712
+      - path: docs/evidence/p2.5a/phase-d-ops-repeat.log
+        sha256: 5bce667ec30c326386f85ee0199aaa4eef1593b5e3de6bfca62a6abb3f1e5726
+      - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
+        sha256: 19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e

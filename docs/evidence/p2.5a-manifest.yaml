@@ -1,9 +1,9 @@
-# Phase 2.5a exit evidence — Ops Phases B-C
+# Phase 2.5a exit evidence — Ops Phases B-D
 #
 # The operations substrate spans Ops Phases A-D, all of which are program phase
 # P2.5a. This manifest is the single P2.5a record and is appended to as each
-# Ops phase gate is reached. The first seven rows are Ops Phase B's; the six
-# appended rows are Ops Phase C's.
+# Ops phase gate is reached. The first seven rows are Ops Phase B's; the next
+# six are Ops Phase C's; the final seven are Ops Phase D's.
 #
 # Validated against EvidenceManifestSchema by
 # packages/core/tests/evidence-manifest.spec.ts, alongside the P0 and P1
@@ -22,6 +22,12 @@
 #   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,70)
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
+# Ops Phase D:
+#   run:    https://github.com/moremeds/helium/actions/runs/33270118932
+#   commit: 1ca81e4  (feat/ops-phase-d)
+#   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49,70)
+#   pnpm:   11.24.0   vitest: 3.2.7
+#
 # A hash captured on a developer machine is not admissible. Captured output
 # carries wall-clock durations, so re-running the same commit yields a
 # different hash; the hash pins this run, and `reproduction` re-runs the
@@ -37,7 +43,7 @@
 manifestVersion: p0-1
 phase: P2.5a
 scope: offline
-recordedAt: 2026-08-29T16:20:59Z
+recordedAt: 2026-08-29T19:12:24Z
 claims:
   - id: P2.5A-CRASH-MATRIX
     assertion: "A controller terminated at any point in a recovery attempt produces no duplicate attempt, receipt or terminal state, and never blindly retries."
@@ -315,3 +321,175 @@ claims:
     status: BLOCKED
     limitation: "No Phase C probe or adapter has run against the mini. This row prevents the offline green gate from being misread as live observation proof."
     nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."
+
+  - id: P2.5A-OPSD-MODE-AUTHORITY
+    assertion: "The standalone operations controller remains deterministic and fail-closed across observe, suggest, approve and auto modes, with scoped durable approval and authority decisions."
+    acceptanceBound: "Observe and suggest never instantiate an executor; approve requires a matching unexpired signed nonce that cannot replay across restart; auto requires both policy eligibility and a trusted exact authority-manifest entry; missing, malformed, stale, untrusted or escalated authority resolves to observe; the owner-only control socket cannot directly invoke an executor or accept an unrelated approval."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm test && node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:8dd20900b599b95387ffa96759b3a6dd0f8dfc1863023e9175dd4cae13b38de2"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-test.log"
+        sha256: "13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091"
+      - path: "docs/evidence/p2.5a/phase-d-signing.log"
+        sha256: "da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3"
+    baseline: "Ops Phase C merge c5931a6, which provided observation and policy primitives but no standalone controller, durable approval ledger or control socket."
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/controller.test.ts plugins/ops-agent/src/mode.test.ts plugins/ops-agent/src/ipc.test.ts plugins/ops-agent/src/approval.test.ts plugins/ops-agent/src/bin/opsctl.test.ts plugins/ops-agent/src/index.test.ts && node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs"
+    failures: "None in CI run 33270118932. Missing signing policy, a registered mini, exposed key material, stale digest, unresolved ownership and unregistered probes are all refusal cases."
+    status: PROVEN
+    limitation: "Proven with temporary state, fake launchctl output, generated test keys and fake executors. No control socket, approval key, authority manifest or executor was installed on the mini."
+    nextGate: "Task 16 live identity commissioning and the post-AC#1 controlled drill."
+
+  - id: P2.5A-PROVIDER-OUTAGE-CONTINUITY
+    assertion: "Exhausting every configured model-provider quota domain cannot stop operations collection or deterministic recovery and cannot create a provider retry busy loop."
+    acceptanceBound: "With fake Codex, DeepSeek and Claude domains all returning quota-exhausted, the controller performs the eligible deterministic action once, makes exactly one attempt per domain, durably records analysis unavailable with all three reasons, suppresses the immediate retry through persisted backoff, and restores that backoff after a process restart."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts && pnpm exec vitest run --project unit plugins/ops-agent/src/analysis-client.test.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:02096e386fb180547383d25ae7a0ab74c103edd772653138064d4fc7dcdfd746"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-test-contracts.log"
+        sha256: "e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c"
+      - path: "docs/evidence/p2.5a/phase-d-test.log"
+        sha256: "13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091"
+    baseline: "The Phase D plan's three-domain provider-outage gate and the earlier false-green fixture that made no provider call."
+    reproduction: "pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts -t 'keeps the deterministic side effect available when all provider quota domains are exhausted' && pnpm exec vitest run --project unit plugins/ops-agent/src/analysis-client.test.ts"
+    failures: "None. The contract observes providerCalls=3, one succeeded deterministic side effect, and one durable unavailable event naming codex, deepseek and claude; the second publish is circuit-broken."
+    status: PROVEN
+    limitation: "All three providers are deterministic fakes; this proves outage semantics and retry control, not the live providers' quota APIs. Claude remains included only as a fake domain, so no Claude quota was consumed."
+    nextGate: "P3 paired evaluation against available Codex and DeepSeek models; add Claude live coverage only after its quota returns."
+
+  - id: P2.5A-ACTION-BOUNDARY-DURABLE
+    assertion: "A recovery action is single-owner, crash-convergent and evidence-complete across process races, torn writes, restarts and release/configuration drift."
+    acceptanceBound: "The OS-atomic component lock survives two-process acquisition and stale-holder races; orphan coordination state is safely reclaimed; a torn event tail is truncated before the next append; restart reconciliation terminalizes interrupted work without re-execution; decision-time owner, dependencies and complete postcondition definitions are immutable; terminal events reference owner-only hashed evidence including every nested raw artifact; and contradictory FAILED/PROVEN/pass evidence is rejected."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm test && bash scripts/test-repeat.sh 20 pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:a97e14e646e6d775011f779b585d6faa4cbf44ea5f981453414cef12d30c6406"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-test.log"
+        sha256: "13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091"
+      - path: "docs/evidence/p2.5a/phase-d-test-contracts.log"
+        sha256: "e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c"
+      - path: "docs/evidence/p2.5a/phase-d-ops-repeat.log"
+        sha256: "5bce667ec30c326386f85ee0199aaa4eef1593b5e3de6bfca62a6abb3f1e5726"
+    baseline: "Ops Phase B's pure action event contract and Phase C's observation path, before a production-composed durable controller existed."
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/controller.test.ts packages/core/tests/operations-component-lock.spec.ts packages/core/tests/event-store.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts plugins/ops-agent/src/recovery-evidence-store.test.ts && bash scripts/test-repeat.sh 20 pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts"
+    failures: "None across 20 repeated contract runs: 600 of 600 assertions passed. The independent code review found no Important-or-higher issue at commit 1ca81e4."
+    status: PROVEN
+    limitation: "Crashes, signals, raw artifacts and competing processes use temporary local fixtures. This does not claim a real recovery, real launchd ownership handoff or production evidence bundle."
+    nextGate: "Post-AC#1 controlled ownership handoff and drill, after Task 16 is commissioned."
+
+  - id: P2.5A-SIGNING-BOUNDARY-FAIL-CLOSED
+    assertion: "Offline approval and authority-manifest tooling signs only canonical, exactly identified and structurally certified grants, and otherwise refuses or downgrades to observe."
+    acceptanceBound: "The signer refuses a private key on a registered mini, an uncommissioned signing policy, exposed key permissions, stale script digest, unresolved owner UID, mismatched release identity, missing runnable probe and structurally uncertified SOP; it never overwrites an existing signed artifact; runtime verification rejects signature, signer, version, digest or authority mismatch."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs && pnpm exec vitest run --project unit plugins/ops-agent/tests/script-certification.spec.ts packages/core/tests/operations-authority-manifest.spec.ts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:e399726a6764f7ebc7862affae1639cc48496c3808dae3a3a28747ef56e9a280"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-signing.log"
+        sha256: "da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3"
+      - path: "docs/evidence/p2.5a/phase-d-test.log"
+        sha256: "13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091"
+    baseline: "Task 16's required off-mini signing boundary, before exact executable owner/release identity and independent probe registration were enforced."
+    reproduction: "node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs && pnpm exec vitest run --project unit plugins/ops-agent/tests/script-certification.spec.ts packages/core/tests/operations-authority-manifest.spec.ts"
+    failures: "None in CI run 33270118932. Nine of nine offline signing and release-cycle subtests passed."
+    status: PROVEN
+    limitation: "Only generated fixture keys and fixture scripts were signed. No operator key, mini identity, live executable hash or production grant was created."
+    nextGate: "P2.5A-LIVE-SCRIPT-CERTIFICATION."
+
+  - id: P2.5A-LIVE-SCRIPT-CERTIFICATION
+    assertion: "The first existing production recovery scripts are inventoried against their live deployment identities, owned by opsd, drill-bounded and covered by an operator-signed authority manifest."
+    acceptanceBound: "For every initial trading-stack, Colima and Livewire action: record the exact live path, release/hash, owner UID, argv/environment/preflight/postconditions, mutation owner and competing label; resolve runbook-versus-live drift; retain approve authority; complete the controlled drill where required; and sign the exact SOP digests off-mini under the commissioned operator policy."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "not yet runnable: live paths, hashes, owner UIDs, mutation owners, drill records and the operator signature are intentionally unresolved"
+      toolVersion: "n/a"
+      decision: inconclusive
+    artifacts: []
+    baseline: "docs/ops/script-inventory.md and the sentinel executor/SOP registrations committed on feat/ops-phase-d."
+    reproduction: "Blocked until AC#1 closes, a separate mini access plan is approved, live identity capture is recorded, ownership handoff is reviewed, and the operator signs off-mini."
+    failures: "Not attempted. Fixture certification and fail-closed signing do not certify a production executable."
+    status: BLOCKED
+    limitation: "Task 16 is not complete. The authority manifest remains empty, production mutation owners remain external or none, executor identities are sentinels, and no controlled drill or operator signature exists."
+    nextGate: "After 2026-08-31 and separate approval: read-only identity capture first; reviewed ownership handoff second; controlled drill and off-mini signature last."
+
+  - id: P2.5A-OBSERVE-PACKAGING
+    assertion: "The observe-only macOS package is freeze-guarded, private, reversible, release-compatible and independently dead-man monitored without installing or starting anything."
+    acceptanceBound: "The host clock cannot be overridden; every date through 2026-08-31 refuses before writing; a redirected post-freeze install renders only the declared 0700/0600 state, config and plist paths; uninstall removes only its own files; deploy and rollback validate a compatible opsd/plugin/config target and a non-future post-flip controller cycle; stale or future global, tenant and opsd timestamps fail health; and no test invokes launchctl."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh"
+      toolVersion: "macOS runner; node 22.19.0; pnpm 11.24.0"
+      outputHash: "sha256:c82415675c95661d4dabb6444e514c5d068a47bf655ec320152d8f8b52465d9c"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-macos-packaging.log"
+        sha256: "19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e"
+      - path: "docs/evidence/p2.5a/phase-d-deadman.log"
+        sha256: "461a454aa5b9fd60c198c286e9ed7b9da519123a305e8026c361ad255e763b58"
+      - path: "docs/evidence/p2.5a/phase-d-signing.log"
+        sha256: "da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3"
+    baseline: "Ops Phase C, which contained no opsd launchd template, installer, release compatibility gate or independent opsd dead-man check."
+    reproduction: "bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh && bash -n scripts/ops/install-observe-only.sh scripts/ops/uninstall-observe-only.sh scripts/ops/run-opsd.sh scripts/release/deploy.sh scripts/release/rollback.sh"
+    failures: "None. The macOS CI job reports ALL PASS and explicitly records that it did not load, start or invoke launchd."
+    status: PROVEN
+    limitation: "All filesystem effects were redirected into temporary directories. Packaging has not been installed, loaded or observed on the mini, and passing this claim is not deployment approval."
+    nextGate: "AC#1 completion evidence plus a separate observe-only deployment approval after Task 16 identity capture."
+
+  - id: P2.5A-PHASE-D-OFFLINE-GATE
+    assertion: "The Phase D code tree, excluding explicitly blocked live commissioning, passes the complete repository and macOS offline gate at the pinned runtime."
+    acceptanceBound: "At commit 1ca81e4 under Node 22.19.0: 12 workspace builds and typechecks pass; 830 unit tests pass; 85 contract tests pass with the one credentialed live-provider contract explicitly skipped; two local E2E modes pass; 600 repeated Ops boundary assertions pass; signing, dead-man and macOS packaging suites pass; core neutrality and literal-argv execution remain enforced."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && bash scripts/ops/install-observe-only.test.sh && git diff --check"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:22ea5de56c519a1b100189f73ebedfcbc46a9a4d7622e64bda8acb8c9c88fb47"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-ci-gate.log"
+        sha256: "a6e30a5c0756a61a56548cdb5d8be0348549235cc94cceea8167593ac1e69923"
+      - path: "docs/evidence/p2.5a/phase-d-build.log"
+        sha256: "dd2ae7a7688c08d108d111077082f4f46bf722f52c81c4daacdddc1db71795b2"
+      - path: "docs/evidence/p2.5a/phase-d-typecheck.log"
+        sha256: "e0d7048384a8c2967731ae78ddbdfd3c0f884eedfd6fdce4c9e4abe53fdfcf98"
+      - path: "docs/evidence/p2.5a/phase-d-test.log"
+        sha256: "13cce62868af247c7855f2a11f84458af20ba9974d7ecaf9caa22957bb3ed091"
+      - path: "docs/evidence/p2.5a/phase-d-test-contracts.log"
+        sha256: "e8a2eacc656252f976f4bb42a2ba8a290045ec935307fc46fff1f4d8270ef08c"
+      - path: "docs/evidence/p2.5a/phase-d-test-e2e-local.log"
+        sha256: "c242cd2c45e9b1502c43eaef5bde81826e3bb07886d8c005d2a918bb4d9b8712"
+      - path: "docs/evidence/p2.5a/phase-d-ops-repeat.log"
+        sha256: "5bce667ec30c326386f85ee0199aaa4eef1593b5e3de6bfca62a6abb3f1e5726"
+      - path: "docs/evidence/p2.5a/phase-d-macos-packaging.log"
+        sha256: "19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e"
+    baseline: "Ops Phase C merge c5931a6 and the exact Phase D gate in docs/plans/2026-08-25-helium-ops-agent-implementation.md."
+    reproduction: "pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts && pnpm exec vitest run --project unit plugins/ops-agent/src/script-executor.test.ts && bash scripts/ops/install-observe-only.test.sh && git diff --check"
+    failures: "None in CI run 33270118932. The live-provider contract remained explicitly skipped because CI carries no provider credentials."
+    status: PROVEN
+    limitation: "This is an offline code gate, not the Phase D commissioning gate. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED; no production proof was opened and no byte or process touched the mini."
+    nextGate: "Keep PR 19 draft until Task 16 and the controlled live drill are completed after AC#1 with separate approval."
