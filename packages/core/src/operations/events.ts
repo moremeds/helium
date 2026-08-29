@@ -68,6 +68,15 @@ export const ActionAuthorizedSchema = z.strictObject({
   type: z.literal("action-authorized"),
   actionId: OpsIdSchema,
   authority: z.enum(SOP_AUTHORITIES),
+  /** The exact signed entry that granted this effective authority. */
+  authorityManifestEntry: z
+    .strictObject({
+      sopId: OpsIdSchema,
+      version: z.number().int().positive(),
+      digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      authority: z.enum(SOP_AUTHORITIES),
+    })
+    .optional(),
   approvedBy: z.string().min(1).max(200).optional(),
 });
 

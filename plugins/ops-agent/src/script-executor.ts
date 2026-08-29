@@ -38,6 +38,18 @@ export interface ExecutionReceipt {
   finishedAt: string;
 }
 
+export type ExecutionGate = () => Promise<
+  { admitted: true } | { admitted: false; reason: string }
+>;
+
+/** A pre-spawn guard refused. No child process was created. */
+export class ExecutionSuppressedError extends Error {
+  constructor(readonly reason: string) {
+    super(`execution suppressed: ${reason}`);
+    this.name = "ExecutionSuppressedError";
+  }
+}
+
 const SIGKILL_GRACE_MS = 5_000;
 
 export class ScriptExecutor {
@@ -49,6 +61,7 @@ export class ScriptExecutor {
   async run(
     request: ExecutionRequest,
     signal: AbortSignal,
+    gate?: ExecutionGate,
   ): Promise<ExecutionReceipt> {
     const now = this.opts.now ?? (() => new Date());
     const script = this.registry.get(request.executorId);
@@ -66,6 +79,15 @@ export class ScriptExecutor {
       throw new Error(
         `refusing to execute ${request.executorId}: ${identity.reason}`,
       );
+    }
+
+    // This callback performs the final controller-enumeration check and
+    // write-ahead intent append. Nothing asynchronous occurs between a
+    // successful return and `spawn`, which makes this the execution boundary
+    // rather than an earlier advisory check.
+    const gateDecision = await gate?.();
+    if (gateDecision !== undefined && !gateDecision.admitted) {
+      throw new ExecutionSuppressedError(gateDecision.reason);
     }
 
     const startedAt = now().toISOString();

@@ -21,6 +21,7 @@ import {
   SopDefinitionSchema,
   certifySop,
   type CheckDefinition,
+  type AuthorityManifestEntry,
   type ComponentSpec,
   type DependencyEdge,
   type Observation,
@@ -45,6 +46,7 @@ export interface LoadedSop {
   definition: SopDefinition;
   /** The authority actually granted -- never above the file's own claim. */
   authority: SopAuthority;
+  authorityManifestEntry?: AuthorityManifestEntry;
   authorityDowngradeReason?: string;
   certified: boolean;
   certificationReasons: string[];
@@ -176,6 +178,9 @@ export class ComponentRegistry {
       return {
         definition,
         authority: resolved.authority,
+        ...(resolved.authorityManifestEntry === undefined
+          ? {}
+          : { authorityManifestEntry: resolved.authorityManifestEntry }),
         ...(resolved.authorityDowngradeReason === undefined
           ? {}
           : { authorityDowngradeReason: resolved.authorityDowngradeReason }),

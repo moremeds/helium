@@ -16,6 +16,7 @@
  * component at the same time is the same disaster as one SOP running twice.
  * @module @helium/core/operations/lease
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { OpsIdSchema } from "./component.js";
 
@@ -159,10 +160,13 @@ export class ActionLeaseController {
 
   acquire(key: ActionLeaseKey): LeaseAcquisition {
     const now = this.opts.now();
+    const reservation = leaseKeyOf(key);
     return this.table.acquire({
       key,
-      leaseId: `${this.opts.controllerId}:${leaseKeyOf(key)}`,
-      operationId: `op:${leaseKeyOf(key)}`,
+      // Both ids enter strict event/evidence schemas. Hash the full lease key
+      // instead of leaking its pipe-delimited representation into an OpsId.
+      leaseId: boundedId("lease", `${this.opts.controllerId}|${reservation}`),
+      operationId: boundedId("op", reservation),
       now,
       ttlMs: this.opts.ttlMs,
     });
@@ -171,4 +175,8 @@ export class ActionLeaseController {
   release(leaseId: string, componentId: string): LeaseRelease {
     return this.table.release(leaseId, componentId);
   }
+}
+
+function boundedId(prefix: string, value: string): string {
+  return `${prefix}-${createHash("sha256").update(value).digest("hex")}`;
 }

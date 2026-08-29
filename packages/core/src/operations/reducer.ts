@@ -13,6 +13,7 @@ import type { ActionOutcome } from "./action.js";
 import type { Attribution, OperationsEvent } from "./events.js";
 import type { IncidentState } from "./incident.js";
 import type { MutationOwnership } from "./component.js";
+import type { AuthorityManifestEntry } from "./authority-manifest.js";
 import type { Observation } from "./observation.js";
 
 /** Non-terminal action states, plus the six terminal outcomes. */
@@ -34,6 +35,7 @@ export interface ActionProjection {
   state: ActionState;
   attribution?: Attribution;
   authority?: string;
+  authorityManifestEntry?: AuthorityManifestEntry;
   leaseId?: string;
   argv?: string[];
   exitCode?: number | null;
@@ -177,6 +179,9 @@ export function reduceOperations(
         const action = state.actions[event.actionId];
         action.state = "authorized";
         action.authority = event.authority;
+        if (event.authorityManifestEntry !== undefined) {
+          action.authorityManifestEntry = { ...event.authorityManifestEntry };
+        }
         break;
       }
 

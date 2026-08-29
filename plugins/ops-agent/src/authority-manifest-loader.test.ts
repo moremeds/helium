@@ -93,7 +93,15 @@ describe("resolveSopAuthority", () => {
     const source = loadAuthoritySource(
       onDisk([{ sopId: "fixture-auto", version: 1, digest, authority: "auto" }]),
     );
-    expect(resolveSopAuthority(sop("auto"), source)).toEqual({ authority: "auto" });
+    expect(resolveSopAuthority(sop("auto"), source)).toEqual({
+      authority: "auto",
+      authorityManifestEntry: {
+        sopId: "fixture-auto",
+        version: 1,
+        digest,
+        authority: "auto",
+      },
+    });
   });
 
   it("downgrades to observe with a reason when the entry is missing", () => {

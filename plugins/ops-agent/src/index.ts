@@ -11,6 +11,59 @@
  * working when every model provider is unavailable.
  * @module dsh-plugin-ops-agent
  */
+import { z } from "zod";
+
+export const name = "ops-agent";
+/** No DSH service, agent runtime, provider, model, or tool is mandatory. */
+export const inject: readonly string[] = [];
+
+const PluginConfigSchema = z.strictObject({ socketPath: z.string().min(1) });
+export type OpsPluginConfig = z.infer<typeof PluginConfigSchema>;
+
+interface EffectContext {
+  effect(start: () => () => void, label?: string): unknown;
+}
+
+/**
+ * The DSH-side half is intentionally optional and authority-free in Phase D.
+ * Phase E attaches analysis to this lifecycle; execution remains in the
+ * standalone daemon and is never made a Cordis effect.
+ */
+export function apply(ctx: EffectContext, raw: OpsPluginConfig): void {
+  PluginConfigSchema.parse(raw);
+  ctx.effect(() => () => {}, "ops-agent.optional-analysis-client()");
+}
+
+export {
+  OpsDaemon,
+  createStandaloneOpsDaemon,
+  type OpsAnalysisClient,
+  type OpsDaemonControl,
+  type OpsDaemonController,
+  type OpsDaemonOptions,
+  type StandaloneOpsDaemonOptions,
+} from "./bin/opsd.js";
+export { OpsControlClient, OpsControlServer } from "./ipc.js";
+export {
+  ApprovalLedger,
+  OperatorEnvelopeVerifier,
+  SignedApprovalEnvelopeSchema,
+  SignedInterventionEnvelopeSchema,
+  approvalSigningPayload,
+  interventionSigningPayload,
+  type AcceptedIntervention,
+  type AcceptedApproval,
+  type SignedApprovalEnvelope,
+  type SignedInterventionEnvelope,
+} from "./approval.js";
+export { OpsController, type OpsControllerOptions } from "./controller.js";
+export {
+  OPS_MODES,
+  OpsModeSchema,
+  decideRuntimeMode,
+  type OpsMode,
+  type RuntimeModeDecision,
+} from "./mode.js";
 export {
   ScriptRegistry,
   ArgvSchemaSchema,
@@ -42,6 +95,8 @@ export {
 } from "./probes/launchd-controller.js";
 export {
   ScriptExecutor,
+  ExecutionSuppressedError,
+  type ExecutionGate,
   type ExecutionReceipt,
   type ExecutionRequest,
 } from "./script-executor.js";
