@@ -11,9 +11,12 @@ import {
   DEFAULT_DISK_THRESHOLDS,
   checkMountIdentity,
   classifyDisk,
+  diskProbe,
   parseDf,
   type VolumeUsage,
 } from "./disk.js";
+import type { CommandRunner } from "./process.js";
+import { ObservationSchema } from "@helium/core/operations/observation.js";
 
 const GIB = 1024 ** 3;
 
@@ -163,5 +166,51 @@ describe("checkMountIdentity", () => {
       { mount: "/Volumes/BACKUP", device: "/dev/disk6s1" },
     ]);
     expect(results.map((r) => r.ok)).toEqual([true, false]);
+  });
+});
+
+describe("diskProbe", () => {
+  it("runs df with exact argv and emits one independent observation per configured volume", async () => {
+    const calls: { argv: readonly string[]; timeoutMs: number }[] = [];
+    const runner: CommandRunner = {
+      async run(argv, timeoutMs) {
+        calls.push({ argv, timeoutMs });
+        return { stdout: DF_MACOS, exitCode: 0, timedOut: false };
+      },
+    };
+    const observations = await diskProbe({
+      componentId: "host",
+      timeoutMs: 1_500,
+      volumes: [
+        { id: "internal-data", mount: "/System/Volumes/Data", device: "/dev/disk3s5" },
+        { id: "data-lake", mount: "/Volumes/DATA_LAKE", device: "/dev/disk5s1" },
+        { id: "backup", mount: "/Volumes/BACKUP", device: "/dev/disk6s1" },
+      ],
+    }).observe(runner, new Date("2026-08-29T12:00:00.000Z"));
+
+    expect(calls).toEqual([{ argv: ["/bin/df", "-kP"], timeoutMs: 1_500 }]);
+    ObservationSchema.array().parse(observations);
+    expect(observations.map((row) => row.probeId)).toEqual([
+      "host.volume.internal-data.v1",
+      "host.volume.data-lake.v1",
+      "host.volume.backup.v1",
+    ]);
+    expect(observations.map((row) => row.state)).toEqual(["degraded", "failed", "failed"]);
+  });
+
+  it("reports every configured volume unknown when df times out", async () => {
+    const runner: CommandRunner = {
+      async run() {
+        return { stdout: "", exitCode: 1, timedOut: true };
+      },
+    };
+    const observations = await diskProbe({
+      componentId: "host",
+      volumes: [
+        { id: "colima", mount: "/colima", device: "/dev/colima" },
+        { id: "helium-state", mount: "/helium", device: "/dev/state" },
+      ],
+    }).observe(runner, new Date("2026-08-29T12:00:00.000Z"));
+    expect(observations.map((row) => row.state)).toEqual(["unknown", "unknown"]);
   });
 });

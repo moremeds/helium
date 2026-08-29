@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ObservationSchema } from "@helium/core";
+import { ObservationSchema } from "@helium/core/operations/observation.js";
 import {
   classifyProcess,
   processProbe,

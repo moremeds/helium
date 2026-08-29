@@ -4,6 +4,8 @@ export interface AdapterContext {
   observedAt: string;
   ttlMs: number;
   sourceVersion: string;
+  /** Stable references to the raw artifacts this snapshot was parsed from. */
+  evidenceRefs: readonly string[];
 }
 
 export function makeObservation(
@@ -21,6 +23,9 @@ export function makeObservation(
   if (!Number.isInteger(context.ttlMs) || context.ttlMs <= 0) {
     throw new Error("ttlMs must be a positive integer");
   }
+  if (context.evidenceRefs.length === 0) {
+    throw new Error("adapter snapshot requires at least one raw evidence reference");
+  }
   return {
     version: 1,
     id: `obs-${fields.probeId.replace(/\.v\d+$/, "")}-${observedAtMs}`,
@@ -31,7 +36,7 @@ export function makeObservation(
     state: fields.state,
     dimension: fields.dimension,
     value: { ...fields.value, sourceVersion: context.sourceVersion },
-    evidenceRefs: [`artifact://probe/${fields.probeId}/${observedAtMs}`],
+    evidenceRefs: [...context.evidenceRefs],
     parserVersion: `${fields.probeId.replace(/\.v\d+$/, "")}/1`,
   };
 }

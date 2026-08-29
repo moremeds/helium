@@ -12,11 +12,9 @@
  * that is absent.
  * @module dsh-plugin-ops-agent/probes/launchd-controller
  */
-import type {
-  ComponentSpec,
-  ControllerProbeOutcome,
-  Observation,
-} from "@helium/core";
+import type { ComponentSpec } from "@helium/core/operations/component.js";
+import type { ControllerProbeOutcome } from "@helium/core/operations/mutation-owner.js";
+import type { Observation } from "@helium/core/operations/observation.js";
 
 export interface LaunchctlResult {
   exitCode: number;

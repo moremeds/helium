@@ -16,6 +16,7 @@ const snapshot = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "postgres-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/postgres/raw-snapshot.json"],
   isReady: true,
   selectOne: { ok: true, latencyMs: 8, failedAfterMs: 1_000 },
   connections: { used: 20, max: 100, degradedRatio: 0.8, failedRatio: 0.95 },

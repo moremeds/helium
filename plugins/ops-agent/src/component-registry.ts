@@ -14,6 +14,7 @@
  */
 import {
   CheckRegistry,
+  CheckDefinitionSchema,
   ComponentSpecSchema,
   DependencyEdgeSchema,
   DependencyGraph,
@@ -96,7 +97,9 @@ export class ComponentRegistry {
       ComponentSpecSchema.parse(c),
     );
     const edges = (bundle.edges ?? []).map((e) => DependencyEdgeSchema.parse(e));
-    const checks = (bundle.checks ?? []).map((c) => c) as unknown[];
+    const checks = (bundle.checks ?? []).map((check) =>
+      CheckDefinitionSchema.parse(check),
+    );
     const sops = (bundle.sops ?? []).map((s) => SopDefinitionSchema.parse(s));
 
     if (this.#components.size + components.length > limits.maxComponents) {
@@ -157,6 +160,9 @@ export class ComponentRegistry {
       const definition = checkRegistry.get(check);
       if (definition !== undefined) this.#checks.set(check, definition);
     }
+    for (const check of checks) {
+      this.#tenantOf.set(`check:${check.id}`, bundle.tenantId);
+    }
     for (const sop of loaded) {
       this.#sops.set(sop.definition.id, sop);
       this.#tenantOf.set(`sop:${sop.definition.id}`, bundle.tenantId);
@@ -179,6 +185,10 @@ export class ComponentRegistry {
       for (const sop of loaded) {
         this.#sops.delete(sop.definition.id);
         this.#tenantOf.delete(`sop:${sop.definition.id}`);
+      }
+      for (const check of checks) {
+        this.#checks.delete(check.id);
+        this.#tenantOf.delete(`check:${check.id}`);
       }
     };
   }

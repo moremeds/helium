@@ -9,7 +9,10 @@
  * there is no code path here that signals, starts or stops anything.
  * @module dsh-plugin-ops-agent/probes/process
  */
-import type { Observation, ObservationState } from "@helium/core";
+import type {
+  Observation,
+  ObservationState,
+} from "@helium/core/operations/observation.js";
 
 export interface CommandResult {
   stdout: string;

@@ -16,6 +16,7 @@ const snapshot = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "argon-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/argon/raw-snapshot.json"],
   api: { httpStatus: 200, bodyOk: true },
   database: { ready: true },
   worker: { heartbeatAt: "2026-08-25T03:19:30.000Z", maxAgeMs: 60_000 },

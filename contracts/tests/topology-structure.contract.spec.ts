@@ -78,6 +78,7 @@ const DECLARED_FORBIDDEN_TARGETS = [
   "plugins/helium/src/executor-registry.ts",
   "packages/fake-metered/src/index.ts",
   "packages/fake-flat-rate/src/index.ts",
+  "packages/core/src/operations/lease.ts",
 ];
 
 function tsFilesUnder(dir: string): string[] {
@@ -131,7 +132,21 @@ const STATIC_IMPORT =
   /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
 
 function resolveSpecifier(fromFile: string, specifier: string): string | undefined {
-  if (!specifier.startsWith(".")) return undefined; // package: not a local edge
+  if (specifier === "@helium/core") {
+    return resolve(repoRoot, "packages/core/src/index.ts");
+  }
+  if (specifier.startsWith("@helium/core/")) {
+    const subpath = specifier.slice("@helium/core/".length);
+    const candidate = resolve(
+      repoRoot,
+      "packages/core/src",
+      subpath.replace(/\.js$/, ".ts"),
+    );
+    return existsSync(candidate) && statSync(candidate).isFile()
+      ? candidate
+      : undefined;
+  }
+  if (!specifier.startsWith(".")) return undefined;
   const base = resolve(dirname(fromFile), specifier);
   for (const candidate of [
     base.replace(/\.js$/, ".ts"),

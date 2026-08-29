@@ -12,7 +12,18 @@
  * collector down; a probe that guesses reports health it never observed.
  * @module dsh-plugin-ops-agent/probes/macos-resource
  */
-import type { ObservationState } from "@helium/core";
+import type {
+  Observation,
+  ObservationState,
+} from "@helium/core/operations/observation.js";
+import type { CommandResult, CommandRunner } from "./process.js";
+
+const MEMORY_PRESSURE_ARGV = ["/usr/bin/memory_pressure", "-Q"] as const;
+const VM_STAT_ARGV = ["/usr/bin/vm_stat"] as const;
+const SWAP_USAGE_ARGV = ["/usr/sbin/sysctl", "-n", "vm.swapusage"] as const;
+const UPTIME_ARGV = ["/usr/bin/uptime"] as const;
+const MEMORY_SIZE_ARGV = ["/usr/sbin/sysctl", "-n", "hw.memsize"] as const;
+const LOGICAL_CPU_ARGV = ["/usr/sbin/sysctl", "-n", "hw.logicalcpu"] as const;
 
 /** Bytes per unit, for the suffixes the host tools actually emit. */
 const UNITS: Readonly<Record<string, number>> = {
@@ -109,6 +120,22 @@ export function parseLoadAverage(text: string): LoadAverage | undefined {
   return { one, five, fifteen };
 }
 
+function successful(result: CommandResult): boolean {
+  return !result.timedOut && result.exitCode === 0;
+}
+
+function parsePositiveInteger(text: string): number | undefined {
+  const value = Number(text.trim());
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function parseMemoryPressure(text: string): string | undefined {
+  const value = text.trim();
+  if (value.length === 0) return undefined;
+  if (/System-wide memory (?:pressure|free percentage):/i.test(value)) return value;
+  return undefined;
+}
+
 export interface MemorySample {
   /** `false` when any input could not be parsed. */
   parsed: boolean;
@@ -171,4 +198,135 @@ export function classifyMemory(sample: MemorySample): ObservationState {
     return "degraded";
   }
   return pressured ? "degraded" : "ok";
+}
+
+export interface MacosResourceProbeOptions {
+  componentId: string;
+  timeoutMs?: number;
+  serviceImpact?: () => boolean;
+}
+
+/**
+ * Execute the bounded, read-only macOS resource command set.
+ *
+ * Exact argv is owned here rather than configuration so this probe cannot be
+ * turned into a general command runner. All six readings form one sample: if
+ * any command fails or cannot be parsed, neither derived health row is allowed
+ * to claim a known state.
+ */
+export function macosResourceProbe(options: MacosResourceProbeOptions) {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const aggregateProbeId = `${options.componentId}.resources.v1`;
+  const memoryProbeId = `${options.componentId}.memory.v1`;
+  const cpuProbeId = `${options.componentId}.cpu-load.v1`;
+  let previous: { pageoutsCounter: number; atMs: number } | undefined;
+
+  return {
+    probeId: aggregateProbeId,
+    async observe(
+      runner: CommandRunner,
+      now: Date,
+      ttlMs = 300_000,
+    ): Promise<Observation[]> {
+      const pressureResult = await runner.run(MEMORY_PRESSURE_ARGV, timeoutMs);
+      const vmStatResult = await runner.run(VM_STAT_ARGV, timeoutMs);
+      const swapResult = await runner.run(SWAP_USAGE_ARGV, timeoutMs);
+      const uptimeResult = await runner.run(UPTIME_ARGV, timeoutMs);
+      const memorySizeResult = await runner.run(MEMORY_SIZE_ARGV, timeoutMs);
+      const logicalCpuResult = await runner.run(LOGICAL_CPU_ARGV, timeoutMs);
+      const results = [
+        pressureResult,
+        vmStatResult,
+        swapResult,
+        uptimeResult,
+        memorySizeResult,
+        logicalCpuResult,
+      ];
+
+      const pressure = parseMemoryPressure(pressureResult.stdout);
+      const vmStat = parseVmStat(vmStatResult.stdout);
+      const swap = parseSwapUsage(swapResult.stdout);
+      const load = parseLoadAverage(uptimeResult.stdout);
+      const totalBytes = parsePositiveInteger(memorySizeResult.stdout);
+      const logicalCpu = parsePositiveInteger(logicalCpuResult.stdout);
+      const parsed =
+        results.every(successful) &&
+        pressure !== undefined &&
+        vmStat !== undefined &&
+        swap !== undefined &&
+        load !== undefined &&
+        totalBytes !== undefined &&
+        logicalCpu !== undefined;
+      const serviceImpact = options.serviceImpact?.() ?? false;
+      const normalizedFiveMinuteLoad =
+        load !== undefined && logicalCpu !== undefined ? load.five / logicalCpu : undefined;
+      const sample: MemorySample = {
+        parsed,
+        totalBytes: totalBytes ?? 0,
+        swap,
+        vmStat,
+        atMs: now.getTime(),
+        previous,
+        serviceImpact,
+        ampleIdleCpu:
+          normalizedFiveMinuteLoad !== undefined && normalizedFiveMinuteLoad < 0.8,
+      };
+      const rate = pageoutRate(sample);
+      if (parsed && vmStat !== undefined) {
+        previous = { pageoutsCounter: vmStat.pageoutsCounter, atMs: now.getTime() };
+      }
+
+      const observedAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+      const memory: Observation = {
+        version: 1,
+        id: `obs-${options.componentId}-memory-${now.getTime()}`,
+        componentId: options.componentId,
+        probeId: memoryProbeId,
+        observedAt,
+        expiresAt,
+        state: classifyMemory(sample),
+        dimension: "memory",
+        value: {
+          pressure: pressure ?? null,
+          totalBytes: totalBytes ?? null,
+          swap: swap ?? null,
+          vmStat: vmStat ?? null,
+          pageoutRate: rate ?? null,
+          serviceImpact,
+          timedOut: results.some((result) => result.timedOut),
+        },
+        evidenceRefs: [`artifact://probe/${memoryProbeId}/${now.getTime()}`],
+        parserVersion: "macos-memory/1",
+      };
+      const normalizedLoad = normalizedFiveMinuteLoad ?? null;
+      const cpuState: ObservationState = !parsed || normalizedFiveMinuteLoad === undefined
+        ? "unknown"
+        : normalizedFiveMinuteLoad >= 0.95 && serviceImpact
+          ? "failed"
+          : normalizedFiveMinuteLoad >= 0.8
+            ? "degraded"
+            : "ok";
+      const cpu: Observation = {
+        version: 1,
+        id: `obs-${options.componentId}-cpu-${now.getTime()}`,
+        componentId: options.componentId,
+        probeId: cpuProbeId,
+        observedAt,
+        expiresAt,
+        state: cpuState,
+        dimension: "cpu-load",
+        value: {
+          load: load ?? null,
+          logicalCpu: logicalCpu ?? null,
+          normalizedFiveMinuteLoad: normalizedLoad,
+          serviceImpact,
+          timedOut: results.some((result) => result.timedOut),
+        },
+        evidenceRefs: [`artifact://probe/${cpuProbeId}/${now.getTime()}`],
+        parserVersion: "macos-cpu-load/1",
+      };
+      return [memory, cpu];
+    },
+  };
 }

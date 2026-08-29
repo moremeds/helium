@@ -75,9 +75,23 @@ export class AlertManager {
     }
 
     if (input.incident.state === "recovered") {
-      if (!state.raised || state.recovered) return { emitted: false };
+      if (!state.raised) {
+        // The episode ended before its `for` window. Drop its clock so a later
+        // recurrence earns a full window of its own.
+        this.#states.delete(input.incident.key);
+        return { emitted: false };
+      }
+      if (state.recovered) return { emitted: false };
       state.recovered = true;
       return this.#deliver(input, "recovered", now);
+    }
+
+    if (state.recovered) {
+      // Incident keys are intentionally stable across episodes. Recovery
+      // closes one episode; the same key opening again is a new transition,
+      // not a periodic restatement of the old one.
+      state = { firstSeenMs: now.getTime(), raised: false, recovered: false };
+      this.#states.set(input.incident.key, state);
     }
 
     if (state.raised) return { emitted: false };

@@ -16,6 +16,7 @@ const snapshot = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "apex-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/apex/raw-snapshot.json"],
   api: { httpStatus: 200, bodyOk: true },
   postgres: { reportedHealthy: true, independentlyVerified: true },
   livewire: {

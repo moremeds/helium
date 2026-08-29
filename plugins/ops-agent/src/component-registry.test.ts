@@ -98,6 +98,27 @@ describe("installation", () => {
     expect(r.component("fixture-service")).toBeUndefined();
   });
 
+  it("removes the tenant's checks so they cannot certify a later bundle", () => {
+    const r = registry();
+    const dispose = r.install(bundle());
+    dispose();
+
+    r.install(
+      bundle({
+        tenantId: "replacement",
+        checks: [],
+        sops: [sop("replacement-sop", "observe")],
+      }),
+    );
+
+    expect(r.sop("replacement-sop")).toMatchObject({
+      certified: false,
+      certificationReasons: [
+        expect.stringContaining("unknown check reference: fixture-business"),
+      ],
+    });
+  });
+
   // A component kind this package has never heard of loads without a
   // TypeScript edit. That is acceptance criterion 14, tested rather than
   // asserted.

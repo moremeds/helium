@@ -8,7 +8,10 @@
  * `CommandRunner` seam.
  * @module dsh-plugin-ops-agent/collector
  */
-import { ObservationSchema, type Observation } from "@helium/core";
+import {
+  ObservationSchema,
+  type Observation,
+} from "@helium/core/operations/observation.js";
 import type { CommandRunner } from "./probes/process.js";
 
 export interface ObservationProbe {

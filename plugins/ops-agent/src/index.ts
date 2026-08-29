@@ -49,21 +49,26 @@ export {
   DEFAULT_DISK_THRESHOLDS,
   checkMountIdentity,
   classifyDisk,
+  diskProbe,
   parseDf,
+  type DiskProbeOptions,
   type DiskThresholds,
   type ExpectedMount,
+  type MonitoredVolume,
   type MountIdentity,
   type VolumeUsage,
 } from "./probes/disk.js";
 export {
   SUSTAINED_PAGEOUT_RATE,
   classifyMemory,
+  macosResourceProbe,
   pageoutRate,
   parseLoadAverage,
   parseSize,
   parseSwapUsage,
   parseVmStat,
   type LoadAverage,
+  type MacosResourceProbeOptions,
   type MemorySample,
   type SwapUsage,
   type VmStat,
@@ -105,3 +110,9 @@ export {
   type AlertInput,
   type AlertMessage,
 } from "./alerts.js";
+export {
+  OpsBundleLoader,
+  type OpsBundleLoaderOptions,
+  type TenantConfigHealth,
+  type TenantInstallResult,
+} from "./bundle-loader.js";

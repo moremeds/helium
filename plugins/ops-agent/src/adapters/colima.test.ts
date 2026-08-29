@@ -16,6 +16,7 @@ const snapshot = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "colima-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/colima/raw-snapshot.json"],
   hostSocketAvailable: true,
   guestRuntimeReady: true,
   vmState: "running" as const,

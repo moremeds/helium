@@ -11,7 +11,11 @@
  * written to it goes somewhere nobody is watching.
  * @module dsh-plugin-ops-agent/probes/disk
  */
-import type { ObservationState } from "@helium/core";
+import type {
+  Observation,
+  ObservationState,
+} from "@helium/core/operations/observation.js";
+import type { CommandRunner } from "./process.js";
 
 export interface VolumeUsage {
   device: string;
@@ -118,4 +122,68 @@ export function checkMountIdentity(
     }
     return { mount: want.mount, ok: true };
   });
+}
+
+export interface MonitoredVolume extends ExpectedMount {
+  id: string;
+  thresholds?: DiskThresholds;
+}
+
+export interface DiskProbeOptions {
+  componentId: string;
+  volumes: readonly MonitoredVolume[];
+  timeoutMs?: number;
+}
+
+/** Execute one bounded `df` read and report every configured mount separately. */
+export function diskProbe(options: DiskProbeOptions) {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const aggregateProbeId = `${options.componentId}.volumes.v1`;
+  return {
+    probeId: aggregateProbeId,
+    async observe(
+      runner: CommandRunner,
+      now: Date,
+      ttlMs = 300_000,
+    ): Promise<Observation[]> {
+      const result = await runner.run(["/bin/df", "-kP"], timeoutMs);
+      const volumes =
+        !result.timedOut && result.exitCode === 0 ? parseDf(result.stdout) : undefined;
+      const observedAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
+
+      return options.volumes.map((configured): Observation => {
+        const probeId = `${options.componentId}.volume.${configured.id}.v1`;
+        const usage = volumes?.find((volume) => volume.mount === configured.mount);
+        const identity =
+          volumes === undefined
+            ? undefined
+            : checkMountIdentity(volumes, [configured])[0];
+        const state: ObservationState =
+          volumes === undefined
+            ? "unknown"
+            : identity?.ok === true
+              ? classifyDisk(usage, configured.thresholds)
+              : "failed";
+        return {
+          version: 1,
+          id: `obs-${options.componentId}-volume-${configured.id}-${now.getTime()}`,
+          componentId: options.componentId,
+          probeId,
+          observedAt,
+          expiresAt,
+          state,
+          dimension: `volume-${configured.id}`,
+          value: {
+            expected: { mount: configured.mount, device: configured.device },
+            identity: identity ?? null,
+            usage: usage ?? null,
+            timedOut: result.timedOut,
+          },
+          evidenceRefs: [`artifact://probe/${probeId}/${now.getTime()}`],
+          parserVersion: "df-kp/1",
+        };
+      });
+    },
+  };
 }

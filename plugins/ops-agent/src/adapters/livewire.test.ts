@@ -17,6 +17,7 @@ const base = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "livewire-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/livewire/raw-snapshot.json"],
   status: { found: true, coverageAt: "2026-08-25T03:10:00.000Z", intradayCoverage: 1 },
   sourceLogs: {
     dailyAt: "2026-08-25T03:11:00.000Z",
@@ -41,6 +42,20 @@ describe("adaptLivewire", () => {
       value: { found: false, taskFailed: false },
     });
     expect(observations.find((row) => row.probeId === "livewire.coverage-freshness.v1")?.state).toBe("ok");
+  });
+
+  it("preserves the raw artifact references instead of inventing probe URIs", () => {
+    const observations = adaptLivewire(base());
+    expect(observations.every((row) =>
+      JSON.stringify(row.evidenceRefs) ===
+      JSON.stringify(["artifact://ops-fixture/livewire/raw-snapshot.json"]),
+    )).toBe(true);
+  });
+
+  it("refuses an adapter snapshot with no raw evidence reference", () => {
+    expect(() => adaptLivewire({ ...base(), evidenceRefs: [] })).toThrow(
+      /evidence reference/,
+    );
   });
 
   it("preserves the frozen Parquet case as an integrity failure that a restart does not address", () => {

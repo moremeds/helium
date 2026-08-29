@@ -93,6 +93,42 @@ describe("AlertManager", () => {
     expect(channel.messages[1]).toMatchObject({ actionAttribution: "operator" });
   });
 
+  it("alerts again when the same stable incident key recurs after recovery", async () => {
+    const channel = delivery();
+    const alerts = new AlertManager({ delivery: channel, forMs: 0 });
+    await alerts.evaluate(input(), new Date("2026-08-29T12:00:00.000Z"));
+    await alerts.evaluate(
+      input({ incident: incident({ state: "recovered" }) }),
+      new Date("2026-08-29T12:10:00.000Z"),
+    );
+    await alerts.evaluate(input(), new Date("2026-08-29T13:00:00.000Z"));
+
+    expect(channel.messages.map((message) => message.transition)).toEqual([
+      "raised",
+      "recovered",
+      "raised",
+    ]);
+  });
+
+  it("starts a fresh for-window when an unalerted episode recovers and later recurs", async () => {
+    const channel = delivery();
+    const alerts = new AlertManager({ delivery: channel, forMs: 300_000 });
+    await alerts.evaluate(input(), new Date("2026-08-29T12:00:00.000Z"));
+    await alerts.evaluate(
+      input({ incident: incident({ state: "recovered" }) }),
+      new Date("2026-08-29T12:01:00.000Z"),
+    );
+    await alerts.evaluate(input(), new Date("2026-08-29T13:00:00.000Z"));
+
+    expect(
+      await alerts.evaluate(input(), new Date("2026-08-29T13:04:59.999Z")),
+    ).toEqual({ emitted: false });
+    expect(
+      await alerts.evaluate(input(), new Date("2026-08-29T13:05:00.000Z")),
+    ).toEqual({ emitted: true });
+    expect(channel.messages).toHaveLength(1);
+  });
+
   it("turns channel failure into one delivery incident and does not restate or trigger recovery", async () => {
     const channel = delivery(true);
     const alerts = new AlertManager({ delivery: channel, forMs: 0 });

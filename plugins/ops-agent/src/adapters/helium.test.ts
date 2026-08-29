@@ -8,6 +8,7 @@ const snapshot = () => ({
   observedAt: NOW,
   ttlMs: 300_000,
   sourceVersion: "helium-fixture/1",
+  evidenceRefs: ["artifact://ops-fixture/helium/raw-snapshot.json"],
   processRunning: true,
   globalHeartbeat: { at: "2026-08-29T11:59:45.000Z", maxAgeMs: 60_000 },
   expectedTenantManifestRef: "artifact://helium/expected-tenants/v1",

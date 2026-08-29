@@ -1,4 +1,5 @@
-import { canMutate, type ComponentSpec } from "@helium/core";
+import type { ComponentSpec } from "@helium/core/operations/component.js";
+import { canMutate } from "@helium/core/operations/mutation-owner.js";
 import { describe, expect, it } from "vitest";
 import {
   launchdControllerProbe,
