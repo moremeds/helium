@@ -185,6 +185,33 @@ printf '%s\n' "$out8" | grep -qi 'b-broken.*invalid' || {
   exit 1
 }
 
+echo "case 9: fresh DSH and tenant heartbeats do not hide stale opsd -> 16"
+rm -f "$HELIUM_JOBS_DIR/b-broken.yaml" "$tmp/state/deadman/opsd-alerted-at"
+mkdir -p "$tmp/state/opsd"
+stale_opsd="$(iso_ago 3600)"
+printf '{"v":1,"seq":1,"hash":"fixture","record":{"v":1,"id":"event-1","at":"%s","type":"observation-recorded","observation":{"observedAt":"%s"}}}\n' \
+  "$stale_opsd" "$stale_opsd" >"$tmp/state/opsd/events.jsonl"
+printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n{"ts":"%s","job":"apex-health","status":"ok"}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
+out9=$(
+  set +e
+  HELIUM_OPSD_EXPECTED=1 bash "$here/check-heartbeat.sh" 2>&1
+  echo "rc=$?"
+)
+case "$out9" in
+*"rc=16"*) : ;;
+*)
+  echo "FAIL-9 (expected rc=16)"
+  printf '%s\n' "$out9"
+  exit 1
+  ;;
+esac
+printf '%s\n' "$out9" | grep -qi 'opsd.*stale' || {
+  echo FAIL-9b-opsd-not-named
+  exit 1
+}
+
 echo "mail log:"
 cat "$FAKE_MAIL_LOG"
 echo "ALL PASS"

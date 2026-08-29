@@ -14,6 +14,7 @@ RELEASES=/Users/moremeds/projects/helium-releases
 SRC=/Users/moremeds/projects/helium
 DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
 STATE_ROOT=/Users/moremeds/.helium/state
+OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
 DSH_PIN=0.1.1-rc.2
 KEEP=5
 
@@ -51,6 +52,21 @@ say "installing"
 installed=$(node -p "require('$DEST/node_modules/@deepseek-ai/dsh/package.json').version")
 [ "$installed" = "$DSH_PIN" ] || { echo "dsh pin drift: $installed" >&2; exit 66; }
 say "dsh pin ok: $installed"
+
+# An already-installed opsd follows the same immutable `current` release as
+# the collector/plugin. Refuse the flip if the new release cannot provide the
+# pair. This does not install or load opsd; installation remains a separate
+# post-AC#1 operator command.
+if [ -f "$OPSD_PLIST" ]; then
+  [ -f "$DEST/plugins/ops-agent/lib/bin/opsd.js" ] || {
+    echo "installed opsd is incompatible with $VERSION: binary missing" >&2
+    exit 76
+  }
+  [ -f "$DEST/scripts/ops/run-opsd.sh" ] || {
+    echo "installed opsd is incompatible with $VERSION: runner missing" >&2
+    exit 76
+  }
+fi
 
 # Validate every job file BEFORE the flip. loadJobs() throws when called without
 # a handler, which is exactly what is wanted here: a typo fails the deploy with
@@ -127,6 +143,21 @@ flip_to() {
   [ "$got" = "$target" ] || { echo "flip verification failed: current -> $got" >&2; return 1; }
 }
 
+opsd_is_loaded() {
+  [ -f "$OPSD_PLIST" ] && launchctl print "gui/$(id -u)/com.helium.opsd" >/dev/null 2>&1
+}
+
+restart_opsd_if_loaded() {
+  [ -f "$OPSD_PLIST" ] || return 0
+  opsd_is_loaded || return 0
+  if launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
+    return 0
+  fi
+  say "opsd kickstart failed once — retrying after 3s"
+  sleep 3
+  launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"
+}
+
 # `deploy-profile.sh` is always invoked with an explicit `--plugin-dir
 # <release>/plugins/helium` — the SPECIFIC release directory, never through
 # the mutable `current` symlink. That means the profile re-deploy below is
@@ -157,6 +188,10 @@ if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
     echo "FATAL: current=$VERSION but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING the OLD release even though current now points at $VERSION. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'. If it comes up healthy, the deploy is fine; if not, run scripts/release/rollback.sh." >&2
     exit 74
   fi
+fi
+if ! restart_opsd_if_loaded; then
+  echo "FATAL: current=$VERSION but installed com.helium.opsd did not restart. The collector/plugin release pair may be inconsistent; inspect both launchd labels before continuing." >&2
+  exit 76
 fi
 
 say "post-flip health window (2 heartbeat intervals)"
@@ -211,6 +246,10 @@ if [ "$ok" != "1" ]; then
       exit 72
     fi
   fi
+  if ! restart_opsd_if_loaded; then
+    echo "FATAL: current=$prev_target and DSH restarted, but installed com.helium.opsd did not restart on the restored release. MANUAL INTERVENTION REQUIRED." >&2
+    exit 76
+  fi
   say "flip-back to $prev_target complete: symlink flipped, profile re-deployed, daemon kickstarted"
   exit 68
 fi
@@ -228,3 +267,8 @@ ls -1dt "$RELEASES"/v*/ 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old
   rm -rf "$old"
 done
 say "DEPLOY OK: $VERSION"
+if opsd_is_loaded; then
+  say "installed opsd restarted on the compatible current release"
+else
+  say "opsd was not loaded; after AC#1 and separate approval use scripts/ops/install-observe-only.sh"
+fi

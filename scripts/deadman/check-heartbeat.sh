@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # External liveness check for the helium daemon. Runs from its own launchd agent
 # every 30 minutes. Emails once per staleness episode, re-alerting at most every 6h.
-# Runs BOTH checks: the global process heartbeat, then — only once that is
-# fresh — a per-tenant liveness check, because the global one is satisfied by
-# ANY tenant's heartbeat and so stays green while one tenant is silent.
+# Runs all independent checks: the global DSH heartbeat, then — only once that
+# is fresh — expected opsd observations, then per-tenant liveness. A healthy
+# DSH heartbeat must never conceal a dead standalone controller.
 # Exit: 0 fresh, 10 stale+alerted, 11 stale+suppressed, 12 stale+alert failed,
 #       13 tenant stale+alerted, 14 tenant stale+suppressed,
-#       15 tenant stale+alert failed, 2 config.
+#       15 tenant stale+alert failed, 16 opsd stale+alerted,
+#       17 opsd stale+suppressed, 18 opsd stale+alert failed, 2 config.
 set -euo pipefail
 
 STATE_ROOT="${HELIUM_STATE_ROOT:-/Users/moremeds/.helium/state}"
@@ -14,6 +15,9 @@ NODE_BIN="${HELIUM_NODE_BIN:-node}"
 ENV_FILE="${HELIUM_ENV_FILE:-/Users/moremeds/.config/helium/helium.env}"
 STALE_S="${HELIUM_DEADMAN_STALE_S:-600}"
 REALERT_S="${HELIUM_DEADMAN_REALERT_S:-21600}"
+OPSD_EXPECTED="${HELIUM_OPSD_EXPECTED:-0}"
+OPSD_STALE_S="${HELIUM_OPSD_STALE_S:-$STALE_S}"
+OPSD_EVENT_LOG="${HELIUM_OPSD_EVENT_LOG:-$STATE_ROOT/opsd/events.jsonl}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ALERT_CMD="${HELIUM_DEADMAN_ALERT_CMD:-$NODE_BIN $script_dir/send-alert.mjs}"
 JOBS_DIR="${HELIUM_JOBS_DIR:-$script_dir/../../jobs}"
@@ -26,6 +30,7 @@ command -v "${NODE_BIN%% *}" >/dev/null 2>&1 || {
 sentinel_dir="$STATE_ROOT/deadman"
 sentinel="$sentinel_dir/alerted-at"
 tenant_sentinel="$sentinel_dir/tenant-alerted-at"
+opsd_sentinel="$sentinel_dir/opsd-alerted-at"
 mkdir -p "$sentinel_dir" "$STATE_ROOT/jsonl"
 
 newest=$(find "$STATE_ROOT/jsonl" -name 'heartbeat-*.jsonl' -type f 2>/dev/null |
@@ -107,10 +112,86 @@ check_tenants() {
   return 15
 }
 
+# opsd owns a separate event stream and can fail while DSH continues emitting
+# global and tenant heartbeats. This check is enabled only after the operator
+# has separately installed and started opsd; source deployment alone cannot
+# change that expectation.
+check_opsd() {
+  [ "$OPSD_EXPECTED" = "1" ] || return 0
+  local events="$OPSD_EVENT_LOG"
+  local last_iso="" last_epoch=0 age=0
+  if [ -f "$events" ]; then
+    last_iso=$(
+      "$NODE_BIN" -e '
+        const {readFileSync}=require("node:fs");
+        let text="";
+        try{text=readFileSync(process.argv[1],"utf8");}catch{}
+        const lines=text.trim().split("\n").filter(Boolean);
+        let out="";
+        for(let i=lines.length-1;i>=0;i--){
+          try{
+            const row=JSON.parse(lines[i]);
+            const record=row?.record;
+            if(record?.type!=="observation-recorded") continue;
+            const ts=record.observation?.observedAt ?? record.at;
+            if(typeof ts==="string" && Number.isFinite(Date.parse(ts))){out=ts;break;}
+          }catch{}
+        }
+        process.stdout.write(out);' "$events"
+    )
+  fi
+  if [ -n "$last_iso" ]; then
+    last_epoch=$("$NODE_BIN" -e \
+      'process.stdout.write(String(Math.floor(Date.parse(process.argv[1])/1000)||0))' "$last_iso")
+  else
+    last_iso="(no valid opsd observation)"
+  fi
+  age=$((now - last_epoch))
+  if [ "$last_epoch" -gt 0 ] && [ "$age" -lt "$OPSD_STALE_S" ]; then
+    rm -f "$opsd_sentinel"
+    echo "opsd fresh: last observation ${age}s ago ($last_iso)"
+    return 0
+  fi
+
+  if [ -f "$opsd_sentinel" ]; then
+    local previous
+    previous=$(cat "$opsd_sentinel")
+    if [ $((now - previous)) -lt "$REALERT_S" ]; then
+      echo "opsd stale (${age}s) but alerted $((now - previous))s ago — suppressed"
+      return 17
+    fi
+  fi
+
+  local body
+  body=$(mktemp "${TMPDIR:-/tmp}/helium-deadman-opsd.XXXXXX")
+  {
+    echo "helium opsd observations are stale."
+    echo "last observation: $last_iso (${age}s ago; threshold ${OPSD_STALE_S}s)"
+    echo "event log:        $events"
+    echo "checked at:       $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  } >"$body"
+  if $ALERT_CMD --env-file "$ENV_FILE" \
+    --subject "[helium] opsd observation stale since $last_iso" \
+    --body-file "$body"; then
+    echo "$now" >"$opsd_sentinel"
+    rm -f "$body"
+    echo "opsd stale (${age}s) — alert sent"
+    return 16
+  fi
+  rm -f "$body"
+  echo "opsd stale (${age}s) — alert FAILED" >&2
+  return 18
+}
+
 age=$((now - last_epoch))
 if [ "$last_epoch" -gt 0 ] && [ "$age" -lt "$STALE_S" ]; then
   rm -f "$sentinel"
   echo "fresh: last heartbeat ${age}s ago ($last_iso)"
+  set +e
+  check_opsd
+  rc=$?
+  set -e
+  [ "$rc" -eq 0 ] || exit "$rc"
   set +e
   check_tenants
   rc=$?

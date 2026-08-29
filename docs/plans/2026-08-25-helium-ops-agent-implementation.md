@@ -1985,7 +1985,7 @@ pnpm test
 pnpm test:contracts
 pnpm test:e2e-local
 pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts
-rg -n "shell:\s*true|sh -c|bash -c" plugins/ops-agent/src && exit 1 || true
+pnpm exec vitest run --project unit plugins/ops-agent/src/script-executor.test.ts
 git diff --check
 ```
 
@@ -2002,11 +2002,13 @@ ordinary output. `contracts/tests/core-neutrality.contract.spec.ts` is now the
 single definition of the banned-token set for this plan and the multi-agent
 plan both; a token argument belongs in that test, never in a new inline scan.
 
-The `shell:` scan directly below it carried the identical suffix defect and is
-fixed in the same pass. That one guards the exact-argv invariant this plan sets
-in Task 7 — `spawn(executablePath, argv, { shell: false, … })` — so a scan that
-printed and passed was giving false assurance on a shell-injection boundary, not
-on a style rule. Every scan in this fence is now a gate.
+The former `shell:` text scan carried the identical suffix defect and also
+matched its own explanatory comment plus the negative test fixtures that must
+name `shell: true`, `sh -c`, and `bash -c` in order to reject them. It has been
+replaced by the focused executor suite, which inspects the production source,
+asserts `shell: false`, excludes shell-process APIs, and passes metacharacters
+through a real child process as literal argv. That guards the exact-argv
+invariant this plan sets in Task 7 without treating safety tests as violations.
 
 Expected:
 

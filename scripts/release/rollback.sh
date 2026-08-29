@@ -6,6 +6,7 @@
 set -euo pipefail
 RELEASES=/Users/moremeds/projects/helium-releases
 DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
+OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
@@ -47,6 +48,20 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 target="$(readlink "$RELEASES/previous")" || { echo "no previous release" >&2; exit 65; }
 current="$(readlink "$RELEASES/current")"
 [ -d "$target" ] || { echo "previous release $target missing" >&2; exit 65; }
+opsd_loaded=0
+if [ -f "$OPSD_PLIST" ]; then
+  if launchctl print "gui/$(id -u)/com.helium.opsd" >/dev/null 2>&1; then
+    opsd_loaded=1
+  fi
+  [ -f "$target/plugins/ops-agent/lib/bin/opsd.js" ] || {
+    echo "previous release cannot restore the installed opsd/plugin pair: opsd binary missing" >&2
+    exit 71
+  }
+  [ -f "$target/scripts/ops/run-opsd.sh" ] || {
+    echo "previous release cannot restore the installed opsd/plugin pair: runner missing" >&2
+    exit 71
+  }
+fi
 echo "[rollback] $current -> $target"
 
 tmp="$RELEASES/.current.$$"
@@ -77,6 +92,16 @@ if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
   if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
     echo "FATAL: current=$target and the profile was re-deployed, but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING $current. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
     exit 70
+  fi
+fi
+if [ "$opsd_loaded" = "1" ]; then
+  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
+    echo "[rollback] opsd kickstart failed once — retrying after 3s"
+    sleep 3
+    if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
+      echo "FATAL: current=$target and DSH restarted, but com.helium.opsd did not restart on the compatible collector/plugin pair. MANUAL INTERVENTION REQUIRED." >&2
+      exit 71
+    fi
   fi
 fi
 
