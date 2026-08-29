@@ -2,13 +2,31 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Revision:** 2026-08-28 — rescoped per adjudication D3: thin selector v1 now, scoring/learning deferred to v2.
+**Revision:** 2026-08-29 — Revision 4 extends Tasks 1-7 to DeepSeek, Codex,
+and Claude without changing their numbering; thin selector v1 stays active and
+scoring/learning stays deferred to v2.
 
-**Goal:** Add provider-owned model-effort selection, beginning with Claude subscription targets, while keeping Helium core and team manifests model-blind.
+**Goal:** Add provider-owned model-effort selection for DeepSeek, Codex, and
+Claude targets while keeping Helium core and team manifests model-blind.
 
-**Architecture:** Provider plugins describe native model and effort options and expose only opaque execution targets to the core capability catalog. A thin selector hard-filters those targets on isolation, tools, quota, and availability, then applies a configured per-role preference with ordered fallback and issues a provider-neutral `ExecutionLease`; the Claude adapter invokes the exact model and effort and records the full runtime snapshot. Provider-owned orchestration modes such as `ultracode` never enter the effort field.
+**Architecture:** Provider plugins describe native model and effort options,
+shared quota domains, and current availability, then expose only opaque
+execution targets to the core capability catalog. A thin selector hard-filters
+those targets on isolation, tools, quota, and availability, applies a configured
+per-role preference with ordered fallback, and issues a provider-neutral
+`ExecutionLease`. DeepSeek uses the DSH in-process executor; Codex and Claude
+use separate dedicated out-of-process adapters. Each invokes the exact native
+target and records a full runtime snapshot. Provider-owned orchestration modes
+never enter the effort field.
 
-**Tech Stack:** TypeScript 5, Zod 4, Vitest 3, pnpm workspace, DSH/Cordis provider plugins, Claude Code subscription OAuth.
+**Tech Stack:** TypeScript 5, Zod 4, Vitest 3, pnpm workspace, DSH/Cordis,
+DeepSeek model access, Codex CLI subscription authentication, and Claude Code
+subscription OAuth.
+
+**Live-test rule:** Codex and DeepSeek are available for current preflight and
+certification. Claude is quota-exhausted: run its fake/replay tests, publish its
+targets unavailable, and make no live Claude call until a fresh preflight is
+green. Never deliberately burn a real quota to exercise the state machine.
 
 ---
 
@@ -26,8 +44,9 @@ WorkOrder capability requirements
 
 Kept in v1: the opaque target registry; capability tags; an `isolationClass` per
 target; quota availability as a **dynamic provider-availability state** (this
-plan consumes the `quota-exhausted` failure class and `retryAfter`, which enter
-the vocabulary at multi-agent Phase 0); per-role preference and fallback ordering
+plan consumes the `quota-exhausted` failure class and opaque reset hint, which
+enter the vocabulary at multi-agent Phase 0); provider-owned shared quota
+domains; per-role preference and fallback ordering
 configured in the plugin composition root; and a provider-neutral
 `ExecutionLease`. Effort and model choices live **only** in the provider catalog
 and the privileged admin override — core code never sees a provider or model
@@ -141,8 +160,12 @@ git commit -m "test: protect provider effort boundary"
 
 **Files:**
 
-- Create: `plugins/helium/src/provider-catalog.ts`
-- Create: `plugins/helium/src/provider-catalog.test.ts`
+- Create: `packages/provider-sdk/package.json`
+- Create: `packages/provider-sdk/tsconfig.json`
+- Create: `packages/provider-sdk/src/catalog.ts`
+- Create: `packages/provider-sdk/tests/catalog.spec.ts`
+- Modify: `pnpm-workspace.yaml`
+- Modify: `pnpm-lock.yaml`
 
 **Step 1: Write the failing schema tests**
 
@@ -154,6 +177,7 @@ expect(
   ProviderTargetSchema.parse({
     targetRef: "target-1",
     model: "opaque-to-core-but-provider-owned",
+    quotaDomain: "subscription-session",
     enabled: true,
     effort: {
       supported: true,
@@ -167,6 +191,7 @@ expect(() =>
   ProviderTargetSchema.parse({
     targetRef: "target-2",
     model: "provider-model",
+    quotaDomain: "subscription-session",
     enabled: true,
     effort: {
       supported: true,
@@ -180,6 +205,7 @@ expect(() =>
   ProviderTargetSchema.parse({
     targetRef: "target-3",
     model: "provider-model",
+    quotaDomain: "subscription-session",
     enabled: true,
     effort: {
       supported: true,
@@ -190,10 +216,10 @@ expect(() =>
 ).toThrow(/orchestration mode/i);
 ```
 
-**Step 2: Run the test and verify failure**
+**Step 2: Run the tests and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/provider-catalog.test.ts
+pnpm exec vitest run --project unit packages/provider-sdk/tests/catalog.spec.ts
 ```
 
 Expected: FAIL because the module does not exist.
@@ -244,6 +270,7 @@ export const ProviderTargetSchema = z
     targetRef: z.string().min(1),
     model: z.string().min(1),
     invokeAs: z.string().min(1).optional(),
+    quotaDomain: z.string().min(1),
     enabled: z.boolean(),
     effort: z.discriminatedUnion("supported", [
       UnsupportedEffortSchema,
@@ -253,14 +280,16 @@ export const ProviderTargetSchema = z
   .strict();
 ```
 
-Keep this file in the plugin package. Do not export it from `@helium/core`.
+Keep this contract in `@helium/provider-sdk`, which is an edge SDK rather than
+core. Do not export it from `@helium/core` and do not let it import
+`plugins/helium`.
 Cap each provider catalog at 32 targets during registration so a malformed edge
 plugin cannot create an unbounded model-effort cross-product.
 
 **Step 4: Run the test and typecheck**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/provider-catalog.test.ts
+pnpm exec vitest run --project unit packages/provider-sdk/tests/catalog.spec.ts
 pnpm typecheck
 ```
 
@@ -269,18 +298,36 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/provider-catalog.ts plugins/helium/src/provider-catalog.test.ts
+git add packages/provider-sdk pnpm-workspace.yaml pnpm-lock.yaml
 git commit -m "feat: validate provider effort catalogs"
 ```
 
-### Task 3: Register the Claude subscription catalog
+### Task 3: Register the three provider-owned catalogs
 
 **Files:**
 
-- Create: `plugins/helium/src/providers/claude-subscription-catalog.ts`
-- Create: `plugins/helium/src/providers/claude-subscription-catalog.test.ts`
+- Create: `plugins/provider-deepseek-dsh/package.json`
+- Create: `plugins/provider-deepseek-dsh/tsconfig.json`
+- Create: `plugins/provider-deepseek-dsh/src/catalog.ts`
+- Create: `plugins/provider-deepseek-dsh/src/catalog.test.ts`
+- Create: `plugins/provider-codex-subscription/package.json`
+- Create: `plugins/provider-codex-subscription/tsconfig.json`
+- Create: `plugins/provider-codex-subscription/src/catalog.ts`
+- Create: `plugins/provider-codex-subscription/src/catalog.test.ts`
+- Create: `plugins/provider-claude-subscription/package.json`
+- Create: `plugins/provider-claude-subscription/tsconfig.json`
+- Create: `plugins/provider-claude-subscription/src/catalog.ts`
+- Create: `plugins/provider-claude-subscription/src/catalog.test.ts`
+- Modify: `pnpm-lock.yaml`
 
-**Step 1: Write the failing Claude matrix tests**
+The Claude matrix below is the first provider-specific track retained from the
+earlier plan. Add equivalent table-driven tracks for the account-visible Codex
+and DSH/DeepSeek targets. Do not invent or copy a global effort enum: each
+track freezes its native preflight result, effort ordering, executor class, and
+quota-domain membership. Fake catalogs are mandatory even when a provider is
+not currently live-testable.
+
+**Step 1: Write the failing provider matrix tests**
 
 ```ts
 expect(claudeSubscriptionCatalog.targets).toEqual([
@@ -323,15 +370,20 @@ expect(applyEffortCap(sonnetEffort, "high").options).toEqual([
 expect(() => resolveClaudeEffort(haikuTarget, "low")).toThrow(/unsupported/i);
 ```
 
-**Step 2: Run the test and verify failure**
+Add Codex and DeepSeek fixtures from sanitized preflight snapshots and assert
+that native effort values remain provider-local, each target has exactly one
+`quotaDomain`, and reversing catalog order does not change the snapshot hash.
+Claude uses its sanitized historical seed while live capacity is unavailable.
+
+**Step 2: Run the tests and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/providers/claude-subscription-catalog.test.ts
+pnpm exec vitest run --project unit plugins/provider-*/src/catalog.test.ts
 ```
 
 Expected: FAIL because the catalog module does not exist.
 
-**Step 3: Implement the catalog and cap resolver**
+**Step 3: Implement the catalogs and native resolvers**
 
 Define the ordered effort scale once at the provider edge:
 
@@ -361,10 +413,14 @@ surfaces organization clamping warnings there, then run the normal structured
 JSON probe. Persist the sanitized result as a versioned certification snapshot.
 If applied effort cannot be established, keep the variant uncertified.
 
+Implement the Codex and DeepSeek resolvers beside it. No resolver imports
+another provider's effort order or maps native levels onto a global scale.
+Catalog creation is pure and network-free; Task 7 owns live preflight.
+
 **Step 4: Run the tests and typecheck**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/providers/claude-subscription-catalog.test.ts
+pnpm exec vitest run --project unit plugins/provider-*/src/catalog.test.ts
 pnpm typecheck
 ```
 
@@ -373,16 +429,30 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/providers/claude-subscription-catalog.ts plugins/helium/src/providers/claude-subscription-catalog.test.ts
-git commit -m "feat: add Claude model effort catalog"
+git add plugins/provider-deepseek-dsh plugins/provider-codex-subscription plugins/provider-claude-subscription pnpm-lock.yaml
+git commit -m "feat: add provider-owned model effort catalogs"
 ```
 
-### Task 4: Invoke an exact Claude model and effort
+### Task 4: Invoke an exact native target for each provider
 
 **Files:**
 
+- Create: `plugins/provider-deepseek-dsh/src/invoke.ts`
+- Create: `plugins/provider-deepseek-dsh/src/invoke.test.ts`
+- Create: `plugins/provider-codex-subscription/src/invoke.ts`
+- Create: `plugins/provider-codex-subscription/src/invoke.test.ts`
+- Create: `plugins/provider-claude-subscription/src/invoke.ts`
+- Create: `plugins/provider-claude-subscription/src/invoke.test.ts`
 - Modify: `plugins/helium/src/claude.ts`
 - Modify: `plugins/helium/src/claude.test.ts`
+
+The detailed Claude steps below remain binding for that adapter. Extract the
+reusable invocation into `plugins/provider-claude-subscription`; keep
+`plugins/helium/src/claude.ts` as a compatibility wrapper so the frozen v1 lane
+does not change behavior. Add parallel
+fake-boundary tests for Codex exact CLI arguments and DeepSeek exact DSH
+`agentOptions`. All three preserve the same owned-workspace, tool, cancellation,
+and runtime-snapshot invariants; only the provider-native fields differ.
 
 **Step 1: Add failing invocation tests**
 
@@ -430,10 +500,11 @@ Haiku, and assert that the normalized result retains both entries.
 **Step 2: Run the test and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts
+pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts plugins/provider-*/src/invoke.test.ts
 ```
 
-Expected: FAIL because `runClaude()` does not accept or pass model and effort.
+Expected: FAIL because one or more adapters cannot yet accept and pass an exact
+native model/effort target.
 
 **Step 3: Extend the invocation boundary**
 
@@ -469,35 +540,45 @@ Keep the full `modelUsage` map from the terminal result envelope.
 
 When the provider reports a quota or rate limit, classify the failure as
 `quota-exhausted` and surface `retryAfter`. That vocabulary is defined at
-multi-agent Phase 0; this adapter only produces it, so the selector can treat
-the provider as temporarily unavailable rather than permanently incapable. It is
-a dynamic availability state, never a capability score.
+multi-agent Phase 0; every adapter produces the same normalized class while
+preserving its provider-native opaque hint. Task 5 updates the provider-owned
+quota domain and publishes availability; core never parses the hint. It is a
+dynamic availability state, never a capability score.
 
 **Step 4: Run the focused tests and typecheck**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts
+pnpm exec vitest run --project unit plugins/helium/src/claude.test.ts plugins/provider-*/src/invoke.test.ts
 pnpm typecheck
 ```
 
-Expected: PASS; exact model and effort are visible in the fake binary's
-arguments, and background Haiku usage remains in the snapshot.
+Expected: PASS; exact model and effort are visible at each fake invocation
+boundary, and every provider preserves its complete runtime snapshot.
 
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/claude.ts plugins/helium/src/claude.test.ts
-git commit -m "feat: invoke Claude with explicit effort"
+git add plugins/helium/src/claude.ts plugins/helium/src/claude.test.ts plugins/provider-deepseek-dsh/src/invoke.ts plugins/provider-deepseek-dsh/src/invoke.test.ts plugins/provider-codex-subscription/src/invoke.ts plugins/provider-codex-subscription/src/invoke.test.ts plugins/provider-claude-subscription/src/invoke.ts plugins/provider-claude-subscription/src/invoke.test.ts
+git commit -m "feat: invoke exact provider targets"
 ```
 
 ### Task 5: Publish only certified model-effort variants to routing
 
 **Files:**
 
-- Create: `plugins/helium/src/providers/claude-subscription-executor.ts`
-- Create: `plugins/helium/src/providers/claude-subscription-executor.test.ts`
+- Create: `plugins/provider-deepseek-dsh/src/executor.ts`
+- Create: `plugins/provider-deepseek-dsh/src/executor.test.ts`
+- Create: `plugins/provider-codex-subscription/src/executor.ts`
+- Create: `plugins/provider-codex-subscription/src/executor.test.ts`
+- Create: `plugins/provider-claude-subscription/src/executor.ts`
+- Create: `plugins/provider-claude-subscription/src/executor.test.ts`
+- Create: `plugins/helium/src/provider-availability.ts`
+- Create: `plugins/helium/src/provider-availability.test.ts`
 - Modify: `plugins/helium/src/executor-registry.ts`
 - Modify: `plugins/helium/src/executor-registry.test.ts`
+- Modify: `packages/core/src/capabilities.ts`
+- Modify: `packages/core/tests/capabilities.spec.ts`
+- Modify: `packages/core/tests/router.spec.ts`
 
 **Step 1: Write failing registry tests**
 
@@ -505,8 +586,9 @@ In v1, "certified" means **entitlement-certified**: the account demonstrably
 accepts that `(model, effort)` invocation. It does not mean quality-measured —
 measured profiles arrive with the deferred v2 evaluation work.
 
-Build a certification fixture containing one Haiku target and selected Sonnet
-and Opus effort variants. Assert that:
+Build certification fixtures for all three providers. The Claude fixture may
+contain one Haiku target and selected Sonnet/Opus variants; Codex and DeepSeek
+fixtures use their own sanitized native snapshots. Assert that:
 
 - every registered core target ID is opaque;
 - each `(model, effort)` variant has its own provider target reference;
@@ -515,7 +597,13 @@ and Opus effort variants. Assert that:
 - uncertified variants remain absent from the capability catalog;
 - Haiku produces exactly one no-effort variant;
 - `ultracode` produces no target; and
-- disposing the provider removes all of its registered variants.
+- disposing the provider removes all of its registered variants;
+- each target has one provider-owned `quotaDomain` and exhausting a domain
+  atomically removes every member target but no target from another domain;
+- the opaque provider reset hint is audited but never parsed by core; and
+- a fresh availability snapshot is content-versioned and idempotent; and
+- advancing a core test clock past an opaque reset hint does **not** restore a
+  target; only a provider-owned availability update does.
 
 ```ts
 const registered = registerCertifiedClaudeTargets({
@@ -536,7 +624,7 @@ expect(
 **Step 2: Run the test and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/providers/claude-subscription-executor.test.ts plugins/helium/src/executor-registry.test.ts
+pnpm exec vitest run --project unit plugins/provider-*/src/executor.test.ts plugins/helium/src/provider-availability.test.ts plugins/helium/src/executor-registry.test.ts packages/core/tests/capabilities.spec.ts packages/core/tests/router.spec.ts
 ```
 
 Expected: FAIL because the provider executor does not exist.
@@ -558,9 +646,18 @@ core persists without interpreting.
 
 Each registered target carries its `isolationClass` so the hard filter can
 reject a target whose isolation is too weak for the work order, and the
-provider's availability state (including `quota-exhausted` with its
-`retryAfter`) so exhausted targets drop out of the candidate set until the
-window elapses.
+provider's published availability state so exhausted targets drop out of the
+candidate set. `provider-availability.ts` belongs to the plugin composition
+layer: it owns quota-domain membership, preserves native reset hints, and emits
+one versioned snapshot/event when domain state changes. It may schedule its own
+provider-specific refresh, but core never parses `retryAfter` or sleeps on it.
+
+Correct the merged P1 behavior in `packages/core/src/capabilities.ts`: remove
+`Date.parse(retryAfter)` and clock-based auto-readmission from `available()` /
+`snapshot()`. An availability state remains unavailable until the provider
+plugin explicitly publishes `available`; the opaque hint may remain in the
+snapshot solely for audit. Update the existing “returns after retryAfter” core
+tests to prove the opposite and let the plugin availability tests prove refresh.
 
 Registration must be all-or-nothing: validate every target and certification
 entry before registering any disposer. On failure, leave both registries
@@ -576,7 +673,7 @@ model and effort remain only in the provider registry and audit snapshot.
 **Step 4: Run tests and the neutrality contract**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/providers/claude-subscription-executor.test.ts plugins/helium/src/executor-registry.test.ts
+pnpm exec vitest run --project unit plugins/provider-*/src/executor.test.ts plugins/helium/src/provider-availability.test.ts plugins/helium/src/executor-registry.test.ts packages/core/tests/capabilities.spec.ts packages/core/tests/router.spec.ts
 pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts
 pnpm typecheck
 ```
@@ -586,8 +683,8 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/providers/claude-subscription-executor.ts plugins/helium/src/providers/claude-subscription-executor.test.ts plugins/helium/src/executor-registry.ts plugins/helium/src/executor-registry.test.ts
-git commit -m "feat: register certified Claude effort targets"
+git add plugins/provider-deepseek-dsh/src/executor.ts plugins/provider-deepseek-dsh/src/executor.test.ts plugins/provider-codex-subscription/src/executor.ts plugins/provider-codex-subscription/src/executor.test.ts plugins/provider-claude-subscription/src/executor.ts plugins/provider-claude-subscription/src/executor.test.ts plugins/helium/src/provider-availability.ts plugins/helium/src/provider-availability.test.ts plugins/helium/src/executor-registry.ts plugins/helium/src/executor-registry.test.ts packages/core/src/capabilities.ts packages/core/tests/capabilities.spec.ts packages/core/tests/router.spec.ts
+git commit -m "feat: register certified provider targets"
 ```
 
 ### Task 6: Configure per-role preference/fallback and the privileged exact-target override
@@ -598,6 +695,8 @@ git commit -m "feat: register certified Claude effort targets"
 - Create: `plugins/helium/src/exact-target-override.test.ts`
 - Create: `plugins/helium/src/routing-service.ts`
 - Create: `plugins/helium/src/routing-service.test.ts`
+- Modify: `packages/core/src/router.ts`
+- Modify: `packages/core/tests/router.spec.ts`
 
 **Step 1: Write failing authorization and audit tests**
 
@@ -628,10 +727,24 @@ access and that an expired override fails closed.
 Add selector tests for the v1 ordering rule: given a configured per-role
 preference and an ordered fallback list of opaque target references, the
 selector returns the preferred surviving target; when the preferred target is
-filtered out (isolation, tools, or a `quota-exhausted` availability state with
-an unexpired `retryAfter`) it returns the next entry in the configured order;
-and when the list is exhausted it returns `capability-shortage`. Assert that no
-score, weight, or confidence value participates in the decision.
+filtered out by isolation, tools, or the current provider availability snapshot,
+it returns the next entry in the configured order. If targets satisfy static
+requirements but are all temporarily unavailable, return a typed capacity-wait
+decision for the Task 15 controller state; use `capability-shortage` only when
+static requirements cannot be met. Assert that no score, weight, confidence, or
+reset-time parsing participates in the decision.
+
+Add the complete fake quota smoke matrix: shared-domain fan-out, persisted old
+attempt with its lease consumed/closed, one new fallback attempt with unchanged WorkOrder
+and artifacts, no fallback under exact override, all targets waiting without a
+busy loop, and duplicate availability events resuming exactly one attempt.
+
+The current P1 selector reports every empty candidate set as
+`capability-shortage`. Change its provider-neutral decision contract so a
+configured target whose only exclusions are `quota-exhausted`/`unavailable`
+returns `failure.class: "unavailable"`; retain `capability-shortage` for missing
+static capability, isolation, tool, mutation, context, latency, or role policy.
+The plugin controller maps the former to durable `waiting-for-capacity`.
 
 **Step 2: Run the test and verify failure**
 
@@ -667,6 +780,13 @@ the original work-order safety and budget constraints, and then issue the same
 lease type. A pinned target that fails the original constraints returns
 `capability-shortage` rather than bypassing policy.
 
+A pinned target that is statically valid but temporarily unavailable does not
+walk the fallback list. It returns the audited exact-target capacity decision;
+the controller either enters `waiting-for-capacity` under the override's retry
+policy or terminalizes the request. Normal fallback always creates a new
+attempt after the exhausted attempt and lease are durably closed; it never
+mutates the old attempt in place.
+
 The composition root also owns the per-role preference and fallback
 configuration. It is a plain ordered list of opaque target references per role —
 no weights, no scores, no learned adjustment — and it never leaves the plugin
@@ -678,7 +798,7 @@ target is a configured preference here, never a hardcoded role in core.
 **Step 4: Run tests and typecheck**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/exact-target-override.test.ts plugins/helium/src/routing-service.test.ts
+pnpm exec vitest run --project unit plugins/helium/src/exact-target-override.test.ts plugins/helium/src/routing-service.test.ts packages/core/tests/router.spec.ts
 pnpm typecheck
 ```
 
@@ -687,7 +807,7 @@ Expected: PASS.
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/src/exact-target-override.ts plugins/helium/src/exact-target-override.test.ts plugins/helium/src/routing-service.ts plugins/helium/src/routing-service.test.ts
+git add plugins/helium/src/exact-target-override.ts plugins/helium/src/exact-target-override.test.ts plugins/helium/src/routing-service.ts plugins/helium/src/routing-service.test.ts packages/core/src/router.ts packages/core/tests/router.spec.ts
 git commit -m "feat: add preference fallback ordering and audited exact target override"
 ```
 
@@ -713,18 +833,40 @@ git diff --check
 Expected: all commands pass, with no network call. The `@helium/evals` fixture
 run is **not** part of the v1 gate; it belongs to the deferred evaluation work.
 
-**Step 2: Run isolated live certification only after AC#1**
+Then, in a temporary composition fixture, remove and re-add each of
+`provider-deepseek-dsh`, `provider-codex-subscription`, and
+`provider-claude-subscription`. Every command exits 0 and
+`git diff --name-only -- packages/core plugins/helium` remains empty. Boot and
+run the fake-provider core suite after all three are removed. This is the
+program's pluggability proof; merely disabling three in-tree modules does not
+count.
 
-Use the Mac mini subscription OAuth credential and existing proxy, but run from
-a mode-0700 temporary directory with production JSONL, jobs, releases, and
-credential files read-only. Certify every enabled Claude model-effort target
-that will enter routing. Do not run `ultracode`.
+**Step 2: Run the fake quota smoke gate**
 
-For each effort level, first run a minimal plain-text invocation and inspect
-stderr for an organization-cap warning. Then run the structured JSON invocation
-used by the adapter. Record `requested`, `effective`, and
+Use fake/replayed provider adapters to exhaust one target, a shared quota
+domain, and all three providers. Cover ordered fallback, exact-target refusal,
+durable waiting, exactly-one resume, paired-run invalidation, and deterministic
+Ops continuity. Assert the harness performs no network call and does not use a
+real credential.
+
+Expected: every failed attempt and lease remains auditable; no capability is
+edited, no submodel is silently substituted, and no busy loop or duplicate
+attempt occurs.
+
+**Step 3: Run isolated live certification only where preflight allows it**
+
+Run from a mode-0700 temporary directory with production JSONL, jobs, releases,
+and credential files read-only. No live probe may touch the mini before AC#1
+closes. On an allowed development host, preflight and certify enabled Codex and
+DeepSeek targets now. Record Claude's quota domain unavailable and make **no
+live Claude invocation** until a later preflight is green. Do not run provider-
+owned orchestration modes such as `ultracode` or Codex `Ultra`.
+
+For each provider-native effort level, use that adapter's minimal preflight and
+then its structured invocation. Record `requested`, `effective`, and
 `providerReportedEffort` separately; never infer a provider-reported value from
-the absence of an error.
+the absence of an error. One successful response certifies entitlement and
+invocation only, not quality.
 
 Expected production invariants before and after:
 
@@ -734,7 +876,7 @@ Expected production invariants before and after:
 - heartbeat continuity is preserved; and
 - no temporary probe directory remains.
 
-**Step 3: Record the certification result**
+**Step 4: Record the certification result**
 
 The review must distinguish:
 
@@ -742,6 +884,7 @@ The review must distinguish:
 - account entitlement;
 - successful invocation;
 - organization cap; and
+- quota-domain availability and opaque reset hint, if any; and
 - routing eligibility.
 
 In v1, routing eligibility follows from entitlement plus configuration; record
@@ -749,7 +892,7 @@ In v1, routing eligibility follows from entitlement plus configuration; record
 blank or inventing a score. Do not promote a target because it returned one
 valid response, and do not infer a quality ranking from these probes.
 
-**Step 4: Open and merge a pull request**
+**Step 5: Open and merge a pull request**
 
 ```bash
 git status --short
@@ -855,22 +998,32 @@ git commit -m "feat: evaluate Claude effort variants"
 
 ## Final acceptance gate (v1)
 
-- Claude Haiku is registered only as a no-effort target.
-- Claude Sonnet 5 and Opus 5 expose only entitlement-certified subsets of `low`,
-  `medium`, `high`, `xhigh`, and `max`.
+- DeepSeek, Codex, and Claude expose only provider-native targets in a current,
+  versioned entitlement snapshot; an unavailable provider may publish zero
+  eligible live targets without blocking the other two.
+- A submodel that does not advertise effort rejects explicit effort; no
+  provider silently clamps an unsupported value.
 - Normal work orders and team manifests reject provider, model, and effort.
-- `ultracode` is absent from the effort catalog and executor registry.
+- Provider-owned multi-agent orchestration modes are absent from the effort
+  catalog and executor registry.
 - Every routed target carries a versioned catalog entry with its capability
   tags, `isolationClass`, entitlement, availability state, and safety
   constraints.
 - Selection is reproducible from configuration alone: the same catalog, the same
   availability state, and the same per-role preference and fallback order select
   the same target, and no score, weight, or confidence value participates.
-- A `quota-exhausted` target with an unexpired `retryAfter` is filtered out of
-  the candidate set rather than being treated as permanently incapable.
+- A `quota-exhausted` domain removes all affected submodels from the published
+  candidate snapshot without changing capability declarations; core does not
+  parse the opaque reset hint.
+- The failed attempt is preserved and its lease remains consumed/closed. Normal routing makes
+  at most one new fallback attempt; exact-target routing makes none; exhausting
+  every eligible target enters durable `waiting-for-capacity`, and one
+  availability event resumes exactly one attempt.
 - Every result retains requested/effective effort and complete runtime model
   usage without claiming unreported provider data.
 - Exact-target overrides are privileged, expiring, bounded, and audited.
+- The complete quota smoke matrix uses fakes/replays and demonstrates that
+  deterministic Ops continues with every provider unavailable.
 - The v1 production path and rollback remain unchanged.
 
 Deferred to v2, and explicitly **not** part of this gate: measured quality,

@@ -8,8 +8,10 @@ restart-safe multi-agent harness while preserving the v1 production path.
 **Architecture:** Helium core owns provider-neutral work orders, a thin
 capability selector, durable team state, evidence, budgets, and delivery policy.
 A provider-executor registry resolves opaque execution leases into concrete
-model calls; each registered executor declares an `isolationClass` and passes
-one shared execution-boundary conformance suite. DSH supplies agent and
+model calls; each registered executor declares an `isolationClass` and carries
+class-appropriate proof: the shared child-process conformance suite for
+process/sandboxed, or explicit floor admission plus DSH behavior tests for
+in-process. DSH supplies agent and
 subagent lifecycle primitives — its in-process driver being one low-isolation
 executor, not the universal execution path; Helium supplies business durability
 and verification around them.
@@ -27,6 +29,16 @@ topology guard and Task 19 keeps the behavioral half (R4/ARCH-5), and Task 6
 carries one exported forbidden-word contract plus the v1 domain-module moves
 while Task 10 registers two fakes as workspace packages (R6/ARCH-8).
 
+**Revision 4 takeover amendment — 2026-08-29.** Keep every task ID and
+dependency below. Execution is authorized through P4. The active provider set
+is DeepSeek (DSH in-process, low isolation), Codex (dedicated out-of-process),
+and Claude (dedicated out-of-process), each exposing only provider-owned,
+preflight-certified submodel/effort targets. Codex and DeepSeek may be live
+tested now. Claude is skipped while quota-exhausted and is enabled only by a
+fresh passing preflight. Tasks 15, 16, 19, and 20 carry the additional capacity
+and paired-evaluation requirements stated below; they are amendments to those
+tasks, not new tasks.
+
 **Tech Stack:** TypeScript 5, Node.js 22+, pnpm, Vitest, Zod, YAML, DeepSeek
 Harness/Cordis `0.1.1-rc.2`, append-only JSONL, MCP, nodemailer.
 
@@ -43,6 +55,9 @@ Harness/Cordis `0.1.1-rc.2`, append-only JSONL, MCP, nodemailer.
   contract surfaces; implementation may not add a sensor-to-provider,
   agent-to-delivery, or agent-to-authority shortcut.
 - Do not silently relax a capability, safety, or budget requirement.
+- Treat quota exhaustion as provider-owned dynamic availability. Never alter a
+  capability declaration, silently select a weaker submodel, busy-poll a reset
+  hint, or overwrite the exhausted attempt.
 - Do not give a mutating team a generic shell or treat command exit as
   verified recovery.
 - Stop at every phase gate for code review and evidence review.
@@ -234,12 +249,13 @@ reset hint through as an opaque `retryAfter` string. Do not parse it into a
 duration in this task, and do not invent one when the provider gives none.
 
 `quota-exhausted` is **dynamic provider-availability state, not a capability
-score and not a budget**: the target's capabilities are unchanged, it is simply
-unavailable until `retryAfter`. A flat-rate subscription reports neither dollars
-nor tokens, so it must never be folded into `budget-exhausted`. Downstream, the
-class means "this target is filtered out until `retryAfter`, try the configured
-fallback" — never "retry this target immediately" and never "this target is
-worse than it was".
+score and not a budget**: the target's capabilities are unchanged. A flat-rate
+subscription reports neither dollars nor tokens, so it must never be folded
+into `budget-exhausted`. Downstream, the provider plugin preserves the opaque
+hint, owns any interpretation and shared-domain cooldown, and publishes a new
+availability snapshot. Core filters that snapshot — it never parses
+`retryAfter`, retries the target immediately, or concludes that the target is
+worse than it was.
 
 Write the red test first: a fake CLI that emits a rate-limit envelope must
 produce `classification: "quota-exhausted"` with `retryAfter` preserved
@@ -1513,7 +1529,7 @@ tool/mutation policy, context and latency bounds, `quota-exhausted`
 availability), preference resolution, ordered fallback, and shortage:
 
 ```ts
-const decision = select(workOrder, policy, catalog.snapshot(now));
+const decision = select(workOrder, policy, catalog.snapshot());
 expect(decision.selected).toBe(ExecutionTargetId("target-b"));
 expect(decision.candidates).toEqual([
   expect.objectContaining({ targetId: "target-b", eligible: true }),
@@ -1529,13 +1545,15 @@ Add these cases specifically:
 
 - the configured preference is filtered out by `isolationClass`, and the
   decision records the fallback position that produced the selection;
-- the preferred target is `quota-exhausted` with a future `retryAfter`, the
-  fallback is chosen, and the same call after `retryAfter` chooses the
-  preference again;
+- the preferred target is `quota-exhausted`, the fallback is chosen, and merely
+  advancing a core clock past an opaque `retryAfter` does **not** re-admit it;
+  only a provider-owned availability update does;
 - a preference can never re-admit a target a hard filter excluded — there is no
   boost that outranks a hard requirement;
-- an empty surviving set yields `capability-shortage` with per-target exclusion
-  reasons, and never a relaxed requirement.
+- an empty surviving set yields `unavailable` when a configured target satisfies
+  static requirements but is temporarily unavailable, or
+  `capability-shortage` when static requirements cannot be met; neither relaxes
+  a requirement.
 
 **Step 2: Run the test and verify failure**
 
@@ -1555,7 +1573,7 @@ export interface SelectionDecision {
   candidates: CandidateDecision[];
   /** Index into the configured fallback list; 0 means the preference won. */
   fallbackPosition?: number;
-  failure?: { class: "capability-shortage"; reasons: string[] };
+  failure?: { class: "capability-shortage" | "unavailable"; reasons: string[] };
   policyVersion: string;
   catalogVersion: string;
 }
@@ -1565,7 +1583,9 @@ Filter hard requirements first, then take the configured per-role preference
 from the survivors, then walk the ordered fallback list. Break ties by stable
 target ID (with no scoring there are few ties left). Do not place runtime
 availability polling in this pure function; pass an availability snapshot —
-including quota state and `retryAfter` — as catalog input.
+including quota state and opaque `retryAfter` audit data — as catalog input.
+Core never parses the hint. Provider Effort Tasks 5-6 deliver this Revision 4
+correction to the already-merged P1 implementation.
 
 **Step 4: Run tests and repeat for determinism**
 
@@ -1649,10 +1669,12 @@ export interface Executor {
 
 Provide the adapter that presents an `Executor` as the P0 harness's
 `ExecutionBoundarySubject`, and run
-`runExecutionBoundaryConformance()` over every registered executor — the same
-suite, whatever the class. The suite is the admission gate: an executor that
-declares `sandboxed` but demonstrates only `in-process` fails registration
-rather than downgrading silently.
+`runExecutionBoundaryConformance()` over every process/sandboxed executor. An
+in-process executor has no child report for that suite; register it only through
+`conformanceAtFloor()` and never accept that record for a stronger class. Add
+separate tests for the actual DSH inheritance, tool-filter, cancellation, and
+drain contract. An executor that declares `sandboxed` but proves less fails
+registration rather than downgrading silently.
 
 The plugin registry owns concrete executors and is the only place a concrete
 execution mechanism appears. Lease consumption is atomic in process and
@@ -2230,6 +2252,18 @@ Build a table-driven crash matrix for task assignment, executor start, artifact
 publication, cancellation, and delivery intent. (There is no message-acceptance
 cell: the general mailbox is deferred — Task 14.)
 
+Add provider-neutral capacity cases driven by fake results:
+
+- `quota-exhausted` terminalizes the old attempt and leaves its one-shot lease
+  consumed/closed;
+- fallback creates one new attempt with the same `WorkOrder`, artifact
+  references, and remaining budget;
+- an exact-target override creates no fallback attempt;
+- no eligible target produces durable `waiting-for-capacity` and no timer loop;
+- duplicate availability events resume at most one attempt; and
+- replay at every boundary converges to the same state without a duplicate
+  execution or charge.
+
 **Step 2: Run tests and verify failure**
 
 ```bash
@@ -2246,6 +2280,12 @@ walks the task/agent ownership tree child-first. Recovery converts uncertain
 in-process work into interrupted state and marks uncertain external side
 effects for reconciliation rather than retrying them blindly.
 
+Capacity waiting is not ordinary retry. Persist the exhausted attempt and its
+opaque runtime snapshot, keep its one-shot lease consumed/closed, and represent
+`waiting-for-capacity` in provider-neutral team state. A later plugin-layer
+availability event may request one new attempt. The reducer never parses
+`retryAfter`, names a provider, or wakes itself on a provider clock.
+
 State the guarantee precisely and do not inflate it. This buys: write-ahead
 intent before every external side effect; at-most-one active lease per unit of
 work; no blind retry of an intent whose outcome is unknown; idempotent or
@@ -2261,7 +2301,8 @@ a crash before the outcome append is genuinely indeterminate.
 pnpm exec vitest run --project unit packages/core/tests/team-budget.spec.ts packages/core/tests/team-recovery.spec.ts --repeat=20
 ```
 
-Expected: PASS with no duplicate charge or terminal event.
+Expected: PASS with no duplicate charge, terminal event, fallback attempt, or
+capacity resume.
 
 **Step 5: Commit**
 
@@ -2272,16 +2313,18 @@ git commit -m "feat: reconcile team budgets and cancellation"
 
 ### Task 16: Register provider executors behind the DSH lifecycle seam
 
+**Revision 4 prerequisite:** Complete active Tasks 1-6 of the
+[Provider Effort Selection Implementation Plan](2026-08-25-provider-effort-selection-implementation.md)
+against fake catalogs before this task's live preflight. Task 7 certification
+may certify Codex and DeepSeek now; it records Claude unavailable and issues no
+live Claude invocation until preflight reports capacity.
+
 **Files:**
 
 - Modify: `plugins/helium/package.json`
 - Modify: `plugins/helium/src/index.ts`
 - Create: `plugins/helium/src/dsh-team-host.ts`
 - Create: `plugins/helium/src/dsh-team-host.test.ts`
-- Create: `plugins/helium/src/executors/dsh-in-process.ts`
-- Create: `plugins/helium/src/executors/dsh-in-process.test.ts`
-- Create: `plugins/helium/src/executors/out-of-process-cli.ts`
-- Create: `plugins/helium/src/executors/out-of-process-cli.test.ts`
 - Create: `contracts/fixtures/team-host/package.json`
 - Create: `contracts/fixtures/team-host/cordis.patch.yml`
 - Create: `contracts/fixtures/team-host/src/index.ts`
@@ -2319,20 +2362,26 @@ it resolves to the DSH-configured model by construction.
 
 1. Keep the DSH lifecycle seam — start, follow-up, interrupt, list, drain, cold
    resume. Helium does not build a second model loop.
-2. Every provider executor declares an `isolationClass` and passes the **same**
-   execution-boundary conformance suite from Phase 0 Task 2. One suite, every
-   class, no exemptions.
-3. `dsh-in-process.ts` registers the DSH in-process driver as a
-   **low-isolation** executor (`isolationClass: "in-process"`), documenting the
-   inheritance quoted above as its declared, harness-proven boundary.
-4. `out-of-process-cli.ts` registers a **dedicated out-of-process executor**
-   for Claude and Codex subscription targets, with its own process tree,
-   environment, workspace, and settings boundary — reusing the Phase 0 Task 1
-   isolation work rather than re-deriving it.
+2. Every provider executor declares an `isolationClass`. Process/sandboxed
+   executors pass the shared Phase 0 Task 2 suite. The in-process executor
+   registers only through `conformanceAtFloor()` and separately proves DSH
+   inheritance, tool-filter, cancellation, and drain behavior.
+3. `plugins/provider-deepseek-dsh` registers the DSH in-process driver as a
+   **low-isolation DeepSeek executor** (`isolationClass: "in-process"`),
+   documenting the inheritance quoted above as its declared, harness-proven
+   boundary.
+4. `plugins/provider-codex-subscription` and
+   `plugins/provider-claude-subscription` each register a dedicated
+   out-of-process executor with its own provider-native catalog and invocation
+   adapter, while reusing the Phase 0 Task 1 process-boundary discipline.
 5. An in-process target only receives work whose WorkOrder tolerates its
    isolation class. A WorkOrder requiring `process` or `sandboxed` never reaches
    the in-process executor, and the selector's hard filter (Task 9) is what
    enforces that — the executor is not asked to police its own eligibility.
+6. Each provider plugin owns a versioned catalog snapshot, the mapping from its
+   submodels to shared quota domains, and availability refresh. Core receives
+   opaque target availability only. One exhausted quota domain removes all of
+   its affected targets in one published snapshot.
 
 **Step 1: Write the structural host and registry tests**
 
@@ -2366,11 +2415,14 @@ Add these cases:
   `tool-boundary-violation`, it does not silently downgrade;
 - both executors run the Phase 0 conformance harness and pass it, each against
   its own declared class.
+- fake DeepSeek, Codex, and Claude catalogs can coexist; exhausting one shared
+  quota domain removes all and only its member targets, preserves the opaque
+  reset hint in the audit record, and emits one availability change.
 
 **Step 2: Run the tests and verify failure**
 
 ```bash
-pnpm exec vitest run --project unit plugins/helium/src/dsh-team-host.test.ts plugins/helium/src/executors
+pnpm exec vitest run --project unit plugins/helium/src/dsh-team-host.test.ts plugins/provider-*/src/executor.test.ts
 ```
 
 Expected: FAIL because the host and the executors do not exist.
@@ -2393,6 +2445,13 @@ environment, workspace, and settings boundary, and reuse the Phase 0 Task 1
 termination discipline (TERM then KILL to the group). It declares
 `isolationClass: "process"` and must demonstrate it under the harness.
 
+The generic process boundary may be shared, but the Codex and Claude adapters,
+catalogs, entitlement probes, exact arguments, runtime snapshots, and quota
+domains remain separate provider-owned modules. Do not infer a submodel list
+from documentation alone: publish only the versioned targets accepted by the
+current account preflight. Do not invoke Claude while its quota domain is
+unavailable.
+
 Do not use DSH workflow as the durable controller; its current run does not own
 Helium's task DAG, budget, or restart contract.
 
@@ -2406,6 +2465,12 @@ Register a second fake executor with a _different_ isolation class in the same
 fixture, so the contract proves the registry actually dispatches on the resolved
 target rather than always taking the in-process path.
 
+Also run the complete fake capacity matrix without network or credentials:
+single-target fallback, shared-domain exhaustion, exact-target no-fallback,
+all-targets `waiting-for-capacity`, duplicate availability-event
+deduplication, and deterministic Ops independence. Never exhaust a real quota
+to prove these transitions.
+
 Run:
 
 ```bash
@@ -2413,13 +2478,14 @@ pnpm exec vitest run --project contracts contracts/tests/team-host.contract.spec
 ```
 
 Expected: PASS; the completed sibling is unaffected, the cancelled sibling is
-settled, no child remains after drain, and both registered executors pass the
-shared execution-boundary conformance suite at their declared class.
+settled, no child remains after drain, the out-of-process executor passes the
+shared boundary suite, and the in-process executor remains pinned to the floor
+while its DSH behavior tests pass.
 
 **Step 5: Commit**
 
 ```bash
-git add plugins/helium/package.json plugins/helium/src/index.ts plugins/helium/src/dsh-team-host.ts plugins/helium/src/dsh-team-host.test.ts plugins/helium/src/executors contracts/fixtures/team-host contracts/tests/team-host.contract.spec.ts pnpm-lock.yaml
+git add plugins/helium/package.json plugins/helium/src/index.ts plugins/helium/src/dsh-team-host.ts plugins/helium/src/dsh-team-host.test.ts contracts/fixtures/team-host contracts/tests/team-host.contract.spec.ts pnpm-lock.yaml
 git commit -m "feat: dispatch team work through the provider-executor registry"
 ```
 
@@ -2443,10 +2509,11 @@ unknown is recorded `uncertain` rather than retried, and the process table
 contains no child from the test. Exactly-once is not asserted anywhere in this
 gate.
 
-Also expected: every executor registered by Task 16 passes the shared
-execution-boundary conformance suite at its declared `isolationClass`, and no
-work order requiring a stronger class than its resolved executor declares was
-executed.
+Also expected: every executor registered by Task 16 carries class-appropriate
+proof, and no work order requiring a stronger class than its resolved executor
+declares was executed. The fake capacity matrix passes, and live certification evidence
+marks every untested or exhausted provider target unavailable rather than
+silently substituting a submodel.
 
 ## Phase 2.5a: operations safety substrate and Ops reference team
 
@@ -2679,6 +2746,15 @@ suite layers runtime behaviour on top of that guard and must not weaken it:
 never relax, re-scope, or re-implement the structural assertion here, and never
 let a runtime expectation stand in for the compile-time one.
 
+Add the Revision 4 capacity and evaluation cases. A fake Codex catalog resolves
+one anchor target for both a single-agent control and multi-agent treatment;
+the two arms receive byte-identical input artifacts, tool declarations, and
+declared budgets. Quota exhaustion in either arm marks the pair incomplete,
+terminalizes the affected attempt, and schedules neither arm into the score.
+When all eligible targets are unavailable, replay preserves
+`waiting-for-capacity`; one later availability event creates exactly one new
+attempt. An exact-target override never falls back.
+
 **Step 2: Run the focused tests and verify failure**
 
 ```bash
@@ -2705,6 +2781,13 @@ The controller:
 9. renders only after adjudication; and
 10. records a terminal shadow result without production delivery.
 
+For ordinary resilient runs, a quota-exhausted result follows Task 15's durable
+transition and may select an ordered fallback through a new attempt. For the P3
+primary experiment, the evaluation coordinator instead invalidates the whole
+pair and reschedules both Codex arms from unchanged inputs only after the anchor
+catalog snapshot is available. These modes are explicit; a mixed-provider
+fallback result can prove resilience but cannot enter the primary statistic.
+
 Add `teamShadowEnabled` and `teamsDir` configuration. Default shadow to false.
 No configuration accepts a provider or model name.
 
@@ -2714,7 +2797,9 @@ This runs **before the first shadow run**, not after it. Compute the `sha256`
 of the `evals/fixtures/macro` directory and append it to
 `docs/evidence/claims.yaml` (the register Task 7 created) as the Phase 3
 primary-metric claim, together with the metric name — `unsupported-claim rate`,
-lower is better — and the pinned command that recomputes the hash. The hash is
+lower is better — the Codex single-agent/control versus Codex
+multi-agent/treatment pairing contract, the versioned anchor target snapshot,
+and the pinned command that recomputes the hash. The hash is
 frozen from that moment: Task 20's gate re-verifies it and a changed hash fails
 the gate rather than being re-baselined. Recording the hash after a shadow run,
 or re-recording it once results are visible, is the failure this step exists to
@@ -2731,7 +2816,8 @@ pnpm test:e2e-local
 Expected: PASS; enabling shadow adds records but does not change v1 reports or
 email. The event log must demonstrate the canonical sequence from `CaseEvent`
 through lease, agent result, accepted evidence decision, and terminal shadow
-outcome; no shortcut edge is accepted.
+outcome; no shortcut edge is accepted. Capacity cases leave no duplicate lease
+or attempt, and quota-interrupted pairs never enter the score input.
 
 **Step 5: Commit**
 
@@ -2825,12 +2911,18 @@ master plan states, and it is the only thing that decides it. It:
 1. re-verifies the `evals/fixtures/macro` directory `sha256` against the value
    Task 19 pre-registered in `docs/evidence/claims.yaml`, and **fails the gate
    on any mismatch** — a changed fixture set is never re-baselined;
-2. pairs each fixture case's multi-agent run with the frozen v1 control run;
+2. pairs each fixture case's Codex multi-agent treatment with a Codex
+   single-agent control using the same versioned anchor target, tools, source
+   event, input artifacts, and declared budget;
 3. fails unless there are at least **30 paired cases** (`n >= 30`);
 4. fails unless the multi-agent path shows at least a **20% relative
    reduction** in unsupported-claim rate at **p < 0.05** on a **two-sided
    Wilcoxon signed-rank** test over the paired differences; and
-5. emits human preference as a descriptive secondary that can never gate.
+5. rejects any pair whose control or treatment was interrupted by quota,
+   cancellation, timeout, changed anchor snapshot, or unequal inputs, then
+   reschedules both members outside the scorer; and
+6. emits human preference and provider-stratified DeepSeek/Claude results as
+   descriptive secondaries that can never gate.
 
 The three thresholds in points 3 and 4 are **`PROVISIONAL`** — parameters
 **P-1** and **P-2** of
@@ -2838,6 +2930,10 @@ The three thresholds in points 3 and 4 are **`PROVISIONAL`** — parameters
 must be ratified or replaced by the operator before this phase's gate is run.
 `packages/evals/tests/paired-gate.spec.ts` covers each failure mode: hash
 mismatch, `n < 30`, reduction below threshold, and `p >= 0.05`.
+It also covers one-sided quota exhaustion, both-sided exhaustion, mismatched
+anchor snapshots, and proof that neither half of an invalid pair reaches the
+statistic. Claude fixtures are replayed/fake while live preflight reports its
+quota domain unavailable.
 
 **Step 4: Run offline evaluations**
 
@@ -2874,9 +2970,9 @@ Expected:
 
 - zero unauthorized capability calls;
 - no provider/model names in core or team manifests;
-- every registered executor passes the shared execution-boundary conformance
-  suite at its declared `isolationClass`, and no work order ran on an executor
-  weaker than it required;
+- every registered process/sandboxed executor passes the shared boundary suite,
+  every in-process executor is pinned to explicit floor admission plus DSH
+  behavior tests, and no work order ran on an executor weaker than it required;
 - every deterministic exit assertion names a verifier that is a command plus its
   version plus an output hash, never a model;
 - every material factual claim has provenance;
@@ -2888,11 +2984,15 @@ Expected:
   baseline and a human-takeover condition;
 - crash/restart and cascading cancellation pass;
 - shadow mode performs no email or mutation; and
-- the scorecard compares the team with the frozen v1 control, and the paired
+- the scorecard compares Codex multi-agent treatment with the frozen
+  same-anchor Codex single-agent control, and the paired
   gate in `packages/evals/src/paired-gate.ts` passes: the pre-registered
   fixture-set `sha256` still matches, `n >= 30` paired cases, and at least a
   20% relative reduction in unsupported-claim rate at p < 0.05 on a
-  two-sided Wilcoxon signed-rank test (thresholds `PROVISIONAL`, P-1/P-2).
+  two-sided Wilcoxon signed-rank test (thresholds `PROVISIONAL`, P-1/P-2); and
+- no quota-interrupted or anchor-mismatched pair entered the statistic, while
+  DeepSeek, Claude, and mixed-provider results remain separately labeled
+  secondary/resilience evidence.
 
 Open a PR for shadow-mode code only. Do not enable it on the mini until Phase 0,
 Phase 1, and Phase 2 evidence is reviewed and AC#1 is complete.
@@ -2906,7 +3006,10 @@ catalog, cost envelope, and failure behavior. That plan must include:
 - review-only delivery first;
 - explicit human approval;
 - per-tenant and per-team health;
-- provider circuit-breaker drills;
+- the Codex single-agent macro fallback and deterministic Ops plus
+  watchdog/operator fallback, both exercised before promotion;
+- provider circuit-breaker and fake quota-domain drills, including exact-target
+  refusal, all-provider durable wait, and exactly-one resume;
 - state-schema rollback proof;
 - five uninterrupted trading days;
 - one real material macro case; and
@@ -2915,7 +3018,8 @@ catalog, cost envelope, and failure behavior. That plan must include:
 Ops promotion follows the independent ladder in the Ops implementation plan:
 observe-only, suggest-only, then one certified automatic SOP at a time. Macro
 promotion does not imply Ops mutation authority, and Ops promotion does not
-retire the v1 macro lane.
+retire a healthy compatibility lane. An unavailable Claude lane is not a
+fallback and receives no live test traffic until preflight passes.
 
 Do not pre-authorize production email, mutations, or v1 retirement in this
 implementation plan.

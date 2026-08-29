@@ -18,6 +18,15 @@ provider is unavailable.
 Harness/Cordis `0.1.1-rc.2`, append-only JSONL, macOS launchd, exact-argv child
 processes, existing ecosystem health and recovery scripts.
 
+**Revision 4 takeover amendment — 2026-08-29.** Keep the A-E phase names and
+all task IDs. Execution through Ops Phase E/P3.5 and P4 is authorized behind
+the existing gates. `origin/master` contains Phases A/B. The clean local
+`feat/ops-phase-c` branch contains Task 9 and the probe portion of Task 10;
+Task 10's collector, Tasks 11/12/13a, and the Phase C PR remain open. Provider
+capacity must never affect the deterministic path: DeepSeek, Codex, and Claude
+may all be unavailable or quota-exhausted while collection, policy, leases,
+verification, watchdogs, and operator takeover continue.
+
 ---
 
 ## Execution rules and prerequisites
@@ -38,6 +47,8 @@ processes, existing ecosystem health and recovery scripts.
 - Write and run a focused failing test before each production change.
 - Keep the deterministic observation, policy, execution, and verification path
   fully testable with no provider plugin installed.
+- Include a fake shared-quota-domain outage in every gate from Phase D onward;
+  no live subscription is intentionally exhausted for this proof.
 - Never expose a generic shell tool to an Ops role.
 - Never represent a free-form command string in a persisted action.
 - Treat probe output, logs, status pages, and model text as untrusted data.
@@ -1563,7 +1574,8 @@ git diff --check
 
 Expected: all initial required components have fixture-backed observations; the
 admission decision function is proven as a pure function; no action executes
-yet. This gate does **not** assert that host pressure prevents team fan-out —
+yet. Run it once with provider packages disabled as a continuity check. This
+gate does **not** assert that host pressure prevents team fan-out —
 that requires the team controller and is asserted at the Phase E gate. Open and
 merge an observe-only plugin PR. Do not install `opsd` until AC#1 is complete
 and a separate deployment plan is approved. "Do not install" here is design
@@ -2010,7 +2022,10 @@ Expected:
 - observe/suggest modes cannot execute; and
 - no deployment or mini mutation occurs from CI or merge; and
 - the phase evidence manifest distinguishes fixture proof, contract proof, and
-  still-unopened production proof.
+  still-unopened production proof; and
+- with fake DeepSeek, Codex, and Claude quota domains all exhausted, `opsd`
+  remains healthy, records provider analysis as unavailable, performs no busy
+  loop, and preserves deterministic eligible SOP and verification behavior.
 
 ## Phase E (P3.5): team admission enforcement and the Ops team
 
@@ -2164,7 +2179,9 @@ Expected: host pressure demonstrably prevents team fan-out through the real
 team controller; the Ops team manifest loads through the multi-agent parser
 with no provider, model, or effort field; the incident lead can select only
 from the deterministic eligible set; and the deterministic controller still
-completes every recovery path with the whole team disabled.
+completes every recovery path with the whole team disabled. Repeat with all
+three provider quota domains unavailable and require the same deterministic
+result plus a surfaced, non-spamming team-capacity status.
 
 ## Post-AC#1 production promotion plan
 
@@ -2199,6 +2216,9 @@ merged. It must not be folded into the coding PR.
 
 ### First automatic SOP gate
 
+- disable all three provider catalogs before the controlled drill and prove the
+  deterministic controller, existing watchdog boundary, and operator takeover
+  remain sufficient; a model analysis result is never a mutation prerequisite;
 - promote one exact SOP version in a separate PR, and re-sign the authority
   manifest for its exact digest on the operator's trusted workstation; an SOP
   file promoted without a re-signed entry loads at `observe` and the gate fails
