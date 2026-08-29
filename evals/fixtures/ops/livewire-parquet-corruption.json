@@ -1,0 +1,43 @@
+{
+  "fixtureVersion": 1,
+  "observedAt": "2026-08-25T03:10:00.000Z",
+  "observations": [
+    {
+      "version": 1,
+      "id": "obs-livewire-coverage-1",
+      "componentId": "livewire",
+      "probeId": "livewire.coverage-job.v1",
+      "observedAt": "2026-08-25T03:09:41.000Z",
+      "expiresAt": "2026-08-25T03:14:41.000Z",
+      "state": "failed",
+      "dimension": "integrity",
+      "value": { "latestFailure": "invalid parquet footer" },
+      "evidenceRefs": ["artifact://ops-fixture/livewire/coverage-job.log"],
+      "parserVersion": "livewire-coverage/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-livewire-process-1",
+      "componentId": "livewire",
+      "probeId": "livewire.process-liveness.v1",
+      "observedAt": "2026-08-25T03:10:00.000Z",
+      "expiresAt": "2026-08-25T03:15:00.000Z",
+      "state": "ok",
+      "dimension": "readiness",
+      "value": { "processRunning": true },
+      "evidenceRefs": ["artifact://ops-fixture/livewire/process.json"],
+      "parserVersion": "livewire-process/1"
+    }
+  ],
+  "expected": {
+    "incidentTerminal": "open",
+    "actionOutcome": null,
+    "attribution": null,
+    "automaticRecoverySucceeded": false,
+    "assertions": {
+      "integrityFailureDetected": "PROVEN",
+      "processRestartIsEligibleRepair": "FAILED",
+      "targetedRepairRestoresIntegrity": "BLOCKED"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "fixtureVersion": 1,
+  "observedAt": "2026-08-25T03:20:00.000Z",
+  "observations": [
+    {
+      "version": 1,
+      "id": "obs-argon-api-1",
+      "componentId": "argon",
+      "probeId": "argon.http-health.v1",
+      "observedAt": "2026-08-25T03:19:50.000Z",
+      "expiresAt": "2026-08-25T03:24:50.000Z",
+      "state": "ok",
+      "dimension": "readiness",
+      "value": { "apiServing": true, "workersServing": true },
+      "evidenceRefs": ["artifact://ops-fixture/argon/health.json"],
+      "parserVersion": "argon-health/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-argon-backup-artifact-1",
+      "componentId": "argon",
+      "probeId": "argon.backup-artifact.v1",
+      "observedAt": "2026-08-25T03:20:00.000Z",
+      "expiresAt": "2026-08-25T03:25:00.000Z",
+      "state": "failed",
+      "dimension": "durability",
+      "value": { "latestLocalBackupDate": "2026-07-23" },
+      "evidenceRefs": ["artifact://ops-fixture/argon/backup-listing.json"],
+      "parserVersion": "argon-backup/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-argon-backup-daemon-1",
+      "componentId": "argon",
+      "probeId": "argon.backup-daemon.v1",
+      "observedAt": "2026-08-25T03:20:00.000Z",
+      "expiresAt": "2026-08-25T03:25:00.000Z",
+      "state": "failed",
+      "dimension": "controller",
+      "value": { "lastExit": "EX_CONFIG" },
+      "evidenceRefs": ["artifact://ops-fixture/argon/backup-daemon.log"],
+      "parserVersion": "argon-backup-daemon/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-postgres-port-1",
+      "componentId": "postgres",
+      "probeId": "postgres.port-listen.v1",
+      "observedAt": "2026-08-25T03:20:00.000Z",
+      "expiresAt": "2026-08-25T03:25:00.000Z",
+      "state": "ok",
+      "dimension": "readiness",
+      "value": { "listening": true },
+      "evidenceRefs": ["artifact://ops-fixture/postgres/port.json"],
+      "parserVersion": "postgres-port/1"
+    }
+  ],
+  "expected": {
+    "incidentTerminal": "open",
+    "actionOutcome": null,
+    "attribution": null,
+    "automaticRecoverySucceeded": false,
+    "assertions": {
+      "backupPipelineHealthy": "FAILED",
+      "listeningPortProvesBackupHealth": "FAILED",
+      "restoreViability": "BLOCKED",
+      "serverProcessOwnership": "BLOCKED",
+      "runbookMatchesLiveTopology": "FAILED"
+    }
+  }
+}
