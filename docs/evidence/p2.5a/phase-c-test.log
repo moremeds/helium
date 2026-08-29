@@ -1,0 +1,175 @@
+##[group]Run pnpm run test
+^[[36;1mpnpm run test^[[0m
+shell: /usr/bin/bash -e {0}
+env:
+  PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+##[endgroup]
+$ vitest run --project unit
+
+^[[1m^[[46m RUN ^[[49m^[[22m ^[[36mv3.2.7 ^[[39m^[[90m/home/runner/work/helium/helium^[[39m
+
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/v1-compat/tests/tools.spec.ts ^[[2m(^[[22m^[[2m22 tests^[[22m^[[2m)^[[22m^[[32m 106^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/dispatcher.test.ts ^[[2m(^[[22m^[[2m14 tests^[[22m^[[2m)^[[22m^[[32m 243^[[2mms^[[22m^[[39m
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mreconciles startup and appends a harness_started row before any job starts
+^[[22m^[[39m[helium] startup reconciled { interrupted: ^[[33m0^[[39m, orphanedDeliveries: ^[[33m0^[[39m, jobs: [ ^[[32m'a'^[[39m ], tenants: ^[[33m1^[[39m }
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mcarry-in (Task 2.2): one scheduling loop per job ticks a shared calendar watcher once per cycle, not once per state-change trigger
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m0^[[39m,
+  jobs: [ ^[[32m'multi'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mstop() disposes the job loop so no further ticks occur
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m0^[[39m,
+  jobs: [ ^[[32m'stoppable'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mscript jobs (Task 3.6)^[[2m > ^[[22m^[[2mroutes a job.script trigger through the script runner instead of the triage/senior engines, recording a ledger row and delivering a DispatchResult
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m0^[[39m,
+  jobs: [ ^[[32m'dsh-canary'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mscript jobs (Task 3.6)^[[2m > ^[[22m^[[2mdelivers run_failed with the stderr tail when the script exits non-zero
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m0^[[39m,
+  jobs: [ ^[[32m'dsh-canary'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+^[[90mstderr^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mexpected-tenant inventory^[[2m > ^[[22m^[[2memits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mexpected-tenant inventory^[[2m > ^[[22m^[[2memits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid
+^[[22m^[[39m[helium] startup reconciled {
+^[[22m^[[39mhelium: SKIPPING malformed job /tmp/helium-runtime-jG0MQP/jobs/b-broken.yaml -- this tenant is NOT running: /tmp/helium-runtime-jG0MQP/jobs/b-broken.yaml: invalid YAML — Flow sequence in block collection must be sufficiently indented and end with a ] at line 1, column 20:
+  interrupted: ^[[33m0^[[39m,
+
+  orphanedDeliveries: ^[[33m0^[[39m,
+this: [is not a job
+  jobs: [ ^[[32m'test-job'^[[39m ],
+                   ^
+  tenants: ^[[33m2^[[39m
+
+}
+
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime^[[2m > ^[[22m^[[2mexpected-tenant inventory^[[2m > ^[[22m^[[2mcloses crash-orphaned delivery intents at boot
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m2^[[39m,
+  jobs: [ ^[[32m'test-job'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/runtime.test.ts ^[[2m(^[[22m^[[2m12 tests^[[22m^[[2m)^[[22m^[[33m 474^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/probes/macos-resource.test.ts ^[[2m(^[[22m^[[2m29 tests^[[22m^[[2m)^[[22m^[[32m 17^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/claude.test.ts ^[[2m(^[[22m^[[2m16 tests^[[22m^[[2m)^[[22m^[[33m 3476^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m runClaude^[[2m > ^[[22mSIGTERMs a hung child at the deadline and classifies it as a timeout ^[[33m 403^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m runClaude^[[2m > ^[[22mkills the whole process group at the deadline, leaving no descendant behind ^[[33m 3007^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/component-registry.test.ts ^[[2m(^[[22m^[[2m21 tests^[[22m^[[2m)^[[22m^[[32m 27^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/v1-compat/tests/job.spec.ts ^[[2m(^[[22m^[[2m18 tests^[[22m^[[2m)^[[22m^[[32m 105^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/delivery.test.ts ^[[2m(^[[22m^[[2m12 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-verify.spec.ts ^[[2m(^[[22m^[[2m21 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-authority.spec.ts ^[[2m(^[[22m^[[2m26 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-sop.spec.ts ^[[2m(^[[22m^[[2m20 tests^[[22m^[[2m)^[[22m^[[32m 15^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/executor-registry.test.ts ^[[2m(^[[22m^[[2m13 tests^[[22m^[[2m)^[[22m^[[32m 17^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/router.spec.ts ^[[2m(^[[22m^[[2m14 tests^[[22m^[[2m)^[[22m^[[32m 15^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/sensor.test.ts ^[[2m(^[[22m^[[2m12 tests^[[22m^[[2m)^[[22m^[[32m 159^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-crash-matrix.spec.ts ^[[2m(^[[22m^[[2m44 tests^[[22m^[[2m)^[[22m^[[32m 74^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/probes/disk.test.ts ^[[2m(^[[22m^[[2m18 tests^[[22m^[[2m)^[[22m^[[32m 12^[[2mms^[[22m^[[39m
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] startup reconciled {
+  interrupted: ^[[33m0^[[39m,
+  orphanedDeliveries: ^[[33m0^[[39m,
+  jobs: [ ^[[32m'dsh-canary'^[[39m ],
+  tenants: ^[[33m1^[[39m
+}
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] script already in flight, skipping trigger { job: ^[[32m'dsh-canary'^[[39m }
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] script already in flight, skipping trigger { job: ^[[32m'dsh-canary'^[[39m }
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] script already in flight, skipping trigger { job: ^[[32m'dsh-canary'^[[39m }
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] script already in flight, skipping trigger { job: ^[[32m'dsh-canary'^[[39m }
+
+^[[90mstdout^[[2m | plugins/helium/src/runtime.script-guard.test.ts^[[2m > ^[[22m^[[2mHeliumRuntime script overlap guard (deterministic)^[[2m > ^[[22m^[[2mdoes not run overlapping script instances for the same job — a trigger while one is in flight is skipped
+^[[22m^[[39m[helium] script already in flight, skipping trigger { job: ^[[32m'dsh-canary'^[[39m }
+
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/runtime.script-guard.test.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[32m 94^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-mutation-owner.spec.ts ^[[2m(^[[22m^[[2m16 tests^[[22m^[[2m)^[[22m^[[32m 12^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-component-lock.spec.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[33m 710^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m two real processes^[[2m > ^[[22mlets exactly one of two concurrent child processes take the lock ^[[33m 690^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-correlate.spec.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/script-executor.test.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[33m 1197^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m ScriptExecutor^[[2m > ^[[22mtimes out and reaps the whole process group, descendants included ^[[33m 1009^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/probes/launchd-controller.test.ts ^[[2m(^[[22m^[[2m17 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-reducer.spec.ts ^[[2m(^[[22m^[[2m14 tests^[[22m^[[2m)^[[22m^[[32m 12^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/recovery-evidence-bundle.spec.ts ^[[2m(^[[22m^[[2m21 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/collector.test.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/alerts.test.ts ^[[2m(^[[22m^[[2m7 tests^[[22m^[[2m)^[[22m^[[32m 12^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/evidence-manifest.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 62^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/authority-manifest-loader.test.ts ^[[2m(^[[22m^[[2m10 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/capabilities.spec.ts ^[[2m(^[[22m^[[2m16 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-authority-manifest.spec.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[32m 11^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/script-registry.test.ts ^[[2m(^[[22m^[[2m17 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/v1-compat/tests/mcp-selection.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/bundle-loader.test.ts ^[[2m(^[[22m^[[2m4 tests^[[22m^[[2m)^[[22m^[[32m 41^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-lease.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 19^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/event-store.spec.ts ^[[2m(^[[22m^[[2m8 tests^[[22m^[[2m)^[[22m^[[32m 26^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/probes/process.test.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[32m 8^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/ops-fixtures.spec.ts ^[[2m(^[[22m^[[2m15 tests^[[22m^[[2m)^[[22m^[[32m 15^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-check.spec.ts ^[[2m(^[[22m^[[2m12 tests^[[22m^[[2m)^[[22m^[[32m 11^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/runs.spec.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 15^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-reconcile.spec.ts ^[[2m(^[[22m^[[2m8 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/mcp-selection.spec.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-store.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 18^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/dispatch.test.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 8^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/calendar.test.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 13^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/tenant-health.spec.ts ^[[2m(^[[22m^[[2m7 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-recovery-budget.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/jsonl.spec.ts ^[[2m(^[[22m^[[2m6 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/work.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 16^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/livewire.test.ts ^[[2m(^[[22m^[[2m6 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/evidence-ledger.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 12^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/v1-compat/tests/adapter.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 62^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/v1-compat/tests/macro-watch-job.spec.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[32m 33^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/script.test.ts ^[[2m(^[[22m^[[2m6 tests^[[22m^[[2m)^[[22m^[[32m 175^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-observation.spec.ts ^[[2m(^[[22m^[[2m9 tests^[[22m^[[2m)^[[22m^[[32m 13^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-component.spec.ts ^[[2m(^[[22m^[[2m10 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/execution.spec.ts ^[[2m(^[[22m^[[2m8 tests^[[22m^[[2m)^[[22m^[[32m 7^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/postgres.test.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/index.test.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 7^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/colima.test.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 8^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/helium.test.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 8^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/evidence-bundle.spec.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 11^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-dependency.spec.ts ^[[2m(^[[22m^[[2m6 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/argon.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[32m 8^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/adapters/apex.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[32m 7^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/verdict.spec.ts ^[[2m(^[[22m^[[2m7 tests^[[22m^[[2m)^[[22m^[[32m 14^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/operations-admission.spec.ts ^[[2m(^[[22m^[[2m4 tests^[[22m^[[2m)^[[22m^[[32m 5^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/state.spec.ts ^[[2m(^[[22m^[[2m4 tests^[[22m^[[2m)^[[22m^[[32m 9^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/theses.spec.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 10^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/cron.test.ts ^[[2m(^[[22m^[[2m5 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/ops-agent/src/config.test.ts ^[[2m(^[[22m^[[2m4 tests^[[22m^[[2m)^[[22m^[[32m 13^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/toolkit.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[32m 7^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/calendar-data.test.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 18^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m packages/core/tests/time.spec.ts ^[[2m(^[[22m^[[2m4 tests^[[22m^[[2m)^[[22m^[[32m 7^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[42m unit ^[[49m^[[39m plugins/helium/src/envfile.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[32m 5^[[2mms^[[22m^[[39m
+
+^[[2m Test Files ^[[22m ^[[1m^[[32m74 passed^[[39m^[[22m^[[90m (74)^[[39m
+^[[2m      Tests ^[[22m ^[[1m^[[32m755 passed^[[39m^[[22m^[[90m (755)^[[39m
+^[[2m   Start at ^[[22m 16:13:01
+^[[2m   Duration ^[[22m 38.81s^[[2m (transform 1.84s, setup 0ms, collect 11.09s, tests 7.75s, environment 27ms, prepare 9.68s)^[[22m
+

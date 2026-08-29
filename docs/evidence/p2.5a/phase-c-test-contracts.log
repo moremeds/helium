@@ -1,0 +1,31 @@
+##[group]Run pnpm run test:contracts
+^[[36;1mpnpm run test:contracts^[[0m
+shell: /usr/bin/bash -e {0}
+env:
+  PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+##[endgroup]
+$ vitest run --project contracts
+
+^[[1m^[[46m RUN ^[[49m^[[22m ^[[36mv3.2.7 ^[[39m^[[90m/home/runner/work/helium/helium^[[39m
+
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/topology-structure.contract.spec.ts ^[[2m(^[[22m^[[2m10 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/executor-conformance.contract.spec.ts ^[[2m(^[[22m^[[2m16 tests^[[22m^[[2m)^[[22m^[[32m 89^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/claims-register.contract.spec.ts ^[[2m(^[[22m^[[2m11 tests^[[22m^[[2m)^[[22m^[[32m 23^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/effect-timer.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[33m 10124^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m contract: ctx.effect interval timers run inside a booted profile^[[2m > ^[[22mstarts the per-job sensor loop and stops cleanly on SIGTERM ^[[33m 2091^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/tool-restriction.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[33m 9803^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m contract: agentCtx.tools.restrict() denies a tool in the agent's own scoped view^[[2m > ^[[22mkeeps the allow-listed tool visible and removes the denied one ^[[33m 1509^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/core-neutrality.contract.spec.ts ^[[2m(^[[22m^[[2m3 tests^[[22m^[[2m)^[[22m^[[32m 13^[[2mms^[[22m^[[39m
+ ^[[2m^[[90m↓^[[39m^[[22m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/agent-dispatch.live.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m | ^[[22m^[[33m1 skipped^[[39m^[[2m)^[[22m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/senior-isolation.contract.spec.ts ^[[2m(^[[22m^[[2m10 tests^[[22m^[[2m)^[[22m^[[32m 105^[[2mms^[[22m^[[39m
+dsh: initialized profile heliumadd at /tmp/helium-dsh-home-hgo3zC/profiles/heliumadd
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/plugin-add.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[33m 6691^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m contract: dsh plugin add file: installs helium into a fresh profile^[[2m > ^[[22madds the package and joins it to the profile bundle stack ^[[33m 1597^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/profile-mount.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[33m 7911^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m ^[[30m^[[46m contracts ^[[49m^[[39m contracts/tests/version.contract.spec.ts ^[[2m(^[[22m^[[2m1 test^[[22m^[[2m)^[[22m^[[32m 90^[[2mms^[[22m^[[39m
+
+^[[2m Test Files ^[[22m ^[[1m^[[32m10 passed^[[39m^[[22m^[[2m | ^[[22m^[[33m1 skipped^[[39m^[[90m (11)^[[39m
+^[[2m      Tests ^[[22m ^[[1m^[[32m55 passed^[[39m^[[22m^[[2m | ^[[22m^[[33m1 skipped^[[39m^[[90m (56)^[[39m
+^[[2m   Start at ^[[22m 16:12:44
+^[[2m   Duration ^[[22m 38.62s^[[2m (transform 445ms, setup 0ms, collect 988ms, tests 34.87s, environment 3ms, prepare 1.21s)^[[22m
+

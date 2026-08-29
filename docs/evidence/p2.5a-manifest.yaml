@@ -1,8 +1,9 @@
-# Phase 2.5a exit evidence — Ops Phase B
+# Phase 2.5a exit evidence — Ops Phases B-C
 #
 # The operations substrate spans Ops Phases A-D, all of which are program phase
 # P2.5a. This manifest is the single P2.5a record and is appended to as each
-# Ops phase gate is reached; the rows below are Ops Phase B's.
+# Ops phase gate is reached. The first seven rows are Ops Phase B's; the six
+# appended rows are Ops Phase C's.
 #
 # Validated against EvidenceManifestSchema by
 # packages/core/tests/evidence-manifest.spec.ts, alongside the P0 and P1
@@ -13,6 +14,12 @@
 #   run:    https://github.com/moremeds/helium/actions/runs/33244380149
 #   commit: 3b54957  (feat/ops-phase-b)
 #   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49)
+#   pnpm:   11.24.0   vitest: 3.2.7
+#
+# Ops Phase C:
+#   run:    https://github.com/moremeds/helium/actions/runs/33262299542
+#   commit: 1fb17ae  (feat/ops-phase-c)
+#   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,70)
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
 # A hash captured on a developer machine is not admissible. Captured output
@@ -30,7 +37,7 @@
 manifestVersion: p0-1
 phase: P2.5a
 scope: offline
-recordedAt: 2026-08-29T09:10:00Z
+recordedAt: 2026-08-29T16:14:18Z
 claims:
   - id: P2.5A-CRASH-MATRIX
     assertion: "A controller terminated at any point in a recovery attempt produces no duplicate attempt, receipt or terminal state, and never blindly retries."
@@ -175,3 +182,136 @@ claims:
     status: BLOCKED
     limitation: "Nothing about targeted repair is proven. The design recorded this as BLOCKED before any code existed and it remains BLOCKED: no drill has run, no production SOP is certified, and no mutation has been performed on any host."
     nextGate: "Ops Task 16 and 17, then the post-AC#1 drill gate."
+
+  - id: P2.5A-OPS-CONFIG-TOPOLOGY
+    assertion: "Ops configuration loads into an atomic, dependency-aware, effect-scoped registry, and the collector remains structurally isolated from executors and leases."
+    acceptanceBound: "Bounded tenant-scoped YAML loading includes components, checks, SOPs and dependency edges; a bad or cross-bundle reference installs nothing and cannot leave a dangling graph or certified SOP; and the topology contract resolves every workspace package import before refusing any collector path to an executor or the core lease target."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test && pnpm run test:contracts"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:be3a5fcb689d5c7d65667845cc1cb8e8e9996e72e77e98a0e0330319a0a634f6"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-c-test.log"
+        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      - path: "docs/evidence/p2.5a/phase-c-test-contracts.log"
+        sha256: "40f673def5dea6de18792bfe6b26ced5f3842d9fa14ddc1deb25e0f33a639715"
+    baseline: "Ops Phase B merge 7cae01e, which supplied the core operations contracts but no configuration loader or collector topology."
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/bundle-loader.test.ts plugins/ops-agent/src/component-registry.test.ts && pnpm exec vitest run --project contracts contracts/tests/topology-structure.contract.spec.ts contracts/tests/core-neutrality.contract.spec.ts"
+    failures: "None. The cross-bundle cases reject incoming dependencies and SOP references before commit, then prove the original bundle can still be disposed without corrupting the remaining graph."
+    status: PROVEN
+    limitation: "Proven against committed YAML and static source traversal in CI. It does not prove configuration reload or disposal inside a deployed long-running daemon."
+    nextGate: "Ops Phase D: compose the standalone controller and adversarial process contracts."
+
+  - id: P2.5A-RAW-OBSERVATION-REFS
+    assertion: "Every runnable Phase C host probe fails closed and preserves the runner-supplied raw command references needed to replay its observation or mutation-admission decision."
+    acceptanceBound: "Process, disk, macOS resource and controller probes use fixed argv with individual timeouts; required timeout or unparseable input yields unknown; memory pressure, CPU busy time and bounded process contribution are interpreted into dimensions declared by the host ComponentSpec; and the exact controller check passed to canMutate retains an evidenceRef that RecoveryEvidenceSchema requires."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-c-test.log"
+        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+    baseline: "Ops Phase B probe and evidence interfaces, before runnable resource collection and raw-reference propagation existed."
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/probes/process.test.ts plugins/ops-agent/src/probes/disk.test.ts plugins/ops-agent/src/probes/macos-resource.test.ts plugins/ops-agent/src/probes/launchd-controller.test.ts packages/core/tests/recovery-evidence-bundle.spec.ts"
+    failures: "None. Every fail-closed branch carries the reference returned by the same fake command invocation rather than manufacturing a second reference."
+    status: PROVEN
+    limitation: "The command shapes are authored fixtures and the runners are fakes. This proves propagation after a runner supplies an evidenceRef; it does not prove that a production runner or artifact store persisted the referenced raw bytes."
+    nextGate: "Post-AC#1 read-only host capture, then Ops Phase D controller composition."
+
+  - id: P2.5A-INITIAL-ADAPTERS
+    assertion: "The six initial component adapters emit schema-valid, dimension-specific observations without discarding caller-supplied raw evidence references."
+    acceptanceBound: "Livewire, Argon, Apex, Colima, PostgreSQL and Helium adapters preserve independent health dimensions, keep a healthy listener from hiding stale or corrupt data and backup state, enumerate expected tenants, and preserve the raw evidenceRefs supplied with every source sample."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-c-test.log"
+        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+    baseline: "The six sanitized production-derived fixture families from Ops Phase A."
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/adapters/livewire.test.ts plugins/ops-agent/src/adapters/argon.test.ts plugins/ops-agent/src/adapters/apex.test.ts plugins/ops-agent/src/adapters/colima.test.ts plugins/ops-agent/src/adapters/postgres.test.ts plugins/ops-agent/src/adapters/helium.test.ts"
+    failures: "None. Adapter tests assert that caller evidence references survive unchanged instead of being replaced with adapter-generated artifact names."
+    status: PROVEN
+    limitation: "Proven against authored and sanitized fixture inputs only. No adapter connected to a live service, database, mount, or credential in this run."
+    nextGate: "Post-AC#1 read-only capture and Ops Phase D controller integration."
+
+  - id: P2.5A-ALERT-ADMISSION-PURE
+    assertion: "Alert transitions and host-pressure admission are deterministic without a model or team controller in the safety path."
+    acceptanceBound: "Alerts honor sustained-for windows, dedupe an open incident, inhibit symptoms, emit recovery once, alert again on a later recurrence, reset an interrupted window and surface delivery failure; under sustained pressure the pure admission function refuses optional teams and subagent fan-out while admitting collectors, deterministic actions, one minimal incident lane and dead-man work."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-c-test.log"
+        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+    baseline: "Ops Phase B incident and observation projections, before alert transitions or resource admission policy existed."
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-admission.spec.ts plugins/ops-agent/src/alerts.test.ts"
+    failures: "None. Recovery before the for-window matures clears the timer, so a later recurrence must satisfy a fresh complete window."
+    status: PROVEN
+    limitation: "Admission is deliberately a pure function in Phase C; it is not enforced by a team controller until P3.5 Task 13b. Alerts use a fake delivery channel and have not been emitted from a deployed collector."
+    nextGate: "P3.5 Task 13b for enforcement; Ops Phase D for controller-side alert integration."
+
+  - id: P2.5A-PHASE-C-OFFLINE-GATE
+    assertion: "The complete observe-only Phase C tree builds, typechecks, and passes the repository unit, contract and local end-to-end gates at the pinned runtime."
+    acceptanceBound: "At commit 1fb17ae under Node 22.19.0: every workspace build and typecheck passes, 755 unit tests pass, 55 contract tests pass with the one live-provider contract explicitly skipped, and both local end-to-end modes pass."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:46d9a0f952f8498e1aee7f01b0f3d60c6019a321152a31687e5f0701defb8ba3"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-c-build.log"
+        sha256: "ce2cc06ba4cb32090a8cd2d151073542dbe960ebe1a48a2de57c117487dfa637"
+      - path: "docs/evidence/p2.5a/phase-c-typecheck.log"
+        sha256: "822dbcd3e033298944b9f2dd07fe46ded7ef4490d4f4a4ae8442d1665a5646d6"
+      - path: "docs/evidence/p2.5a/phase-c-test.log"
+        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      - path: "docs/evidence/p2.5a/phase-c-test-contracts.log"
+        sha256: "40f673def5dea6de18792bfe6b26ced5f3842d9fa14ddc1deb25e0f33a639715"
+      - path: "docs/evidence/p2.5a/phase-c-test-e2e-local.log"
+        sha256: "5feff5afd10c0dec5895b33c4fb578ff78f19925f076aefae3afeea0b8ed59c9"
+    baseline: "Ops Phase B merge 7cae01e and the Phase C gate in the authoritative Ops implementation plan."
+    reproduction: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && git diff --check"
+    failures: "None in CI run 33262299542. The live provider contract remained explicitly skipped because CI carries no provider credentials."
+    status: PROVEN
+    limitation: "The end-to-end engines are local stubs, one live-provider contract is skipped, and neither opsd nor an action controller exists in Phase C. No byte was installed on the mini and no real host command ran."
+    nextGate: "Ops Phase D: observe/suggest controller, script certification, adversarial contracts and reversible packaging."
+
+  - id: P2.5A-LIVE-HOST-OBSERVATION
+    assertion: "The real mini's resource, controller and component output can be collected read-only into replayable observations without altering host state."
+    acceptanceBound: "After AC#1 closes and separate observation approval is recorded, collect every initial component and host dimension with the exact production runner, persist raw bytes and references, parse without UNKNOWN caused by shape drift, and demonstrate zero writes, process starts, service-manager changes or mutations."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "not yet runnable: AC#1 forbids touching the mini before 2026-08-31 and no production runner is deployed"
+      toolVersion: "n/a"
+      decision: inconclusive
+    artifacts: []
+    baseline: "The read-only mini audit of 2026-08-25 and the AC#1 freeze boundary in design section 13.4."
+    reproduction: "Blocked until AC#1 evidence is recorded and a separate read-only observation plan is approved; Phase C itself must not run even a manual one-shot probe on the mini."
+    failures: "Not attempted. Fixture-backed parser success is not evidence that the live host emits the same shapes or that a production runner persists the referenced bytes."
+    status: BLOCKED
+    limitation: "No Phase C probe or adapter has run against the mini. This row prevents the offline green gate from being misread as live observation proof."
+    nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."
