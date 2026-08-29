@@ -1,0 +1,15 @@
+# A fixture component. It exists so the loader can be exercised end to end
+# without naming anything real, and so a reviewer can see the shape a component
+# takes without reading TypeScript.
+version: 1
+id: fixture-service
+kind: service
+displayName: Fixture service
+dimensions: [readiness]
+mutationOwner:
+  # `none` is the fail-closed value. A component nobody has decided about is
+  # never mutated.
+  owner: none
+  competingLabels: []
+  changedAt: "2026-08-25T00:00:00.000Z"
+  changeRef: "ops/components/fixture.yaml"

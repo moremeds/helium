@@ -85,7 +85,7 @@ describe("resolveAuthority", () => {
         signManifest([entry({ sopId: "some-other-sop" })]),
         trustedKey,
       ),
-    ).toMatchObject({ authority: "observe", reason: "sop-not-listed" });
+    ).toMatchObject({ authority: "observe", reason: "manifest-entry-missing" });
   });
 
   it("falls back to observe on a digest mismatch", () => {

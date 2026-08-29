@@ -21,6 +21,26 @@ export {
   type RegisteredScript,
 } from "./script-registry.js";
 export {
+  ComponentRegistry,
+  type LoadedSop,
+  type OpsBundle,
+  type RegistryLimits,
+} from "./component-registry.js";
+export { OpsConfigSchema, type OpsConfig } from "./config.js";
+export {
+  loadAuthoritySource,
+  resolveSopAuthority,
+  type AuthoritySource,
+  type ResolvedSopAuthority,
+} from "./authority-manifest-loader.js";
+export {
+  launchdControllerProbe,
+  parseLoadedLabels,
+  type LaunchctlResult,
+  type LaunchctlRunner,
+  type LaunchdControllerProbe,
+} from "./probes/launchd-controller.js";
+export {
   ScriptExecutor,
   type ExecutionReceipt,
   type ExecutionRequest,
