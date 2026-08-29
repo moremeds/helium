@@ -13,6 +13,7 @@ const result = (over: Partial<CommandResult> = {}): CommandResult => ({
   stdout: "",
   exitCode: 0,
   timedOut: false,
+  evidenceRef: "artifact://raw-command/process-fixture",
   ...over,
 });
 
@@ -109,6 +110,14 @@ describe("processProbe", () => {
     );
     expect(observation.state).toBe("unknown");
     expect(observation.value).toEqual({ matched: false, timedOut: true });
+  });
+
+  it("preserves the runner's persisted raw-command reference", async () => {
+    const observation = await processProbe(options).observe(
+      recordingRunner(result({ evidenceRef: "artifact://raw-command/process-42" })),
+      NOW,
+    );
+    expect(observation.evidenceRefs).toEqual(["artifact://raw-command/process-42"]);
   });
 
   it("honours an explicit probe id and timeout", async () => {

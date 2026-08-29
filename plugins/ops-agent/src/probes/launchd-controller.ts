@@ -22,6 +22,8 @@ export interface LaunchctlResult {
   timedOut: boolean;
   /** The runner hit its output bound; what was NOT read cannot be ruled out. */
   truncated: boolean;
+  /** Reference returned only after the runner has persisted the raw result. */
+  evidenceRef: string;
 }
 
 export interface LaunchctlRunner {
@@ -76,43 +78,62 @@ export function launchdControllerProbe(
   const probeId = options.probeId ?? "host.controller-enumeration.v1";
   const parserVersion = options.parserVersion ?? "controller-enumeration/1";
 
-  const check = async (
+  const sample = async (
     component: ComponentSpec,
-  ): Promise<ControllerProbeOutcome> => {
+  ): Promise<{ outcome: ControllerProbeOutcome; evidenceRef: string }> => {
     const result = await options.launchctl.list(LIST_ARGV);
 
     if (result.timedOut) {
-      return { result: "unknown", observedLabels: [], detail: "enumeration-timeout" };
+      return {
+        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-timeout" },
+        evidenceRef: result.evidenceRef,
+      };
     }
     if (result.exitCode !== 0) {
       return {
-        result: "unknown",
-        observedLabels: [],
-        detail: `enumeration-exit-${result.exitCode}`,
+        outcome: {
+          result: "unknown",
+          observedLabels: [],
+          detail: `enumeration-exit-${result.exitCode}`,
+        },
+        evidenceRef: result.evidenceRef,
       };
     }
     if (result.truncated) {
-      return { result: "unknown", observedLabels: [], detail: "enumeration-truncated" };
+      return {
+        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-truncated" },
+        evidenceRef: result.evidenceRef,
+      };
     }
 
     const labels = parseLoadedLabels(result.stdout);
     if (labels === undefined) {
-      return { result: "unknown", observedLabels: [], detail: "enumeration-unparseable" };
+      return {
+        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-unparseable" },
+        evidenceRef: result.evidenceRef,
+      };
     }
 
     const declared = new Set(component.mutationOwner.competingLabels);
     const competing = labels.filter((l) => l !== ownLabel && declared.has(l));
     return {
-      result: competing.length > 0 ? "competing" : "clear",
-      observedLabels: labels,
+      outcome: {
+        result: competing.length > 0 ? "competing" : "clear",
+        observedLabels: labels,
+      },
+      evidenceRef: result.evidenceRef,
     };
   };
+
+  const check = async (
+    component: ComponentSpec,
+  ): Promise<ControllerProbeOutcome> => (await sample(component)).outcome;
 
   return {
     probeId,
     check,
     async observe(component, now, ttlMs = 300_000): Promise<Observation> {
-      const outcome = await check(component);
+      const { outcome, evidenceRef } = await sample(component);
       return {
         version: 1,
         id: `obs-${component.id}-controller-${now.getTime()}`,
@@ -134,7 +155,7 @@ export function launchdControllerProbe(
           observedLabels: outcome.observedLabels,
           ...(outcome.detail === undefined ? {} : { detail: outcome.detail }),
         },
-        evidenceRefs: [`artifact://probe/${probeId}/${component.id}`],
+        evidenceRefs: [evidenceRef],
         parserVersion,
       };
     },

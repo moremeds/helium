@@ -16,7 +16,9 @@ import {
   classifyMemory,
   macosResourceProbe,
   pageoutRate,
+  parseCpuTop,
   parseLoadAverage,
+  parseMemoryPressure,
   parseSize,
   parseSwapUsage,
   parseVmStat,
@@ -39,6 +41,16 @@ const SWAP_USAGE = `vm.swapusage: total = 8192.00M  used = 6830.08M  free = 1361
 const SWAP_USAGE_COMMA = `vm.swapusage: total = 8192,00M  used = 6830,08M  free = 1361,92M  (encrypted)`;
 const UPTIME = `19:42  up 12 days,  3:11, 2 users, load averages: 1.85 2.04 2.11`;
 const UPTIME_COMMA = `19:42  up 12 days,  3:11, 2 users, load averages: 1,85 2,04 2,11`;
+const TOP = `Processes: 550 total, 3 running, 547 sleeping, 3300 threads
+CPU usage: 12.00% user, 8.00% sys, 80.00% idle
+PID COMMAND %CPU
+200 helium-opsd 12.5
+300 postgres 4.0`;
+const TOP_BUSY = `Processes: 550 total, 6 running, 544 sleeping, 3300 threads
+CPU usage: 70.00% user, 20.00% sys, 10.00% idle
+PID COMMAND %CPU
+200 helium-opsd 62.5
+300 postgres 20.0`;
 const NOW = "2026-08-29T12:00:00.000Z";
 
 const GIB = 1024 ** 3;
@@ -118,6 +130,34 @@ describe("parseLoadAverage", () => {
 
   it("returns undefined on unparseable input", () => {
     expect(parseLoadAverage("up 3 days")).toBeUndefined();
+  });
+});
+
+describe("parseMemoryPressure", () => {
+  it("interprets named pressure states and free percentages", () => {
+    expect(parseMemoryPressure("System-wide memory pressure: critical")).toEqual({
+      level: "critical",
+    });
+    expect(parseMemoryPressure("System-wide memory free percentage: 9%"))
+      .toEqual({ level: "warning", freePercent: 9 });
+  });
+
+  it("refuses a recognizable prefix with an unknown value", () => {
+    expect(parseMemoryPressure("System-wide memory pressure: mysterious"))
+      .toBeUndefined();
+  });
+});
+
+describe("parseCpuTop", () => {
+  it("reads busy time and bounded per-process contribution", () => {
+    expect(parseCpuTop(TOP)).toEqual({
+      busyPercent: 20,
+      idlePercent: 80,
+      processes: [
+        { pid: 200, command: "helium-opsd", cpuPercent: 12.5 },
+        { pid: 300, command: "postgres", cpuPercent: 4 },
+      ],
+    });
   });
 });
 
@@ -204,26 +244,36 @@ describe("classifyMemory", () => {
 });
 
 describe("macosResourceProbe", () => {
-  const command = (stdout: string): CommandResult => ({
+  const command = (stdout: string, artifact = "fixture"): CommandResult => ({
     stdout,
     exitCode: 0,
     timedOut: false,
+    evidenceRef: `artifact://raw-command/${artifact}`,
   });
 
-  function resourceRunner(vmStats: string[]): CommandRunner & {
+  function resourceRunner(
+    vmStats: string[],
+    overrides: { pressure?: string; top?: string } = {},
+  ): CommandRunner & {
     calls: { argv: readonly string[]; timeoutMs: number }[];
   } {
     const calls: { argv: readonly string[]; timeoutMs: number }[] = [];
     let vmIndex = 0;
     const byCommand = (argv: readonly string[]): CommandResult => {
       const key = argv.join(" ");
-      if (key === "/usr/bin/memory_pressure -Q") return command("System-wide memory pressure: normal");
-      if (key === "/usr/bin/vm_stat") return command(vmStats[Math.min(vmIndex++, vmStats.length - 1)]!);
-      if (key === "/usr/sbin/sysctl -n vm.swapusage") return command(SWAP_USAGE);
-      if (key === "/usr/bin/uptime") return command(UPTIME);
-      if (key === "/usr/sbin/sysctl -n hw.memsize") return command(String(TOTAL));
-      if (key === "/usr/sbin/sysctl -n hw.logicalcpu") return command("8");
-      return { stdout: "", exitCode: 1, timedOut: false };
+      if (key === "/usr/bin/memory_pressure -Q") return command(overrides.pressure ?? "System-wide memory pressure: normal", "memory-pressure");
+      if (key === "/usr/bin/vm_stat") return command(vmStats[Math.min(vmIndex++, vmStats.length - 1)]!, "vm-stat");
+      if (key === "/usr/sbin/sysctl -n vm.swapusage") return command(SWAP_USAGE, "swap-usage");
+      if (key === "/usr/bin/uptime") return command(UPTIME, "uptime");
+      if (key === "/usr/sbin/sysctl -n hw.memsize") return command(String(TOTAL), "memory-size");
+      if (key === "/usr/sbin/sysctl -n hw.logicalcpu") return command("8", "logical-cpu");
+      if (key === "/usr/bin/top -l 1 -n 10 -stats pid,command,cpu") return command(overrides.top ?? TOP, "top");
+      return {
+        stdout: "",
+        exitCode: 1,
+        timedOut: false,
+        evidenceRef: "artifact://raw-command/unexpected",
+      };
     };
     return {
       calls,
@@ -249,12 +299,20 @@ describe("macosResourceProbe", () => {
       { argv: ["/usr/bin/uptime"], timeoutMs: 2_000 },
       { argv: ["/usr/sbin/sysctl", "-n", "hw.memsize"], timeoutMs: 2_000 },
       { argv: ["/usr/sbin/sysctl", "-n", "hw.logicalcpu"], timeoutMs: 2_000 },
+      { argv: ["/usr/bin/top", "-l", "1", "-n", "10", "-stats", "pid,command,cpu"], timeoutMs: 2_000 },
     ]);
     ObservationSchema.array().parse(observations);
     expect(observations.map((row) => row.probeId)).toEqual([
       "host.memory.v1",
       "host.cpu-load.v1",
     ]);
+    expect(observations.flatMap((row) => row.evidenceRefs)).toEqual(
+      expect.arrayContaining([
+        "artifact://raw-command/memory-pressure",
+        "artifact://raw-command/vm-stat",
+        "artifact://raw-command/top",
+      ]),
+    );
   });
 
   it("uses only continuous consecutive counters for a pageout rate", async () => {
@@ -278,12 +336,47 @@ describe("macosResourceProbe", () => {
     const original = runner.run.bind(runner);
     runner.run = async (argv, timeoutMs) =>
       argv[0] === "/usr/bin/vm_stat"
-        ? { stdout: "", exitCode: 1, timedOut: true }
+        ? {
+            stdout: "",
+            exitCode: 1,
+            timedOut: true,
+            evidenceRef: "artifact://raw-command/vm-stat-timeout",
+          }
         : original(argv, timeoutMs);
     const observations = await macosResourceProbe({ componentId: "host" }).observe(
       runner,
       new Date(NOW),
     );
     expect(observations.map((row) => row.state)).toEqual(["unknown", "unknown"]);
+  });
+
+  it("makes a critical memory-pressure reading a failed memory observation", async () => {
+    const observations = await macosResourceProbe({ componentId: "host" }).observe(
+      resourceRunner([VM_STAT], {
+        pressure: "System-wide memory pressure: critical",
+      }),
+      new Date(NOW),
+    );
+    expect(observations[0]).toMatchObject({
+      state: "failed",
+      value: { pressure: { level: "critical" } },
+    });
+  });
+
+  it("uses CPU busy time and records process contribution", async () => {
+    const observations = await macosResourceProbe({ componentId: "host" }).observe(
+      resourceRunner([VM_STAT], { top: TOP_BUSY }),
+      new Date(NOW),
+    );
+    expect(observations[1]).toMatchObject({
+      state: "degraded",
+      value: {
+        busyPercent: 90,
+        processContributions: [
+          { pid: 200, command: "helium-opsd", cpuPercent: 62.5 },
+          { pid: 300, command: "postgres", cpuPercent: 20 },
+        ],
+      },
+    });
   });
 });

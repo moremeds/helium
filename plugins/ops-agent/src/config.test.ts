@@ -3,6 +3,7 @@ import { OpsConfigSchema } from "./config.js";
 
 const base = {
   componentsDir: "ops/components",
+  dependenciesDir: "ops/dependencies",
   sopsDir: "ops/sops",
   checksDir: "ops/checks",
   authorityManifestPath: "ops/authority-manifest.json",

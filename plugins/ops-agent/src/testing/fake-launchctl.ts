@@ -17,6 +17,7 @@ export interface FakeLaunchctlScript {
   stdout?: string;
   timedOut?: boolean;
   truncated?: boolean;
+  evidenceRef?: string;
 }
 
 /**
@@ -33,12 +34,14 @@ export function fakeLaunchctl(
         stdout: ["PID\tStatus\tLabel", ...script.map((l) => `-\t0\t${l}`)].join("\n"),
         timedOut: false,
         truncated: false,
+        evidenceRef: "artifact://raw-command/fake-launchctl",
       }
     : {
         exitCode: script.exitCode ?? 0,
         stdout: script.stdout ?? "",
         timedOut: script.timedOut ?? false,
         truncated: script.truncated ?? false,
+        evidenceRef: script.evidenceRef ?? "artifact://raw-command/fake-launchctl",
       };
 
   return {

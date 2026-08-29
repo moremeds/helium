@@ -1,0 +1,12 @@
+id: fixture-readiness
+kind: business
+probe:
+  probeId: fixture.readiness.v1
+  args: {}
+expect:
+  dimension: readiness
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 5000
+owner: phase-c-fixture

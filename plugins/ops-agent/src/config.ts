@@ -11,6 +11,7 @@ import { z } from "zod";
 
 export const OpsConfigSchema = z.strictObject({
   componentsDir: z.string().min(1),
+  dependenciesDir: z.string().min(1),
   sopsDir: z.string().min(1),
   checksDir: z.string().min(1),
   authorityManifestPath: z.string().min(1),

@@ -175,7 +175,12 @@ describe("diskProbe", () => {
     const runner: CommandRunner = {
       async run(argv, timeoutMs) {
         calls.push({ argv, timeoutMs });
-        return { stdout: DF_MACOS, exitCode: 0, timedOut: false };
+        return {
+          stdout: DF_MACOS,
+          exitCode: 0,
+          timedOut: false,
+          evidenceRef: "artifact://raw-command/df-42",
+        };
       },
     };
     const observations = await diskProbe({
@@ -196,12 +201,22 @@ describe("diskProbe", () => {
       "host.volume.backup.v1",
     ]);
     expect(observations.map((row) => row.state)).toEqual(["degraded", "failed", "failed"]);
+    expect(observations.map((row) => row.evidenceRefs)).toEqual([
+      ["artifact://raw-command/df-42"],
+      ["artifact://raw-command/df-42"],
+      ["artifact://raw-command/df-42"],
+    ]);
   });
 
   it("reports every configured volume unknown when df times out", async () => {
     const runner: CommandRunner = {
       async run() {
-        return { stdout: "", exitCode: 1, timedOut: true };
+        return {
+          stdout: "",
+          exitCode: 1,
+          timedOut: true,
+          evidenceRef: "artifact://raw-command/df-timeout",
+        };
       },
     };
     const observations = await diskProbe({

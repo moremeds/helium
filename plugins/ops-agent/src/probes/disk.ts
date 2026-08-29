@@ -180,7 +180,7 @@ export function diskProbe(options: DiskProbeOptions) {
             usage: usage ?? null,
             timedOut: result.timedOut,
           },
-          evidenceRefs: [`artifact://probe/${probeId}/${now.getTime()}`],
+          evidenceRefs: [result.evidenceRef],
           parserVersion: "df-kp/1",
         };
       });

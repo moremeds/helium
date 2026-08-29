@@ -108,6 +108,9 @@ describe("observations", () => {
       parserVersion: "controller-enumeration/1",
     });
     expect(observation.value).toMatchObject({ controllerResult: "competing" });
+    expect(observation.evidenceRefs).toEqual([
+      "artifact://raw-command/fake-launchctl",
+    ]);
     expect(observation.expiresAt > observation.observedAt).toBe(true);
   });
 

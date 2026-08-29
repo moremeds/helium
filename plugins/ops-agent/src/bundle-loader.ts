@@ -33,7 +33,7 @@ export interface OpsBundleLoaderOptions {
   now: () => Date;
 }
 
-type BundleSection = "components" | "checks" | "sops";
+type BundleSection = "components" | "edges" | "checks" | "sops";
 
 export class OpsBundleLoader {
   readonly registry: ComponentRegistry;
@@ -59,12 +59,14 @@ export class OpsBundleLoader {
     });
   }
 
-  installTenant(tenantId: string): TenantInstallResult {
+  installTenant(tenantId: string, tenantBaseDir: string): TenantInstallResult {
     try {
+      const bundleBase = resolve(tenantBaseDir);
       const files = [
-        ...this.#files("components", this.#config.componentsDir),
-        ...this.#files("checks", this.#config.checksDir),
-        ...this.#files("sops", this.#config.sopsDir),
+        ...this.#files("components", this.#config.componentsDir, bundleBase),
+        ...this.#files("edges", this.#config.dependenciesDir, bundleBase),
+        ...this.#files("checks", this.#config.checksDir, bundleBase),
+        ...this.#files("sops", this.#config.sopsDir, bundleBase),
       ];
       if (files.length > this.#config.maxFiles) {
         throw new Error(
@@ -75,6 +77,7 @@ export class OpsBundleLoader {
       const bundle: OpsBundle = {
         tenantId,
         components: [],
+        edges: [],
         checks: [],
         sops: [],
       };
@@ -99,8 +102,15 @@ export class OpsBundleLoader {
     return isAbsolute(configured) ? configured : resolve(this.#baseDir, configured);
   }
 
-  #files(section: BundleSection, configuredDir: string): { section: BundleSection; path: string }[] {
-    const dir = this.#path(configuredDir);
+  #files(
+    section: BundleSection,
+    configuredDir: string,
+    bundleBase: string,
+  ): { section: BundleSection; path: string }[] {
+    if (isAbsolute(configuredDir)) {
+      throw new Error(`tenant bundle directory must be relative: ${configuredDir}`);
+    }
+    const dir = resolve(bundleBase, configuredDir);
     return readdirSync(dir)
       .filter((name) => /\.ya?ml$/i.test(name))
       .sort()

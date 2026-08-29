@@ -18,6 +18,8 @@ export interface CommandResult {
   stdout: string;
   exitCode: number;
   timedOut: boolean;
+  /** Reference returned only after the runner has persisted the raw result. */
+  evidenceRef: string;
 }
 
 export interface CommandRunner {
@@ -64,7 +66,7 @@ export function processProbe(options: ProcessProbeOptions) {
         state: classifyProcess(result, options.match),
         dimension: "readiness",
         value: { matched: result.stdout.includes(options.match), timedOut: result.timedOut },
-        evidenceRefs: [`artifact://probe/${probeId}`],
+        evidenceRefs: [result.evidenceRef],
         parserVersion: "process-liveness/1",
       };
     },

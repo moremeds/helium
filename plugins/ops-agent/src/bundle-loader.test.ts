@@ -20,6 +20,7 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
 const config = (overrides: Record<string, unknown> = {}) => ({
   componentsDir: "ops/components",
+  dependenciesDir: "ops/dependencies",
   sopsDir: "ops/sops",
   checksDir: "ops/checks",
   authorityManifestPath: "ops/authority-manifest.json",
@@ -30,7 +31,7 @@ const config = (overrides: Record<string, unknown> = {}) => ({
 function tempTree(): string {
   const root = mkdtempSync(join(tmpdir(), "helium-ops-loader-"));
   roots.push(root);
-  for (const dir of ["components", "sops", "checks"]) {
+  for (const dir of ["components", "dependencies", "sops", "checks"]) {
     mkdirSync(join(root, "ops", dir), { recursive: true });
   }
   return root;
@@ -55,15 +56,22 @@ describe("OpsBundleLoader", () => {
     const loader = new OpsBundleLoader({
       baseDir: repoRoot,
       config: config(),
-      registeredProbeIds: [],
+      registeredProbeIds: ["fixture.readiness.v1"],
       now,
     });
 
-    const installed = loader.installTenant("phase-c");
+    const installed = loader.installTenant("phase-c", repoRoot);
     expect(installed.health).toEqual({ tenantId: "phase-c", state: "loaded" });
     expect(loader.registry.component("fixture-service")).toBeDefined();
     expect(loader.registry.component("livewire")).toBeDefined();
-    expect(loader.registry.sop("fixture-observe")).toMatchObject({ authority: "observe" });
+    expect(loader.registry.sop("fixture-observe")).toMatchObject({
+      authority: "observe",
+      certified: true,
+    });
+    expect(loader.registry.graph().dependenciesOf("apex")).toEqual([
+      "livewire",
+      "postgres",
+    ]);
   });
 
   it("loads a future component written only as YAML and disposes it effect-scoped", () => {
@@ -76,7 +84,7 @@ describe("OpsBundleLoader", () => {
       now,
     });
 
-    const installed = loader.installTenant("future");
+    const installed = loader.installTenant("future", root);
     expect(installed.health.state).toBe("loaded");
     expect(loader.registry.component("future-service")?.kind).toBe("future-component-kind");
     installed.dispose?.();
@@ -94,7 +102,7 @@ describe("OpsBundleLoader", () => {
       registeredProbeIds: [],
       now,
     });
-    expect(countBound.installTenant("count").health).toMatchObject({
+    expect(countBound.installTenant("count", root).health).toMatchObject({
       state: "invalid",
       detail: expect.stringMatching(/file limit/),
     });
@@ -106,26 +114,39 @@ describe("OpsBundleLoader", () => {
       registeredProbeIds: [],
       now,
     });
-    expect(byteBound.installTenant("bytes").health).toMatchObject({
+    expect(byteBound.installTenant("bytes", root).health).toMatchObject({
       state: "invalid",
       detail: expect.stringMatching(/byte limit/),
     });
     expect(byteBound.registry.components()).toEqual([]);
   });
 
-  it("marks only a bad tenant invalid and leaves a previously loaded tenant installed", () => {
+  it("selects files from each tenant base and leaves a bad tenant isolated", () => {
     const root = tempTree();
-    writeFileSync(join(root, "ops/components/healthy.yaml"), componentYaml("healthy"));
+    const healthyRoot = join(root, "tenants", "healthy");
+    const brokenRoot = join(root, "tenants", "broken");
+    for (const tenantRoot of [healthyRoot, brokenRoot]) {
+      for (const dir of ["components", "dependencies", "sops", "checks"]) {
+        mkdirSync(join(tenantRoot, "ops", dir), { recursive: true });
+      }
+    }
+    writeFileSync(
+      join(healthyRoot, "ops/components/healthy.yaml"),
+      componentYaml("healthy"),
+    );
+    writeFileSync(
+      join(brokenRoot, "ops/components/broken.yaml"),
+      "version: [not closed",
+    );
     const loader = new OpsBundleLoader({
       baseDir: root,
       config: config(),
       registeredProbeIds: [],
       now,
     });
-    expect(loader.installTenant("healthy").health.state).toBe("loaded");
+    expect(loader.installTenant("healthy", healthyRoot).health.state).toBe("loaded");
 
-    writeFileSync(join(root, "ops/components/broken.yaml"), "version: [not closed");
-    const bad = loader.installTenant("broken");
+    const bad = loader.installTenant("broken", brokenRoot);
     expect(bad.health).toMatchObject({ state: "invalid" });
     expect(loader.registry.component("healthy")).toBeDefined();
     expect(loader.registry.component("broken")).toBeUndefined();

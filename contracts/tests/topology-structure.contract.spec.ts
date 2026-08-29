@@ -131,20 +131,46 @@ export function resolveModules(names: string[]): string[] {
 const STATIC_IMPORT =
   /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
 
-function resolveSpecifier(fromFile: string, specifier: string): string | undefined {
-  if (specifier === "@helium/core") {
-    return resolve(repoRoot, "packages/core/src/index.ts");
-  }
-  if (specifier.startsWith("@helium/core/")) {
-    const subpath = specifier.slice("@helium/core/".length);
-    const candidate = resolve(
-      repoRoot,
-      "packages/core/src",
-      subpath.replace(/\.js$/, ".ts"),
-    );
-    return existsSync(candidate) && statSync(candidate).isFile()
-      ? candidate
-      : undefined;
+interface WorkspacePackage {
+  name: string;
+  root: string;
+}
+
+function workspacePackages(): WorkspacePackage[] {
+  const roots = ["packages", "plugins", "contracts/fixtures"]
+    .flatMap((parent) => {
+      const parentPath = resolve(repoRoot, parent);
+      return readdirSync(parentPath)
+        .sort()
+        .map((entry) => resolve(parentPath, entry))
+        .filter((path) => statSync(path).isDirectory());
+    });
+  roots.push(resolve(repoRoot, "contracts"));
+  return roots
+    .flatMap((root): WorkspacePackage[] => {
+      const manifest = resolve(root, "package.json");
+      if (!existsSync(manifest)) return [];
+      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { name?: unknown };
+      return typeof parsed.name === "string" ? [{ name: parsed.name, root }] : [];
+    })
+    .sort((a, b) => b.name.length - a.name.length);
+}
+
+const WORKSPACE_PACKAGES = workspacePackages();
+
+export function resolveSpecifier(fromFile: string, specifier: string): string | undefined {
+  const workspacePackage = WORKSPACE_PACKAGES.find(
+    ({ name }) => specifier === name || specifier.startsWith(`${name}/`),
+  );
+  if (workspacePackage !== undefined) {
+    const subpath = specifier.slice(workspacePackage.name.length).replace(/^\//, "");
+    const candidate = subpath === ""
+      ? resolve(workspacePackage.root, "src/index.ts")
+      : resolve(workspacePackage.root, "src", subpath.replace(/\.js$/, ".ts"));
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) {
+      throw new Error(`workspace import does not resolve to source: ${specifier}`);
+    }
+    return candidate;
   }
   if (!specifier.startsWith(".")) return undefined;
   const base = resolve(dirname(fromFile), specifier);
@@ -258,5 +284,18 @@ describe("topology: the lint fails loud rather than passing empty", () => {
     );
     expect(reachable.length).toBeGreaterThan(5);
     expect(reachable.some((p) => p.endsWith("/work.ts"))).toBe(true);
+  });
+
+  it("resolves every forbidden workspace package import to its source entrypoint", () => {
+    const from = resolve(repoRoot, "plugins/ops-agent/src/collector.ts");
+    expect(resolveSpecifier(from, "@helium/fake-metered")).toBe(
+      resolve(repoRoot, "packages/fake-metered/src/index.ts"),
+    );
+    expect(resolveSpecifier(from, "@helium/fake-flat-rate")).toBe(
+      resolve(repoRoot, "packages/fake-flat-rate/src/index.ts"),
+    );
+    expect(resolveSpecifier(from, "dsh-plugin-helium")).toBe(
+      resolve(repoRoot, "plugins/helium/src/index.ts"),
+    );
   });
 });

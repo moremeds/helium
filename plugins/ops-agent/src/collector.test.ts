@@ -43,7 +43,12 @@ function sink(): ObservationSink & { rows: Observation[] } {
 }
 
 const runner = (
-  reply: CommandResult = { stdout: "helium-opsd", exitCode: 0, timedOut: false },
+  reply: CommandResult = {
+    stdout: "helium-opsd",
+    exitCode: 0,
+    timedOut: false,
+    evidenceRef: "artifact://raw-command/collector-fixture",
+  },
 ): CommandRunner & { calls: { argv: readonly string[]; timeoutMs: number }[] } => {
   const calls: { argv: readonly string[]; timeoutMs: number }[] = [];
   return {

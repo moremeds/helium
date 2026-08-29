@@ -24,6 +24,15 @@ const SWAP_USAGE_ARGV = ["/usr/sbin/sysctl", "-n", "vm.swapusage"] as const;
 const UPTIME_ARGV = ["/usr/bin/uptime"] as const;
 const MEMORY_SIZE_ARGV = ["/usr/sbin/sysctl", "-n", "hw.memsize"] as const;
 const LOGICAL_CPU_ARGV = ["/usr/sbin/sysctl", "-n", "hw.logicalcpu"] as const;
+const TOP_ARGV = [
+  "/usr/bin/top",
+  "-l",
+  "1",
+  "-n",
+  "10",
+  "-stats",
+  "pid,command,cpu",
+] as const;
 
 /** Bytes per unit, for the suffixes the host tools actually emit. */
 const UNITS: Readonly<Record<string, number>> = {
@@ -129,11 +138,74 @@ function parsePositiveInteger(text: string): number | undefined {
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
-function parseMemoryPressure(text: string): string | undefined {
-  const value = text.trim();
-  if (value.length === 0) return undefined;
-  if (/System-wide memory (?:pressure|free percentage):/i.test(value)) return value;
+export interface MemoryPressure {
+  level: "normal" | "warning" | "critical";
+  freePercent?: number;
+}
+
+export function parseMemoryPressure(text: string): MemoryPressure | undefined {
+  const named = /System-wide memory pressure:\s*(normal|warning|critical)/i.exec(text);
+  if (named !== null) {
+    return { level: named[1].toLowerCase() as MemoryPressure["level"] };
+  }
+  const free = /System-wide memory free percentage:\s*([0-9]+(?:[.,][0-9]+)?)%/i.exec(
+    text,
+  );
+  if (free !== null) {
+    const freePercent = Number(free[1].replace(",", "."));
+    if (!Number.isFinite(freePercent) || freePercent < 0 || freePercent > 100) {
+      return undefined;
+    }
+    return {
+      level: freePercent <= 5 ? "critical" : freePercent <= 15 ? "warning" : "normal",
+      freePercent,
+    };
+  }
   return undefined;
+}
+
+export interface CpuProcessContribution {
+  pid: number;
+  command: string;
+  cpuPercent: number;
+}
+
+export interface CpuTopSample {
+  busyPercent: number;
+  idlePercent: number;
+  processes: CpuProcessContribution[];
+}
+
+/** Parse one bounded `top` sample: aggregate busy time plus top contributors. */
+export function parseCpuTop(text: string): CpuTopSample | undefined {
+  const usage =
+    /CPU usage:\s*([0-9.,]+)% user,\s*([0-9.,]+)% sys,\s*([0-9.,]+)% idle/i.exec(
+      text,
+    );
+  if (usage === null) return undefined;
+  const number = (raw: string): number => Number(raw.replace(",", "."));
+  const user = number(usage[1]);
+  const system = number(usage[2]);
+  const idlePercent = number(usage[3]);
+  if (![user, system, idlePercent].every(Number.isFinite)) return undefined;
+  const lines = text.split("\n");
+  const header = lines.findIndex((line) => /^\s*PID\s+COMMAND\s+%CPU\s*$/.test(line));
+  if (header < 0) return undefined;
+  const processes: CpuProcessContribution[] = [];
+  for (const line of lines.slice(header + 1)) {
+    if (line.trim() === "") continue;
+    const match = /^\s*(\d+)\s+(\S+)\s+([0-9.,]+)\s*$/.exec(line);
+    if (match === null) return undefined;
+    const pid = Number(match[1]);
+    const cpuPercent = number(match[3]);
+    if (!Number.isSafeInteger(pid) || !Number.isFinite(cpuPercent)) return undefined;
+    processes.push({ pid, command: match[2], cpuPercent });
+  }
+  return {
+    busyPercent: Math.round((user + system) * 100) / 100,
+    idlePercent,
+    processes,
+  };
 }
 
 export interface MemorySample {
@@ -142,6 +214,7 @@ export interface MemorySample {
   totalBytes: number;
   swap?: SwapUsage;
   vmStat?: VmStat;
+  pressure?: MemoryPressure;
   atMs: number;
   /** The previous sample, for rate calculation. */
   previous?: { pageoutsCounter: number; atMs: number };
@@ -183,6 +256,8 @@ export function classifyMemory(sample: MemorySample): ObservationState {
     return "unknown";
   }
 
+  if (sample.pressure?.level === "critical") return "failed";
+
   const rate = pageoutRate(sample);
   if (rate !== undefined && rate >= SUSTAINED_PAGEOUT_RATE && sample.serviceImpact) {
     return "failed";
@@ -190,6 +265,7 @@ export function classifyMemory(sample: MemorySample): ObservationState {
 
   const compressedBytes = sample.vmStat.compressedPages * sample.vmStat.pageSizeBytes;
   const pressured =
+    sample.pressure?.level === "warning" ||
     sample.swap.usedBytes > 0 || compressedBytes > sample.totalBytes * 0.1;
 
   if (rate === undefined && pressured) {
@@ -210,7 +286,7 @@ export interface MacosResourceProbeOptions {
  * Execute the bounded, read-only macOS resource command set.
  *
  * Exact argv is owned here rather than configuration so this probe cannot be
- * turned into a general command runner. All six readings form one sample: if
+ * turned into a general command runner. All seven readings form one sample: if
  * any command fails or cannot be parsed, neither derived health row is allowed
  * to claim a known state.
  */
@@ -234,6 +310,7 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
       const uptimeResult = await runner.run(UPTIME_ARGV, timeoutMs);
       const memorySizeResult = await runner.run(MEMORY_SIZE_ARGV, timeoutMs);
       const logicalCpuResult = await runner.run(LOGICAL_CPU_ARGV, timeoutMs);
+      const topResult = await runner.run(TOP_ARGV, timeoutMs);
       const results = [
         pressureResult,
         vmStatResult,
@@ -241,6 +318,7 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
         uptimeResult,
         memorySizeResult,
         logicalCpuResult,
+        topResult,
       ];
 
       const pressure = parseMemoryPressure(pressureResult.stdout);
@@ -249,6 +327,7 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
       const load = parseLoadAverage(uptimeResult.stdout);
       const totalBytes = parsePositiveInteger(memorySizeResult.stdout);
       const logicalCpu = parsePositiveInteger(logicalCpuResult.stdout);
+      const cpuTop = parseCpuTop(topResult.stdout);
       const parsed =
         results.every(successful) &&
         pressure !== undefined &&
@@ -256,7 +335,8 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
         swap !== undefined &&
         load !== undefined &&
         totalBytes !== undefined &&
-        logicalCpu !== undefined;
+        logicalCpu !== undefined &&
+        cpuTop !== undefined;
       const serviceImpact = options.serviceImpact?.() ?? false;
       const normalizedFiveMinuteLoad =
         load !== undefined && logicalCpu !== undefined ? load.five / logicalCpu : undefined;
@@ -265,6 +345,7 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
         totalBytes: totalBytes ?? 0,
         swap,
         vmStat,
+        pressure,
         atMs: now.getTime(),
         previous,
         serviceImpact,
@@ -296,15 +377,22 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
           serviceImpact,
           timedOut: results.some((result) => result.timedOut),
         },
-        evidenceRefs: [`artifact://probe/${memoryProbeId}/${now.getTime()}`],
+        evidenceRefs: [
+          pressureResult.evidenceRef,
+          vmStatResult.evidenceRef,
+          swapResult.evidenceRef,
+          memorySizeResult.evidenceRef,
+        ],
         parserVersion: "macos-memory/1",
       };
       const normalizedLoad = normalizedFiveMinuteLoad ?? null;
-      const cpuState: ObservationState = !parsed || normalizedFiveMinuteLoad === undefined
+      const cpuState: ObservationState =
+        !parsed || normalizedFiveMinuteLoad === undefined || cpuTop === undefined
         ? "unknown"
-        : normalizedFiveMinuteLoad >= 0.95 && serviceImpact
+        : (cpuTop.busyPercent >= 95 || normalizedFiveMinuteLoad >= 0.95) &&
+            serviceImpact
           ? "failed"
-          : normalizedFiveMinuteLoad >= 0.8
+          : cpuTop.busyPercent >= 80 || normalizedFiveMinuteLoad >= 0.8
             ? "degraded"
             : "ok";
       const cpu: Observation = {
@@ -320,10 +408,17 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
           load: load ?? null,
           logicalCpu: logicalCpu ?? null,
           normalizedFiveMinuteLoad: normalizedLoad,
+          busyPercent: cpuTop?.busyPercent ?? null,
+          idlePercent: cpuTop?.idlePercent ?? null,
+          processContributions: cpuTop?.processes ?? [],
           serviceImpact,
           timedOut: results.some((result) => result.timedOut),
         },
-        evidenceRefs: [`artifact://probe/${cpuProbeId}/${now.getTime()}`],
+        evidenceRefs: [
+          uptimeResult.evidenceRef,
+          logicalCpuResult.evidenceRef,
+          topResult.evidenceRef,
+        ],
         parserVersion: "macos-cpu-load/1",
       };
       return [memory, cpu];
