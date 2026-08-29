@@ -1,0 +1,27 @@
+version: 1
+id: colima-bounded-restart
+digest: "sha256:e832d81fdbbebf9cf5ec030dc9d024e408aaa05c11ba1b2734815bd0649d789f"
+componentId: colima
+matches:
+  dimension: stability
+  failureClass: failed
+authority: approve
+mutating: true
+priority: 10
+action:
+  executorId: colima-restart
+  executable:
+    path: /__HELIUM_UNCERTIFIED__/colima-restart
+    identity:
+      kind: sha256
+      value: "0000000000000000000000000000000000000000000000000000000000000000"
+  argvSchemaId: colima-restart-argv-v1
+  cwdId: colima-workdir
+  environmentProfileId: ops-minimal
+  timeoutMs: 180000
+preconditions: [data-lake-mounted]
+postconditions: [colima-vm-healthy, colima-container-set]
+exclusiveGroup: colima-recovery
+graceMs: 120000
+maxAttempts: 1
+cooldownMs: 1800000

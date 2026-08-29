@@ -56,7 +56,17 @@ describe("OpsBundleLoader", () => {
     const loader = new OpsBundleLoader({
       baseDir: repoRoot,
       config: config(),
-      registeredProbeIds: ["fixture.readiness.v1"],
+      registeredProbeIds: [
+        "fixture.readiness.v1",
+        "colima.vm-status.v1",
+        "host.volume.data-lake.v1",
+        "colima.transport.v1",
+        "colima.container-inventory.v1",
+        "livewire.input-source.v1",
+        "livewire.parquet-integrity.v1",
+        "livewire.target-freshness.v1",
+        "livewire.coverage.v1",
+      ],
       now,
     });
 
@@ -66,6 +76,11 @@ describe("OpsBundleLoader", () => {
     expect(loader.registry.component("livewire")).toBeDefined();
     expect(loader.registry.sop("fixture-observe")).toMatchObject({
       authority: "observe",
+      certified: true,
+    });
+    expect(loader.registry.sop("colima-reconnect")).toMatchObject({
+      authority: "observe",
+      authorityDowngradeReason: "manifest-entry-missing",
       certified: true,
     });
     expect(loader.registry.graph().dependenciesOf("apex")).toEqual([

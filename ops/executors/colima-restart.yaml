@@ -1,0 +1,19 @@
+executorId: colima-restart
+path: /__HELIUM_UNCERTIFIED__/colima-restart
+identity:
+  kind: sha256
+  value: "0000000000000000000000000000000000000000000000000000000000000000"
+argvSchema:
+  id: colima-restart-argv-v1
+  params:
+    - flag: --mode
+      valuePattern: transport|vm
+      required: true
+    - flag: --attempt
+      valuePattern: "1"
+      required: true
+cwd: /__HELIUM_UNCERTIFIED__/colima
+environmentProfile:
+  PATH: /usr/bin:/bin:/usr/sbin:/sbin
+timeoutMs: 180000
+maxOutputBytes: 65536

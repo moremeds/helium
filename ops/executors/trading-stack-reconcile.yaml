@@ -1,0 +1,19 @@
+executorId: trading-stack-reconcile
+path: /__HELIUM_UNCERTIFIED__/trading-stack-reconcile
+identity:
+  kind: sha256
+  value: "0000000000000000000000000000000000000000000000000000000000000000"
+argvSchema:
+  id: trading-stack-reconcile-argv-v1
+  params:
+    - flag: --scope
+      valuePattern: containers
+      required: true
+    - flag: --pull
+      valuePattern: "false"
+      required: true
+cwd: /__HELIUM_UNCERTIFIED__/trading-stack
+environmentProfile:
+  PATH: /usr/bin:/bin:/usr/sbin:/sbin
+timeoutMs: 120000
+maxOutputBytes: 65536

@@ -1,0 +1,30 @@
+version: 1
+id: livewire-targeted-parquet-repair
+digest: "sha256:3d414ec469a1e11350b5ed3ff60c0a8f105fd2bb462879623e88e725f3e4a4b5"
+componentId: livewire
+matches:
+  dimension: integrity
+  failureClass: failed
+authority: approve
+mutating: true
+priority: 10
+action:
+  executorId: livewire-targeted-repair
+  executable:
+    path: /__HELIUM_UNCERTIFIED__/livewire-targeted-repair
+    identity:
+      kind: sha256
+      value: "0000000000000000000000000000000000000000000000000000000000000000"
+  argvSchemaId: livewire-targeted-repair-argv-v1
+  cwdId: livewire-workdir
+  environmentProfileId: ops-minimal
+  timeoutMs: 900000
+preconditions: [data-lake-mounted, livewire-input-available]
+postconditions:
+  - livewire-parquet-integrity
+  - livewire-target-freshness
+  - livewire-coverage-complete
+exclusiveGroup: livewire-target-repair
+graceMs: 300000
+maxAttempts: 1
+cooldownMs: 3600000

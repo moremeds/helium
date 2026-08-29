@@ -1,0 +1,12 @@
+id: livewire-target-freshness
+kind: business
+probe:
+  probeId: livewire.target-freshness.v1
+  args: {}
+expect:
+  dimension: target-freshness
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 30000
+owner: ops
