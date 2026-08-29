@@ -200,7 +200,7 @@ if [ -n "$prev_target" ]; then
   mv -fh "$RELEASES/.previous.$$" "$RELEASES/previous"
 fi
 
-flip_start=$(date -u +%s)
+flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 flip_to "$DEST"
 say "flipped current -> $VERSION; restarting daemon"
 # fix round 2, ITEM 2: match the flip-back path's kickstart handling here
@@ -228,14 +228,14 @@ while [ $SECONDS -lt $end ]; do
     const {readFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");
     const d=join(process.env.HELIUM_STATE_ROOT,"jsonl");
     const f=readdirSync(d).filter(x=>x.startsWith("heartbeat-")).sort().pop();
-    const since=Number(process.argv[1])*1000,now=Date.now();
+    const since=Number(process.argv[1]),now=Date.now();
     const n=readFileSync(join(d,f),"utf8").split("\n").filter(Boolean)
       .filter(l=>{try{const at=Date.parse(JSON.parse(l).ts);return at>since&&at<=now;}catch{return false;}}).length;
-    console.log(n);' "$flip_start")
+    console.log(n);' "$flip_start_ms")
   say "  heartbeat rows since flip: $fresh"
   opsd_fresh=1
   if [ "$opsd_required" = "1" ]; then
-    opsd_fresh=$(opsd_cycle_after "$DEST" "$flip_start")
+    opsd_fresh=$(opsd_cycle_after "$DEST" "$flip_start_ms")
     say "  opsd target-release observation cycle: $opsd_fresh"
   fi
   if [ "$fresh" -ge 2 ] && [ "$opsd_fresh" = "1" ]; then
@@ -277,7 +277,7 @@ if [ "$ok" != "1" ]; then
       exit 72
     fi
   fi
-  flip_back_start=$(date -u +%s)
+  flip_back_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
   if ! restart_opsd_if_loaded; then
     echo "FATAL: current=$prev_target and DSH restarted, but installed com.helium.opsd did not restart on the restored release. MANUAL INTERVENTION REQUIRED." >&2
     exit 76
@@ -286,7 +286,7 @@ if [ "$ok" != "1" ]; then
     restored=0; restore_end=$((SECONDS + 90))
     while [ $SECONDS -lt $restore_end ]; do
       sleep 10
-      if [ "$(opsd_cycle_after "$prev_target" "$flip_back_start")" = "1" ]; then
+      if [ "$(opsd_cycle_after "$prev_target" "$flip_back_start_ms")" = "1" ]; then
         restored=1
         break
       fi

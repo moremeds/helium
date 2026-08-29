@@ -194,5 +194,25 @@ export const RecoveryEvidenceSchema = z
     if (bundle.outcome === "not-needed" && bundle.baseline?.allPassing !== true) {
       issue(["baseline"], "a not-needed outcome requires an all-passing baseline");
     }
+    if (bundle.outcome === "failed") {
+      if (bundle.status !== "FAILED" || bundle.verifier.decision !== "fail") {
+        issue(
+          ["outcome"],
+          "a failed outcome requires FAILED status and a failing verifier",
+        );
+      }
+    } else if (bundle.outcome === "uncertain") {
+      if (bundle.status !== "PARTIAL" || bundle.verifier.decision !== "inconclusive") {
+        issue(
+          ["outcome"],
+          "an uncertain outcome requires PARTIAL status and an inconclusive verifier",
+        );
+      }
+    } else if (bundle.status !== "PROVEN" || bundle.verifier.decision !== "pass") {
+      issue(
+        ["outcome"],
+        "a proven recovery outcome requires PROVEN status and a passing verifier",
+      );
+    }
   });
 export type RecoveryEvidence = z.infer<typeof RecoveryEvidenceSchema>;

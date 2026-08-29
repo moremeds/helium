@@ -3,8 +3,8 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export function hasTargetCycle(text, sinceSeconds, target, nowMs = Date.now()) {
-  const sinceMs = Number(sinceSeconds) * 1000;
+export function hasTargetCycle(text, since, target, nowMs = Date.now()) {
+  const sinceMs = Number(since);
   if (!Number.isFinite(sinceMs) || !Number.isFinite(nowMs)) return false;
   return text.split("\n").filter(Boolean).some((line) => {
     try {

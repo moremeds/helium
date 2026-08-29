@@ -47,6 +47,8 @@ export interface ActionProjection {
   controllerProbe?: ControllerProbeOutcome;
   eligibility?: { eligible: boolean; reasons: string[] };
   mutationOwner?: MutationOwnership;
+  dependencyIds?: string[];
+  verificationPolicy?: { postconditionIds: string[]; graceMs: number };
   exitCode?: number | null;
   timedOut?: boolean;
   outputDigest?: string;
@@ -249,6 +251,11 @@ export function reduceOperations(
         action.mutationOwner = {
           ...event.mutationOwner,
           competingLabels: [...event.mutationOwner.competingLabels],
+        };
+        action.dependencyIds = [...event.dependencyIds];
+        action.verificationPolicy = {
+          postconditionIds: [...event.verificationPolicy.postconditionIds],
+          graceMs: event.verificationPolicy.graceMs,
         };
         break;
       }

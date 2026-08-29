@@ -60,6 +60,7 @@ if [ -f "$OPSD_PLIST" ]; then
     "$target/scripts/ops/run-opsd.sh" \
     "$target/ops/authority-manifest.json" \
     "$target/ops/authority-manifest.pub.pem" \
+    "$current/scripts/release/opsd-cycle-after.mjs" \
     "$OPSD_CONFIG"; do
     [ -f "$required" ] || {
       echo "previous release cannot restore installed opsd: required asset missing: $required" >&2
@@ -79,7 +80,7 @@ if [ -f "$OPSD_PLIST" ]; then
     }
 fi
 echo "[rollback] $current -> $target"
-flip_start=$(date -u +%s)
+flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 
 tmp="$RELEASES/.current.$$"
 ln -sfn "$target" "$tmp"
@@ -129,8 +130,8 @@ while [ $SECONDS -lt $end ]; do
   pid=$(launchctl print "gui/$(id -u)/com.helium.dsh" 2>/dev/null | awk '/pid =/{print $3}')
   opsd_fresh=1
   if [ "$opsd_loaded" = "1" ]; then
-    opsd_fresh=$(node "$target/scripts/release/opsd-cycle-after.mjs" \
-      "$OPSD_EVENT_LOG" "$flip_start" "$target")
+    opsd_fresh=$(node "$current/scripts/release/opsd-cycle-after.mjs" \
+      "$OPSD_EVENT_LOG" "$flip_start_ms" "$target")
   fi
   if [ -n "$pid" ] && [ "$opsd_fresh" = "1" ]; then
     ok=1

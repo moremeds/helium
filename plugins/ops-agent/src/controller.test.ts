@@ -226,6 +226,7 @@ interface HarnessOptions {
   store?: MemoryStore;
   stateDir?: string;
   componentOwner?: "opsd" | "external" | "none";
+  emptyRegistry?: boolean;
 }
 
 function harness(options: HarnessOptions) {
@@ -252,14 +253,21 @@ function harness(options: HarnessOptions) {
 
   const controller = new OpsController({
     mode: options.mode,
-    registry: registry(options.authority ?? "auto", {
-      manifest: options.manifest,
-      graceMs: options.graceMs,
-      componentOwner: options.componentOwner,
-    }),
+    registry: options.emptyRegistry === true
+      ? new ComponentRegistry({
+          authority: { unavailableReason: "release-config-removed" },
+          registeredProbeIds: [],
+          now,
+        })
+      : registry(options.authority ?? "auto", {
+          manifest: options.manifest,
+          graceMs: options.graceMs,
+          componentOwner: options.componentOwner,
+        }),
     store,
     now,
     collect: async (sink) => {
+      if (options.emptyRegistry === true) return { observations: [], failures: [] };
       const observation = failingObservation(++observationSequence);
       await sink.append(observation);
       return { observations: [observation], failures: [] };
@@ -586,14 +594,14 @@ describe("OpsController modes", () => {
       { v: 1, id: "restart-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-99"] },
       { v: 1, id: "restart-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-restart", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "restart-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-restart", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
-      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner },
+      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner, dependencyIds: ["decision-time-dependency"], verificationPolicy: { postconditionIds: [check.id], graceMs: 0 } },
     ]) seed.store.append(event);
 
     const restarted = harness({
       mode: "auto",
       store: seed.store,
       stateDir: seed.stateDir,
-      componentOwner: "external",
+      emptyRegistry: true,
     });
     await restarted.controller.tick();
     expect(seed.store.state().actions["act-restart"]?.state).toBe("uncertain");
@@ -609,5 +617,10 @@ describe("OpsController modes", () => {
       eligibility: { eligible: true, reasons: [] },
       mutationOwner: { owner: "opsd" },
     });
+    const incidentSnapshot = JSON.parse(readFileSync(
+      join(seed.stateDir, "evidence", bundle.incidentSnapshot.ref.split("/").at(-1)!),
+      "utf8",
+    ));
+    expect(incidentSnapshot.dependencyIds).toEqual(["decision-time-dependency"]);
   });
 });

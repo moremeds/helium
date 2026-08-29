@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,5 +180,95 @@ describe("two real processes", () => {
       expect(results.filter((r) => r === "LOST"), `round ${round}`).toHaveLength(1);
       expect(readLockHolder(d, "runtime")).toBeDefined();
     }
+  }, 30_000);
+
+  it("does not let a delayed stale reclaimer delete a replacement live lock", async () => {
+    const module = fileURLToPath(
+      new URL("../lib/operations/component-lock.js", import.meta.url),
+    );
+    if (!existsSync(module)) {
+      throw new Error(
+        `built lock module missing at ${module}; run pnpm build before this suite`,
+      );
+    }
+
+    const d = dir();
+    const stalePid = 9_999_999;
+    expect(acquireComponentLock(d, receipt({ pid: stalePid })).ok).toBe(true);
+    const waitFor = async (path: string, timeoutMs = 5_000): Promise<void> => {
+      const deadline = Date.now() + timeoutMs;
+      while (!existsSync(path)) {
+        if (Date.now() >= deadline) throw new Error(`timed out waiting for ${path}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    };
+    const child = (label: "a" | "b") => {
+      const ready = join(d, `ready-${label}`);
+      const proceed = join(d, `proceed-${label}`);
+      const started = join(d, `started-${label}`);
+      const result = join(d, `result-${label}.json`);
+      const release = join(d, `release-${label}`);
+      const script = `
+        import { existsSync, writeFileSync } from "node:fs";
+        import { acquireComponentLock, reclaimComponentLock } from ${JSON.stringify(module)};
+        const sleep = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+        writeFileSync(${JSON.stringify(started)}, "");
+        const reclaimed = reclaimComponentLock(${JSON.stringify(d)}, "runtime", {
+          bootId: "boot-1",
+          isAlive(pid) {
+            if (pid !== ${stalePid}) {
+              try { process.kill(pid, 0); return true; }
+              catch (error) { return error?.code === "EPERM"; }
+            }
+            writeFileSync(${JSON.stringify(ready)}, "");
+            while (!existsSync(${JSON.stringify(proceed)})) sleep();
+            return false;
+          },
+        });
+        const acquired = acquireComponentLock(${JSON.stringify(d)}, {
+          componentId: "runtime", bootId: "boot-1", pid: process.pid,
+          leaseId: ${JSON.stringify(`lease-${label}`)}, sopDigest: ${JSON.stringify(digest)},
+          acquiredAt: "2026-08-25T04:00:00.000Z", expiresAt: "2026-08-25T04:10:00.000Z",
+        });
+        writeFileSync(${JSON.stringify(result)}, JSON.stringify({ reclaimed, acquired: acquired.ok }));
+        if (acquired.ok) while (!existsSync(${JSON.stringify(release)})) sleep();
+      `;
+      const proc = spawn(process.execPath, ["--input-type=module", "-e", script], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stderr = "";
+      proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      const done = new Promise<void>((resolve, reject) => {
+        proc.on("error", reject);
+        proc.on("close", (code) => {
+          code === 0 ? resolve() : reject(new Error(`${label} exited ${code}: ${stderr}`));
+        });
+      });
+      return { ready, proceed, started, result, release, done };
+    };
+
+    const a = child("a");
+    await waitFor(a.ready);
+    const b = child("b");
+    await waitFor(b.started);
+    // Give B time to reach the same stale-holder probe. A safe coordinator
+    // keeps it outside; the old read-then-unlink implementation lets it in.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const bReadTheStaleReceipt = existsSync(b.ready);
+    writeFileSync(a.proceed, "");
+    if (bReadTheStaleReceipt) {
+      // Reproduce the dangerous ordering exactly: A replaces the stale lock,
+      // then the already-delayed B resumes its deletion.
+      await waitFor(a.result);
+      writeFileSync(b.proceed, "");
+    }
+    await Promise.all([waitFor(a.result), waitFor(b.result)]);
+    const results = [a, b].map(({ result }) =>
+      JSON.parse(readFileSync(result, "utf8")) as { acquired: boolean });
+    expect(results.filter(({ acquired }) => acquired)).toHaveLength(1);
+    expect(readLockHolder(d, "runtime")).toBeDefined();
+    writeFileSync(a.release, "");
+    writeFileSync(b.release, "");
+    await Promise.all([a.done, b.done]);
   }, 30_000);
 });

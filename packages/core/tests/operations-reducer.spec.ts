@@ -73,6 +73,8 @@ const intentRecorded: OperationsEvent = {
     changedAt: at(3),
     changeRef: "artifact://ownership/1",
   },
+  dependencyIds: ["host"],
+  verificationPolicy: { postconditionIds: ["runtime-up"], graceMs: 0 },
 };
 const operatorIntervened: OperationsEvent = {
   v: 1,

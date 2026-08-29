@@ -454,6 +454,13 @@ export class OpsController {
               ],
             },
             mutationOwner: component.mutationOwner,
+            dependencyIds: this.options.registry
+              .graph()
+              .transitiveDependenciesOf(component.id),
+            verificationPolicy: {
+              postconditionIds: [...candidate.sop.postconditions],
+              graceMs: candidate.sop.graceMs,
+            },
           });
           return { admitted: true };
         },
@@ -602,7 +609,12 @@ export class OpsController {
     const component = this.options.registry.component(action.componentId);
     const loaded = this.options.registry.sop(action.sopId);
     const incident = this.options.store.state().incidents[action.incidentId];
-    if (component === undefined || loaded === undefined || incident === undefined) {
+    if (incident === undefined) {
+      throw new Error(`cannot build recovery evidence for unresolved action: ${action.actionId}`);
+    }
+    const persistedDecision = action.eligibility !== undefined &&
+      action.mutationOwner !== undefined && action.dependencyIds !== undefined;
+    if (!persistedDecision && (component === undefined || loaded === undefined)) {
       throw new Error(`cannot build recovery evidence for unresolved action: ${action.actionId}`);
     }
     if (action.authorityManifestEntry === undefined || action.authority === undefined) {
@@ -621,7 +633,8 @@ export class OpsController {
       this.options.evidence.persistArtifact("observation", observation));
     const incidentSnapshot = this.options.evidence.persistArtifact("incident", {
       incident,
-      dependencyIds: this.options.registry.graph().transitiveDependenciesOf(component.id),
+      dependencyIds: action.dependencyIds ??
+        this.options.registry.graph().transitiveDependenciesOf(component!.id),
       capturedAt: this.options.now().toISOString(),
     });
     const baseline = overrides.baseline ?? action.baseline;
@@ -686,10 +699,10 @@ export class OpsController {
       authorityManifestEntry: action.authorityManifestEntry,
       authority: action.authority as RecoveryEvidence["authority"],
       eligibility: action.eligibility ?? {
-        eligible: loaded.certified,
-        reasons: [...loaded.certificationReasons],
+        eligible: loaded!.certified,
+        reasons: [...loaded!.certificationReasons],
       },
-      mutationOwner: action.mutationOwner ?? component.mutationOwner,
+      mutationOwner: action.mutationOwner ?? component!.mutationOwner,
       controllerProbe,
       ...(missingLease
         ? {}
@@ -747,20 +760,23 @@ export class OpsController {
     };
   }
 
-  async #sampleGrace(sop: SopDefinition): Promise<{
+  async #sampleGrace(policy: {
+    postconditions: readonly string[];
+    graceMs: number;
+  }): Promise<{
     verdict: "pass" | "fail" | "unknown";
     samples: PostconditionSample[];
   }> {
     const allSamples: PostconditionSample[] = [];
     const sample = async () => {
-      const rows = await this.options.sampleChecks(sop.postconditions, "postcondition");
+      const rows = await this.options.sampleChecks(policy.postconditions, "postcondition");
       allSamples.push(...rows);
       return samplesVerdict(rows);
     };
-    if (sop.graceMs === 0) return { verdict: await sample(), samples: allSamples };
-    const intervalMs = Math.min(this.options.graceIntervalMs ?? 1_000, sop.graceMs);
+    if (policy.graceMs === 0) return { verdict: await sample(), samples: allSamples };
+    const intervalMs = Math.min(this.options.graceIntervalMs ?? 1_000, policy.graceMs);
     const result = await runGraceWindow(
-      { initialDelayMs: intervalMs, intervalMs, timeoutMs: sop.graceMs },
+      { initialDelayMs: intervalMs, intervalMs, timeoutMs: policy.graceMs },
       {
         sample,
         now: this.options.now,
@@ -786,10 +802,16 @@ export class OpsController {
       .filter((action) => ["authorized", "intent-recorded", "executed"].includes(action.state))
       .sort((a, b) => a.actionId.localeCompare(b.actionId));
     for (const action of actions) {
-      const loaded = this.options.registry.sop(action.sopId);
-      const postconditions = loaded === undefined
+      const policy = action.verificationPolicy;
+      const loaded = policy === undefined ? this.options.registry.sop(action.sopId) : undefined;
+      const postconditions = policy === undefined && loaded === undefined
         ? []
-        : (await this.#sampleGrace(loaded.definition)).samples;
+        : (await this.#sampleGrace(policy === undefined
+            ? loaded!.definition
+            : {
+                postconditions: policy.postconditionIds,
+                graceMs: policy.graceMs,
+              })).samples;
       const [decision] = reconcileOnStartup({
         actions: [action],
         evidence: {

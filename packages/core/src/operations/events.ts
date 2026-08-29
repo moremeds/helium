@@ -107,6 +107,12 @@ export const ActionIntentRecordedSchema = z.strictObject({
   }),
   /** Exact admission-time ownership; never reconstructed from later config. */
   mutationOwner: MutationOwnershipSchema,
+  /** Decision-time dependency and verification policy, immutable across releases. */
+  dependencyIds: z.array(OpsIdSchema).max(500),
+  verificationPolicy: z.strictObject({
+    postconditionIds: z.array(OpsIdSchema).min(1).max(500),
+    graceMs: z.number().int().nonnegative().max(86_400_000),
+  }),
 });
 
 export const ActionReceiptRecordedSchema = z.strictObject({

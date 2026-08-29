@@ -9,8 +9,9 @@ const row = (at, releaseRef = target, observationCount = 1) => JSON.stringify({
 
 test("accepts only a target cycle strictly after the flip and not in the future", () => {
   const now = Date.parse("2026-08-30T00:10:00.000Z");
-  const since = Date.parse("2026-08-30T00:00:00.000Z") / 1000;
+  const since = Date.parse("2026-08-30T00:00:00.500Z");
   assert.equal(hasTargetCycle(row("2026-08-30T00:05:00.000Z"), since, target, now), true);
+  assert.equal(hasTargetCycle(row("2026-08-30T00:00:00.250Z"), since, target, now), false);
   assert.equal(hasTargetCycle(row("2026-08-30T01:00:00.000Z"), since, target, now), false);
   assert.equal(hasTargetCycle(row("2026-08-29T23:59:59.000Z"), since, target, now), false);
   assert.equal(hasTargetCycle(row("2026-08-30T00:05:00.000Z", "/releases/old"), since, target, now), false);

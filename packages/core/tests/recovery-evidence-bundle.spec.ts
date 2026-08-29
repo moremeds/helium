@@ -196,12 +196,24 @@ describe("RecoveryEvidenceSchema", () => {
     })).toThrow(/successful process receipt/);
   });
 
-  it("reuses the canonical status vocabulary rather than defining one", () => {
-    for (const status of ["PLANNED", "PARTIAL", "PROVEN", "FAILED", "BLOCKED"]) {
-      expect(() =>
-        RecoveryEvidenceSchema.parse({ ...bundle(), status }),
-      ).not.toThrow();
-    }
+  it("binds a terminal outcome to its canonical status and verifier decision", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      outcome: "failed",
+      status: "PROVEN",
+      verifier: { ...bundle().verifier, decision: "pass" },
+    })).toThrow(/failed outcome requires FAILED status and a failing verifier/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      outcome: "uncertain",
+      status: "PROVEN",
+      verifier: { ...bundle().verifier, decision: "pass" },
+    })).toThrow(/uncertain outcome requires PARTIAL status and an inconclusive verifier/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      status: "FAILED",
+      verifier: { ...bundle().verifier, decision: "fail" },
+    })).toThrow(/proven recovery outcome requires PROVEN status and a passing verifier/);
     expect(() =>
       RecoveryEvidenceSchema.parse({ ...bundle(), status: "RECOVERED" }),
     ).toThrow();
