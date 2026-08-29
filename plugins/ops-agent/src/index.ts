@@ -45,3 +45,33 @@ export {
   type ExecutionReceipt,
   type ExecutionRequest,
 } from "./script-executor.js";
+export {
+  DEFAULT_DISK_THRESHOLDS,
+  checkMountIdentity,
+  classifyDisk,
+  parseDf,
+  type DiskThresholds,
+  type ExpectedMount,
+  type MountIdentity,
+  type VolumeUsage,
+} from "./probes/disk.js";
+export {
+  SUSTAINED_PAGEOUT_RATE,
+  classifyMemory,
+  pageoutRate,
+  parseLoadAverage,
+  parseSize,
+  parseSwapUsage,
+  parseVmStat,
+  type LoadAverage,
+  type MemorySample,
+  type SwapUsage,
+  type VmStat,
+} from "./probes/macos-resource.js";
+export {
+  classifyProcess,
+  processProbe,
+  type CommandResult,
+  type CommandRunner,
+  type ProcessProbeOptions,
+} from "./probes/process.js";
