@@ -5,7 +5,7 @@ import { ageState, makeObservation, type AdapterContext } from "./shared.js";
 export interface ArgonSnapshot extends AdapterContext {
   api: { httpStatus: number; bodyOk?: boolean };
   database: { ready: boolean };
-  worker: { heartbeatAt?: string; maxAgeMs: number };
+  worker: { heartbeatAt?: string; heartbeatAgeMs?: number; maxAgeMs: number };
   product: { freshAt?: string; maxAgeMs: number };
   backup: { createdAt?: string; maxAgeMs: number };
 }
@@ -15,6 +15,13 @@ const bodyState = (value: boolean | undefined): ObservationState =>
 
 export function adaptArgon(snapshot: ArgonSnapshot): Observation[] {
   const at = snapshot.observedAt;
+  const workerState = snapshot.worker.heartbeatAgeMs === undefined
+    ? ageState(snapshot.worker.heartbeatAt, at, { failedAfterMs: snapshot.worker.maxAgeMs })
+    : !Number.isFinite(snapshot.worker.heartbeatAgeMs) || snapshot.worker.heartbeatAgeMs < 0
+      ? "unknown"
+      : snapshot.worker.heartbeatAgeMs > snapshot.worker.maxAgeMs
+        ? "failed"
+        : "ok";
   return [
     makeObservation(snapshot, {
       componentId: "argon",
@@ -40,9 +47,12 @@ export function adaptArgon(snapshot: ArgonSnapshot): Observation[] {
     makeObservation(snapshot, {
       componentId: "argon",
       probeId: "argon.worker-heartbeat.v1",
-      state: ageState(snapshot.worker.heartbeatAt, at, { failedAfterMs: snapshot.worker.maxAgeMs }),
+      state: workerState,
       dimension: "freshness",
-      value: { heartbeatAt: snapshot.worker.heartbeatAt },
+      value: {
+        heartbeatAt: snapshot.worker.heartbeatAt,
+        heartbeatAgeMs: snapshot.worker.heartbeatAgeMs,
+      },
     }),
     makeObservation(snapshot, {
       componentId: "argon",

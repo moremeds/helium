@@ -89,7 +89,12 @@ function reply(stdout: string, ref: string, exitCode = 0): CommandResult {
   return { stdout, exitCode, timedOut: false, evidenceRef: `artifact://raw/${ref}` };
 }
 
-function fixtureRunner(options: { dockerName?: string } = {}) {
+function fixtureRunner(options: {
+  dockerName?: string;
+  argonWorkerAt?: string;
+  argonWorkerLagSeconds?: number;
+  quietPgIsReady?: boolean;
+} = {}) {
   const calls: readonly string[][] = [];
   const runner: CommandRunner = {
     async run(argv) {
@@ -109,8 +114,16 @@ function fixtureRunner(options: { dockerName?: string } = {}) {
           ok: true,
           db: "up",
           workers: [
-            { last_beat_at: "2026-08-29T22:49:50.000Z" },
-            { last_beat_at: "2026-08-29T22:49:45.000Z" },
+            {
+              last_beat_at: options.argonWorkerAt ?? "2026-08-29T22:49:50.000Z",
+              ...(options.argonWorkerLagSeconds === undefined
+                ? {}
+                : { lag_seconds: options.argonWorkerLagSeconds }),
+            },
+            {
+              last_beat_at: options.argonWorkerAt ?? "2026-08-29T22:49:45.000Z",
+              lag_seconds: options.argonWorkerLagSeconds ?? 15,
+            },
           ],
           freshness: { as_of: "2026-08-28" },
         })}\n200`, "argon");
@@ -154,7 +167,9 @@ function fixtureRunner(options: { dockerName?: string } = {}) {
       if (argv[0] === "/usr/bin/stat" && joined.includes("docker.sock")) {
         return reply("srw-------|/Users/moremeds/.colima/default/docker.sock\n", "socket");
       }
-      if (argv[0] === "/opt/postgres/bin/pg_isready") return reply("accepting connections\n", "ready");
+      if (argv[0] === "/opt/postgres/bin/pg_isready") {
+        return reply(options.quietPgIsReady === true ? "" : "accepting connections\n", "ready");
+      }
       if (argv[0] === "/opt/postgres/bin/psql" && joined.includes("SELECT 1")) {
         return reply("BEGIN\nSET\n1\nCOMMIT\n", "select-one");
       }
@@ -251,5 +266,36 @@ describe("production observation probes", () => {
       : [observations];
     expect(rows.find((row) => row.probeId === "colima.vm-state.v1")?.state)
       .toBe("unknown");
+  });
+
+  it("uses the service-reported worker lag when the heartbeat was emitted after collection began", async () => {
+    const { runner } = fixtureRunner({
+      argonWorkerAt: "2026-08-29T22:50:00.250Z",
+      argonWorkerLagSeconds: 0.2,
+    });
+    const probe = createProductionObservationProbes(targets, {
+      releaseDir: "/release",
+      nodePath: "/usr/local/bin/node",
+    }).find((candidate) => candidate.probeId === "argon.production-snapshot.v1")!;
+    const observations = await probe.observe(runner, NOW);
+    const rows: readonly Observation[] = Array.isArray(observations)
+      ? observations
+      : [observations];
+    expect(rows.find((row) => row.probeId === "argon.worker-heartbeat.v1")?.state)
+      .toBe("ok");
+  });
+
+  it("treats a quiet successful pg_isready as independent Apex verification", async () => {
+    const { runner } = fixtureRunner({ quietPgIsReady: true });
+    const probe = createProductionObservationProbes(targets, {
+      releaseDir: "/release",
+      nodePath: "/usr/local/bin/node",
+    }).find((candidate) => candidate.probeId === "apex.production-snapshot.v1")!;
+    const observations = await probe.observe(runner, NOW);
+    const rows: readonly Observation[] = Array.isArray(observations)
+      ? observations
+      : [observations];
+    expect(rows.find((row) => row.probeId === "apex.postgres-dependency.v1")?.state)
+      .toBe("ok");
   });
 });

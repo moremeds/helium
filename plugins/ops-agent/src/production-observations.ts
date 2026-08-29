@@ -385,6 +385,12 @@ function argonProbe(targets: ProductionObservationTargets): ObservationProbe {
         .map((worker) => worker.last_beat_at)
         .filter((value): value is string => typeof value === "string" && Number.isFinite(Date.parse(value)))
         .sort((a, b) => Date.parse(a) - Date.parse(b));
+      const workerLags = workers
+        .map((worker) => numericValue(worker.lag_seconds))
+        .filter((value): value is number => value !== undefined && value >= 0);
+      const workerAgeMs = workers.length > 0 && workerLags.length === workers.length
+        ? Math.max(...workerLags) * 1000
+        : undefined;
       const freshness = objectValue(health.body.freshness);
       const asOf = typeof freshness?.as_of === "string" ? freshness.as_of : undefined;
       return adaptArgon({
@@ -394,7 +400,11 @@ function argonProbe(targets: ProductionObservationTargets): ObservationProbe {
           bodyOk: typeof health.body.ok === "boolean" ? health.body.ok : undefined,
         },
         database: { ready: health.body.db === "up" },
-        worker: { heartbeatAt: beats[0], maxAgeMs: targets.argon.workerMaxAgeMs },
+        worker: {
+          heartbeatAt: beats[0],
+          ...(workerAgeMs === undefined ? {} : { heartbeatAgeMs: workerAgeMs }),
+          maxAgeMs: targets.argon.workerMaxAgeMs,
+        },
         product: {
           freshAt: /^\d{4}-\d{2}-\d{2}$/.test(asOf ?? "") ? `${asOf}T23:59:59.999Z` : undefined,
           maxAgeMs: targets.argon.productMaxAgeMs,
@@ -469,7 +479,7 @@ function apexProbe(targets: ProductionObservationTargets): ObservationProbe {
         postgres: {
           reportedHealthy: health.body.pg_connected === true,
           independentlyVerified:
-            readyResult.exitCode === 0 && !readyResult.timedOut && /accepting connections/i.test(readyResult.stdout),
+            readyResult.exitCode === 0 && !readyResult.timedOut,
         },
         livewire: {
           reportedRevisionMatches:
