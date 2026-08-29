@@ -56,7 +56,11 @@ export {
   type SignedApprovalEnvelope,
   type SignedInterventionEnvelope,
 } from "./approval.js";
-export { OpsController, type OpsControllerOptions } from "./controller.js";
+export {
+  OpsController,
+  type ControllerTickResult,
+  type OpsControllerOptions,
+} from "./controller.js";
 export {
   OPS_MODES,
   OpsModeSchema,

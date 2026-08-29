@@ -39,9 +39,15 @@ importers:
       '@helium/fake-metered':
         specifier: file:../packages/fake-metered
         version: link:../packages/fake-metered
+      '@helium/ops-controller-fixture':
+        specifier: file:./fixtures/ops-controller
+        version: link:fixtures/ops-controller
       '@types/node':
         specifier: ^22
         version: 22.20.1
+      dsh-plugin-ops-agent:
+        specifier: file:../plugins/ops-agent
+        version: link:../plugins/ops-agent
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -54,6 +60,22 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.30.0
         version: 1.30.0(zod@4.4.3)
+
+  contracts/fixtures/ops-controller:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../../packages/core
+        version: link:../../../packages/core
+      dsh-plugin-ops-agent:
+        specifier: file:../../../plugins/ops-agent
+        version: link:../../../plugins/ops-agent
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
 
   contracts/fixtures/plugin-live-dispatch:
     devDependencies:

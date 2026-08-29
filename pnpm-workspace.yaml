@@ -6,6 +6,7 @@ packages:
   - contracts/fixtures/mcp-ping
   - contracts/fixtures/plugin-restrict-proof
   - contracts/fixtures/senior-isolation
+  - contracts/fixtures/ops-controller
 allowBuilds:
   esbuild: true
   koffi: true
