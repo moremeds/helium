@@ -219,36 +219,34 @@ describe("HeliumRuntime", () => {
   });
 
   it("carry-in (Task 2.2): one scheduling loop per job ticks a shared calendar watcher once per cycle, not once per state-change trigger", async () => {
-    fixture = await startFixture((_req, res) => {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ state: "x" }));
-    });
     const far = new Date(Date.now() + 3_600_000).toISOString();
     const { deps } = rig(
       JOB_YAML(
         "multi",
         [
-          STATE_CHANGE(fixture.url, "state", 40),
-          STATE_CHANGE(fixture.url, "state2", 40),
-          CALENDAR_WINDOW("test-cal", 40),
+          STATE_CHANGE("http://fixture.invalid/one", "state", 10_000),
+          STATE_CHANGE("http://fixture.invalid/two", "state2", 10_000),
+          CALENDAR_WINDOW("test-cal", 10_000),
         ].join("\n"),
       ),
       `- name: FOMC-test\n  kind: FOMC\n  at: ${far}\n`,
+    );
+    deps.fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ state: "x", state2: "y" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
     );
 
     const pollerSpy = vi.spyOn(StateChangePoller.prototype, "tick");
     const watcherSpy = vi.spyOn(CalendarWindowWatcher.prototype, "tick");
     const rt = new HeliumRuntime(deps);
     rt.start();
-    await new Promise((r) => setTimeout(r, 220));
+    await vi.waitFor(() => {
+      expect(pollerSpy).toHaveBeenCalledTimes(2);
+      expect(watcherSpy).toHaveBeenCalledTimes(1);
+    });
     rt.stop();
-    // Same root cause as the "stop() disposes..." test above: stop()
-    // cancels the *next scheduled* cycle only, not one already in-flight —
-    // a cycle caught mid-way through its sequential `for (poller of
-    // pollers) await poller.tick()` loop (one poller ticked, the other not
-    // yet) makes pollerCalls transiently odd. Let it finish before
-    // snapshotting.
-    await new Promise((r) => setTimeout(r, 50));
 
     const pollerCalls = pollerSpy.mock.calls.length; // 2 pollers ticked every cycle
     const watcherCalls = watcherSpy.mock.calls.length; // 1 watcher, shared by the job
