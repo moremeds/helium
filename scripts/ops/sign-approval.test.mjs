@@ -6,9 +6,20 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { canonicalJson } from "../../packages/core/lib/event-store.js";
 import { signApprovalEnvelope } from "./sign-approval.mjs";
+import { hardwareIdentityHash } from "./signing-host-policy.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "helium-sign-approval-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
+const operatorIdentity = "fixture-operator-hardware";
+const miniIdentity = "fixture-mini-hardware";
+const signingHost = {
+  hardwareIdentity: operatorIdentity,
+  policy: {
+    version: 1,
+    allowedOperatorHostHashes: [hardwareIdentityHash(operatorIdentity)],
+    forbiddenMiniHostHashes: [hardwareIdentityHash(miniIdentity)],
+  },
+};
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
 const unsigned = {
@@ -74,7 +85,7 @@ test("CLI writes a new artifact and refuses to overwrite one", async () => {
     key,
     "--output",
     output,
-  ]);
+  ], { signingHost });
   assert.equal(JSON.parse(readFileSync(output, "utf8")).kind, "approval");
   await assert.rejects(
     runSigner([
@@ -84,7 +95,29 @@ test("CLI writes a new artifact and refuses to overwrite one", async () => {
       key,
       "--output",
       output,
-    ]),
+    ], { signingHost }),
     /refusing to overwrite/,
+  );
+});
+
+test("CLI refuses a registered mini and an uncommissioned signing policy", async () => {
+  const input = join(dir, "approval.json");
+  const key = join(dir, "operator.pem");
+  writeFileSync(input, JSON.stringify(unsigned));
+  writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  const { runSigner } = await import("./sign-approval.mjs");
+  const args = ["--input", input, "--private-key", key, "--output", join(dir, "host-refused.json")];
+  await assert.rejects(
+    runSigner(args, { signingHost: { ...signingHost, hardwareIdentity: miniIdentity } }),
+    /registered mini/,
+  );
+  await assert.rejects(
+    runSigner(args, {
+      signingHost: {
+        hardwareIdentity: operatorIdentity,
+        policy: { version: 1, allowedOperatorHostHashes: [], forbiddenMiniHostHashes: [] },
+      },
+    }),
+    /not commissioned/,
   );
 });

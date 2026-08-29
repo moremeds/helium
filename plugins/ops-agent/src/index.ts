@@ -37,6 +37,8 @@ export function apply(ctx: EffectContext, raw: OpsPluginConfig): void {
 export {
   OpsDaemon,
   createStandaloneOpsDaemon,
+  validateOpsdRelease,
+  runOpsdReleaseCheck,
   type OpsAnalysisClient,
   type OpsDaemonControl,
   type OpsDaemonController,
@@ -46,6 +48,7 @@ export {
 export { OpsControlClient, OpsControlServer } from "./ipc.js";
 export {
   ApprovalLedger,
+  FileOperatorEnvelopeStore,
   OperatorEnvelopeVerifier,
   SignedApprovalEnvelopeSchema,
   SignedInterventionEnvelopeSchema,
@@ -55,6 +58,7 @@ export {
   type AcceptedApproval,
   type SignedApprovalEnvelope,
   type SignedInterventionEnvelope,
+  type OperatorEnvelopePersistence,
 } from "./approval.js";
 export {
   OpsController,
@@ -68,6 +72,20 @@ export {
   type OpsMode,
   type RuntimeModeDecision,
 } from "./mode.js";
+export { DurableOpsAnalysisClient } from "./analysis-client.js";
+export {
+  FileComponentActionLocks,
+  hostBootId,
+  type ComponentActionLockPort,
+  type ComponentActionLockInput,
+  type ComponentActionLockAcquisition,
+} from "./component-action-lock.js";
+export {
+  FileRecoveryEvidenceStore,
+  RECOVERY_EVIDENCE_SCHEMA,
+  type RecoveryEvidencePort,
+  type TerminalEvidenceRef,
+} from "./recovery-evidence-store.js";
 export {
   ScriptRegistry,
   ArgvSchemaSchema,

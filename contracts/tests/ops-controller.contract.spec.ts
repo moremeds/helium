@@ -175,7 +175,15 @@ describe("ownership, provider and delivery failures", () => {
     });
     expect(result.tick.actions[0]).toMatchObject({ outcome: "succeeded" });
     expect(result.sideEffects).toBe(1);
-    expect(result.providerCalls).toBe(0);
+    expect(result.providerCalls).toBe(3);
+    expect(result.events.filter((event) => event.type === "analysis-status-recorded"))
+      .toEqual([
+        expect.objectContaining({
+          status: "unavailable",
+          consecutiveFailures: 1,
+          reason: expect.stringMatching(/codex:quota-exhausted.*deepseek:quota-exhausted.*claude:quota-exhausted/),
+        }),
+      ]);
   });
 
   it("suppresses spawn when an operator repairs the target before the baseline", async () => {
@@ -226,7 +234,7 @@ describe("ownership, provider and delivery failures", () => {
     const [decision] = reconcileOnStartup({
       actions: [{
         actionId: "act-1", incidentId: "inc-1", componentId: "colima", sopId: "restart",
-        sopDigest: `sha256:${"a".repeat(64)}`, state: "intent-recorded",
+        sopVersion: 1, sopDigest: `sha256:${"a".repeat(64)}`, state: "intent-recorded",
       }],
       evidence: {
         "act-1": {

@@ -8,6 +8,7 @@ import {
   composeObserveOnlyOpsDaemon,
   loadOpsdRuntimeConfig,
   parseOpsdArgs,
+  validateOpsdRelease,
   writeBoundedOpsLog,
 } from "./opsd.js";
 
@@ -101,9 +102,40 @@ describe("opsd executable boundary", () => {
       const log = readFileSync(join(root, "state", "events.jsonl"), "utf8");
       expect(log).toContain('"type":"observation-recorded"');
       expect(log).toContain('"componentId":"host"');
+      expect(log).toContain('"type":"controller-cycle-recorded"');
+      expect(log).toContain(`"releaseRef":"${releaseDir.replace(/\/$/, "")}"`);
     } finally {
       await daemon.stop();
     }
+  });
+
+  it("validates the complete configured bundle against a candidate release", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-opsd-preflight-"));
+    roots.push(root);
+    const config = {
+      version: 1 as const,
+      mode: "observe" as const,
+      releaseDir,
+      componentsDir: "ops/components",
+      dependenciesDir: "ops/dependencies",
+      checksDir: "ops/checks",
+      sopsDir: "ops/sops",
+      executorsDir: "ops/executors",
+      authorityManifestPath: `${releaseDir}/ops/authority-manifest.json`,
+      trustedKeyPath: `${releaseDir}/ops/authority-manifest.pub.pem`,
+      stateDir: `${root}/state`,
+      socketPath: `${root}/run/opsd.sock`,
+      intervalMs: 60000,
+      maxFiles: 500,
+      maxComponents: 200,
+      maxSops: 200,
+      maxChecks: 500,
+      maxFileBytes: 1000000,
+    };
+    expect(() => validateOpsdRelease(config, releaseDir)).not.toThrow();
+    expect(() => validateOpsdRelease({ ...config, executorsDir: "ops/checks" }, releaseDir))
+      .toThrow();
+    expect(() => validateOpsdRelease(config, root)).toThrow(/check directory|ENOENT|no such file/i);
   });
 
   it("keeps daemon-owned logs within their configured byte bound", () => {

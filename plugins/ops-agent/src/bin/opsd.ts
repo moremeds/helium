@@ -8,7 +8,7 @@
  * cannot fail collection, correlation, policy, execution, or verification.
  */
 import { spawn } from "node:child_process";
-import { createHash, createPublicKey } from "node:crypto";
+import { createHash, createPublicKey, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -17,6 +17,7 @@ import {
   readFileSync,
   readSync,
   readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -30,9 +31,18 @@ import {
 } from "@helium/core";
 import { parseAllDocuments } from "yaml";
 import { z } from "zod";
-import { ApprovalLedger, OperatorEnvelopeVerifier } from "../approval.js";
+import {
+  ApprovalLedger,
+  FileOperatorEnvelopeStore,
+  OperatorEnvelopeVerifier,
+} from "../approval.js";
+import { DurableOpsAnalysisClient } from "../analysis-client.js";
 import { OpsBundleLoader } from "../bundle-loader.js";
 import { Collector, type ObservationProbe } from "../collector.js";
+import {
+  FileComponentActionLocks,
+  hostBootId,
+} from "../component-action-lock.js";
 import { OpsConfigSchema } from "../config.js";
 import {
   OpsController,
@@ -42,6 +52,8 @@ import {
 import type { OpsControlServer } from "../ipc.js";
 import { OpsControlServer as UnixOpsControlServer } from "../ipc.js";
 import { macosResourceProbe } from "../probes/macos-resource.js";
+import { FileRecoveryEvidenceStore } from "../recovery-evidence-store.js";
+import { ScriptRegistry } from "../script-registry.js";
 import type { CommandResult, CommandRunner } from "../probes/process.js";
 
 export interface OpsDaemonController<T> {
@@ -63,6 +75,7 @@ export interface OpsDaemonOptions<T> {
   analysis?: OpsAnalysisClient<T>;
   intervalMs: number;
   onError?: (error: Error) => void;
+  onTickSuccess?: (snapshot: T) => void | Promise<void>;
 }
 
 /** Owns the daemon lifecycle and serializes deterministic ticks. */
@@ -108,6 +121,7 @@ export class OpsDaemon<T = ControllerTickResult> {
 
     const run = this.options.controller.tick(this.#abort.signal).then(
       async (snapshot) => {
+        await this.options.onTickSuccess?.(snapshot);
         if (this.options.analysis !== undefined) {
           await this.options.analysis.publish(snapshot).catch((error: unknown) => {
             this.#report(error);
@@ -151,6 +165,7 @@ export interface StandaloneOpsDaemonOptions
   analysis?: OpsAnalysisClient;
   intervalMs: number;
   onError?: (error: Error) => void;
+  runtimeReleaseRef?: string;
 }
 
 /**
@@ -168,6 +183,7 @@ export function createStandaloneOpsDaemon(
     analysis,
     intervalMs,
     onError,
+    runtimeReleaseRef,
     ...controllerOptions
   } = options;
   const controller = new OpsController({
@@ -180,11 +196,35 @@ export function createStandaloneOpsDaemon(
         now: controllerOptions.now,
       }).collectOnce(),
   });
+  const supervisedAnalysis = analysis === undefined
+    ? undefined
+    : new DurableOpsAnalysisClient({
+        analysisId: "optional-team-analysis",
+        delegate: analysis,
+        store: controllerOptions.store,
+        now: controllerOptions.now,
+      });
   return new OpsDaemon({
     controller,
     control,
-    ...(analysis === undefined ? {} : { analysis }),
+    ...(supervisedAnalysis === undefined ? {} : { analysis: supervisedAnalysis }),
     intervalMs,
+    ...(runtimeReleaseRef === undefined
+      ? {}
+      : {
+          onTickSuccess: (snapshot: ControllerTickResult) => {
+            controllerOptions.store.append({
+              v: 1,
+              id: `evt-controller-cycle-${randomUUID()}`,
+              at: controllerOptions.now().toISOString(),
+              type: "controller-cycle-recorded",
+              controllerId: "com.helium.opsd",
+              releaseRef: runtimeReleaseRef,
+              observationCount: snapshot.observations.length,
+              collectionFailureCount: snapshot.collectionFailures.length,
+            });
+          },
+        }),
     ...(onError === undefined ? {} : { onError }),
   });
 }
@@ -239,6 +279,37 @@ export function loadOpsdRuntimeConfig(path: string): OpsdRuntimeConfig {
   return OpsdRuntimeConfigSchema.parse(raw);
 }
 
+export function validateOpsdRelease(
+  config: OpsdRuntimeConfig,
+  releaseDir = config.releaseDir,
+): void {
+  const rebase = (path: string) =>
+    path === config.releaseDir
+      ? releaseDir
+      : path.startsWith(`${config.releaseDir}/`)
+        ? `${releaseDir}${path.slice(config.releaseDir.length)}`
+        : path;
+  const parsed = OpsdRuntimeConfigSchema.parse({
+    ...config,
+    releaseDir,
+    authorityManifestPath: rebase(config.authorityManifestPath),
+    trustedKeyPath: rebase(config.trustedKeyPath),
+  });
+  const registeredProbeIds = discoverConfiguredProbeIds(parsed);
+  const loader = new OpsBundleLoader({
+    baseDir: parsed.releaseDir,
+    config: loaderConfig(parsed),
+    registeredProbeIds,
+    now: () => new Date(),
+  });
+  const installed = loader.installTenant("standalone-host", parsed.releaseDir);
+  if (installed.health.state !== "loaded") {
+    throw new Error(`ops bundle invalid: ${installed.health.detail ?? "unknown error"}`);
+  }
+  ScriptRegistry.load(loadConfiguredDocuments(parsed, parsed.executorsDir, "executor"));
+  createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
+}
+
 interface ObserveCompositionOverrides {
   runner?: CommandRunner;
   probes?: readonly ObservationProbe[];
@@ -256,8 +327,8 @@ export function composeObserveOnlyOpsDaemon(
 ): OpsDaemon {
   const parsed = OpsdRuntimeConfigSchema.parse(config);
   const now = overrides.now ?? (() => new Date());
-  mkdirSync(parsed.stateDir, { recursive: true });
-  mkdirSync(dirname(parsed.socketPath), { recursive: true });
+  mkdirSync(parsed.stateDir, { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(parsed.socketPath), { recursive: true, mode: 0o700 });
 
   const registeredProbeIds = discoverConfiguredProbeIds(parsed);
   const loader = new OpsBundleLoader({
@@ -272,9 +343,23 @@ export function composeObserveOnlyOpsDaemon(
   }
 
   const trustedKey = createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
-  const store = OperationsStore.open(parsed.stateDir);
-  const approvals = new ApprovalLedger({ trustedKey, now });
-  const interventions = new OperatorEnvelopeVerifier({ trustedKey, now });
+  const evidence = new FileRecoveryEvidenceStore(resolve(parsed.stateDir, "evidence"));
+  const store = OperationsStore.open(parsed.stateDir, {
+    validateEvent: (event) => evidence.verifyEvent(event),
+  });
+  const operatorPersistence = new FileOperatorEnvelopeStore(
+    resolve(parsed.stateDir, "operator-envelopes"),
+  );
+  const approvals = new ApprovalLedger({
+    trustedKey,
+    now,
+    persistence: operatorPersistence,
+  });
+  const interventions = new OperatorEnvelopeVerifier({
+    trustedKey,
+    now,
+    persistence: operatorPersistence,
+  });
   const control = new UnixOpsControlServer({
     socketPath: parsed.socketPath,
     approvals,
@@ -310,7 +395,12 @@ export function composeObserveOnlyOpsDaemon(
       },
     },
     leases,
+    componentLocks: new FileComponentActionLocks({
+      dir: resolve(parsed.stateDir, "component-locks"),
+      bootId: hostBootId(),
+    }),
     approvals,
+    evidence,
     createExecutor: () => ({
       async run() {
         throw new Error("observe-only runtime has no executor");
@@ -322,6 +412,7 @@ export function composeObserveOnlyOpsDaemon(
     control,
     intervalMs: parsed.intervalMs,
     onError: (error) => writeBoundedOpsLog("err", error.message),
+    runtimeReleaseRef: realpathSync(parsed.releaseDir),
   });
 }
 
@@ -343,6 +434,36 @@ function loaderConfig(config: OpsdRuntimeConfig): z.input<typeof OpsConfigSchema
 
 function configuredDir(releaseDir: string, configured: string): string {
   return isAbsolute(configured) ? configured : resolve(releaseDir, configured);
+}
+
+function loadConfiguredDocuments(
+  config: OpsdRuntimeConfig,
+  configured: string,
+  label: string,
+): unknown[] {
+  const dir = configuredDir(config.releaseDir, configured);
+  const names = readdirSync(dir)
+    .filter((name) => /\.(?:ya?ml|json)$/i.test(name))
+    .sort();
+  if (names.length > config.maxFiles) throw new Error(`${label} file limit exceeded`);
+  return names.flatMap((name) => {
+    const path = resolve(dir, name);
+    const stat = statSync(path);
+    if (!stat.isFile()) throw new Error(`${label} is not a file: ${path}`);
+    if (stat.size > config.maxFileBytes) {
+      throw new Error(`${label} file byte limit exceeded: ${path}`);
+    }
+    if (/\.json$/i.test(name)) return [JSON.parse(readFileSync(path, "utf8"))];
+    const documents = parseAllDocuments(readFileSync(path, "utf8"), {
+      strict: true,
+      uniqueKeys: true,
+    });
+    const errors = documents.flatMap((document) => document.errors);
+    if (errors.length > 0) throw new Error(`invalid ${label} YAML: ${path}`);
+    return documents
+      .filter((document) => document.contents !== null)
+      .map((document) => document.toJS() as unknown);
+  });
 }
 
 function discoverConfiguredProbeIds(config: OpsdRuntimeConfig): string[] {
@@ -495,6 +616,19 @@ export async function runOpsd(argv: readonly string[]): Promise<void> {
   }
 }
 
+export function runOpsdReleaseCheck(argv: readonly string[]): void {
+  if (argv.length !== 4 || argv[0] !== "--check-config" || argv[2] !== "--release") {
+    throw new Error("usage: opsd --check-config ABS --release ABS");
+  }
+  const configPath = argv[1];
+  const releaseDir = argv[3];
+  if (configPath === undefined || releaseDir === undefined ||
+      !isAbsolute(configPath) || !isAbsolute(releaseDir)) {
+    throw new Error("opsd release check requires absolute paths");
+  }
+  validateOpsdRelease(loadOpsdRuntimeConfig(configPath), releaseDir);
+}
+
 /** Write a tail-preserving daemon log without allowing indefinite growth. */
 export function writeBoundedOpsLog(
   stream: "out" | "err",
@@ -548,7 +682,11 @@ if (
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  runOpsd(process.argv.slice(2)).catch((error: unknown) => {
+  const argv = process.argv.slice(2);
+  const running = argv[0] === "--check-config"
+    ? Promise.resolve().then(() => runOpsdReleaseCheck(argv))
+    : runOpsd(argv);
+  running.catch((error: unknown) => {
     writeBoundedOpsLog(
       "err",
       `fatal: ${error instanceof Error ? error.message : "unknown error"}`,

@@ -1,5 +1,18 @@
 /** Signed, scoped operator approval and intervention envelopes. */
-import { verify, type KeyObject } from "node:crypto";
+import { createHash, verify, type KeyObject } from "node:crypto";
+import {
+  closeSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import { canonicalJson } from "@helium/core";
 import type { OperatorApproval } from "@helium/core/operations/authority.js";
 import { z } from "zod";
@@ -40,6 +53,10 @@ export type SignedApprovalEnvelope = z.infer<typeof SignedApprovalEnvelopeSchema
 export interface AcceptedApproval extends OperatorApproval {
   operatorId: string;
 }
+
+const AcceptedApprovalSchema = ApprovalPayloadSchema.extend({
+  operatorId: OpsIdSchema,
+}).strict();
 
 const InterventionPayloadSchema = z.strictObject({
   componentId: OpsIdSchema,
@@ -98,22 +115,109 @@ function verifyEnvelope(
   if (!ok) throw new Error("operator envelope signature is invalid");
 }
 
-class NonceLedger {
-  readonly #used = new Set<string>();
+export interface OperatorEnvelopePersistence {
+  consumeNonce(nonce: string): void;
+  loadApprovals(): AcceptedApproval[];
+  saveApproval(approval: AcceptedApproval): void;
+}
 
-  consume(nonce: string): void {
+class MemoryOperatorEnvelopeStore implements OperatorEnvelopePersistence {
+  readonly #used = new Set<string>();
+  readonly #approvals = new Map<string, AcceptedApproval>();
+
+  consumeNonce(nonce: string): void {
     if (this.#used.has(nonce)) throw new Error(`operator nonce replay: ${nonce}`);
     this.#used.add(nonce);
+  }
+
+  loadApprovals(): AcceptedApproval[] {
+    return [...this.#approvals.values()].map((approval) => ({ ...approval }));
+  }
+
+  saveApproval(approval: AcceptedApproval): void {
+    this.#approvals.set(keyOf(approval.incidentId, approval.sopId), { ...approval });
+  }
+}
+
+/** Durable, process-independent nonce and accepted-approval store. */
+export class FileOperatorEnvelopeStore implements OperatorEnvelopePersistence {
+  readonly #nonceDir: string;
+  readonly #approvalDir: string;
+
+  constructor(dir: string) {
+    assertPrivateDirectory(dir);
+    this.#nonceDir = join(dir, "nonces");
+    this.#approvalDir = join(dir, "approvals");
+    assertPrivateDirectory(this.#nonceDir);
+    assertPrivateDirectory(this.#approvalDir);
+  }
+
+  consumeNonce(nonce: string): void {
+    const path = join(this.#nonceDir, `${hashId(nonce)}.json`);
+    try {
+      writeFileSync(path, `${JSON.stringify({ nonce })}\n`, {
+        mode: 0o600,
+        flag: "wx",
+        flush: true,
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(`operator nonce replay: ${nonce}`);
+      }
+      throw error;
+    }
+  }
+
+  loadApprovals(): AcceptedApproval[] {
+    return readdirSync(this.#approvalDir)
+      .filter((name) => name.endsWith(".json"))
+      .sort()
+      .map((name) => {
+        const path = join(this.#approvalDir, name);
+        const stat = lstatSync(path);
+        if (!stat.isFile() || (stat.mode & 0o077) !== 0) {
+          throw new Error(`approval ledger file must be owner-only: ${path}`);
+        }
+        return AcceptedApprovalSchema.parse(JSON.parse(readFileSync(path, "utf8")));
+      });
+  }
+
+  saveApproval(approval: AcceptedApproval): void {
+    const parsed = AcceptedApprovalSchema.parse(approval);
+    const id = hashId(keyOf(parsed.incidentId, parsed.sopId));
+    const target = join(this.#approvalDir, `${id}.json`);
+    const staging = join(this.#approvalDir, `.${id}.${process.pid}.tmp`);
+    writeFileSync(staging, `${JSON.stringify(parsed)}\n`, {
+      mode: 0o600,
+      flag: "wx",
+      flush: true,
+    });
+    renameSync(staging, target);
+    const fd = openSync(this.#approvalDir, "r");
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
   }
 }
 
 export class ApprovalLedger {
-  readonly #nonces = new NonceLedger();
+  readonly #persistence: OperatorEnvelopePersistence;
   readonly #approvals = new Map<string, AcceptedApproval>();
 
   constructor(
-    private readonly options: { trustedKey: KeyObject; now: () => Date },
-  ) {}
+    private readonly options: {
+      trustedKey: KeyObject;
+      now: () => Date;
+      persistence?: OperatorEnvelopePersistence;
+    },
+  ) {
+    this.#persistence = options.persistence ?? new MemoryOperatorEnvelopeStore();
+    for (const approval of this.#persistence.loadApprovals()) {
+      this.#approvals.set(keyOf(approval.incidentId, approval.sopId), approval);
+    }
+  }
 
   accept(raw: unknown): AcceptedApproval {
     const envelope = SignedApprovalEnvelopeSchema.parse(raw);
@@ -126,11 +230,12 @@ export class ApprovalLedger {
     if (Date.parse(envelope.approval.expiresAt) <= this.options.now().getTime()) {
       throw new Error("operator approval is expired");
     }
-    this.#nonces.consume(envelope.nonce);
+    this.#persistence.consumeNonce(envelope.nonce);
     const accepted: AcceptedApproval = {
       ...envelope.approval,
       operatorId: envelope.operatorId,
     };
+    this.#persistence.saveApproval(accepted);
     this.#approvals.set(keyOf(accepted.incidentId, accepted.sopId), accepted);
     return accepted;
   }
@@ -155,11 +260,17 @@ export interface AcceptedIntervention {
 }
 
 export class OperatorEnvelopeVerifier {
-  readonly #nonces = new NonceLedger();
+  readonly #persistence: OperatorEnvelopePersistence;
 
   constructor(
-    private readonly options: { trustedKey: KeyObject; now: () => Date },
-  ) {}
+    private readonly options: {
+      trustedKey: KeyObject;
+      now: () => Date;
+      persistence?: OperatorEnvelopePersistence;
+    },
+  ) {
+    this.#persistence = options.persistence ?? new MemoryOperatorEnvelopeStore();
+  }
 
   acceptIntervention(raw: unknown): AcceptedIntervention {
     const envelope = SignedInterventionEnvelopeSchema.parse(raw);
@@ -172,7 +283,7 @@ export class OperatorEnvelopeVerifier {
     if (Date.parse(envelope.expiresAt) <= this.options.now().getTime()) {
       throw new Error("operator intervention envelope is expired");
     }
-    this.#nonces.consume(envelope.nonce);
+    this.#persistence.consumeNonce(envelope.nonce);
     return {
       ...envelope.intervention,
       operatorId: envelope.operatorId,
@@ -182,3 +293,18 @@ export class OperatorEnvelopeVerifier {
 
 const keyOf = (incidentId: string, sopId: string): string =>
   `${incidentId}\u0000${sopId}`;
+
+const hashId = (value: string): string =>
+  createHash("sha256").update(value).digest("hex");
+
+function assertPrivateDirectory(dir: string): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const stat = statSync(dir);
+  if (!stat.isDirectory()) throw new Error(`operator ledger is not a directory: ${dir}`);
+  if ((stat.mode & 0o077) !== 0) {
+    throw new Error(`operator ledger directory must be owner-only: ${dir}`);
+  }
+  if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
+    throw new Error(`operator ledger directory has a different owner: ${dir}`);
+  }
+}

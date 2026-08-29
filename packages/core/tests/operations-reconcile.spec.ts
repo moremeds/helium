@@ -10,6 +10,7 @@ const action = (
   incidentId: "inc-1",
   componentId: "runtime",
   sopId: "restart",
+  sopVersion: 1,
   sopDigest: `sha256:${"a".repeat(64)}`,
   state,
 });

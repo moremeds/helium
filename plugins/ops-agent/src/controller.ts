@@ -9,19 +9,31 @@ import type { PostconditionSample } from "@helium/core/operations/action.js";
 import { correlate } from "@helium/core/operations/correlate.js";
 import type { OperationsEvent } from "@helium/core/operations/events.js";
 import type { Incident } from "@helium/core/operations/incident.js";
-import type { ActionLeaseController } from "@helium/core/operations/lease.js";
+import type { ActionLease, ActionLeaseController } from "@helium/core/operations/lease.js";
 import {
   canMutate,
   type ControllerProbeOutcome,
 } from "@helium/core/operations/mutation-owner.js";
 import type { Observation } from "@helium/core/operations/observation.js";
-import type { OperationsState } from "@helium/core/operations/reducer.js";
+import {
+  reconcileOnStartup,
+} from "@helium/core/operations/reconcile.js";
+import type {
+  ActionProjection,
+  OperationsState,
+} from "@helium/core/operations/reducer.js";
+import type { RecoveryEvidence } from "@helium/core/operations/recovery-evidence.js";
 import type { SopDefinition } from "@helium/core/operations/sop.js";
-import { verifyAction } from "@helium/core/operations/verify.js";
+import {
+  runGraceWindow,
+  verifyAction,
+} from "@helium/core/operations/verify.js";
 import type { CollectionResult, ObservationSink } from "./collector.js";
 import type { ComponentRegistry, LoadedSop } from "./component-registry.js";
 import { decideRuntimeMode, type OpsMode } from "./mode.js";
 import type { ApprovalLedger } from "./approval.js";
+import type { ComponentActionLockPort } from "./component-action-lock.js";
+import type { RecoveryEvidencePort } from "./recovery-evidence-store.js";
 import {
   ExecutionSuppressedError,
   type ExecutionGate,
@@ -62,10 +74,14 @@ export interface OpsControllerOptions {
   ) => Promise<PostconditionSample[]>;
   controllerProbe: ControllerProbePort;
   leases: ActionLeaseController;
+  componentLocks: ComponentActionLockPort;
   approvals: ApprovalLedger;
+  evidence: RecoveryEvidencePort;
   createExecutor: () => ActionExecutor;
   argvFor: (sop: SopDefinition, incident: Incident) => string[];
   nextId?: (prefix: string) => string;
+  sleep?: (ms: number) => Promise<void>;
+  graceIntervalMs?: number;
 }
 
 export interface ControllerActionResult {
@@ -98,6 +114,7 @@ interface Candidate {
 export class OpsController {
   readonly #nextId: (prefix: string) => string;
   readonly #incidentKeys = new Map<string, string>();
+  #startupReconciled = false;
 
   constructor(private readonly options: OpsControllerOptions) {
     this.#nextId =
@@ -105,6 +122,7 @@ export class OpsController {
   }
 
   async tick(signal: AbortSignal = new AbortController().signal): Promise<ControllerTickResult> {
+    await this.#reconcileStartup();
     await this.#recordRegistryObservations();
     const collection = await this.options.collect(this.#observationSink());
     for (const observation of collection.observations) {
@@ -324,6 +342,7 @@ export class OpsController {
 
     const argv = this.options.argvFor(candidate.sop, candidate.incident);
     let leaseId: string | undefined;
+    let componentLock: { release(): void } | undefined;
     let boundaryRef = initialProbe.evidenceRef;
     let suppressionReason: string | undefined;
 
@@ -346,6 +365,25 @@ export class OpsController {
       }
       leaseId = acquired.lease.leaseId;
 
+      const locked = this.options.componentLocks.acquire({
+        componentId: component.id,
+        leaseId: acquired.lease.leaseId,
+        sopDigest: candidate.sop.digest,
+        acquiredAt: acquired.lease.acquiredAt,
+        expiresAt: acquired.lease.expiresAt,
+      });
+      if (!locked.ok) {
+        return {
+          incidentId: candidate.incident.key,
+          sopId: candidate.sop.id,
+          disposition: "observe",
+          reason: locked.reason,
+          controllerEvidenceRef: boundaryRef,
+        };
+      }
+      componentLock = locked.handle;
+
+      const baselineCapturedAt = this.options.now().toISOString();
       const samples = await this.options.sampleChecks(
         candidate.sop.postconditions,
         "baseline",
@@ -363,7 +401,11 @@ export class OpsController {
         // happened, which is precisely what `not-needed` rules out.
         this.#ensureProposed(action.actionId, candidate);
         this.#ensureAuthorized(action.actionId, candidate);
-        this.#verify(action.actionId, "not-needed", baseline.samples);
+        this.#recordTerminal(action.actionId, "not-needed", baseline.samples, {
+          lease: acquired.lease,
+          baseline: { capturedAt: baselineCapturedAt, ...baseline },
+          controllerProbe: initialProbe,
+        });
         return this.#executedResult(candidate, action.actionId, boundaryRef);
       }
 
@@ -396,8 +438,14 @@ export class OpsController {
             type: "action-intent-recorded",
             actionId: action.actionId,
             leaseId,
+            operationId: acquired.lease.operationId,
             argv,
-            baselineAllPassing: false,
+            baseline: {
+              capturedAt: baselineCapturedAt,
+              samples: baseline.samples,
+              allPassing: false,
+            },
+            controllerProbe: atSpawn,
           });
           return { admitted: true };
         },
@@ -411,24 +459,25 @@ export class OpsController {
         actionId: action.actionId,
         exitCode: receipt.exit.code,
         timedOut: receipt.timedOut,
+        outputDigest: receipt.outputDigest,
+        outputTail: receipt.outputTail,
+        outputBytes: receipt.outputBytes,
+        startedAt: receipt.startedAt,
+        finishedAt: receipt.finishedAt,
       });
-      const postconditions = await this.options.sampleChecks(
-        candidate.sop.postconditions,
-        "postcondition",
-      );
-      const postconditionVerdict = samplesVerdict(postconditions);
+      const verified = await this.#sampleGrace(candidate.sop);
       const verdict = verifyAction({
         baseline,
         intentRecorded: true,
         receipt: { exitCode: receipt.exit.code, timedOut: receipt.timedOut },
-        postconditions: postconditionVerdict,
+        postconditions: verified.verdict,
         operatorConfirmed:
           this.options.store.state().actions[action.actionId]?.supersededAt !== undefined,
       });
       if (verdict.decision !== "outcome") {
         throw new Error(`unexpected verification refusal: ${verdict.reason}`);
       }
-      this.#verify(action.actionId, verdict.outcome, postconditions);
+      this.#recordTerminal(action.actionId, verdict.outcome, verified.samples);
       return this.#executedResult(candidate, action.actionId, boundaryRef);
     } catch (error) {
       if (error instanceof ExecutionSuppressedError) {
@@ -441,11 +490,12 @@ export class OpsController {
         };
       }
       if (this.options.store.state().actions[action.actionId]?.state === "intent-recorded") {
-        this.#verify(action.actionId, "uncertain", []);
+        this.#recordTerminal(action.actionId, "uncertain", []);
         return this.#executedResult(candidate, action.actionId, boundaryRef, error);
       }
       throw error;
     } finally {
+      componentLock?.release();
       if (leaseId !== undefined) {
         this.options.leases.release(leaseId, component.id);
       }
@@ -490,7 +540,27 @@ export class OpsController {
     });
   }
 
-  #verify(actionId: string, outcome: string, samples: PostconditionSample[]): void {
+  #recordTerminal(
+    actionId: string,
+    requestedOutcome: RecoveryEvidence["outcome"],
+    samples: PostconditionSample[],
+    overrides: {
+      lease?: ActionLease;
+      baseline?: {
+        capturedAt: string;
+        samples: PostconditionSample[];
+        allPassing: boolean;
+      };
+      controllerProbe?: ControllerProbeOutcome;
+    } = {},
+  ): void {
+    const action = this.options.store.state().actions[actionId];
+    if (action === undefined) throw new Error(`cannot verify missing action: ${actionId}`);
+    const outcome = action.supersededAt === undefined
+      ? requestedOutcome
+      : "superseded-by-operator";
+    const evidence = this.#buildRecoveryEvidence(action, outcome, samples, overrides);
+    const persisted = this.options.evidence.persistBundle(evidence);
     this.options.store.append({
       v: 1,
       id: this.#nextId("evt-action-verified"),
@@ -498,8 +568,219 @@ export class OpsController {
       type: "action-verified",
       actionId,
       outcome,
+      ...(evidence.attribution === undefined
+        ? {}
+        : { attribution: evidence.attribution }),
       postconditionRefs: samples.map((sample) => sample.checkId),
+      postconditionSamples: samples,
+      recoveryEvidence: persisted,
     });
+  }
+
+  #buildRecoveryEvidence(
+    action: ActionProjection,
+    outcome: RecoveryEvidence["outcome"],
+    samples: PostconditionSample[],
+    overrides: {
+      lease?: ActionLease;
+      baseline?: {
+        capturedAt: string;
+        samples: PostconditionSample[];
+        allPassing: boolean;
+      };
+      controllerProbe?: ControllerProbeOutcome;
+    },
+  ): RecoveryEvidence {
+    const component = this.options.registry.component(action.componentId);
+    const loaded = this.options.registry.sop(action.sopId);
+    const incident = this.options.store.state().incidents[action.incidentId];
+    if (component === undefined || loaded === undefined || incident === undefined) {
+      throw new Error(`cannot build recovery evidence for unresolved action: ${action.actionId}`);
+    }
+    if (action.authorityManifestEntry === undefined || action.authority === undefined) {
+      throw new Error(`cannot verify action without signed authority evidence: ${action.actionId}`);
+    }
+    const controllerProbe = overrides.controllerProbe ?? action.controllerProbe;
+    if (controllerProbe === undefined) {
+      throw new Error(`cannot verify action without controller probe evidence: ${action.actionId}`);
+    }
+    const observations = incident.observationIds.map((id) => {
+      const observation = this.options.store.state().observations[id];
+      if (observation === undefined) throw new Error(`missing incident observation: ${id}`);
+      return this.options.evidence.persistArtifact("observation", observation);
+    });
+    const incidentSnapshot = this.options.evidence.persistArtifact("incident", {
+      incident,
+      dependencyIds: this.options.registry.graph().transitiveDependenciesOf(component.id),
+      capturedAt: this.options.now().toISOString(),
+    });
+    const baseline = overrides.baseline ?? action.baseline;
+    const lease = overrides.lease ?? (
+      action.leaseId === undefined || action.operationId === undefined
+        ? undefined
+        : { leaseId: action.leaseId, operationId: action.operationId }
+    );
+    const receipt = action.outputDigest === undefined
+      ? undefined
+      : {
+          exitCode: action.exitCode ?? null,
+          timedOut: action.timedOut ?? false,
+          outputDigest: action.outputDigest,
+          evidence: this.options.evidence.persistArtifact("receipt", {
+            actionId: action.actionId,
+            exitCode: action.exitCode ?? null,
+            timedOut: action.timedOut ?? false,
+            outputDigest: action.outputDigest,
+            outputTail: action.outputTail ?? "",
+            outputBytes: action.outputBytes ?? 0,
+            startedAt: action.startedAt,
+            finishedAt: action.finishedAt,
+          }),
+        };
+    const attribution = outcome === "superseded-by-operator"
+      ? "operator"
+      : outcome === "external-recovery"
+        ? "external"
+        : outcome === "uncertain"
+          ? "unknown"
+          : outcome === "not-needed"
+            ? undefined
+            : "automatic";
+    const status = outcome === "uncertain" ? "PARTIAL" : "PROVEN";
+    const missingIntent = action.argv === undefined || baseline === undefined;
+    const missingReceipt = receipt === undefined;
+    const missingLease = lease === undefined;
+    return {
+      assertionId: `recovery-${action.actionId}`,
+      componentId: action.componentId,
+      incidentId: action.incidentId,
+      observations,
+      incidentSnapshot,
+      sopId: action.sopId,
+      sopVersion: action.sopVersion,
+      sopDigest: action.sopDigest,
+      authorityManifestEntry: action.authorityManifestEntry,
+      authority: action.authority as RecoveryEvidence["authority"],
+      eligibility: {
+        eligible: loaded.certified,
+        reasons: [...loaded.certificationReasons],
+      },
+      mutationOwner: component.mutationOwner,
+      controllerProbe,
+      ...(missingLease
+        ? {}
+        : { lease: { leaseId: lease!.leaseId, operationId: lease!.operationId } }),
+      ...(missingIntent
+        ? {}
+        : {
+            intent: {
+              actionId: action.actionId,
+              argv: action.argv!,
+              baseline: {
+                capturedAt: baseline!.capturedAt,
+                allPassing: baseline!.allPassing,
+                sampleCount: baseline!.samples.length,
+              },
+            },
+          }),
+      ...(missingReceipt ? {} : { receipt }),
+      postconditionSamples: samples.map((sample) => ({
+        checkId: sample.checkId,
+        state: sample.state,
+        observedAt: sample.observedAt,
+        evidenceRefs: [...sample.evidenceRefs],
+      })),
+      outcome,
+      ...(attribution === undefined ? {} : { attribution }),
+      verifier: {
+        identity: "helium-opsd",
+        version: "verify/1",
+        decision: outcome === "uncertain" ? "inconclusive" : "pass",
+      },
+      replayRef: `eventlog://operations/action/${action.actionId}`,
+      status,
+      limitation: outcome === "uncertain"
+        ? "The persisted action prefix cannot prove execution or attribution."
+        : "",
+      ...(missingIntent || missingReceipt || missingLease
+        ? {
+            notApplicable: {
+              ...(missingIntent ? { intent: "no write-ahead intent was recorded" } : {}),
+              ...(missingReceipt ? { receipt: "no executor receipt was recorded" } : {}),
+              ...(missingLease ? { lease: "no durable action lease was recorded" } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  async #sampleGrace(sop: SopDefinition): Promise<{
+    verdict: "pass" | "fail" | "unknown";
+    samples: PostconditionSample[];
+  }> {
+    const allSamples: PostconditionSample[] = [];
+    const sample = async () => {
+      const rows = await this.options.sampleChecks(sop.postconditions, "postcondition");
+      allSamples.push(...rows);
+      return samplesVerdict(rows);
+    };
+    if (sop.graceMs === 0) return { verdict: await sample(), samples: allSamples };
+    const intervalMs = Math.min(this.options.graceIntervalMs ?? 1_000, sop.graceMs);
+    const result = await runGraceWindow(
+      { initialDelayMs: intervalMs, intervalMs, timeoutMs: sop.graceMs },
+      {
+        sample,
+        now: this.options.now,
+        sleep: this.options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
+      },
+    );
+    return { verdict: result.verdict, samples: allSamples };
+  }
+
+  async #reconcileStartup(): Promise<void> {
+    if (this.#startupReconciled) return;
+    const actions = Object.values(this.options.store.state().actions)
+      .filter((action) => ["authorized", "intent-recorded", "executed"].includes(action.state))
+      .sort((a, b) => a.actionId.localeCompare(b.actionId));
+    for (const action of actions) {
+      this.options.componentLocks.reconcile(action.componentId);
+      const loaded = this.options.registry.sop(action.sopId);
+      const postconditions = loaded === undefined
+        ? []
+        : (await this.#sampleGrace(loaded.definition)).samples;
+      const [decision] = reconcileOnStartup({
+        actions: [action],
+        evidence: {
+          [action.actionId]: {
+            intentRecorded: action.state === "intent-recorded" || action.state === "executed",
+            ...(action.baseline === undefined
+              ? {}
+              : { baselineAllPassing: action.baseline.allPassing }),
+            ...(action.outputDigest === undefined
+              ? {}
+              : {
+                  receipt: {
+                    exitCode: action.exitCode ?? null,
+                    timedOut: action.timedOut ?? false,
+                  },
+                }),
+            postconditions: samplesVerdict(postconditions),
+            operatorConfirmed: action.supersededAt !== undefined,
+          },
+        },
+      });
+      if (decision === undefined) continue;
+      let probe = action.controllerProbe;
+      if (probe === undefined) {
+        const component = this.options.registry.component(action.componentId);
+        if (component === undefined) throw new Error(`missing action component: ${action.componentId}`);
+        probe = await this.options.controllerProbe.check(component);
+      }
+      this.#recordTerminal(action.actionId, decision.outcome, postconditions, {
+        controllerProbe: probe,
+      });
+    }
+    this.#startupReconciled = true;
   }
 
   #executedResult(

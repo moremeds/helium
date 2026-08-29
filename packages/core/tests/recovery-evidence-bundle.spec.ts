@@ -45,9 +45,19 @@ const bundle = () => ({
       sampleCount: 2,
     },
   },
-  receipt: { exitCode: 0, timedOut: false, outputDigest: digest },
+  receipt: {
+    exitCode: 0,
+    timedOut: false,
+    outputDigest: digest,
+    evidence: { ref: "artifact://receipt/1", sha256: hash },
+  },
   postconditionSamples: [
-    { checkId: "runtime-up", state: "pass" as const, observedAt: "2026-08-25T04:05:00.000Z" },
+    {
+      checkId: "runtime-up",
+      state: "pass" as const,
+      observedAt: "2026-08-25T04:05:00.000Z",
+      evidenceRefs: ["artifact://postcondition/1"],
+    },
   ],
   outcome: "succeeded" as const,
   attribution: "automatic" as const,
@@ -143,6 +153,35 @@ describe("RecoveryEvidenceSchema", () => {
     ).toThrow(/automatic attribution requires a recorded intent/);
   });
 
+  it("refuses authority evidence that does not match the exact SOP grant", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      authorityManifestEntry: { ...bundle().authorityManifestEntry, sopId: "other" },
+    })).toThrow(/authority manifest entry does not match/);
+  });
+
+  it("refuses an intent admitted under unsafe ownership or controller evidence", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      mutationOwner: { ...bundle().mutationOwner, owner: "external" },
+    })).toThrow(/intent requires opsd mutation ownership/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      controllerProbe: { ...bundle().controllerProbe, result: "competing" },
+    })).toThrow(/intent requires a clear controller probe/);
+  });
+
+  it("refuses a succeeded assertion whose process or postconditions did not pass", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      postconditionSamples: [{ ...bundle().postconditionSamples[0], state: "fail" }],
+    })).toThrow(/passing postcondition/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      receipt: { ...bundle().receipt, exitCode: 1 },
+    })).toThrow(/successful process receipt/);
+  });
+
   it("reuses the canonical status vocabulary rather than defining one", () => {
     for (const status of ["PLANNED", "PARTIAL", "PROVEN", "FAILED", "BLOCKED"]) {
       expect(() =>
@@ -155,10 +194,16 @@ describe("RecoveryEvidenceSchema", () => {
   });
 
   it("carries the controller probe result, so an ownership refusal is auditable", () => {
+    const { intent: _intent, receipt: _receipt, lease: _lease, ...withoutAction } = bundle();
     const parsed = RecoveryEvidenceSchema.parse({
-      ...bundle(),
+      ...withoutAction,
       outcome: "not-needed",
       attribution: undefined,
+      notApplicable: {
+        intent: "controller admission refused before intent",
+        receipt: "no process was started",
+        lease: "no mutation lease was retained",
+      },
       controllerProbe: {
         result: "competing",
         observedLabels: ["a", "b"],

@@ -42,6 +42,7 @@ export class FakeOpsHost {
 }
 
 import { generateKeyPairSync, sign } from "node:crypto";
+import { join } from "node:path";
 import {
   ActionLeaseController,
   ActionLeaseTable,
@@ -59,6 +60,9 @@ import {
   ComponentRegistry,
   ExecutionSuppressedError,
   OpsController,
+  FileComponentActionLocks,
+  FileRecoveryEvidenceStore,
+  DurableOpsAnalysisClient,
   type ExecutionGate,
   type ExecutionReceipt,
   type ExecutionRequest,
@@ -252,12 +256,40 @@ export async function runControllerScenario(
       ttlMs: 60_000,
       now: () => now,
     }),
+    componentLocks: new FileComponentActionLocks({
+      dir: join(options.stateDir, "component-locks"),
+      bootId: "fixture-boot",
+    }),
     approvals: new ApprovalLedger({ trustedKey: publicKey, now: () => now }),
+    evidence: new FileRecoveryEvidenceStore(join(options.stateDir, "evidence")),
     createExecutor: () => executor,
     argvFor: () => [],
     nextId: (prefix) => `${prefix}-${++eventSequence}`,
   });
   const tick = await controller.tick();
+  if (options.providerQuota !== undefined) {
+    const analysis = new DurableOpsAnalysisClient({
+      analysisId: "fixture-team-analysis",
+      store,
+      now: () => now,
+      baseBackoffMs: 60_000,
+      delegate: {
+        async publish() {
+          const unavailable: string[] = [];
+          for (const [provider, quota] of Object.entries(options.providerQuota ?? {})) {
+            providerCalls += 1;
+            if (quota === "available") return;
+            unavailable.push(`${provider}:quota-exhausted`);
+          }
+          throw new Error(`analysis unavailable (${unavailable.join(",")})`);
+        },
+      },
+    });
+    await analysis.publish(tick);
+    // The immediate retry is intentionally suppressed by the production
+    // circuit breaker. This proves quota exhaustion cannot create a busy loop.
+    await analysis.publish(tick);
+  }
   return {
     tick,
     sideEffects,

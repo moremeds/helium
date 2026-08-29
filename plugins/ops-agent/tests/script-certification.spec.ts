@@ -119,8 +119,12 @@ describe("initial operations script inventory", () => {
     for (const id of sopIds) {
       const sop = SopDefinitionSchema.parse(yaml(join(sopDir, `${id}.yaml`)));
       expect(sop.digest).toBe(computedSopDigest(sop));
-      expect(certifySop(sop, registry)).toEqual({ certified: true, reasons: [] });
-      expect(byComponent.get(sop.componentId)?.mutationOwner.owner).not.toBe("opsd");
+      const component = byComponent.get(sop.componentId);
+      expect(component?.mutationOwner.owner).not.toBe("opsd");
+      expect(certifySop(sop, registry, component)).toEqual({
+        certified: false,
+        reasons: [`mutation-owner-not-opsd:${component?.mutationOwner.owner}`],
+      });
       expect(existsSync(sop.action.executable.path)).toBe(false);
       expect(resolveSopAuthority(sop, authority)).toMatchObject({
         authority: "observe",

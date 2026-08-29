@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Render the observe-only opsd package. This script never invokes launchctl.
 set -euo pipefail
+umask 077
 
 FREEZE_END="2026-08-31"
 release=""
 root=""
 launchd_root=""
-now="$(date -u +%F)"
+now="$(/bin/date -u +%F)"
 
 usage() {
-  echo "usage: install-observe-only.sh --release ABS --root ABS --launchd-root ABS [--now YYYY-MM-DD]" >&2
+  echo "usage: install-observe-only.sh --release ABS --root ABS --launchd-root ABS" >&2
   exit 64
 }
 
@@ -18,15 +19,6 @@ while [ "$#" -gt 0 ]; do
     --release) [ "$#" -ge 2 ] || usage; release="$2"; shift 2 ;;
     --root) [ "$#" -ge 2 ] || usage; root="$2"; shift 2 ;;
     --launchd-root) [ "$#" -ge 2 ] || usage; launchd_root="$2"; shift 2 ;;
-    --now)
-      [ "$#" -ge 2 ] || usage
-      [ "${HELIUM_OPS_TEST_ALLOW_DATE_OVERRIDE:-0}" = "1" ] || {
-        echo "--now is a test-only option; freeze date uses the host clock" >&2
-        exit 77
-      }
-      now="$2"
-      shift 2
-      ;;
     *) usage ;;
   esac
 done
@@ -46,7 +38,7 @@ for value in "$release" "$root" "$launchd_root"; do
   esac
 done
 [[ "$now" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || {
-  echo "--now must be YYYY-MM-DD" >&2
+  echo "host UTC date must be YYYY-MM-DD" >&2
   exit 64
 }
 node_bin="${HELIUM_NODE_BIN:-}"
@@ -61,7 +53,7 @@ esac
 if ! "$node_bin" \
   -e 'const d=process.argv[1]; if(new Date(`${d}T00:00:00Z`).toISOString().slice(0,10)!==d) process.exit(1)' \
   "$now"; then
-  echo "--now is not a calendar date" >&2
+  echo "host UTC date is not a calendar date" >&2
   exit 64
 fi
 if [[ ! "$now" > "$FREEZE_END" ]]; then
@@ -84,6 +76,7 @@ plist="$launchd_root/com.helium.opsd.plist"
 [ ! -e "$plist" ] || { echo "refusing existing launchd label: $plist" >&2; exit 73; }
 
 mkdir -p "$root/config" "$root/logs" "$root/run" "$root/state" "$launchd_root"
+chmod 700 "$root" "$root/config" "$root/logs" "$root/run" "$root/state"
 config_tmp="$config.tmp.$$"
 plist_tmp="$plist.tmp.$$"
 trap 'rm -f "$config_tmp" "$plist_tmp"' EXIT

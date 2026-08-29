@@ -424,7 +424,7 @@ evidence and recovery verification.
 **Step 4: Repeat correlation tests for determinism**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-dependency.spec.ts packages/core/tests/operations-correlate.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-dependency.spec.ts packages/core/tests/operations-correlate.spec.ts
 ```
 
 Expected: byte-identical incident and inhibition snapshots across repeats.
@@ -871,7 +871,7 @@ ID with different values is corruption.
 **Step 4: Run the concurrency suite repeatedly**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-lease.spec.ts packages/core/tests/operations-recovery-budget.spec.ts packages/core/tests/operations-component-lock.spec.ts --repeat=50
+bash scripts/test-repeat.sh 50 pnpm exec vitest run --project unit packages/core/tests/operations-lease.spec.ts packages/core/tests/operations-recovery-budget.spec.ts packages/core/tests/operations-component-lock.spec.ts
 ```
 
 Expected: at most one controller wins each attempt, and never two; no duplicate
@@ -1072,7 +1072,7 @@ that component.
 **Step 4: Run ownership, probe, and lease suites**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts packages/core/tests/operations-lease.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts packages/core/tests/operations-lease.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts
 pnpm typecheck
 rg -n -i "launchctl|com\.helium|com\.local" packages/core/src/operations && exit 1 || true
 ```
@@ -1185,7 +1185,7 @@ or `not-needed` outcome; never fabricate action evidence.
 **Step 4: Run the crash and attribution suite repeatedly**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts
 ```
 
 Expected: PASS; the production-derived Colima fixture is attributed only to the
@@ -1844,7 +1844,7 @@ event log across controller process restarts and assert terminal convergence.
 **Step 4: Run the contracts repeatedly**
 
 ```bash
-pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts
 ```
 
 Expected: PASS with one or zero authorized side effects per case, truthful

@@ -13,6 +13,16 @@ without making a guessed production path executable. The committed authority
 manifest has no entries, and current mutation ownership is `external` or
 `none`, so every mutating SOP is held at effective `observe`.
 
+The signing-host policy is also deliberately uncommissioned: its operator and
+mini hardware-hash lists are empty. After the freeze, a separately approved
+inventory must record both machines' hardware identities, place the operator
+hash only in `allowedOperatorHostHashes`, and place the mini hash in
+`forbiddenMiniHostHashes`. Both approval signing and authority-manifest signing
+fail closed until then. The manifest signer also revalidates component
+ownership, business postconditions, executor registration, and the executable
+hash immediately before signing; a structurally uncertified SOP cannot enter
+the manifest.
+
 IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
 ## trading-stack-reconcile

@@ -81,7 +81,8 @@ describe("OpsBundleLoader", () => {
     expect(loader.registry.sop("colima-reconnect")).toMatchObject({
       authority: "observe",
       authorityDowngradeReason: "manifest-entry-missing",
-      certified: true,
+      certified: false,
+      certificationReasons: ["mutation-owner-not-opsd:external"],
     });
     expect(loader.registry.graph().dependenciesOf("apex")).toEqual([
       "livewire",

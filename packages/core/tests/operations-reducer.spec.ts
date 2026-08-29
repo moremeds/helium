@@ -3,6 +3,18 @@ import { reduceOperations } from "../src/operations/reducer.js";
 import type { OperationsEvent } from "../src/operations/events.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
+const evidence = {
+  ref: "artifact://ops/evidence/recovery.json",
+  sha256: "b".repeat(64),
+  schema: "helium.ops.recovery-evidence/v1" as const,
+  assertionId: "recovery-act-1",
+};
+const sample = {
+  checkId: "runtime-up",
+  state: "pass" as const,
+  observedAt: "2026-08-25T04:05:00.000Z",
+  evidenceRefs: ["artifact://check/runtime-up"],
+};
 const at = (n: number) => `2026-08-25T04:0${n}:00.000Z`;
 
 const opened: OperationsEvent = {
@@ -42,8 +54,18 @@ const intentRecorded: OperationsEvent = {
   type: "action-intent-recorded",
   actionId: "act-1",
   leaseId: "lease-1",
+  operationId: "op-1",
   argv: ["--restart"],
-  baselineAllPassing: false,
+  baseline: {
+    capturedAt: at(3),
+    samples: [{ ...sample, state: "fail" }],
+    allPassing: false,
+  },
+  controllerProbe: {
+    result: "clear",
+    observedLabels: [],
+    evidenceRef: "artifact://controller/1",
+  },
 };
 const operatorIntervened: OperationsEvent = {
   v: 1,
@@ -62,6 +84,8 @@ const verifiedRecovered: OperationsEvent = {
   actionId: "act-1",
   outcome: "succeeded",
   postconditionRefs: ["runtime-up"],
+  postconditionSamples: [sample],
+  recoveryEvidence: evidence,
 };
 
 describe("reduceOperations", () => {
@@ -126,6 +150,11 @@ describe("reduceOperations", () => {
       actionId: "act-1",
       exitCode: 0,
       timedOut: false,
+      outputDigest: digest,
+      outputTail: "ok",
+      outputBytes: 2,
+      startedAt: at(4),
+      finishedAt: at(4),
     };
     const state = reduceOperations([opened, proposed, authorized, intentRecorded, receipt]);
     // A zero exit is not a verification.
@@ -178,6 +207,11 @@ describe("reduceOperations", () => {
           actionId: "act-1",
           exitCode: 0,
           timedOut: false,
+          outputDigest: digest,
+          outputTail: "ok",
+          outputBytes: 2,
+          startedAt: at(4),
+          finishedAt: at(4),
         } as OperationsEvent,
       ],
     ],

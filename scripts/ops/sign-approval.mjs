@@ -4,6 +4,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import { constants, openSync, closeSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { canonicalJson } from "../../packages/core/lib/event-store.js";
+import { assertTrustedSigningHost } from "./signing-host-policy.mjs";
 
 const flags = new Set(["--input", "--private-key", "--output"]);
 
@@ -58,7 +59,8 @@ export function signApprovalEnvelope(raw, privateKeyPem) {
   };
 }
 
-export async function runSigner(argv) {
+export async function runSigner(argv, testOptions = undefined) {
+  assertTrustedSigningHost(testOptions?.signingHost);
   const parsed = parseArgs(argv);
   const keyStat = statSync(parsed.privateKey);
   if (!keyStat.isFile()) throw new Error("approval private key is not a file");
@@ -71,7 +73,10 @@ export async function runSigner(argv) {
   let fd;
   try {
     fd = openSync(parsed.output, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    writeFileSync(fd, `${JSON.stringify(signed, null, 2)}\n`, "utf8");
+    writeFileSync(fd, `${JSON.stringify(signed, null, 2)}\n`, {
+      encoding: "utf8",
+      flush: true,
+    });
   } catch (error) {
     if (error?.code === "EEXIST") {
       throw new Error(`refusing to overwrite approval artifact: ${parsed.output}`);

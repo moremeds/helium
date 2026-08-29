@@ -174,7 +174,8 @@ export class ComponentRegistry {
 
     const loaded = sops.map((definition) => {
       const resolved = resolveSopAuthority(definition, this.deps.authority);
-      const certification = certifySop(definition, checkRegistry);
+      const component = components.find((candidate) => candidate.id === definition.componentId);
+      const certification = certifySop(definition, checkRegistry, component);
       return {
         definition,
         authority: resolved.authority,

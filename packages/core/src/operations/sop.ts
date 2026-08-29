@@ -9,7 +9,7 @@
  * @module @helium/core/operations/sop
  */
 import { z } from "zod";
-import { OpsIdSchema } from "./component.js";
+import { OpsIdSchema, type ComponentSpec } from "./component.js";
 import { OBSERVATION_STATES } from "./observation.js";
 import type { CheckRegistry } from "./check.js";
 
@@ -79,8 +79,13 @@ export interface CertificationResult {
 export function certifySop(
   sop: SopDefinition,
   registry: CheckRegistry,
+  component?: Pick<ComponentSpec, "id" | "mutationOwner">,
 ): CertificationResult {
   const reasons: string[] = [];
+
+  if (sop.mutating && component !== undefined && component.mutationOwner.owner !== "opsd") {
+    reasons.push(`mutation-owner-not-opsd:${component.mutationOwner.owner}`);
+  }
 
   for (const [label, refs] of [
     ["precondition", sop.preconditions],
@@ -96,12 +101,17 @@ export function certifySop(
   // A mutating SOP owes a business check. "The process came back" is exactly
   // the evidence the audited integrity failure would have passed while the
   // data stayed broken.
-  if (sop.mutating && reasons.length === 0) {
-    const postconditions = registry.resolveAll(sop.postconditions);
-    if (!postconditions.some((c) => c.kind === "business")) {
-      reasons.push(
-        "a mutating SOP needs at least one business postcondition, not only liveness",
-      );
+  if (sop.mutating) {
+    try {
+      const postconditions = registry.resolveAll(sop.postconditions);
+      if (!postconditions.some((c) => c.kind === "business")) {
+        reasons.push(
+          "a mutating SOP needs at least one business postcondition, not only liveness",
+        );
+      }
+    } catch {
+      // The unresolved-reference reason was already recorded above. Do not
+      // invent a second classification from checks we could not inspect.
     }
   }
 

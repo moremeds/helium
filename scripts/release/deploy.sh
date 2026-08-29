@@ -15,6 +15,8 @@ SRC=/Users/moremeds/projects/helium
 DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
 STATE_ROOT=/Users/moremeds/.helium/state
 OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
+OPSD_CONFIG=/Users/moremeds/.helium/ops/config/opsd.json
+OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl
 DSH_PIN=0.1.1-rc.2
 KEEP=5
 
@@ -58,14 +60,28 @@ say "dsh pin ok: $installed"
 # pair. This does not install or load opsd; installation remains a separate
 # post-AC#1 operator command.
 if [ -f "$OPSD_PLIST" ]; then
-  [ -f "$DEST/plugins/ops-agent/lib/bin/opsd.js" ] || {
-    echo "installed opsd is incompatible with $VERSION: binary missing" >&2
-    exit 76
-  }
-  [ -f "$DEST/scripts/ops/run-opsd.sh" ] || {
-    echo "installed opsd is incompatible with $VERSION: runner missing" >&2
-    exit 76
-  }
+  for required in \
+    "$DEST/plugins/ops-agent/lib/bin/opsd.js" \
+    "$DEST/scripts/ops/run-opsd.sh" \
+    "$DEST/ops/authority-manifest.json" \
+    "$DEST/ops/authority-manifest.pub.pem" \
+    "$OPSD_CONFIG"; do
+    [ -f "$required" ] || {
+      echo "installed opsd is incompatible with $VERSION: required asset missing: $required" >&2
+      exit 76
+    }
+  done
+  for required_dir in "$DEST/ops/components" "$DEST/ops/dependencies" "$DEST/ops/checks" "$DEST/ops/sops" "$DEST/ops/executors"; do
+    [ -d "$required_dir" ] || {
+      echo "installed opsd is incompatible with $VERSION: required bundle directory missing: $required_dir" >&2
+      exit 76
+    }
+  done
+  node "$DEST/plugins/ops-agent/lib/bin/opsd.js" \
+    --check-config "$OPSD_CONFIG" --release "$DEST" || {
+      echo "installed opsd configuration is invalid for $VERSION" >&2
+      exit 76
+    }
 fi
 
 # Validate every job file BEFORE the flip. loadJobs() throws when called without
@@ -158,6 +174,26 @@ restart_opsd_if_loaded() {
   launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"
 }
 
+opsd_cycle_after() {
+  local target="$1" since="$2"
+  node -e '
+    const {readFileSync}=require("node:fs");
+    let text="";try{text=readFileSync(process.argv[1],"utf8");}catch{}
+    const since=Number(process.argv[2])*1000,target=process.argv[3];
+    const ok=text.split("\n").filter(Boolean).some(line=>{try{
+      const row=JSON.parse(line),event=row?.record;
+      return event?.type==="controller-cycle-recorded" &&
+        event.releaseRef===target && Date.parse(event.at)>since &&
+        event.observationCount>0;
+    }catch{return false;}});
+    process.stdout.write(ok?"1":"0");' "$OPSD_EVENT_LOG" "$since" "$target"
+}
+
+opsd_required=0
+if opsd_is_loaded; then
+  opsd_required=1
+fi
+
 # `deploy-profile.sh` is always invoked with an explicit `--plugin-dir
 # <release>/plugins/helium` — the SPECIFIC release directory, never through
 # the mutable `current` symlink. That means the profile re-deploy below is
@@ -207,7 +243,12 @@ while [ $SECONDS -lt $end ]; do
       .filter(l=>{try{return Date.parse(JSON.parse(l).ts)>since;}catch{return false;}}).length;
     console.log(n);' "$flip_start")
   say "  heartbeat rows since flip: $fresh"
-  if [ "$fresh" -ge 2 ]; then
+  opsd_fresh=1
+  if [ "$opsd_required" = "1" ]; then
+    opsd_fresh=$(opsd_cycle_after "$DEST" "$flip_start")
+    say "  opsd target-release observation cycle: $opsd_fresh"
+  fi
+  if [ "$fresh" -ge 2 ] && [ "$opsd_fresh" = "1" ]; then
     ok=1
     break
   fi
@@ -246,9 +287,24 @@ if [ "$ok" != "1" ]; then
       exit 72
     fi
   fi
+  flip_back_start=$(date -u +%s)
   if ! restart_opsd_if_loaded; then
     echo "FATAL: current=$prev_target and DSH restarted, but installed com.helium.opsd did not restart on the restored release. MANUAL INTERVENTION REQUIRED." >&2
     exit 76
+  fi
+  if [ "$opsd_required" = "1" ]; then
+    restored=0; restore_end=$((SECONDS + 90))
+    while [ $SECONDS -lt $restore_end ]; do
+      sleep 10
+      if [ "$(opsd_cycle_after "$prev_target" "$flip_back_start")" = "1" ]; then
+        restored=1
+        break
+      fi
+    done
+    if [ "$restored" != "1" ]; then
+      echo "FATAL: current=$prev_target but restored opsd produced no target-release observation cycle. MANUAL INTERVENTION REQUIRED." >&2
+      exit 76
+    fi
   fi
   say "flip-back to $prev_target complete: symlink flipped, profile re-deployed, daemon kickstarted"
   exit 68
@@ -267,7 +323,7 @@ ls -1dt "$RELEASES"/v*/ 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old
   rm -rf "$old"
 done
 say "DEPLOY OK: $VERSION"
-if opsd_is_loaded; then
+if [ "$opsd_required" = "1" ]; then
   say "installed opsd restarted on the compatible current release"
 else
   say "opsd was not loaded; after AC#1 and separate approval use scripts/ops/install-observe-only.sh"

@@ -1,5 +1,7 @@
+import { spawn } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -124,6 +126,50 @@ describe("OpsControlServer", () => {
     } finally {
       await instance.stop();
     }
+  });
+
+  it("reclaims an owner-owned stale socket after an ungraceful process exit", async () => {
+    const path = socketPath();
+    const child = spawn(
+      process.execPath,
+      [
+        "-e",
+        "const net=require('node:net'); const s=net.createServer(); s.listen(process.argv[1],()=>process.stdout.write('ready\\n')); setInterval(()=>{},1000)",
+        path,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"] },
+    );
+    await once(child.stdout!, "data");
+    child.kill("SIGKILL");
+    await once(child, "exit");
+    expect(existsSync(path)).toBe(true);
+
+    const restarted = await server(path);
+    try {
+      await expect(
+        restarted.client.request({
+          type: "approve",
+          envelope: approval("ipc-after-stale-socket"),
+        }),
+      ).resolves.toMatchObject({ sopId: "repair-fixture" });
+    } finally {
+      await restarted.instance.stop();
+    }
+  });
+
+  it("refuses to unlink a live control socket", async () => {
+    const live = await server();
+    await expect(server(live.path)).rejects.toThrow(
+      /live control socket|existing control socket/,
+    );
+    await live.instance.stop();
+  });
+
+  it("never removes an existing non-socket path it did not create", async () => {
+    const path = socketPath();
+    writeFileSync(path, "operator-owned\n", { mode: 0o600 });
+    await expect(server(path)).rejects.toThrow(/non-socket/);
+    expect(readFileSync(path, "utf8")).toBe("operator-owned\n");
   });
 
   it("accepts a signed scoped approval and rejects same-uid unsigned access", async () => {

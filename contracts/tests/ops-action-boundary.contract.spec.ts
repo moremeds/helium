@@ -30,6 +30,18 @@ import { describe, expect, it } from "vitest";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-30T00:00:00.000Z");
+const postconditionSample = {
+  checkId: "ready",
+  state: "pass" as const,
+  observedAt: NOW.toISOString(),
+  evidenceRefs: ["artifact://check/ready"],
+};
+const terminalEvidence = {
+  ref: "artifact://ops/evidence/recovery.json",
+  sha256: "d".repeat(64),
+  schema: "helium.ops.recovery-evidence/v1" as const,
+  assertionId: "recovery-act-1",
+};
 
 describe("mutation action boundary", () => {
   it("allows at most one of two racing controllers to hold a component lease", () => {
@@ -98,9 +110,9 @@ describe("mutation action boundary", () => {
     const sequence: OperationsEvent[] = [
       { v: 1, id: "event-1", at: at(1), type: "action-proposed", actionId: "act-1", incidentId: "inc-1", componentId: "runtime", sopId: "repair", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "event-2", at: at(2), type: "action-authorized", actionId: "act-1", authority: "auto" },
-      { v: 1, id: "event-3", at: at(3), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", argv: [], baselineAllPassing: false },
-      { v: 1, id: "event-4", at: at(4), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false },
-      { v: 1, id: "event-5", at: at(5), type: "action-verified", actionId: "act-1", outcome: "succeeded", postconditionRefs: ["ready"] },
+      { v: 1, id: "event-3", at: at(3), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: at(3), samples: [{ ...postconditionSample, state: "fail", observedAt: at(3) }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" } },
+      { v: 1, id: "event-4", at: at(4), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2, startedAt: at(4), finishedAt: at(4) },
+      { v: 1, id: "event-5", at: at(5), type: "action-verified", actionId: "act-1", outcome: "succeeded", postconditionRefs: ["ready"], postconditionSamples: [postconditionSample], recoveryEvidence: terminalEvidence },
     ];
 
     for (let prefix = 0; prefix <= sequence.length; prefix += 1) {
@@ -210,9 +222,9 @@ describe("signed authority and evidence boundary", () => {
     const events: OperationsEvent[] = [
       { v: 1, id: "terminal-1", at: NOW.toISOString(), type: "action-proposed", actionId: "act-1", incidentId: "inc-1", componentId: "runtime", sopId: "repair", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "terminal-2", at: NOW.toISOString(), type: "action-authorized", actionId: "act-1", authority: "auto" },
-      { v: 1, id: "terminal-3", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", argv: [], baselineAllPassing: false },
-      { v: 1, id: "terminal-4", at: NOW.toISOString(), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false },
-      { v: 1, id: "terminal-5", at: NOW.toISOString(), type: "action-verified", actionId: "act-1", outcome: "failed", postconditionRefs: ["ready"] },
+      { v: 1, id: "terminal-3", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [{ ...postconditionSample, state: "fail" }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" } },
+      { v: 1, id: "terminal-4", at: NOW.toISOString(), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2, startedAt: NOW.toISOString(), finishedAt: NOW.toISOString() },
+      { v: 1, id: "terminal-5", at: NOW.toISOString(), type: "action-verified", actionId: "act-1", outcome: "failed", postconditionRefs: ["ready"], postconditionSamples: [{ ...postconditionSample, state: "fail" }], recoveryEvidence: terminalEvidence },
       { v: 1, id: "terminal-6", at: NOW.toISOString(), type: "observation-recorded", observation: {
         version: 1, id: "healthy-later", componentId: "runtime", probeId: "runtime.ready.v1",
         observedAt: NOW.toISOString(), expiresAt: "2026-08-30T00:05:00.000Z", state: "ok",
@@ -224,6 +236,7 @@ describe("signed authority and evidence boundary", () => {
     expect(() => store.append({
       v: 1, id: "terminal-7", at: NOW.toISOString(), type: "action-verified",
       actionId: "act-1", outcome: "succeeded", postconditionRefs: ["ready"],
+      postconditionSamples: [postconditionSample], recoveryEvidence: terminalEvidence,
     })).toThrow(/already terminal/);
     expect(store.state().actions["act-1"]?.state).toBe("failed");
   });
@@ -252,8 +265,18 @@ function recoveryBundle() {
     controllerProbe: { result: "clear" as const, observedLabels: [], evidenceRef: "artifact://controller/1" },
     lease: { leaseId: "lease-1", operationId: "op-1" },
     intent: { actionId: "act-1", argv: [], baseline: { capturedAt: NOW.toISOString(), allPassing: false, sampleCount: 1 } },
-    receipt: { exitCode: 0, timedOut: false, outputDigest: digest },
-    postconditionSamples: [{ checkId: "ready", state: "pass" as const, observedAt: NOW.toISOString() }],
+    receipt: {
+      exitCode: 0,
+      timedOut: false,
+      outputDigest: digest,
+      evidence: { ref: "artifact://receipt/1", sha256: hash },
+    },
+    postconditionSamples: [{
+      checkId: "ready",
+      state: "pass" as const,
+      observedAt: NOW.toISOString(),
+      evidenceRefs: ["artifact://check/ready"],
+    }],
     outcome: "succeeded" as const, attribution: "automatic" as const,
     verifier: { identity: "contract", version: "1", decision: "pass" as const },
     replayRef: "artifact://replay/1", status: "PROVEN" as const, limitation: "offline fixture",

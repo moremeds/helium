@@ -42,35 +42,44 @@ const DEFAULT_MAX_REQUEST_BYTES = 64 * 1024;
 
 export class OpsControlServer {
   #server: Server | undefined;
+  #ownsSocket = false;
   #sequence = 0;
 
   constructor(private readonly options: OpsControlServerOptions) {}
 
   async start(): Promise<void> {
     if (this.#server !== undefined) throw new Error("ops control server already started");
-    try {
-      await lstat(this.options.socketPath);
-      throw new Error(`refusing existing control socket path: ${this.options.socketPath}`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
+    await reclaimStaleSocket(this.options.socketPath);
 
     const server = createServer((socket) => this.#serve(socket));
     this.#server = server;
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        server.off("listening", onListening);
-        reject(error);
-      };
-      const onListening = () => {
-        server.off("error", onError);
-        resolve();
-      };
-      server.once("error", onError);
-      server.once("listening", onListening);
-      server.listen(this.options.socketPath);
-    });
-    await chmod(this.options.socketPath, 0o600);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          server.off("listening", onListening);
+          reject(error);
+        };
+        const onListening = () => {
+          server.off("error", onError);
+          this.#ownsSocket = true;
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(this.options.socketPath);
+      });
+      await chmod(this.options.socketPath, 0o600);
+    } catch (error) {
+      this.#server = undefined;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      if (this.#ownsSocket) {
+        this.#ownsSocket = false;
+        await unlink(this.options.socketPath).catch((unlinkError: unknown) => {
+          if ((unlinkError as NodeJS.ErrnoException).code !== "ENOENT") throw unlinkError;
+        });
+      }
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
@@ -81,10 +90,13 @@ export class OpsControlServer {
         server.close((error) => (error === undefined ? resolve() : reject(error))),
       );
     }
-    try {
-      await unlink(this.options.socketPath);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    if (this.#ownsSocket) {
+      this.#ownsSocket = false;
+      try {
+        await unlink(this.options.socketPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
   }
 
@@ -159,6 +171,61 @@ export class OpsControlServer {
     });
     return { ok: true, value: { recorded: true, operatorId: accepted.operatorId } };
   }
+}
+
+async function reclaimStaleSocket(path: string): Promise<void> {
+  let before: Awaited<ReturnType<typeof lstat>>;
+  try {
+    before = await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (!before.isSocket()) {
+    throw new Error(`refusing non-socket control path: ${path}`);
+  }
+  if (typeof process.getuid === "function" && before.uid !== process.getuid()) {
+    throw new Error(`refusing control socket owned by another uid: ${path}`);
+  }
+  if (await socketAcceptsConnections(path)) {
+    throw new Error(`refusing live control socket: ${path}`);
+  }
+
+  let after: Awaited<ReturnType<typeof lstat>>;
+  try {
+    after = await lstat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  if (!after.isSocket() || after.dev !== before.dev || after.ino !== before.ino) {
+    throw new Error(`control socket changed during stale check: ${path}`);
+  }
+  await unlink(path);
+}
+
+async function socketAcceptsConnections(path: string): Promise<boolean> {
+  return await new Promise<boolean>((resolve, reject) => {
+    const socket = createConnection(path);
+    const timer = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`control socket liveness check timed out: ${path}`));
+    }, 500);
+    const finish = (value: boolean) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(value);
+    };
+    socket.once("connect", () => finish(true));
+    socket.once("error", (error: NodeJS.ErrnoException) => {
+      if (error.code === "ECONNREFUSED" || error.code === "ENOENT") {
+        finish(false);
+        return;
+      }
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
 export class OpsControlClient {

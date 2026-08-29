@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, verify } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, generateKeyPairSync, verify } from "node:crypto";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { canonicalJson } from "../../packages/core/lib/event-store.js";
 import { runManifestSigner } from "./sign-authority-manifest.mjs";
+import { hardwareIdentityHash } from "./signing-host-policy.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "helium-sign-manifest-"));
 after(() => rmSync(dir, { recursive: true, force: true }));
+const operatorIdentity = "fixture-operator-hardware";
+const miniIdentity = "fixture-mini-hardware";
+const signingHost = {
+  hardwareIdentity: operatorIdentity,
+  policy: {
+    version: 1,
+    allowedOperatorHostHashes: [hardwareIdentityHash(operatorIdentity)],
+    forbiddenMiniHostHashes: [hardwareIdentityHash(miniIdentity)],
+  },
+};
 
 function sop(authority = "approve") {
   const unsigned = {
@@ -36,24 +47,69 @@ function sop(authority = "approve") {
   return { ...unsigned, digest: `sha256:${"0".repeat(64)}` };
 }
 
-test("signs exact SOP id/version/digest/authority entries with Ed25519", async () => {
-  const { createHash } = await import("node:crypto");
+function certificationFixture(root, raw, executable) {
+  const components = join(root, "components");
+  const checks = join(root, "checks");
+  const executors = join(root, "executors");
+  for (const path of [components, checks, executors]) mkdirSync(path);
+  const hash = createHash("sha256").update(readFileSync(executable)).digest("hex");
+  raw.action.executable.path = executable;
+  raw.action.executable.identity.value = hash;
+  writeFileSync(join(components, "fixture.json"), JSON.stringify({
+    version: 1,
+    id: "fixture",
+    kind: "fixture",
+    dimensions: ["integrity"],
+    mutationOwner: {
+      owner: "opsd",
+      competingLabels: [],
+      changedAt: "2026-08-30T00:00:00.000Z",
+      changeRef: "fixture",
+    },
+  }));
+  writeFileSync(join(checks, "fixture.json"), JSON.stringify({
+    id: "fixture-check",
+    kind: "business",
+    probe: { probeId: "fixture.v1", args: {} },
+    expect: { dimension: "integrity", operator: "eq", value: true },
+    onUnavailable: "unknown",
+    timeoutMs: 1_000,
+    owner: "fixture",
+  }));
+  writeFileSync(join(executors, "fixture.json"), JSON.stringify({
+    executorId: "fixture",
+    path: executable,
+    identity: { kind: "sha256", value: hash },
+    argvSchema: { id: "fixture-argv", params: [] },
+    cwd: root,
+    environmentProfile: {},
+    timeoutMs: 1_000,
+    maxOutputBytes: 1_000,
+  }));
+  return { components, checks, executors };
+}
+
+test("signs exact certified SOP id/version/digest/authority entries with Ed25519", async () => {
   const raw = sop();
+  const executable = join(dir, "fixture-executable");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const fixture = certificationFixture(dir, raw, executable);
   raw.digest = `sha256:${createHash("sha256").update(canonicalJson(Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")))).digest("hex")}`;
   const sops = join(dir, "sops");
-  const { mkdirSync } = await import("node:fs");
   mkdirSync(sops);
   writeFileSync(join(sops, "fixture.json"), JSON.stringify(raw));
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = join(dir, "operator.pem");
   const output = join(dir, "manifest.json");
   writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
-  process.env.HELIUM_OPS_SIGNING_ALLOWED = "1";
-  try {
-    await runManifestSigner(["--sops-dir", sops, "--private-key", key, "--output", output]);
-  } finally {
-    delete process.env.HELIUM_OPS_SIGNING_ALLOWED;
-  }
+  await runManifestSigner([
+    "--sops-dir", sops,
+    "--components-dir", fixture.components,
+    "--checks-dir", fixture.checks,
+    "--executors-dir", fixture.executors,
+    "--private-key", key,
+    "--output", output,
+  ], { signingHost });
   const manifest = JSON.parse(readFileSync(output, "utf8"));
   assert.deepEqual(manifest.entries, [
     { sopId: raw.id, version: 1, digest: raw.digest, authority: "approve" },
@@ -64,30 +120,71 @@ test("signs exact SOP id/version/digest/authority entries with Ed25519", async (
   );
 });
 
-test("refuses the mini role, an exposed key, and a stale declared digest", async () => {
-  const { createHash } = await import("node:crypto");
+test("refuses a registered mini, an exposed key, and a stale declared digest", async () => {
   const raw = sop();
+  const executable = join(dir, "refusal-executable");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const root = join(dir, "refusal-fixture");
+  mkdirSync(root);
+  const fixture = certificationFixture(root, raw, executable);
   raw.digest = `sha256:${createHash("sha256").update(canonicalJson(Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")))).digest("hex")}`;
   const sops = join(dir, "refusal-sops");
-  const { mkdirSync } = await import("node:fs");
   mkdirSync(sops);
   const sopPath = join(sops, "fixture.json");
   writeFileSync(sopPath, JSON.stringify(raw));
   const { privateKey } = generateKeyPairSync("ed25519");
   const key = join(dir, "refusal.pem");
   writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
-  const args = ["--sops-dir", sops, "--private-key", key, "--output", join(dir, "refused.json")];
+  const args = [
+    "--sops-dir", sops,
+    "--components-dir", fixture.components,
+    "--checks-dir", fixture.checks,
+    "--executors-dir", fixture.executors,
+    "--private-key", key,
+    "--output", join(dir, "refused.json"),
+  ];
 
-  process.env.HELIUM_OPS_SIGNING_ALLOWED = "1";
-  process.env.HELIUM_HOST_ROLE = "mini";
-  await assert.rejects(runManifestSigner(args), /refuses to run on the mini/);
-  delete process.env.HELIUM_HOST_ROLE;
+  await assert.rejects(
+    runManifestSigner(args, { signingHost: { ...signingHost, hardwareIdentity: miniIdentity } }),
+    /registered mini/,
+  );
 
   chmodSync(key, 0o644);
-  await assert.rejects(runManifestSigner(args), /group- or world-accessible/);
+  await assert.rejects(runManifestSigner(args, { signingHost }), /group- or world-accessible/);
   chmodSync(key, 0o600);
 
   writeFileSync(sopPath, JSON.stringify({ ...raw, priority: raw.priority + 1 }));
-  await assert.rejects(runManifestSigner(args), /digest does not match/);
-  delete process.env.HELIUM_OPS_SIGNING_ALLOWED;
+  await assert.rejects(runManifestSigner(args, { signingHost }), /digest does not match/);
+});
+
+test("refuses a structurally uncertified SOP before signing", async () => {
+  const root = join(dir, "uncertified-fixture");
+  mkdirSync(root);
+  const executable = join(root, "fixture-executable");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const raw = sop();
+  const fixture = certificationFixture(root, raw, executable);
+  const componentPath = join(fixture.components, "fixture.json");
+  const component = JSON.parse(readFileSync(componentPath, "utf8"));
+  component.mutationOwner.owner = "external";
+  component.mutationOwner.externalOwnerLabel = "legacy-watchdog";
+  writeFileSync(componentPath, JSON.stringify(component));
+  raw.digest = `sha256:${createHash("sha256").update(canonicalJson(Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")))).digest("hex")}`;
+  const sops = join(root, "sops");
+  mkdirSync(sops);
+  writeFileSync(join(sops, "fixture.json"), JSON.stringify(raw));
+  const { privateKey } = generateKeyPairSync("ed25519");
+  const key = join(root, "operator.pem");
+  writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  await assert.rejects(
+    runManifestSigner([
+      "--sops-dir", sops,
+      "--components-dir", fixture.components,
+      "--checks-dir", fixture.checks,
+      "--executors-dir", fixture.executors,
+      "--private-key", key,
+      "--output", join(root, "manifest.json"),
+    ], { signingHost }),
+    /mutation-owner-not-opsd:external/,
+  );
 });

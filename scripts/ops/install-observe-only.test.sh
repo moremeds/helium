@@ -16,6 +16,7 @@ root="$tmp/home/.helium/ops"
 launchd_root="$tmp/home/Library/LaunchAgents"
 release="$tmp/releases/current"
 mkdir -p "$root" "$launchd_root"
+chmod 700 "$root"
 mkdir -p "$tmp/releases"
 ln -s "$repo" "$release"
 printf 'neighbor-state\n' >"$root/existing-watchdog.state"
@@ -36,17 +37,28 @@ out=$(bash "$here/install-observe-only.sh" \
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || { echo "FAIL: production date override succeeded"; exit 1; }
-printf '%s\n' "$out" | grep -q 'test-only' || {
+printf '%s\n' "$out" | grep -q 'usage:' || {
   echo "FAIL: date override refusal was not explicit"
   exit 1
 }
 [ "$(snapshot)" = "$before" ] || { echo "FAIL: date override refusal wrote files"; exit 1; }
 
+installer_at() {
+  local date="$1"
+  local target="$tmp/install-observe-only-$date.sh"
+  sed "s|now=\"\$(/bin/date -u +%F)\"|now=\"$date\"|" \
+    "$here/install-observe-only.sh" >"$target"
+  chmod 700 "$target"
+  printf '%s\n' "$target"
+}
+
+pre_freeze_installer="$(installer_at 2026-08-30)"
+post_freeze_installer="$(installer_at 2026-09-01)"
+
 echo "case 1: freeze refuses before and through 2026-08-31 without writing"
 set +e
-out=$(HELIUM_OPS_TEST_ALLOW_DATE_OVERRIDE=1 bash "$here/install-observe-only.sh" \
-  --release "$release" --root "$root" --launchd-root "$launchd_root" \
-  --now 2026-08-30 2>&1)
+out=$(bash "$pre_freeze_installer" \
+  --release "$release" --root "$root" --launchd-root "$launchd_root" 2>&1)
 rc=$?
 set -e
 [ "$rc" -ne 0 ] || { echo "FAIL: pre-freeze install succeeded"; exit 1; }
@@ -54,12 +66,14 @@ printf '%s\n' "$out" | grep -q 'freeze' || { echo "FAIL: refusal did not name fr
 [ "$(snapshot)" = "$before" ] || { echo "FAIL: freeze refusal wrote files"; exit 1; }
 
 echo "case 2: post-freeze install renders exactly config and plist"
-HELIUM_OPS_TEST_ALLOW_DATE_OVERRIDE=1 bash "$here/install-observe-only.sh" \
-  --release "$release" --root "$root" --launchd-root "$launchd_root" \
-  --now 2026-09-01
+bash "$post_freeze_installer" \
+  --release "$release" --root "$root" --launchd-root "$launchd_root"
 config="$root/config/opsd.json"
 plist="$launchd_root/com.helium.opsd.plist"
 [ -f "$config" ] && [ -f "$plist" ] || { echo "FAIL: declared files missing"; exit 1; }
+[ "$(stat -f '%Lp' "$root")" = "700" ] || { echo "FAIL: ops root is not 0700"; exit 1; }
+[ "$(stat -f '%Lp' "$root/state")" = "700" ] || { echo "FAIL: state dir is not 0700"; exit 1; }
+[ "$(stat -f '%Lp' "$config")" = "600" ] || { echo "FAIL: config is not 0600"; exit 1; }
 files="$(find "$tmp/home" -type f | sed "s|$tmp/home/||" | sort)"
 [ "$files" = "$(printf '%s\n' \
   '.helium/ops/config/opsd.json' \
@@ -97,6 +111,15 @@ echo "case 4: release scripts preserve a compatible opsd/plugin pair"
 grep -q 'install-observe-only.sh' "$repo/scripts/release/deploy.sh"
 grep -q 'com.helium.opsd' "$repo/scripts/release/rollback.sh"
 grep -q 'plugins/ops-agent' "$repo/scripts/release/rollback.sh"
+grep -q -- '--check-config' "$repo/scripts/release/deploy.sh"
+grep -q -- '--check-config' "$repo/scripts/release/rollback.sh"
+grep -q 'controller-cycle-recorded' "$repo/scripts/release/deploy.sh"
+grep -q 'controller-cycle-recorded' "$repo/scripts/release/rollback.sh"
+grep -q 'releaseRef===target' "$repo/scripts/release/deploy.sh"
+grep -q 'releaseRef===target' "$repo/scripts/release/rollback.sh"
+grep -q 'ops/executors' "$repo/scripts/release/deploy.sh"
+grep -q 'ops/executors' "$repo/scripts/release/rollback.sh"
+grep -q 'restored opsd produced no target-release observation cycle' "$repo/scripts/release/deploy.sh"
 
 echo "case 5: a fresh DSH heartbeat does not hide stale opsd observations"
 state="$tmp/deadman-state"

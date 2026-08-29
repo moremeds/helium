@@ -1,7 +1,11 @@
 import { generateKeyPairSync, sign } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ApprovalLedger,
+  FileOperatorEnvelopeStore,
   OperatorEnvelopeVerifier,
   approvalSigningPayload,
   interventionSigningPayload,
@@ -105,6 +109,25 @@ describe("ApprovalLedger", () => {
     const ledger = new ApprovalLedger({ trustedKey: publicKey, now: () => NOW });
     expect(() => ledger.accept({ ...approval(), command: "rm -rf" })).toThrow();
   });
+
+  it("persists accepted approvals and refuses the same nonce after restart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-approval-ledger-"));
+    const first = new ApprovalLedger({
+      trustedKey: publicKey,
+      now: () => NOW,
+      persistence: new FileOperatorEnvelopeStore(dir),
+    });
+    const envelope = approval({ nonce: "nonce-durable-approval" });
+    const accepted = first.accept(envelope);
+
+    const restarted = new ApprovalLedger({
+      trustedKey: publicKey,
+      now: () => NOW,
+      persistence: new FileOperatorEnvelopeStore(dir),
+    });
+    expect(restarted.find(accepted.incidentId, accepted.sopId)).toEqual(accepted);
+    expect(() => restarted.accept(envelope)).toThrow(/replay/);
+  });
 });
 
 describe("OperatorEnvelopeVerifier", () => {
@@ -145,5 +168,23 @@ describe("OperatorEnvelopeVerifier", () => {
     const once = intervention({ nonce: "intervention-replay" });
     verifier.acceptIntervention(once);
     expect(() => verifier.acceptIntervention(once)).toThrow(/replay/);
+  });
+
+  it("refuses an intervention nonce after verifier restart", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-intervention-ledger-"));
+    const envelope = intervention({ nonce: "nonce-durable-intervention" });
+    new OperatorEnvelopeVerifier({
+      trustedKey: publicKey,
+      now: () => NOW,
+      persistence: new FileOperatorEnvelopeStore(dir),
+    }).acceptIntervention(envelope);
+
+    expect(() =>
+      new OperatorEnvelopeVerifier({
+        trustedKey: publicKey,
+        now: () => NOW,
+        persistence: new FileOperatorEnvelopeStore(dir),
+      }).acceptIntervention(envelope),
+    ).toThrow(/replay/);
   });
 });

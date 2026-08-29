@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # launchd entrypoint for the standalone ops daemon.
 set -euo pipefail
+umask 077
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 release="$(cd "$here/../.." && pwd -P)"

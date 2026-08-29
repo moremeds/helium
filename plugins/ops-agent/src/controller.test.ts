@@ -1,4 +1,7 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
 import {
   ActionLeaseController,
@@ -26,6 +29,11 @@ import {
   type ActionExecutor,
   type OperationsStorePort,
 } from "./controller.js";
+import {
+  FileComponentActionLocks,
+  type ComponentActionLockPort,
+} from "./component-action-lock.js";
+import { FileRecoveryEvidenceStore } from "./recovery-evidence-store.js";
 import { ComponentRegistry, type OpsBundle } from "./component-registry.js";
 import {
   ExecutionSuppressedError,
@@ -81,7 +89,7 @@ const check = {
   owner: "ops",
 };
 
-function sop(authority: SopAuthority): SopDefinition {
+function sop(authority: SopAuthority, graceMs = 0): SopDefinition {
   return {
     version: 1,
     id: "repair-fixture",
@@ -104,7 +112,7 @@ function sop(authority: SopAuthority): SopDefinition {
     },
     preconditions: [],
     postconditions: [check.id],
-    graceMs: 0,
+    graceMs,
     maxAttempts: 2,
     cooldownMs: 60_000,
   };
@@ -112,9 +120,9 @@ function sop(authority: SopAuthority): SopDefinition {
 
 function registry(
   authority: SopAuthority,
-  options: { manifest?: boolean } = { manifest: true },
+  options: { manifest?: boolean; graceMs?: number } = { manifest: true },
 ): ComponentRegistry {
-  const definition = sop(authority);
+  const definition = sop(authority, options.graceMs);
   const entries: AuthorityManifestEntry[] = [
     {
       sopId: definition.id,
@@ -199,19 +207,30 @@ interface HarnessOptions {
   baselinePassing?: boolean;
   controllerResults?: Array<"clear" | "competing" | "unknown">;
   rivalAppearsDuringBaseline?: boolean;
+  graceMs?: number;
+  postconditionStates?: Array<"pass" | "fail" | "unknown">;
+  now?: () => Date;
+  sleep?: (ms: number) => Promise<void>;
+  graceIntervalMs?: number;
+  componentLocks?: ComponentActionLockPort;
+  store?: MemoryStore;
+  stateDir?: string;
 }
 
 function harness(options: HarnessOptions) {
-  const store = new MemoryStore();
+  const stateDir = options.stateDir ?? mkdtempSync(join(tmpdir(), "helium-controller-unit-"));
+  const store = options.store ?? new MemoryStore();
+  const now = options.now ?? (() => NOW);
   const executor = new FakeExecutor();
   const approvals = new ApprovalLedger({ trustedKey: publicKey, now: () => NOW });
   let observationSequence = 0;
   let factoryCalls = 0;
   let probeIndex = 0;
   let rivalAppeared = false;
+  let postconditionIndex = 0;
   const controllerResults = options.controllerResults ?? ["clear"];
 
-  const sample = (state: "pass" | "fail"): PostconditionSample[] => [
+  const sample = (state: "pass" | "fail" | "unknown"): PostconditionSample[] => [
     {
       checkId: check.id,
       state,
@@ -224,9 +243,10 @@ function harness(options: HarnessOptions) {
     mode: options.mode,
     registry: registry(options.authority ?? "auto", {
       manifest: options.manifest,
+      graceMs: options.graceMs,
     }),
     store,
-    now: () => NOW,
+    now,
     collect: async (sink) => {
       const observation = failingObservation(++observationSequence);
       await sink.append(observation);
@@ -239,7 +259,11 @@ function harness(options: HarnessOptions) {
             rivalAppeared = options.rivalAppearsDuringBaseline === true;
             return sample(options.baselinePassing === true ? "pass" : "fail");
           })()
-        : sample("pass"),
+        : sample(
+            options.postconditionStates?.[
+              Math.min(postconditionIndex++, options.postconditionStates.length - 1)
+            ] ?? "pass",
+          ),
     controllerProbe: {
       async check() {
         const result = rivalAppeared
@@ -258,12 +282,21 @@ function harness(options: HarnessOptions) {
       ttlMs: 60_000,
       now: () => NOW,
     }),
+    componentLocks: options.componentLocks ?? new FileComponentActionLocks({
+      dir: join(stateDir, "locks"),
+      bootId: "boot-test",
+    }),
     approvals,
+    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence")),
     createExecutor() {
       factoryCalls += 1;
       return executor;
     },
     argvFor: () => [],
+    ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
+    ...(options.graceIntervalMs === undefined
+      ? {}
+      : { graceIntervalMs: options.graceIntervalMs }),
   });
 
   return {
@@ -271,6 +304,8 @@ function harness(options: HarnessOptions) {
     executor,
     approvals,
     controller,
+    stateDir,
+    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence")),
     factoryCalls: () => factoryCalls,
   };
 }
@@ -427,5 +462,77 @@ describe("OpsController modes", () => {
     expect(h.store.events.map((event) => event.type)).not.toContain(
       "action-intent-recorded",
     );
+  });
+
+  it("writes and revalidates complete evidence before the terminal assertion", async () => {
+    const h = harness({ mode: "auto" });
+    await h.controller.tick();
+    const terminal = h.store.events.find((event) => event.type === "action-verified");
+    expect(terminal).toMatchObject({
+      recoveryEvidence: {
+        schema: "helium.ops.recovery-evidence/v1",
+        assertionId: expect.stringMatching(/^recovery-act-/),
+        sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    });
+    expect(() => h.evidence.verifyHistory(h.store.replay())).not.toThrow();
+  });
+
+  it("waits through the declared grace window and records every sample", async () => {
+    let nowMs = NOW.getTime();
+    const h = harness({
+      mode: "auto",
+      graceMs: 2_000,
+      graceIntervalMs: 1_000,
+      postconditionStates: ["fail", "pass"],
+      now: () => new Date(nowMs),
+      sleep: async (ms) => { nowMs += ms; },
+    });
+    const result = await h.controller.tick();
+    expect(result.actions[0]).toMatchObject({ outcome: "succeeded" });
+    const terminal = h.store.events.find((event) => event.type === "action-verified");
+    expect(terminal?.type === "action-verified" && terminal.postconditionSamples).toHaveLength(2);
+  });
+
+  it("uses one OS-atomic lock across controllers with independent lease tables", async () => {
+    const lockDir = mkdtempSync(join(tmpdir(), "helium-controller-race-"));
+    const locks = new FileComponentActionLocks({ dir: lockDir, bootId: "boot-race" });
+    const first = harness({ mode: "auto", componentLocks: locks });
+    const second = harness({ mode: "auto", componentLocks: locks });
+    const results = await Promise.all([first.controller.tick(), second.controller.tick()]);
+    expect(first.executor.runs + second.executor.runs).toBe(1);
+    expect(results.flatMap((result) => result.actions).map((action) => action.disposition).sort())
+      .toEqual(["execute", "observe"]);
+    expect(results.flatMap((result) => result.actions).find((action) => action.disposition === "observe"))
+      .toMatchObject({ reason: "component-lock-held" });
+  });
+
+  it("reconciles a persisted intent to uncertain on startup and never reruns it", async () => {
+    const seed = harness({ mode: "auto" });
+    const incidentKey = "fixture-service|integrity|failed|fixture-service";
+    const incidentId = `inc-${createHash("sha256").update(incidentKey).digest("hex").slice(0, 32)}`;
+    const baseline = {
+      checkId: check.id,
+      state: "fail" as const,
+      observedAt: NOW.toISOString(),
+      evidenceRefs: ["artifact://check/fail"],
+    };
+    for (const event of [
+      { v: 1, id: "restart-observation", at: NOW.toISOString(), type: "observation-recorded", observation: failingObservation(99) },
+      { v: 1, id: "restart-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-99"] },
+      { v: 1, id: "restart-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-restart", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
+      { v: 1, id: "restart-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-restart", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
+      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" } },
+    ]) seed.store.append(event);
+
+    const restarted = harness({
+      mode: "auto",
+      store: seed.store,
+      stateDir: seed.stateDir,
+    });
+    await restarted.controller.tick();
+    expect(seed.store.state().actions["act-restart"]?.state).toBe("uncertain");
+    expect(restarted.executor.runs).toBe(0);
+    expect(seed.store.events.filter((event) => event.type === "action-verified")).toHaveLength(1);
   });
 });

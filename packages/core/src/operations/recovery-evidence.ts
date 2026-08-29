@@ -82,6 +82,7 @@ export const RecoveryEvidenceSchema = z
         exitCode: z.number().int().nullable(),
         timedOut: z.boolean(),
         outputDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+        evidence: HashedRefSchema,
       })
       .optional(),
 
@@ -90,6 +91,7 @@ export const RecoveryEvidenceSchema = z
         checkId: OpsIdSchema,
         state: z.enum(["pass", "fail", "unknown"]),
         observedAt: z.string().min(1),
+        evidenceRefs: z.array(z.string().min(1).max(512)).min(1),
       }),
     ),
     outcome: z.enum(ACTION_OUTCOMES),
@@ -116,38 +118,68 @@ export const RecoveryEvidenceSchema = z
       .optional(),
   })
   .superRefine((bundle, ctx) => {
+    const issue = (path: (string | number)[], message: string) => {
+      ctx.addIssue({ code: "custom", path, message });
+    };
     for (const field of OPTIONAL_RECOVERY_FIELDS) {
       if (bundle[field] !== undefined) continue;
       if (bundle.notApplicable?.[field] !== undefined) continue;
-      ctx.addIssue({
-        code: "custom",
-        path: [field],
-        message: `${field} is absent with no notApplicableReason; state why rather than omitting it`,
-      });
+      issue(
+        [field],
+        `${field} is absent with no notApplicableReason; state why rather than omitting it`,
+      );
+    }
+    const grant = bundle.authorityManifestEntry;
+    if (grant.sopId !== bundle.sopId || grant.version !== bundle.sopVersion ||
+        grant.digest !== bundle.sopDigest || grant.authority !== bundle.authority) {
+      issue(
+        ["authorityManifestEntry"],
+        "authority manifest entry does not match the exact SOP grant",
+      );
+    }
+    if (bundle.intent !== undefined) {
+      if (bundle.lease === undefined) {
+        issue(["lease"], "a recorded intent requires its action lease");
+      }
+      if (!bundle.eligibility.eligible || bundle.eligibility.reasons.length > 0) {
+        issue(["eligibility"], "a recorded intent requires certified eligibility");
+      }
+      if (bundle.mutationOwner.owner !== "opsd") {
+        issue(["mutationOwner"], "a recorded intent requires opsd mutation ownership");
+      }
+      if (bundle.controllerProbe.result !== "clear") {
+        issue(["controllerProbe"], "a recorded intent requires a clear controller probe");
+      }
+    }
+    if (bundle.receipt !== undefined && bundle.intent === undefined) {
+      issue(["receipt"], "an execution receipt requires a recorded intent");
     }
     // A success claim requires the evidence a success is made of.
     if (bundle.outcome === "succeeded") {
       if (bundle.intent === undefined || bundle.receipt === undefined) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["outcome"],
-          message: "a succeeded outcome requires both an intent and a receipt",
-        });
+        issue(["outcome"], "a succeeded outcome requires both an intent and a receipt");
       } else if (bundle.intent.baseline.allPassing) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["outcome"],
-          message:
-            "a succeeded outcome requires a baseline with at least one failing postcondition",
-        });
+        issue(
+          ["outcome"],
+          "a succeeded outcome requires a baseline with at least one failing postcondition",
+        );
+      }
+      if (bundle.receipt !== undefined &&
+          (bundle.receipt.exitCode !== 0 || bundle.receipt.timedOut)) {
+        issue(["receipt"], "a succeeded outcome requires a successful process receipt");
+      }
+      const latestByCheck = new Map<string, (typeof bundle.postconditionSamples)[number]>();
+      for (const sample of bundle.postconditionSamples) latestByCheck.set(sample.checkId, sample);
+      if (latestByCheck.size === 0 ||
+          [...latestByCheck.values()].some((sample) => sample.state !== "pass")) {
+        issue(["postconditionSamples"], "a succeeded outcome requires passing postcondition samples");
+      }
+      if (bundle.attribution !== "automatic") {
+        issue(["attribution"], "a succeeded outcome requires automatic attribution");
       }
     }
     if (bundle.attribution === "automatic" && bundle.intent === undefined) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["attribution"],
-        message: "automatic attribution requires a recorded intent",
-      });
+      issue(["attribution"], "automatic attribution requires a recorded intent");
     }
   });
 export type RecoveryEvidence = z.infer<typeof RecoveryEvidenceSchema>;

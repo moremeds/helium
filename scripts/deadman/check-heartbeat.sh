@@ -147,7 +147,7 @@ check_opsd() {
     last_iso="(no valid opsd observation)"
   fi
   age=$((now - last_epoch))
-  if [ "$last_epoch" -gt 0 ] && [ "$age" -lt "$OPSD_STALE_S" ]; then
+  if [ "$last_epoch" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt "$OPSD_STALE_S" ]; then
     rm -f "$opsd_sentinel"
     echo "opsd fresh: last observation ${age}s ago ($last_iso)"
     return 0
@@ -184,7 +184,7 @@ check_opsd() {
 }
 
 age=$((now - last_epoch))
-if [ "$last_epoch" -gt 0 ] && [ "$age" -lt "$STALE_S" ]; then
+if [ "$last_epoch" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -lt "$STALE_S" ]; then
   rm -f "$sentinel"
   echo "fresh: last heartbeat ${age}s ago ($last_iso)"
   set +e
