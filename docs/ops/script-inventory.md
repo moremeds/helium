@@ -6,7 +6,9 @@ proved incident symptoms, but did not retain executable paths, owners, release
 hashes, or a successful controlled repair. The 2026-08-30 operator amendment
 permits bounded read-only identity/configuration inspection during AC#1, while
 installation, repair, deployment, service lifecycle changes and application/
-configuration/state writes remain frozen through 2026-08-31.
+configuration/state writes remained frozen until the separately recorded
+weekend commissioning waiver. That waiver permits only the isolated
+empty-authority observe-only install and does not certify any script below.
 
 The YAML registrations therefore use the impossible
 `/__HELIUM_UNCERTIFIED__/` prefix. They exercise exact-argv and policy contracts
@@ -14,22 +16,21 @@ without making a guessed production path executable. The committed authority
 manifest has no entries, and current mutation ownership is `external` or
 `none`, so every mutating SOP is held at effective `observe`.
 
-The signing-host policy remains deliberately uncommissioned. On 2026-08-30 the
+The signing-host identity boundary is now commissioned. On 2026-08-30 the
 approved off-mini operator workstation was recorded as a SHA-256 hardware hash
-in `allowedOperatorHostHashes`; its raw hardware UUID was not retained. The mini
-hash remains absent because reading it would start a process during AC#1 and
-was forbidden by the superseded zero-process rule. The approved inventory must
-place the mini hash only in `forbiddenMiniHostHashes`. Both
-approval signing and authority-manifest signing continue to fail closed until
-both lists are populated. The manifest signer also revalidates component
+in `allowedOperatorHostHashes`, and the mini was independently recorded only in
+`forbiddenMiniHostHashes`; neither raw hardware UUID was retained. Approval and
+authority-manifest signing therefore accept only the operator workstation and
+explicitly refuse the mini. The manifest signer also revalidates component
 ownership, business postconditions, executor registration, and the executable
 hash immediately before signing; a structurally uncertified SOP cannot enter
 the manifest.
 
-Executable ownership is likewise explicit: `expectedOwnerUid: 0` in the
-committed sentinel registrations is not a guessed deployment owner. It keeps
-the registrations non-executable until the post-freeze inventory replaces it
-with the verified uid. The signer also requires a separately exported
+Executable ownership is likewise explicit: live inspection confirmed operator
+UID 501, but `expectedOwnerUid: 0` remains in the sentinel registrations because
+none of the inspected legacy scripts implements the exact registered argv and
+blast-radius contract. The mismatch keeps them non-executable until purpose-built
+wrappers are reviewed and deployed. The signer also requires a separately exported
 `--registered-probes` inventory from the actual host probe registry; it never
 derives runnable probe ids from the submitted check files. Until every
 postcondition probe is present in that inventory, an above-observe grant cannot
@@ -37,10 +38,34 @@ be signed.
 
 IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
+## 2026-08-30 live identity capture
+
+- Host: `moremeds-Mini`, operator UID 501; only the SHA-256 hardware identity is
+  retained in policy.
+- Selected Helium release: `/Users/moremeds/projects/helium-releases/v0.1.5`.
+- Selected Livewire release:
+  `/Users/moremeds/market-warehouse/releases/4d533f4fded9000ed69c525ff2274de397f0d8ba`.
+- Active Colima controllers: `com.moremeds.colima-runtime-watchdog` and
+  `com.moremeds.colima-after-datalake`.
+- Active Livewire controllers: daily update, daily-update watchdog, intraday
+  catch-up, coverage and release promotion labels recorded in the evidence log.
+- No `com.helium.opsd` label or plist existed at capture time.
+- Exact plist/script owners, modes and SHA-256 values are in
+  `docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log`.
+- `trading-stack/scripts/reconcile.sh` exists, but its interface is legacy
+  mode/dry-run behavior, not the registered fixed `--scope containers --pull
+  false` contract. The Colima runtime watchdog has its own stateful automatic
+  restart behavior and is the external mutation owner; it is not repurposed as
+  an opsd executor.
+- Livewire exposes several repair families, but no inspected entry point matches
+  the proposed exact `--target-date` plus `--partition` generic Parquet contract.
+  The target data layer and repair family must be chosen from a real incident;
+  certification remains blocked rather than guessing.
+
 ## trading-stack-reconcile
 
-- Repository owner: unresolved; the implementation is not present in this repository
-- Deployment owner: unresolved by the sanitized audit
+- Repository owner: trading-stack (outside this repository)
+- Deployment owner: UID 501
 - Exact path: `/__HELIUM_UNCERTIFIED__/trading-stack-reconcile`
 - Release or hash identity: unresolved; zero digest is a non-deployable sentinel
 - Argv schema: `trading-stack-reconcile-argv-v1`; fixed `--scope containers --pull false`
@@ -54,13 +79,15 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 - Blast radius: container-only reconcile; no images, volumes, mounts, or IB Gateway
 - Rollback or compensation: stop and return to the existing operator runbook; no blind retry
 - Drill state: not run; production-derived fixture does not exercise this command
-- Mutation owner: `colima=external` under `existing-colima-watchdog`
+- Mutation owner: `colima=external` under
+  `com.moremeds.colima-runtime-watchdog`, with
+  `com.moremeds.colima-after-datalake` also competing
 - Certification state: blocked
 
 ## colima-restart
 
-- Repository owner: unresolved; the watchdog implementation is not present here
-- Deployment owner: unresolved by the sanitized audit
+- Repository owner: trading-stack (outside this repository)
+- Deployment owner: UID 501
 - Exact path: `/__HELIUM_UNCERTIFIED__/colima-restart`
 - Release or hash identity: unresolved; zero digest is a non-deployable sentinel
 - Argv schema: `colima-restart-argv-v1`; fixed mode plus attempt `1`
@@ -74,7 +101,9 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 - Blast radius: one Colima VM; no prune, pull, data deletion, mount change, or IB Gateway
 - Rollback or compensation: restore external ownership before re-enabling the legacy watchdog
 - Drill state: observed watchdog exhaustion only; no successful automatic drill
-- Mutation owner: `colima=external` under `existing-colima-watchdog`
+- Mutation owner: `colima=external` under
+  `com.moremeds.colima-runtime-watchdog`, with
+  `com.moremeds.colima-after-datalake` also competing
 - Certification state: blocked
 
 ## livewire-targeted-repair

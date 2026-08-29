@@ -6,11 +6,11 @@ Mac mini change.
 
 ## Current boundary
 
-- AC#1 freezes all Mac mini installs, managed-service starts/stops, repairs,
-  deployments, and application/configuration/state writes through
-  **2026-08-31**. The installer also enforces this date. The 2026-08-30 operator
-  amendment permits bounded read-only SSH identity/configuration inspection;
-  it does not permit running `opsd` or a production probe.
+- The operator's 2026-08-30 weekend commissioning waiver decouples one
+  reversible, isolated observe-only install from AC#1. AC#1 is left uncredited,
+  not called PASS. The waiver does not authorize a Helium release flip, DSH or
+  legacy-controller restart, dead-man modification, SOP grant, repair,
+  ownership handoff or controlled drill.
 - Merging or deploying the repository does not install `opsd`.
 - The committed authority manifest grants no mutation authority. The unresolved
   production script paths, hashes, owners, live postconditions, drill evidence,
@@ -33,22 +33,27 @@ bash scripts/ops/install-observe-only.test.sh
 The test renders into a temporary root, never calls `launchctl`, verifies the
 freeze refusal, and removes the fixture on exit.
 
-## Post-AC#1 operator procedure
+## Operator procedure
 
 Only after separate approval, on the mini and through the currently selected
 release:
 
 ```bash
-bash /Users/moremeds/projects/helium-releases/current/scripts/ops/install-observe-only.sh \
-  --release /Users/moremeds/projects/helium-releases/current \
+bash /Users/moremeds/projects/helium-ops-candidates/<commit>/scripts/ops/install-observe-only.sh \
+  --release /Users/moremeds/projects/helium-ops-candidates/<commit> \
   --root /Users/moremeds/.helium/ops \
-  --launchd-root /Users/moremeds/Library/LaunchAgents
+  --launchd-root /Users/moremeds/Library/LaunchAgents \
+  --commissioning-waiver ops-phase-d-weekend-2026-08-30
 ```
 
-The `current` symlink is intentional: deploy and rollback validate the target
-contains both the collector and plugin, flip that pair atomically, and restart
-an already-installed daemon. Resolving it to one immutable version here would
-strand opsd on the first installed release.
+The waiver flag is required only through 2026-08-31. It is accepted solely for
+the exact operator decision recorded in
+`docs/evidence/ac1-weekend-commissioning-waiver-2026-08-30.md`.
+
+The weekend waiver uses an immutable candidate separate from the selected
+Helium `current` release. After the Phase D PR is merged and a normal release is
+selected, reinstall the observe-only package against `current`; deploy and
+rollback then validate and move the collector/plugin pair together.
 
 The command only creates four private directories, one `0600` configuration,
 and `com.helium.opsd.plist`. It does not write the authority manifest, call

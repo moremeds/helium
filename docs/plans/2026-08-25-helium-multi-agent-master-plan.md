@@ -12,7 +12,9 @@ gate is Ops Phase C; no later phase inherits a pass from an earlier phase.
 managed-service state on the mini during the active AC#1 observation window,
 which closes 2026-08-31. Bounded read-only identity/configuration inspection is
 permitted by the 2026-08-30 operator amendment; see section 13.4 of the
-[ops-agent design](2026-08-25-helium-ops-agent-design.md)
+[ops-agent design](2026-08-25-helium-ops-agent-design.md). The later same-day
+weekend commissioning waiver decouples only a reversible, empty-authority,
+observe-only Ops Phase D install from AC#1 and leaves AC#1 uncredited.
 
 ## Revision 4 — 2026-08-29
 
@@ -833,6 +835,11 @@ anything that must modify it moves to [Phase 3.5](#phase-35-team-admission-enfor
   **2026-08-31**, and that date is the value the installer's freeze-window
   refusal reads. This 2026-08-30 amendment changes only the earlier zero-process
   presence rule; the v1 five-trading-day acceptance conditions are unchanged.
+- The separately recorded `ops-phase-d-weekend-2026-08-30` waiver permits one
+  isolated observe-only `com.helium.opsd` install/load without changing the
+  selected Helium release or existing services. Because this ends the
+  unattended v1 window, AC#1 is not promoted to PASS. The waiver grants no SOP,
+  repair, ownership handoff or drill authority.
 - A parser failure yields `unknown`, never an automatic restart.
 - Agents receive read-only evidence tools and eligible SOP IDs, never a generic
   shell tool.

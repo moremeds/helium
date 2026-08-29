@@ -65,7 +65,29 @@ set -e
 printf '%s\n' "$out" | grep -q 'freeze' || { echo "FAIL: refusal did not name freeze"; exit 1; }
 [ "$(snapshot)" = "$before" ] || { echo "FAIL: freeze refusal wrote files"; exit 1; }
 
-echo "case 2: post-freeze install renders exactly config and plist"
+echo "case 2: only the recorded commissioning waiver bypasses the packaging freeze"
+set +e
+out=$(bash "$pre_freeze_installer" \
+  --release "$release" --root "$root" --launchd-root "$launchd_root" \
+  --commissioning-waiver not-the-recorded-waiver 2>&1)
+rc=$?
+set -e
+[ "$rc" -ne 0 ] || { echo "FAIL: unknown commissioning waiver succeeded"; exit 1; }
+[ "$(snapshot)" = "$before" ] || { echo "FAIL: unknown waiver wrote files"; exit 1; }
+
+bash "$pre_freeze_installer" \
+  --release "$release" --root "$root" --launchd-root "$launchd_root" \
+  --commissioning-waiver ops-phase-d-weekend-2026-08-30
+config="$root/config/opsd.json"
+plist="$launchd_root/com.helium.opsd.plist"
+[ -f "$config" ] && [ -f "$plist" ] || { echo "FAIL: waiver install did not render files"; exit 1; }
+bash "$here/uninstall-observe-only.sh" --root "$root" --launchd-root "$launchd_root"
+[ "$(snapshot)" = "$before" ] || {
+  echo "FAIL: waiver install/uninstall did not restore the redirected tree"
+  exit 1
+}
+
+echo "case 3: post-freeze install renders exactly config and plist"
 bash "$post_freeze_installer" \
   --release "$release" --root "$root" --launchd-root "$launchd_root"
 config="$root/config/opsd.json"
@@ -99,7 +121,7 @@ fi
 }
 plutil -lint "$plist" >/dev/null
 
-echo "case 3: uninstall removes only the exact opsd files"
+echo "case 4: uninstall removes only the exact opsd files"
 bash "$here/uninstall-observe-only.sh" --root "$root" --launchd-root "$launchd_root"
 [ "$(snapshot)" = "$before" ] || {
   echo "FAIL: install/uninstall did not restore the redirected tree"
@@ -107,7 +129,7 @@ bash "$here/uninstall-observe-only.sh" --root "$root" --launchd-root "$launchd_r
   exit 1
 }
 
-echo "case 4: release scripts preserve a compatible opsd/plugin pair"
+echo "case 5: release scripts preserve a compatible opsd/plugin pair"
 grep -q 'install-observe-only.sh' "$repo/scripts/release/deploy.sh"
 grep -q 'com.helium.opsd' "$repo/scripts/release/rollback.sh"
 grep -q 'plugins/ops-agent' "$repo/scripts/release/rollback.sh"
@@ -125,7 +147,7 @@ grep -q 'ops/executors' "$repo/scripts/release/deploy.sh"
 grep -q 'ops/executors' "$repo/scripts/release/rollback.sh"
 grep -q 'restored opsd produced no target-release observation cycle' "$repo/scripts/release/deploy.sh"
 
-echo "case 5: a fresh DSH heartbeat does not hide stale opsd observations"
+echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"
 state="$tmp/deadman-state"
 mkdir -p "$state/jsonl" "$state/opsd" "$tmp/empty-jobs"
 fresh="$(node -e 'process.stdout.write(new Date().toISOString())')"

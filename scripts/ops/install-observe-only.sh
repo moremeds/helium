@@ -4,13 +4,15 @@ set -euo pipefail
 umask 077
 
 FREEZE_END="2026-08-31"
+COMMISSIONING_WAIVER="ops-phase-d-weekend-2026-08-30"
 release=""
 root=""
 launchd_root=""
+commissioning_waiver=""
 now="$(/bin/date -u +%F)"
 
 usage() {
-  echo "usage: install-observe-only.sh --release ABS --root ABS --launchd-root ABS" >&2
+  echo "usage: install-observe-only.sh --release ABS --root ABS --launchd-root ABS [--commissioning-waiver ID]" >&2
   exit 64
 }
 
@@ -19,6 +21,7 @@ while [ "$#" -gt 0 ]; do
     --release) [ "$#" -ge 2 ] || usage; release="$2"; shift 2 ;;
     --root) [ "$#" -ge 2 ] || usage; root="$2"; shift 2 ;;
     --launchd-root) [ "$#" -ge 2 ] || usage; launchd_root="$2"; shift 2 ;;
+    --commissioning-waiver) [ "$#" -ge 2 ] || usage; commissioning_waiver="$2"; shift 2 ;;
     *) usage ;;
   esac
 done
@@ -56,9 +59,16 @@ if ! "$node_bin" \
   echo "host UTC date is not a calendar date" >&2
   exit 64
 fi
-if [[ ! "$now" > "$FREEZE_END" ]]; then
+if [ -n "$commissioning_waiver" ] && [ "$commissioning_waiver" != "$COMMISSIONING_WAIVER" ]; then
+  echo "unknown commissioning waiver: $commissioning_waiver" >&2
+  exit 77
+fi
+if [[ ! "$now" > "$FREEZE_END" ]] && [ "$commissioning_waiver" != "$COMMISSIONING_WAIVER" ]; then
   echo "observe-only install refused: AC#1 freeze is in force through $FREEZE_END" >&2
   exit 77
+fi
+if [[ ! "$now" > "$FREEZE_END" ]]; then
+  echo "operator commissioning waiver accepted: $COMMISSIONING_WAIVER" >&2
 fi
 
 template="$release/launchd/com.helium.opsd.plist.template"
@@ -135,4 +145,4 @@ chmod 644 "$plist"
 trap - EXIT
 echo "rendered observe-only config: $config"
 echo "rendered launchd plist: $plist"
-echo "not loaded or started; a separate post-freeze operator action is required"
+echo "not loaded or started; a separate explicit operator action is required"

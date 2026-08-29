@@ -14,7 +14,9 @@ remain unchanged.
 Mac mini deployment, installation, managed-service lifecycle operation,
 configuration/state write, or recovery drill may occur during the active AC#1
 observation window, which closes 2026-08-31. Bounded read-only inspection is
-permitted under section 13.4.
+permitted under section 13.4. A second operator decision on 2026-08-30 decouples
+the reversible, empty-authority Ops Phase D commissioning from AC#1; AC#1 is not
+credited as passed when that commissioning begins.
 
 ## 1. Decision
 
@@ -939,6 +941,17 @@ Forbidden until 2026-08-31 has passed and the AC#1 evidence is recorded:
 The amendment supersedes only the earlier zero-process presence rule. It does
 not weaken the five-trading-day v1 acceptance conditions, the installer freeze,
 or the prohibition on deployment, installation, repair and service mutation.
+
+**2026-08-30 weekend commissioning waiver.** The operator subsequently chose
+not to let the low-coverage v1 AC#1 window consume the weekend commissioning
+window. AC#1 therefore remains uncredited rather than being reported as a pass.
+The exact waiver `ops-phase-d-weekend-2026-08-30` may install and load only an
+isolated `com.helium.opsd` in `observe` mode with the committed empty authority
+manifest. It may create only the installer-owned private ops directory, config,
+plist, socket, event/log files and LaunchAgent process. It may not flip the
+Helium release, restart DSH or any existing controller, modify the dead-man,
+grant an SOP, run a repair, or perform the ownership handoff/drill. Bootout plus
+the scoped uninstaller is the required rollback.
 
 **Window 2 — installed and observing.** P4: rollout Stage 1's observe-only days
 and Stage 2's suggest-only days, at least seven of each. Here `opsd` **is**

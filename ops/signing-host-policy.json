@@ -3,5 +3,7 @@
   "allowedOperatorHostHashes": [
     "0861a84d620b7012d6a120f159f2eb6b73155887bd3c2551b35e8060eb6b9e89"
   ],
-  "forbiddenMiniHostHashes": []
+  "forbiddenMiniHostHashes": [
+    "3b0a001567dbefa4baa4e4d17a7c9e3dd311f57aaece83c479ecc08ea3d98de1"
+  ]
 }
