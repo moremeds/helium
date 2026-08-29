@@ -590,10 +590,12 @@ claims:
       seven-day observation window has only started.
     nextGate: Wire and compare every initial live adapter, and complete seven
       continuous observe days with zero action events.
-    outputHash: sha256:e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
+    outputHash: sha256:0a596ee4b6b1623e5118f6a56ea1e5c534c79bfc17c7a5f640b95679f6818cc9
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log
         sha256: e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
+      - path: docs/evidence/p2.5a/phase-d-live-deadman-2026-08-30.log
+        sha256: b31136843ac8091fbe687a8b8e401bcb6cb20aa77e83a23f079f54f0c3a9f258
       - path: docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log
         sha256: df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578
   - id: P2.5A-OPSD-MODE-AUTHORITY
@@ -721,7 +723,7 @@ claims:
       live adapter coverage gates.
     nextGate: Complete live adapter composition and accrue seven continuous
       observe days before suggest mode.
-    outputHash: sha256:c82415675c95661d4dabb6444e514c5d068a47bf655ec320152d8f8b52465d9c
+    outputHash: sha256:101c90602a0b5f749a3be3cb164abf4a41d1d2d235a7ed44383e2baa133a1ac5
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
         sha256: 19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e
