@@ -112,6 +112,7 @@ files="$(find "$tmp/home" -type f | sed "s|$tmp/home/||" | sort)"
 grep -q '"mode": "observe"' "$config"
 grep -q 'authority-manifest.pub.pem' "$config"
 grep -q 'authority-manifest.json' "$config"
+grep -q 'observation-targets.yaml' "$config"
 grep -Fq "$release" "$config"
 grep -Fq "$release/scripts/ops/run-opsd.sh" "$plist"
 if grep -Eqi 'private.?key|password|secret|token' "$config"; then

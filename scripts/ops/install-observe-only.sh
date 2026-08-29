@@ -79,7 +79,9 @@ alerter="$release/scripts/deadman/send-alert.mjs"
 binary="$release/plugins/ops-agent/lib/bin/opsd.js"
 manifest="$release/ops/authority-manifest.json"
 public_key="$release/ops/authority-manifest.pub.pem"
-for required in "$template" "$deadman_template" "$runner" "$deadman" "$alerter" "$binary" "$manifest" "$public_key"; do
+observation_targets="$release/ops/observation-targets.yaml"
+heartbeat_reader="$release/scripts/ops/read-latest-heartbeats.mjs"
+for required in "$template" "$deadman_template" "$runner" "$deadman" "$alerter" "$binary" "$manifest" "$public_key" "$observation_targets" "$heartbeat_reader"; do
   [ -f "$required" ] || { echo "required release file missing: $required" >&2; exit 66; }
 done
 
@@ -113,6 +115,7 @@ const config = {
   trustedKeyPath: `${release}/ops/authority-manifest.pub.pem`,
   stateDir: `${root}/state`,
   socketPath: `${root}/run/opsd.sock`,
+  observationTargetsPath: `${release}/ops/observation-targets.yaml`,
   intervalMs: 60000,
   maxFiles: 500,
   maxComponents: 200,

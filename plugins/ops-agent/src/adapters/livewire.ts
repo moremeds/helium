@@ -3,10 +3,15 @@ import type { Observation } from "@helium/core";
 import { ageState, makeObservation, type AdapterContext } from "./shared.js";
 
 export interface LivewireSnapshot extends AdapterContext {
-  status: { found: boolean; coverageAt?: string; intradayCoverage?: number };
+  status: {
+    found: boolean;
+    state?: "ok" | "degraded" | "failed" | "unknown";
+    coverageAt?: string;
+    intradayCoverage?: number;
+  };
   sourceLogs: { dailyAt?: string; intradayAt?: string };
-  parquet: { valid: boolean; error?: string };
-  ibAvailable: boolean;
+  parquet: { valid?: boolean; error?: string };
+  ibAvailable?: boolean;
   expectedCoverageAt: string;
   freshness: { degradedAfterMs: number; failedAfterMs: number };
 }
@@ -15,7 +20,7 @@ export function adaptLivewire(snapshot: LivewireSnapshot): Observation[] {
   const status = makeObservation(snapshot, {
     componentId: "livewire",
     probeId: "livewire.status-parser.v1",
-    state: snapshot.status.found ? "ok" : "unknown",
+    state: snapshot.status.found ? (snapshot.status.state ?? "ok") : "unknown",
     dimension: "freshness",
     value: {
       found: snapshot.status.found,
@@ -28,24 +33,35 @@ export function adaptLivewire(snapshot: LivewireSnapshot): Observation[] {
   const integrity = makeObservation(snapshot, {
     componentId: "livewire",
     probeId: "livewire.parquet-integrity.v1",
-    state: snapshot.parquet.valid ? "ok" : "failed",
+    state:
+      snapshot.parquet.valid === undefined
+        ? "unknown"
+        : snapshot.parquet.valid
+          ? "ok"
+          : "failed",
     dimension: "integrity",
     value: {
       valid: snapshot.parquet.valid,
       error: snapshot.parquet.error,
-      genericRestartAddressesFailure: snapshot.parquet.valid,
+      genericRestartAddressesFailure:
+        snapshot.parquet.valid === undefined ? false : snapshot.parquet.valid,
     },
   });
 
   const dependency = makeObservation(snapshot, {
     componentId: "livewire",
     probeId: "livewire.ib-dependency.v1",
-    state: snapshot.ibAvailable ? "ok" : "degraded",
+    state:
+      snapshot.ibAvailable === undefined
+        ? "unknown"
+        : snapshot.ibAvailable
+          ? "ok"
+          : "degraded",
     dimension: "dependency",
     value: {
       dependency: "ib",
       available: snapshot.ibAvailable,
-      genericRestartAddressesFailure: snapshot.ibAvailable,
+      genericRestartAddressesFailure: snapshot.ibAvailable === true,
     },
   });
 

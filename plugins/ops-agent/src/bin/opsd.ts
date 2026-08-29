@@ -53,6 +53,11 @@ import {
 import type { OpsControlServer } from "../ipc.js";
 import { OpsControlServer as UnixOpsControlServer } from "../ipc.js";
 import { macosResourceProbe } from "../probes/macos-resource.js";
+import {
+  createConfiguredHostProbes,
+  createProductionObservationProbes,
+  loadProductionObservationTargets,
+} from "../production-observations.js";
 import { FileRecoveryEvidenceStore } from "../recovery-evidence-store.js";
 import { ScriptRegistry } from "../script-registry.js";
 import type { CommandResult, CommandRunner } from "../probes/process.js";
@@ -246,6 +251,7 @@ export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
   executorsDir: z.string().min(1),
   stateDir: AbsolutePathSchema,
   socketPath: UnixSocketPathSchema,
+  observationTargetsPath: AbsolutePathSchema.optional(),
   intervalMs: z.number().int().positive().max(86_400_000),
 }).strict();
 export type OpsdRuntimeConfig = z.infer<typeof OpsdRuntimeConfigSchema>;
@@ -295,6 +301,9 @@ export function validateOpsdRelease(
     releaseDir,
     authorityManifestPath: rebase(config.authorityManifestPath),
     trustedKeyPath: rebase(config.trustedKeyPath),
+    ...(config.observationTargetsPath === undefined
+      ? {}
+      : { observationTargetsPath: rebase(config.observationTargetsPath) }),
   });
   const registeredProbeIds = discoverConfiguredProbeIds(parsed);
   const loader = new OpsBundleLoader({
@@ -309,6 +318,10 @@ export function validateOpsdRelease(
   }
   ScriptRegistry.load(loadConfiguredDocuments(parsed, parsed.executorsDir, "executor"));
   createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
+  if (parsed.observationTargetsPath !== undefined) {
+    loadProductionObservationTargets(parsed.observationTargetsPath);
+    statSync(resolve(parsed.releaseDir, "scripts/ops/read-latest-heartbeats.mjs"));
+  }
 }
 
 interface ObserveCompositionOverrides {
@@ -370,7 +383,19 @@ export function composeObserveOnlyOpsDaemon(
   });
   const runner = overrides.runner ??
     new PersistingCommandRunner(resolve(parsed.stateDir, "raw"), now);
-  const probes = overrides.probes ?? [macosResourceProbe({ componentId: "host" })];
+  const targets = parsed.observationTargetsPath === undefined
+    ? undefined
+    : loadProductionObservationTargets(parsed.observationTargetsPath);
+  const probes = overrides.probes ?? [
+    macosResourceProbe({ componentId: "host" }),
+    ...(targets === undefined ? [] : createConfiguredHostProbes(targets)),
+    ...(targets === undefined
+      ? []
+      : createProductionObservationProbes(targets, {
+          releaseDir: parsed.releaseDir,
+          nodePath: process.execPath,
+        })),
+  ];
   const leases = new ActionLeaseController(new ActionLeaseTable(), {
     controllerId: "com.helium.opsd",
     ttlMs: Math.max(parsed.intervalMs * 2, 120_000),

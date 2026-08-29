@@ -83,6 +83,22 @@ describe("adaptLivewire", () => {
     });
   });
 
+  it("keeps unmeasured integrity and dependency unknown, and preserves a measured bad status", () => {
+    const observations = adaptLivewire({
+      ...base(),
+      status: { ...base().status, state: "failed" as const },
+      parquet: { valid: undefined },
+      ibAvailable: undefined,
+    });
+
+    expect(observations.find((row) => row.probeId === "livewire.status-parser.v1")?.state)
+      .toBe("failed");
+    expect(observations.find((row) => row.probeId === "livewire.parquet-integrity.v1")?.state)
+      .toBe("unknown");
+    expect(observations.find((row) => row.probeId === "livewire.ib-dependency.v1")?.state)
+      .toBe("unknown");
+  });
+
   it("classifies coverage age against the configured trading-calendar thresholds", () => {
     const degraded = adaptLivewire({
       ...base(),

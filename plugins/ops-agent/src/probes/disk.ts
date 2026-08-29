@@ -41,7 +41,7 @@ export function parseDf(text: string): VolumeUsage[] | undefined {
   for (const line of lines.slice(1)) {
     // device 1k-blocks used available capacity [iused ifree %iused] mount
     const match =
-      /^(\S+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+\S+){0,3}\s+(\/.*)$/.exec(line);
+      /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+\S+){0,3}\s+(\/.*)$/.exec(line);
     if (match === null) return undefined;
     const totalBytes = Number(match[2]) * 1024;
     const usedBytes = Number(match[3]) * 1024;
@@ -50,7 +50,7 @@ export function parseDf(text: string): VolumeUsage[] | undefined {
       return undefined;
     }
     volumes.push({
-      device: match[1],
+      device: match[1].trim(),
       totalBytes,
       usedBytes,
       availableBytes,

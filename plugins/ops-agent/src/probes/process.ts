@@ -34,6 +34,8 @@ export interface ProcessProbeOptions {
   argv: readonly string[];
   /** The process must appear in the output for the probe to report `ok`. */
   match: string;
+  /** Component-catalog dimension. Defaults to readiness for existing callers. */
+  dimension?: string;
   timeoutMs?: number;
 }
 
@@ -64,7 +66,7 @@ export function processProbe(options: ProcessProbeOptions) {
         observedAt: now.toISOString(),
         expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
         state: classifyProcess(result, options.match),
-        dimension: "readiness",
+        dimension: options.dimension ?? "readiness",
         value: { matched: result.stdout.includes(options.match), timedOut: result.timedOut },
         evidenceRefs: [result.evidenceRef],
         parserVersion: "process-liveness/1",
