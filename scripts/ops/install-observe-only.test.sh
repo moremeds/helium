@@ -11,6 +11,7 @@ for script in install-observe-only.sh uninstall-observe-only.sh run-opsd.sh; do
   bash -n "$here/$script"
 done
 plutil -lint "$repo/launchd/com.helium.opsd.plist.template" >/dev/null
+plutil -lint "$repo/launchd/com.helium.opsd-deadman.plist.template" >/dev/null
 
 root="$tmp/home/.helium/ops"
 launchd_root="$tmp/home/Library/LaunchAgents"
@@ -92,7 +93,8 @@ bash "$post_freeze_installer" \
   --release "$release" --root "$root" --launchd-root "$launchd_root"
 config="$root/config/opsd.json"
 plist="$launchd_root/com.helium.opsd.plist"
-[ -f "$config" ] && [ -f "$plist" ] || { echo "FAIL: declared files missing"; exit 1; }
+deadman_plist="$launchd_root/com.helium.opsd-deadman.plist"
+[ -f "$config" ] && [ -f "$plist" ] && [ -f "$deadman_plist" ] || { echo "FAIL: declared files missing"; exit 1; }
 [ "$(stat -f '%Lp' "$root")" = "700" ] || { echo "FAIL: ops root is not 0700"; exit 1; }
 [ "$(stat -f '%Lp' "$root/state")" = "700" ] || { echo "FAIL: state dir is not 0700"; exit 1; }
 [ "$(stat -f '%Lp' "$config")" = "600" ] || { echo "FAIL: config is not 0600"; exit 1; }
@@ -101,6 +103,7 @@ files="$(find "$tmp/home" -type f | sed "s|$tmp/home/||" | sort)"
   '.helium/ops/config/opsd.json' \
   '.helium/ops/existing-watchdog.state' \
   'Library/LaunchAgents/com.existing.watchdog.plist' \
+  'Library/LaunchAgents/com.helium.opsd-deadman.plist' \
   'Library/LaunchAgents/com.helium.opsd.plist' | sort)" ] || {
   echo "FAIL: unexpected installed file set"
   printf '%s\n' "$files"
@@ -120,6 +123,10 @@ fi
   exit 1
 }
 plutil -lint "$plist" >/dev/null
+plutil -lint "$deadman_plist" >/dev/null
+grep -Fq "$release/scripts/deadman/check-opsd-heartbeat.sh" "$deadman_plist"
+grep -Fq "$root/state/events.jsonl" "$deadman_plist"
+grep -Fq "$root/state/deadman" "$deadman_plist"
 
 echo "case 4: uninstall removes only the exact opsd files"
 bash "$here/uninstall-observe-only.sh" --root "$root" --launchd-root "$launchd_root"
@@ -177,5 +184,8 @@ printf '%s\n' "$deadman_out" | grep -qi 'opsd.*stale' || {
   echo "FAIL: deadman did not name opsd staleness"
   exit 1
 }
+
+echo "case 7: standalone opsd deadman ignores unrelated tenant health"
+bash "$repo/scripts/deadman/check-opsd-heartbeat.test.sh"
 
 echo "ALL PASS"

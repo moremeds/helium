@@ -32,7 +32,8 @@ esac
 
 config="$root/config/opsd.json"
 plist="$launchd_root/com.helium.opsd.plist"
-rm -f "$config" "$plist"
+deadman_plist="$launchd_root/com.helium.opsd-deadman.plist"
+rm -f "$config" "$plist" "$deadman_plist"
 # Remove only installer-owned directories, and only when empty. Neighboring
 # files or state make rmdir fail harmlessly and remain untouched.
 rmdir "$root/config" "$root/logs" "$root/run" "$root/state" 2>/dev/null || true

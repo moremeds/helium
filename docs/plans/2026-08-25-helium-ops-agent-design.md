@@ -953,13 +953,12 @@ Helium release, restart DSH or any legacy controller, grant an SOP, run a
 repair, or perform the ownership handoff/drill. Bootout plus the scoped
 uninstaller is the required rollback.
 
-Once a valid opsd event path is observed, the waiver also permits adding only
-the opsd expected/event-log keys to the existing scheduled Helium dead-man,
-with the original plist preserved and exact-label reload/restore as rollback.
-If the selected release's dead-man predates that check, the exact script path
-may instead point at the tested immutable Ops candidate, with its hash recorded
-and the same full-plist rollback. This adds independent liveness coverage; it
-grants no recovery authority.
+Once a valid opsd event path is observed, the waiver also permits a separate
+`com.helium.opsd-deadman` scheduled label that reads only that path. Live
+commissioning proved that reusing `com.helium.deadman` couples opsd liveness to
+version-skewed tenant policy; the attempted edit was rolled back byte-for-byte
+and the legacy label is excluded from this integration. The independent label
+adds liveness coverage but grants no recovery authority.
 
 **Window 2 — installed and observing.** P4: rollout Stage 1's observe-only days
 and Stage 2's suggest-only days, at least seven of each. Here `opsd` **is**

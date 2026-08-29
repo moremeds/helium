@@ -10,8 +10,8 @@ Mac mini change.
   reversible, isolated observe-only install from AC#1. AC#1 is left uncredited,
   not called PASS. The waiver does not authorize a Helium release flip, DSH or
   legacy-controller restart, SOP grant, repair, ownership handoff or controlled
-  drill. After the first valid opsd event, the waiver permits the exact
-  reversible dead-man integration described below.
+  drill. After the first valid opsd event, the waiver permits the separate,
+  reversible `com.helium.opsd-deadman` integration described below.
 - Merging or deploying the repository does not install `opsd`.
 - The committed authority manifest grants no mutation authority. The unresolved
   production script paths, hashes, owners, live postconditions, drill evidence,
@@ -56,11 +56,11 @@ Helium `current` release. After the Phase D PR is merged and a normal release is
 selected, reinstall the observe-only package against `current`; deploy and
 rollback then validate and move the collector/plugin pair together.
 
-The command only creates four private directories, one `0600` configuration,
-and `com.helium.opsd.plist`. It does not write the authority manifest, call
-`launchctl`, or start a process. Before continuing, inspect the rendered JSON
-and plist, confirm `mode` is `observe`, and verify both authority paths point
-inside the intended immutable release.
+The command only creates private ops directories, one `0600` configuration,
+`com.helium.opsd.plist`, and `com.helium.opsd-deadman.plist`. It does not write
+the authority manifest, call `launchctl`, or start a process. Before continuing,
+inspect the rendered JSON and plists, confirm `mode` is `observe`, and verify all
+release/event paths point inside the intended candidate and private state root.
 
 Loading is a second, explicit operator action:
 
@@ -72,23 +72,20 @@ launchctl print "gui/$(id -u)/com.helium.opsd"
 ```
 
 After the first valid observation is present at
-`/Users/moremeds/.helium/ops/state/events.jsonl`, enable the independent host
-dead-man check by setting `HELIUM_OPSD_EXPECTED=1` and
-`HELIUM_OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl` in the
-installed dead-man job, then reload that exact job. Preserve the original plist
-under the private ops root before editing, lint the replacement before its
-atomic move, and retain the reverse restore/reload command as rollback. Do not
-declare the controller expected until the log path has been verified. A fresh
-DSH heartbeat cannot suppress an opsd-stale alert.
+`/Users/moremeds/.helium/ops/state/events.jsonl`, load the independent label:
 
-The selected v0.1.5 dead-man script predates the opsd check. For this weekend
-candidate, also pin only `ProgramArguments[1]` to
-`/Users/moremeds/projects/helium-ops-candidates/5637b97/scripts/deadman/check-heartbeat.sh`
-after verifying SHA-256
-`f67896b3585f1feb81e3d7889023d92cdba74be0dfefdee3c9ede968f3baeaa2`.
-Do not credit the integration until a real scheduled-label run exits 0 and its
-stdout contains `opsd fresh:`. Restoring the preserved whole plist reverses both
-the environment and program-path changes.
+```bash
+plutil -lint /Users/moremeds/Library/LaunchAgents/com.helium.opsd-deadman.plist
+launchctl bootstrap "gui/$(id -u)" \
+  /Users/moremeds/Library/LaunchAgents/com.helium.opsd-deadman.plist
+launchctl print "gui/$(id -u)/com.helium.opsd-deadman"
+```
+
+Do not modify or reload `com.helium.deadman`; live commissioning proved its
+selected v0.1.5 script lacks the opsd check, while the candidate replacement
+also changes tenant policy. The standalone label reads no DSH/tenant state and
+has its own dedupe sentinel. Do not credit it until a real run exits 0 and its
+stdout contains `opsd fresh:`.
 
 Observe for at least seven days before considering any authority promotion.
 Track observation freshness, collection failures, incident noise, daemon
@@ -101,10 +98,11 @@ Release rollback validates that the target contains both the ops-agent plugin
 and runner, flips the immutable release pair, and restarts an already-loaded
 `com.helium.opsd`. It never installs or loads the label.
 
-To remove observe-only, first disable the dead-man expectation and unload the
-exact label, then remove only installer-owned files:
+To remove observe-only, unload the two exact new labels, then remove only
+installer-owned files:
 
 ```bash
+launchctl bootout "gui/$(id -u)/com.helium.opsd-deadman"
 launchctl bootout "gui/$(id -u)/com.helium.opsd"
 bash scripts/ops/uninstall-observe-only.sh \
   --root /Users/moremeds/.helium/ops \

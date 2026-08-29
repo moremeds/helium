@@ -27,15 +27,15 @@ The waiver permits only:
 
 It does not permit a Helium release flip, DSH/legacy-controller restart,
 SOP grant, ownership handoff, repair, or controlled mutation drill. After a
-valid opsd event path exists, it permits one narrowly reversible dead-man
-integration: preserve the original `com.helium.deadman.plist`, add only
-`HELIUM_OPSD_EXPECTED=1` and the exact opsd event-log path, lint it, and reload
-that exact scheduled label. Live preflight found that v0.1.5's selected dead-man
-script predates the opsd check. The same preserved-plist rollback therefore also
-permits changing only `ProgramArguments[1]` to the tested candidate script at
-commit `5637b97` (SHA-256
-`f67896b3585f1feb81e3d7889023d92cdba74be0dfefdee3c9ede968f3baeaa2`).
-Success requires a real run to emit `opsd fresh:` and exit 0. Rollback restores
-the preserved plist and reloads the same label. Opsd rollback is exact-label
-`launchctl bootout` followed by the scoped uninstaller; evidence is preserved
-before state removal if needed.
+valid opsd event path exists, it permits a new, narrowly scoped
+`com.helium.opsd-deadman` label that reads only the opsd event log and maintains
+only its own sentinel under the private ops root. It must not read DSH or tenant
+health. Success requires a real run to emit `opsd fresh:` and exit 0.
+
+An attempted reuse of `com.helium.deadman` proved unsafe: v0.1.5 lacked the
+opsd check, while pointing it at the candidate script also enabled a newer
+tenant policy and sent one `dsh-canary` missing alert. The original plist was
+restored byte-for-byte immediately and exited 0. This legacy label is no longer
+part of the opsd integration. Rollback now bootouts only the two new exact labels
+(`com.helium.opsd-deadman`, then `com.helium.opsd`) and runs the scoped
+uninstaller; evidence is preserved before state removal if needed.

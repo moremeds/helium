@@ -72,24 +72,30 @@ if [[ ! "$now" > "$FREEZE_END" ]]; then
 fi
 
 template="$release/launchd/com.helium.opsd.plist.template"
+deadman_template="$release/launchd/com.helium.opsd-deadman.plist.template"
 runner="$release/scripts/ops/run-opsd.sh"
+deadman="$release/scripts/deadman/check-opsd-heartbeat.sh"
+alerter="$release/scripts/deadman/send-alert.mjs"
 binary="$release/plugins/ops-agent/lib/bin/opsd.js"
 manifest="$release/ops/authority-manifest.json"
 public_key="$release/ops/authority-manifest.pub.pem"
-for required in "$template" "$runner" "$binary" "$manifest" "$public_key"; do
+for required in "$template" "$deadman_template" "$runner" "$deadman" "$alerter" "$binary" "$manifest" "$public_key"; do
   [ -f "$required" ] || { echo "required release file missing: $required" >&2; exit 66; }
 done
 
 config="$root/config/opsd.json"
 plist="$launchd_root/com.helium.opsd.plist"
+deadman_plist="$launchd_root/com.helium.opsd-deadman.plist"
 [ ! -e "$config" ] || { echo "refusing existing opsd config: $config" >&2; exit 73; }
 [ ! -e "$plist" ] || { echo "refusing existing launchd label: $plist" >&2; exit 73; }
+[ ! -e "$deadman_plist" ] || { echo "refusing existing launchd label: $deadman_plist" >&2; exit 73; }
 
 mkdir -p "$root/config" "$root/logs" "$root/run" "$root/state" "$launchd_root"
 chmod 700 "$root" "$root/config" "$root/logs" "$root/run" "$root/state"
 config_tmp="$config.tmp.$$"
 plist_tmp="$plist.tmp.$$"
-trap 'rm -f "$config_tmp" "$plist_tmp"' EXIT
+deadman_plist_tmp="$deadman_plist.tmp.$$"
+trap 'rm -f "$config_tmp" "$plist_tmp" "$deadman_plist_tmp"' EXIT
 
 "$node_bin" - "$config_tmp" "$release" "$root" <<'NODE'
 const { writeFileSync } = require("node:fs");
@@ -124,12 +130,33 @@ esac
 "$node_bin" - "$template" "$plist_tmp" "$release" "$config" "$root/logs" "$node_bin" "$user_home" <<'NODE'
 const { readFileSync, writeFileSync } = require("node:fs");
 const [template, out, release, config, logs, node, home] = process.argv.slice(2);
+const root = logs.slice(0, -"/logs".length);
 const xml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
 let body = readFileSync(template, "utf8");
 for (const [key, value] of Object.entries({
   "__RELEASE__": release,
   "__CONFIG__": config,
   "__LOG_ROOT__": logs,
+  "__STATE_ROOT__": `${root}/state`,
+  "__NODE_BIN__": node,
+  "__NODE_BIN_DIR__": node.slice(0, node.lastIndexOf("/")),
+  "__HOME__": home
+})) body = body.replaceAll(key, xml(value));
+if (/__[A-Z0-9_]+__/.test(body)) throw new Error("unresolved launchd placeholder");
+writeFileSync(out, body, { mode: 0o644 });
+NODE
+
+"$node_bin" - "$deadman_template" "$deadman_plist_tmp" "$release" "$config" "$root/logs" "$node_bin" "$user_home" <<'NODE'
+const { readFileSync, writeFileSync } = require("node:fs");
+const [template, out, release, config, logs, node, home] = process.argv.slice(2);
+const root = logs.slice(0, -"/logs".length);
+const xml = (value) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+let body = readFileSync(template, "utf8");
+for (const [key, value] of Object.entries({
+  "__RELEASE__": release,
+  "__CONFIG__": config,
+  "__LOG_ROOT__": logs,
+  "__STATE_ROOT__": `${root}/state`,
   "__NODE_BIN__": node,
   "__NODE_BIN_DIR__": node.slice(0, node.lastIndexOf("/")),
   "__HOME__": home
@@ -140,9 +167,11 @@ NODE
 
 mv "$config_tmp" "$config"
 mv "$plist_tmp" "$plist"
+mv "$deadman_plist_tmp" "$deadman_plist"
 chmod 600 "$config"
-chmod 644 "$plist"
+chmod 644 "$plist" "$deadman_plist"
 trap - EXIT
 echo "rendered observe-only config: $config"
 echo "rendered launchd plist: $plist"
+echo "rendered independent deadman plist: $deadman_plist"
 echo "not loaded or started; a separate explicit operator action is required"
