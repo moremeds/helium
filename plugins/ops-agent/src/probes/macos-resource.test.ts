@@ -11,6 +11,10 @@
  * swap allocated with no sustained burst, which the audit classified as
  * chronic capacity pressure rather than an immediate outage.
  */
+import { readFileSync } from "node:fs";
+import { ComponentSpecSchema } from "@helium/core/operations/component.js";
+import { ObservationSchema } from "@helium/core/operations/observation.js";
+import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 import {
   classifyMemory,
@@ -26,7 +30,15 @@ import {
   type MemorySample,
 } from "./macos-resource.js";
 import type { CommandResult, CommandRunner } from "./process.js";
-import { ObservationSchema } from "@helium/core/operations/observation.js";
+
+const HOST_COMPONENT = ComponentSpecSchema.parse(
+  parse(
+    readFileSync(
+      new URL("../../../../ops/components/host.yaml", import.meta.url),
+      "utf8",
+    ),
+  ),
+);
 
 const VM_STAT = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                              123456.
@@ -306,6 +318,13 @@ describe("macosResourceProbe", () => {
       "host.memory.v1",
       "host.cpu-load.v1",
     ]);
+    expect(observations.map((row) => row.dimension)).toEqual([
+      "memory-pressure",
+      "cpu-load",
+    ]);
+    for (const observation of observations) {
+      expect(HOST_COMPONENT.dimensions).toContain(observation.dimension);
+    }
     expect(observations.flatMap((row) => row.evidenceRefs)).toEqual(
       expect.arrayContaining([
         "artifact://raw-command/memory-pressure",

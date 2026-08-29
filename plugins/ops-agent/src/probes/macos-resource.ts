@@ -367,7 +367,7 @@ export function macosResourceProbe(options: MacosResourceProbeOptions) {
         observedAt,
         expiresAt,
         state: classifyMemory(sample),
-        dimension: "memory",
+        dimension: "memory-pressure",
         value: {
           pressure: pressure ?? null,
           totalBytes: totalBytes ?? null,

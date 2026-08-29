@@ -51,6 +51,14 @@ describe("launchdControllerProbe", () => {
     expect(launchctl.calls).toEqual([["list"]]);
   });
 
+  it("keeps the persisted raw evidence ref on the exact mutation-time check", async () => {
+    const outcome = await launchdControllerProbe({
+      launchctl: fakeLaunchctl([OWN]),
+    }).check(component());
+    expect(outcome.evidenceRef).toBe("artifact://raw-command/fake-launchctl");
+    expect(await canMutate(component(), outcome)).toEqual({ ok: true });
+  });
+
   it.each([
     ["a non-zero exit", { exitCode: 1 }, "enumeration-exit-1"],
     ["a timeout", { timedOut: true }, "enumeration-timeout"],

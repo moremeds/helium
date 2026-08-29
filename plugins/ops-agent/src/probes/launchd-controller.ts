@@ -80,28 +80,30 @@ export function launchdControllerProbe(
 
   const sample = async (
     component: ComponentSpec,
-  ): Promise<{ outcome: ControllerProbeOutcome; evidenceRef: string }> => {
+  ): Promise<ControllerProbeOutcome> => {
     const result = await options.launchctl.list(LIST_ARGV);
 
     if (result.timedOut) {
       return {
-        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-timeout" },
+        result: "unknown",
+        observedLabels: [],
+        detail: "enumeration-timeout",
         evidenceRef: result.evidenceRef,
       };
     }
     if (result.exitCode !== 0) {
       return {
-        outcome: {
-          result: "unknown",
-          observedLabels: [],
-          detail: `enumeration-exit-${result.exitCode}`,
-        },
+        result: "unknown",
+        observedLabels: [],
+        detail: `enumeration-exit-${result.exitCode}`,
         evidenceRef: result.evidenceRef,
       };
     }
     if (result.truncated) {
       return {
-        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-truncated" },
+        result: "unknown",
+        observedLabels: [],
+        detail: "enumeration-truncated",
         evidenceRef: result.evidenceRef,
       };
     }
@@ -109,7 +111,9 @@ export function launchdControllerProbe(
     const labels = parseLoadedLabels(result.stdout);
     if (labels === undefined) {
       return {
-        outcome: { result: "unknown", observedLabels: [], detail: "enumeration-unparseable" },
+        result: "unknown",
+        observedLabels: [],
+        detail: "enumeration-unparseable",
         evidenceRef: result.evidenceRef,
       };
     }
@@ -117,23 +121,21 @@ export function launchdControllerProbe(
     const declared = new Set(component.mutationOwner.competingLabels);
     const competing = labels.filter((l) => l !== ownLabel && declared.has(l));
     return {
-      outcome: {
-        result: competing.length > 0 ? "competing" : "clear",
-        observedLabels: labels,
-      },
+      result: competing.length > 0 ? "competing" : "clear",
+      observedLabels: labels,
       evidenceRef: result.evidenceRef,
     };
   };
 
   const check = async (
     component: ComponentSpec,
-  ): Promise<ControllerProbeOutcome> => (await sample(component)).outcome;
+  ): Promise<ControllerProbeOutcome> => sample(component);
 
   return {
     probeId,
     check,
     async observe(component, now, ttlMs = 300_000): Promise<Observation> {
-      const { outcome, evidenceRef } = await sample(component);
+      const outcome = await sample(component);
       return {
         version: 1,
         id: `obs-${component.id}-controller-${now.getTime()}`,
@@ -155,7 +157,7 @@ export function launchdControllerProbe(
           observedLabels: outcome.observedLabels,
           ...(outcome.detail === undefined ? {} : { detail: outcome.detail }),
         },
-        evidenceRefs: [evidenceRef],
+        evidenceRefs: [outcome.evidenceRef],
         parserVersion,
       };
     },

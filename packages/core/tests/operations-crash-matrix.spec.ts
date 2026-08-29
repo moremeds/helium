@@ -160,15 +160,27 @@ describe("invariants that hold at every crash point", () => {
 
   it("attempts no mutation while ownership is competing or unverifiable", () => {
     for (const probe of [
-      { result: "competing" as const, observedLabels: ["other"] },
-      { result: "unknown" as const, observedLabels: [] },
+      {
+        result: "competing" as const,
+        observedLabels: ["other"],
+        evidenceRef: "artifact://raw-command/controller-competing",
+      },
+      {
+        result: "unknown" as const,
+        observedLabels: [],
+        evidenceRef: "artifact://raw-command/controller-unknown",
+      },
     ]) {
       expect(canMutate(component("opsd"), probe).ok).toBe(false);
     }
     for (const owner of ["external", "none"] as const) {
-      expect(canMutate(component(owner), { result: "clear", observedLabels: [] }).ok).toBe(
-        false,
-      );
+      expect(
+        canMutate(component(owner), {
+          result: "clear",
+          observedLabels: [],
+          evidenceRef: "artifact://raw-command/controller-clear",
+        }).ok,
+      ).toBe(false);
     }
   });
 

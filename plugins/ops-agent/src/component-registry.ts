@@ -101,6 +101,35 @@ export class ComponentRegistry {
       CheckDefinitionSchema.parse(check),
     );
     const sops = (bundle.sops ?? []).map((s) => SopDefinitionSchema.parse(s));
+    const incomingComponentIds = new Set(components.map((component) => component.id));
+    const incomingCheckIds = new Set(checks.map((check) => check.id));
+
+    // A disposer may remove only this bundle. Cross-bundle references would
+    // therefore become dangling the instant the referenced bundle unloads.
+    // Keep bundles self-contained rather than pretending disposal can leave
+    // every other install untouched while sharing its objects.
+    for (const edge of edges) {
+      for (const endpoint of [edge.from, edge.to]) {
+        if (!incomingComponentIds.has(endpoint) && this.#components.has(endpoint)) {
+          throw new Error(`cross-bundle dependency reference: ${endpoint}`);
+        }
+      }
+    }
+    for (const definition of sops) {
+      if (!incomingComponentIds.has(definition.componentId)) {
+        if (this.#components.has(definition.componentId)) {
+          throw new Error(
+            `cross-bundle component reference: ${definition.componentId}`,
+          );
+        }
+        throw new Error(`SOP ${definition.id} names unknown component: ${definition.componentId}`);
+      }
+      for (const checkId of [...definition.preconditions, ...definition.postconditions]) {
+        if (!incomingCheckIds.has(checkId) && this.#checks.has(checkId)) {
+          throw new Error(`cross-bundle check reference: ${checkId}`);
+        }
+      }
+    }
 
     if (this.#components.size + components.length > limits.maxComponents) {
       throw new Error(`bundle ${bundle.tenantId} exceeds the component limit`);
@@ -134,6 +163,12 @@ export class ComponentRegistry {
       mergedChecks,
       this.deps.registeredProbeIds,
     );
+    for (const definition of sops) {
+      checkRegistry.resolveAll([
+        ...definition.preconditions,
+        ...definition.postconditions,
+      ]);
+    }
 
     const loaded = sops.map((definition) => {
       const resolved = resolveSopAuthority(definition, this.deps.authority);

@@ -98,25 +98,20 @@ describe("installation", () => {
     expect(r.component("fixture-service")).toBeUndefined();
   });
 
-  it("removes the tenant's checks so they cannot certify a later bundle", () => {
+  it("removes the tenant's checks so a later bundle cannot resolve them", () => {
     const r = registry();
     const dispose = r.install(bundle());
     dispose();
 
-    r.install(
-      bundle({
-        tenantId: "replacement",
-        checks: [],
-        sops: [sop("replacement-sop", "observe")],
-      }),
-    );
-
-    expect(r.sop("replacement-sop")).toMatchObject({
-      certified: false,
-      certificationReasons: [
-        expect.stringContaining("unknown check reference: fixture-business"),
-      ],
-    });
+    expect(() =>
+      r.install(
+        bundle({
+          tenantId: "replacement",
+          checks: [],
+          sops: [sop("replacement-sop", "observe")],
+        }),
+      ),
+    ).toThrow(/unknown check reference: fixture-business/);
   });
 
   // A component kind this package has never heard of loads without a
@@ -152,6 +147,55 @@ describe("installation", () => {
         }),
       ),
     ).toThrow(/cycle/i);
+  });
+
+  it("rejects a dependency edge that would outlive another bundle's disposer", () => {
+    const r = registry();
+    const disposeA = r.install(
+      bundle({ tenantId: "a", components: [component("a")], checks: [] }),
+    );
+    expect(() =>
+      r.install(
+        bundle({
+          tenantId: "b",
+          components: [component("b")],
+          edges: [{ from: "b", to: "a" }],
+          checks: [],
+        }),
+      ),
+    ).toThrow(/cross-bundle dependency/);
+    disposeA();
+    expect(() => r.graph()).not.toThrow();
+  });
+
+  it("rejects an SOP that borrows another bundle's component or check", () => {
+    const r = registry();
+    r.install(bundle());
+    expect(() =>
+      r.install(
+        bundle({
+          tenantId: "borrower",
+          components: [component("borrower")],
+          checks: [],
+          sops: [
+            sop("borrowed-check", "observe", {
+              componentId: "borrower",
+              postconditions: ["fixture-business"],
+            }),
+          ],
+        }),
+      ),
+    ).toThrow(/cross-bundle check/);
+    expect(() =>
+      r.install(
+        bundle({
+          tenantId: "borrower-2",
+          components: [component("borrower-2")],
+          checks: [],
+          sops: [sop("borrowed-component", "observe")],
+        }),
+      ),
+    ).toThrow(/cross-bundle component/);
   });
 
   it("refuses a check naming a probe nothing registered", () => {
