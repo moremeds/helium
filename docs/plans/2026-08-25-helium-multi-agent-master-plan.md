@@ -2,15 +2,103 @@
 
 **Date:** 2026-08-25
 
-**Last revised:** 2026-08-28 — Revision 3, program review adjudication round 2
+**Last revised:** 2026-08-29 — Revision 4, P4 takeover and provider-capacity
+adjudication
 
-**Status:** Program direction approved; program state `not-ready` until this
-revision lands and the Phase 0 handover is resynced
+**Status:** Architecture and execution through P4 approved. The next unopened
+gate is Ops Phase C; no later phase inherits a pass from an earlier phase.
 
 **Production constraint:** Do not change the mini during the active AC#1
 observation window, which closes 2026-08-31. The test is **presence**, not
 mutation — see section 13.4 of the
 [ops-agent design](2026-08-25-helium-ops-agent-design.md)
+
+## Revision 4 — 2026-08-29
+
+Revision 4 is an incremental takeover amendment, not a replacement plan. The
+Revision 2 and Revision 3 adjudications, task IDs, contracts, and phase gates
+remain authoritative except for the explicit changes below.
+
+**Program endpoint and scope.** P4 is the authorized endpoint of this program.
+The historical near-term subset below remains a record of the earlier funding
+decision, but it no longer limits execution: the approved order is the complete
+gated path `P0 -> P1 -> P2.5a -> P2 -> P3 -> P3.5 -> P4`. P5 and P6 are not
+silent follow-ons; their separate, post-P4 plan is
+[Helium P5/P6 Long-Term Plan](2026-08-29-helium-p5-p6-long-term-plan.md).
+
+**Verified takeover state.** On `origin/master`, multi-agent P0/P1 and Ops
+Phases A/B are merged through PRs 13-16. The clean local branch
+`feat/ops-phase-c` carries Ops Task 9 (`f12bf52`) and the probe portion of Task
+10 (`153793e`), plus its handover (`ebfb8c7`). Task 10's collector, Tasks
+11/12/13a, the Phase C gate, and its PR remain open. A committed test or
+handover is not promoted to merged or phase-complete evidence until its PR gate
+passes on the merging tree.
+
+**Provider inventory.** The executable P2-P4 plan targets three providers, each
+with a provider-owned catalog of one or more submodel/effort targets:
+
+- DeepSeek through the DSH in-process driver, declared low isolation;
+- Codex through a dedicated out-of-process executor; and
+- Claude through a dedicated out-of-process executor.
+
+They land as three independently installable workspace plugin packages, sharing
+only a non-core provider SDK. Provider implementation inside
+`plugins/helium` would make the existing install/remove gate unfalsifiable and
+is not an acceptable substitute.
+
+The core and team manifests remain provider/model blind. Catalog entries,
+entitlements, invocation arguments, and shared quota domains belong to provider
+plugins. The enabled submodel set is discovered and frozen by provider
+preflight; this plan does not invent a static cross-provider model matrix.
+Codex and DeepSeek are currently available for certification. Claude is
+currently quota-exhausted and must receive no live certification or evaluation
+traffic until a fresh preflight reports it available; the expected Monday
+recovery is scheduling context, not evidence.
+
+**Conformance truth.** Merged P1 cannot run a child-process boundary probe
+against an executor that has no child process. Process/sandboxed executors run
+the full shared execution-boundary suite. An in-process executor is admitted
+only through the explicit `floor` record, can never claim a stronger class, and
+must separately prove the DSH inheritance, tool-filter, cancellation, and drain
+behavior it actually has. Revision 4 replaces older “one suite, every class, no
+exemptions” wording with this class-honest policy; it does not weaken the hard
+isolation filter.
+
+**Capacity failure contract.** `quota-exhausted` is availability, never a
+capability downgrade or a failed quality score. A provider plugin owns the
+quota-domain state and atomically marks every target that shares an exhausted
+domain unavailable. The core selector consumes only that published
+availability snapshot; it does not parse or sleep on provider reset text.
+
+On quota exhaustion the controller must:
+
+1. persist the failed attempt, exact runtime/catalog snapshot, and provider's
+   opaque reset hint if present;
+2. terminalize the attempt and leave its one-shot `ExecutionLease`
+   consumed/closed, with no active lease surviving and no reopening;
+3. create at most one new attempt with the same `WorkOrder`, immutable artifact
+   references, and remaining budget, then select the next configured target;
+4. refuse fallback for an exact-target override;
+5. enter durable `waiting-for-capacity` when no eligible target remains, with
+   no busy loop; and
+6. resume exactly one attempt after a provider-owned availability event and a
+   fresh catalog snapshot make a target eligible.
+
+The deterministic Ops collector/controller continues throughout a provider
+outage. Fake executors prove every exhaustion transition; live tests verify
+ordinary invocation and current entitlement but never deliberately consume a
+real subscription quota.
+
+**Evaluation and promotion.** P3's primary comparison is same-anchor and
+paired: Codex single-agent control versus Codex multi-agent treatment, with the
+same anchor model/effort, tools, source event, fixture, and declared budget.
+DeepSeek and Claude runs are secondary stratified evidence; mixed-provider
+routing and fallback are resilience tests, not the primary quality claim. If
+the anchor quota interrupts either member of a pair, neither member is scored;
+both are rescheduled from unchanged inputs after capacity returns. P4 keeps the
+Codex single-agent path as the macro fallback and the deterministic Ops path
+plus watchdog/operator takeover as the Ops fallback. An unavailable Claude
+lane is never described as a live fallback.
 
 ## Revision 3 — 2026-08-28
 
@@ -98,8 +186,8 @@ Substantive changes in this revision:
   static capability score.
 - **ARCH-1 / D2** — the DSH in-process driver is one low-isolation executor
   class, not the unified execution path. Every executor declares an
-  `isolationClass` and passes one conformance suite; P0 delivers that
-  conformance harness and P1's `Executor` inherits it.
+  `isolationClass`; Revision 4's class-honest conformance policy supersedes the
+  earlier claim that a child-process suite can grade an in-process executor.
 - **D3** — capability routing is reduced to a thin selector v1. Scoring, the
   capability ontology, confidence intervals, automatic learning, and the
   effort-evaluation harness are deferred; the routing seam and rule 5 stay.
@@ -158,7 +246,7 @@ The initial component list is required coverage, not a hard-coded boundary.
 The program is complete when Helium can:
 
 - install or remove an execution provider without editing core, proven by
-  running `pnpm remove` and then `pnpm add` for each of the two provider
+  running `pnpm remove` and then `pnpm add` for each of the three provider
   packages, where every command exits 0 **and**
   `git diff --name-only -- packages/core plugins/helium` prints nothing;
 - run the same team definition against different model catalogs;
@@ -195,9 +283,10 @@ The program is complete when Helium can:
    2026-08-31. The test is presence, not mutation: see section 13.4 of the
    [ops-agent design](2026-08-25-helium-ops-agent-design.md).
 3. No multi-agent expansion before every execution boundary is certified. Each
-   executor declares an `isolationClass` and passes the same
-   execution-boundary conformance suite; a task only reaches an executor whose
-   isolation class permits it.
+   executor declares an `isolationClass`; process/sandboxed executors pass the
+   shared execution-boundary suite, while in-process is admitted only at the
+   explicit floor plus DSH behavior tests. A task only reaches an executor
+   whose isolation class permits it.
 4. No production dependency on unpublished DSH experimental packages.
 5. No provider or model names in core schemas or branching logic.
 6. No model majority vote as an acceptance mechanism.
@@ -402,7 +491,7 @@ may prove a contract while production capability remains `PARTIAL` or
 agent or controller caused recovery unless the action and attribution chain is
 complete.
 
-### Deferred scope and the near-term subset
+### Deferred scope and the historical near-term subset
 
 Recorded here so that later revisions cannot silently re-inflate scope. The
 program is 46 tasks across 233 distinct planned file paths; the reduction must
@@ -410,8 +499,10 @@ never come from deleting the model-blind capability seam.
 
 **Deferred until real usage data exists:** the 31-item capability ontology;
 measured capability scores and confidence intervals; weighted scoring;
-automatic learning; the full effort-evaluation harness and the provider-effort
-selection plan; P5 ecosystem plugin expansion; P6 evaluated evolution.
+automatic learning; and the full effort-quality evaluation harness. The thin
+provider-effort selector itself is required for P2-P4 under Revision 4. P5
+ecosystem expansion and P6 evaluated evolution remain outside this program and
+are governed by the separate post-P4 plan.
 
 **Deferred:** the general durable mailbox. Task dependencies plus immutable
 artifact references are the only inter-agent channel until a team graph
@@ -437,8 +528,8 @@ P1 here means the minimal model-blind core only — `WorkOrder`, `AgentResult`
 including its typed `executionSnapshot`, the thin selector, and the `Executor`
 registry with its conformance suite — not the deferred scoring machinery.
 
-**Near-term subset — stated as task IDs, because raw counts drift.** The subset
-is exactly:
+**Historical near-term subset — stated as task IDs, because raw counts drift.**
+Revision 3's subset was exactly:
 
 - multi-agent Phase 0: Tasks 1–5;
 - multi-agent Tasks 6–7 and 10b (the structural topology guard, which Ops
@@ -456,6 +547,11 @@ Task 10b was added, and effort-plan Task 7 (offline effort certification) was
 moved into Deferred (v2). The enumeration above is authoritative; where a count
 elsewhere disagrees, the enumeration wins. Everything else waits behind the
 gates above.
+
+That final sentence describes Revision 3's stopping boundary. Revision 4
+supersedes it only for authorization: after each still-binding gate passes,
+execution continues through P4 in the same order and under the original task
+numbering. It does not retroactively mark any unopened task complete.
 
 ## Phase 0: certify the existing boundary
 
@@ -536,8 +632,9 @@ changing production behavior.
   and `retryAfter` as carried over from P0.
 - Define provider registration and executor services on DSH/Cordis seams. The
   `Executor` interface **inherits the P0 execution-boundary conformance
-  contract**: every executor declares an `isolationClass` and passes that same
-  suite before it can be registered.
+  contract**: every executor declares an `isolationClass`; process/sandboxed
+  executors pass the full suite, while in-process registers only at the
+  explicit floor and separately proves its DSH behavior.
 - Define the opaque target registry and its catalog schema: capability tags as
   a flat set, isolation class, and availability including quota. The versioned
   31-item capability ontology is deferred until real usage data exists.
@@ -567,7 +664,7 @@ changing production behavior.
 
 - The full core suite runs with only the fake provider installed.
 - Adding or removing a provider changes no core or team code, proven by running
-  `pnpm remove` and then `pnpm add` for each of the two provider packages:
+  `pnpm remove` and then `pnpm add` for each of the three provider packages:
   every command exits 0 **and**
   `git diff --name-only -- packages/core plugins/helium` prints nothing. A
   non-empty diff fails the gate.
@@ -581,8 +678,9 @@ changing production behavior.
   `quota-exhausted` with an opaque `retryAfter`. Core must not branch on,
   assume, or default either economics; normalizing `quota-exhausted` into
   `budget-exhausted`, or reading an absent cost as a known zero, fails the gate.
-- No executor registers without a declared `isolationClass` and a passing run
-  of the P0 conformance suite.
+- No executor registers without a declared `isolationClass` and the proof
+  appropriate to it: full P0 suite for process/sandboxed, or explicit floor plus
+  DSH behavior tests for in-process.
 - No sensor or collector module can statically reach an executor, provider
   adapter, or lease: the sensor context type carries no executor member and the
   import-graph lint passes. This is the structural half of the topology guard,
@@ -592,7 +690,9 @@ changing production behavior.
   force on the day the collector and its probes are written.
 - The selector resolves a work order from capability requirements, isolation,
   tools, quota, and availability alone; a `quota-exhausted` target falls back
-  in order instead of failing the work order.
+  in order when another eligible target exists, otherwise returns provider-
+  neutral `unavailable` for the controller's durable capacity wait rather than
+  misclassifying the case as `capability-shortage`.
 - Every recorded run carries a parsed, typed `AgentResult.executionSnapshot`;
   no run satisfies the snapshot requirement through untyped runtime metadata.
 - V1 compatibility tests remain behaviorally unchanged.
@@ -769,9 +869,10 @@ the team scheduler exists.
 
 ### Objective
 
-Prove that multi-agent work adds information and quality over the v1
-single-senior control, with target selection kept as thin as the evidence
-justifies.
+Prove that multi-agent work adds information and quality over a same-anchor
+Codex single-agent control, with target selection kept as thin as the evidence
+justifies. The retained v1 lane remains an operational compatibility path, not
+the primary quality comparator.
 
 ### Selector and provider work
 
@@ -791,9 +892,10 @@ WorkOrder capability requirements
 - Seed capability tags from provider documentation as an opaque, flat set.
 - Implement the hard filter, the configured per-role target preference, the
   ordered fallback, and a routing audit record.
-- Treat `quota-exhausted` as a temporary availability state with `retryAfter`:
-  it removes a target from the eligible set and triggers fallback, and it never
-  edits what a target is deemed capable of.
+- Treat `quota-exhausted` as a temporary provider-owned availability state. The
+  plugin preserves any opaque `retryAfter`, updates every target in the shared
+  quota domain, and publishes a new catalog snapshot. The selector filters that
+  snapshot and never parses reset text or edits what a target is capable of.
 - Detect capability shortage without silently relaxing requirements.
 - Support task-scoped cross-reference and adjudication policy.
 - Activate the Ops diagnostician, independent verifier, incident lead, and
@@ -832,8 +934,9 @@ target for the same role on different runs.
 
 - No production email.
 - No trading or ecosystem mutation.
-- No replacement of the v1 senior lane.
-- The same source event feeds control and shadow runs.
+- No replacement of the retained v1 senior lane during shadowing.
+- The same source event and frozen input bundle feed the Codex single-agent
+  control and Codex multi-agent treatment.
 - Every claim carries provenance or is explicitly marked as judgment.
 
 ### Evaluation set
@@ -870,9 +973,13 @@ Include:
 - Zero unauthorized capability calls.
 - All material factual claims have traceable provenance.
 - Restart and cancellation contracts pass.
-- The multi-agent path reduces the **unsupported-claim rate** — one
-  pre-registered primary metric, lower is better — against the v1 control on a
-  frozen fixture set. "A measured quality **or** information advantage" is
+- The Codex multi-agent path reduces the **unsupported-claim rate** — one
+  pre-registered primary metric, lower is better — against a Codex single-agent
+  control using the same anchor model/effort, tools, source event, fixture, and
+  declared budget on a frozen fixture set. A quota interruption invalidates
+  both members of the pair; neither enters the statistic and both are
+  rescheduled from unchanged inputs after capacity returns. "A measured
+  quality **or** information advantage" is
   withdrawn: an either/or lets the metric be chosen after the results are
   visible, so exactly one metric decides and it is named before the first
   shadow run. The fixture set is frozen by recording its directory `sha256`
@@ -926,8 +1033,12 @@ losing the v1 fallback, deterministic recovery path, or operational controls.
 - Release behind a runtime flag.
 - Start with review-only artifacts and human approval.
 - Canary a bounded subset of material macro cases.
-- Keep v1 as immediate fallback. Because that fallback stays live past the P3
-  promotion gate, it also keeps
+- Keep the Codex single-agent control as the immediate macro fallback. Keep the
+  retained v1 path available only while its provider preflight is healthy; a
+  quota-exhausted Claude subscription is not a fallback. For Ops, the fallback
+  is the deterministic controller plus the existing watchdog/operator takeover
+  path, never another model. Because the retained v1 path stays live past the P3
+  promotion gate when healthy, it also keeps
   [EX-1](#ex-1--v1-delivery-lane-exemption-from-acceptance-criterion-16) in
   force through this phase, and this phase's exit line on exact execution and
   evidence lineage is therefore scoped to the promoted team path. Claims
@@ -953,6 +1064,11 @@ losing the v1 fallback, deterministic recovery path, or operational controls.
   refuses the mutation rather than proceeding.
 - Keep approval and forbidden SOP decisions fail-closed when providers or the
   approval channel are unavailable.
+- Run the fake-executor quota smoke matrix before canary promotion: one target
+  exhausted with fallback available; every submodel in one shared quota domain
+  removed together; exact-target override exhausted with no fallback; all
+  providers exhausted into durable `waiting-for-capacity`; exactly one resume
+  after an availability event; and deterministic Ops continuity throughout.
 
 ### Exit gate
 
@@ -970,11 +1086,15 @@ losing the v1 fallback, deterministic recovery path, or operational controls.
   postconditions before automatic authority is considered.
 - Resource alerts are sustained, deduplicated, dependency-aware, and do not
   create an agent fan-out during host pressure.
+- Quota smoke evidence shows no lost artifact, duplicated attempt, busy loop,
+  silent capability downgrade, invalid paired score, or interruption to the
+  deterministic Ops path.
 
 ## Phase 5: ecosystem plugin expansion
 
-**Gate:** deferred until real usage data from P4 exists. Nothing in this phase
-is scheduled while the program has two teams and one author.
+**Status:** outside the authorized P0-P4 program. The section below is a
+historical summary only; the authoritative post-P4 scope and opening gate are
+in [Helium P5/P6 Long-Term Plan](2026-08-29-helium-p5-p6-long-term-plan.md).
 
 ### Objective
 
@@ -1029,10 +1149,9 @@ authority outside the core policy contract.
 
 ## Phase 6: evaluated evolution
 
-**Gate:** deferred until real usage data exists. Its exit gate needs a
-trajectory corpus that this system does not yet produce, and weighted
-capability scoring and the full effort evaluation are gated behind the same
-condition.
+**Status:** outside the authorized P0-P4 program. The section below is a
+historical summary only; P6 cannot open merely because P5 exists and follows
+the evidence gates in the separate P5/P6 plan.
 
 ### Objective
 
@@ -1062,7 +1181,7 @@ self-modification.
 - no production provider/model names in core source or schemas;
 - fake-provider full suite;
 - provider install/remove proven by `pnpm remove` then `pnpm add` for each of
-  the two provider packages, with every command exiting 0 and
+  the three provider packages, with every command exiting 0 and
   `git diff --name-only -- packages/core plugins/helium` printing nothing;
 - exact execution audit retained.
 
@@ -1073,7 +1192,8 @@ self-modification.
 - global setting and MCP denial;
 - environment-secret isolation;
 - mutation fail-closed;
-- one execution-boundary conformance suite, run against every executor class;
+- the full execution-boundary suite for process/sandboxed classes, plus
+  explicit floor admission and DSH behavior tests for in-process;
 - declared `isolationClass` per executor, and no task admitted to an executor
   whose class does not permit it.
 
@@ -1130,6 +1250,10 @@ self-modification.
 - host-pressure admission control; and
 - model-provider outage during an active incident, including
   `quota-exhausted`.
+- shared-quota-domain exhaustion removes every affected submodel, persists the
+  failed attempt, leaves its lease consumed/closed, and either falls back through a new
+  attempt or enters durable `waiting-for-capacity`; deterministic Ops remains
+  available in every case.
 
 ## Risk register
 
@@ -1187,31 +1311,23 @@ After merge, local `master` is fetched and aligned to the remote merge commit.
 
 ## Immediate next action
 
-Do not deploy during AC#1. The adjudicated mainline is:
+Do not deploy during AC#1. Continue from the existing implementation plans and
+their original task IDs:
 
-1. **Land one docs-only PR**: the seven blockers, XDOC-8, the Phase 0 snippet
-   errors (IMPL-1/2/3), and the defer decisions recorded in this revision.
-   Nothing in it touches code or the mini. Committing the review and the
-   adjudication alongside it also closes the evidence-trail gap, since the
-   individual reviewer reports were never preserved and the consolidated
-   summary was untracked.
-2. **Update and resync the Phase 0 handover**
-   (`docs/codex-handoffs/2026-08-26-helium-multi-agent-phase0-claude.md`, on
-   `feat/multi-agent-phase0`), which stays paused until step 1 lands.
-3. **Execute full Phase 0, including `quota-exhausted`.**
+1. land this Revision 4 docs-only PR;
+2. finish Ops Task 10 on `feat/ops-phase-c`, then Tasks 11, 12, and 13a; run the
+   complete Phase C gate and merge through a PR;
+3. complete Ops Phase D Tasks 14, 16, 17, and 18 without installing on the
+   mini during the freeze;
+4. execute MA Phase 2 Tasks 12-16, including the three-provider executor and
+   provider-capacity contracts;
+5. execute MA Phase 3 Tasks 17-20 with the Codex paired primary evaluation;
+6. execute Ops Phase E / P3.5 Tasks 13b and 15; and
+7. open P4 only after every prior evidence manifest is `PROVEN`, then follow
+   the separate macro and Ops promotion ladders.
 
-The first Phase 0 code change is **MA Task 1's failing isolation test**, not the
-conformance harness. The harness (MA Task 2) is written against the boundary
-Task 1 establishes, so it cannot come first. The order of record is the task
-numbering in
-[the multi-agent implementation plan](2026-08-25-helium-multi-agent-implementation.md):
-Task 1's red test, then Task 2's red conformance contract, then Task 1's
-implementation, then Task 2 green. Where any prose here and that plan's task
-numbering disagree about sequence, **the task numbering wins**.
-
-The harness itself is still the Phase 0 artifact that outlives Phase 0: an
-executable contract for the current senior isolation gap, written so that every
-later executor class inherits it. It is deliberately not generic over an
-`Executor` type, which does not exist until P1, and it is not a new multi-agent
-or Ops feature. Operations execution begins only after its named Phase 0,
-Phase 1, and Phase 2 prerequisites are green.
+Claude availability is checked at each provider preflight. Until that check is
+green, omit live Claude probes and record the target set unavailable; do not
+substitute a weaker Claude submodel or treat Codex/DeepSeek fallback as proof of
+Claude capability. The fake quota smoke matrix is required before any live
+provider certification and again at the P4 canary gate.

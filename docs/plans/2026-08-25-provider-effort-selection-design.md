@@ -4,8 +4,14 @@
 
 **Status:** Approved
 
-**Revision:** 2026-08-28 — rescoped per adjudication D3: thin selector v1 now,
-scoring/learning deferred to v2.
+**Revision:** 2026-08-29 — Revision 4 extends the same thin selector to
+DeepSeek, Codex, and Claude, with provider-owned submodel catalogs and shared
+quota-domain availability. Scoring/learning remains deferred to v2.
+
+**Current availability:** Codex and DeepSeek may be certified now. Claude is
+currently quota-exhausted and stays out of live certification and evaluation
+until its own preflight publishes an available snapshot. The expected Monday
+reset is not itself evidence of recovery.
 
 ## Scope tiers
 
@@ -25,10 +31,10 @@ WorkOrder capability requirements
 
 Kept in v1: the opaque target registry; capability tags; an `isolationClass` per
 target; quota availability as a **dynamic provider-availability state** (the
-`quota-exhausted` failure class and `retryAfter` enter the vocabulary at
-multi-agent Phase 0, and this plan only consumes them); per-role preference and
-fallback ordering configured in the plugin composition root; and a
-provider-neutral `ExecutionLease`.
+`quota-exhausted` failure class and opaque provider reset hint enter the
+vocabulary at multi-agent Phase 0); provider-owned shared quota domains;
+per-role preference and fallback ordering configured in the plugin composition
+root; and a provider-neutral `ExecutionLease`.
 
 Effort and model choices live **only** in the provider catalog and the
 privileged admin override. Core code never sees a provider or model name — it
@@ -65,7 +71,25 @@ A global effort field in a core schema would therefore leak provider semantics,
 create false equivalence, and encourage team authors to hard-code execution
 choices before Helium has measured them.
 
-## Claude catalog contract
+## Provider catalog contracts
+
+Each of the three provider plugins owns its native catalog and publishes a
+versioned certification snapshot. A native submodel/effort variant becomes an
+opaque target only when the current entitlement preflight accepts it. The
+snapshot also declares `quotaDomain`, because several submodels may consume the
+same subscription window. The catalog is not a cross-provider enum and core
+does not inspect it.
+
+- **DeepSeek:** invoked through the DSH in-process low-isolation executor. Its
+  plugin owns the available DSH model names and their native effort mapping.
+- **Codex:** invoked through a dedicated out-of-process executor. Its plugin
+  owns the account-visible Codex models, model-specific effort sets, and exact
+  CLI/runtime mapping.
+- **Claude:** invoked through a separate dedicated out-of-process executor. Its
+  plugin owns Claude model/effort support and organization caps.
+
+The following Claude table is the 2026-08-25 catalog **seed**, not a permanent
+entitlement declaration:
 
 The initial Claude subscription catalog is:
 
@@ -77,8 +101,9 @@ The initial Claude subscription catalog is:
 
 The provider must reject an effort that the selected model does not advertise.
 It must not depend on Claude Code silently clamping an unsupported level.
-Organization-level caps must be reflected in the effective catalog snapshot
-before routing.
+Organization-level caps and current quota availability must be reflected in
+the effective catalog snapshot before routing. If a fresh preflight disagrees
+with the seed table, the snapshot wins and the difference is recorded.
 
 Claude's `ultracode` is not an effort value in Helium. It combines `xhigh`
 reasoning with dynamic workflow orchestration. Helium owns decomposition,
@@ -93,14 +118,17 @@ Provider plugins expose their native options at the edge:
 
 ```yaml
 provider: claude-subscription
+catalog_version: <content-hash>
 targets:
   - model: claude-haiku-4-5-20251001
     invoke_as: haiku
+    quota_domain: claude-subscription-session
     effort:
       supported: false
 
   - model: claude-sonnet-5
     invoke_as: sonnet
+    quota_domain: claude-subscription-session
     effort:
       supported: true
       options: [low, medium, high, xhigh, max]
@@ -108,6 +136,7 @@ targets:
 
   - model: claude-opus-5
     invoke_as: opus
+    quota_domain: claude-subscription-session
     effort:
       supported: true
       options: [low, medium, high, xhigh, max]
@@ -119,6 +148,10 @@ execution_modes:
     reason: provider-owned-agent-orchestration
 ```
 
+This is a representation example, not a hardcoded universal schema instance.
+Codex and DeepSeek publish equivalent native snapshots using their own model
+and effort vocabularies.
+
 The provider registry expands or otherwise represents each valid
 `(model, effort)` combination as an independent execution target. The core
 selector sees only an opaque target reference plus its declared capability tags,
@@ -129,9 +162,10 @@ latency, reliability, and cost profiles per variant are deferred to v2.
 
 1. A work order declares capability and operational requirements only.
 2. The selector hard-filters opaque targets on isolation class, tool
-   requirements, quota availability, and current provider availability. A target
-   whose provider is in the `quota-exhausted` availability state is filtered out
-   until its `retryAfter` has elapsed.
+   requirements, quota availability, and the current provider-published
+   snapshot. When one quota domain is exhausted, its plugin removes every
+   affected target together. Core preserves but never parses a provider reset
+   hint.
 3. Among the surviving targets, the selector takes the configured per-role
    preference, then walks the configured ordered fallback. There is no scoring,
    no weighting, and no tie-break arithmetic.
@@ -142,10 +176,11 @@ latency, reliability, and cost profiles per variant are deferred to v2.
 6. The result records requested and applied effort with the full runtime model
    usage map.
 
-If no target satisfies the original requirements, routing returns
-`capability-shortage`; it does not silently reduce effort or safety constraints.
-Preference and fallback order are configuration, owned by the plugin composition
-root, never by core.
+If no target has the static capability required, routing returns
+`capability-shortage`. If capable targets exist but are temporarily unavailable,
+the controller persists `waiting-for-capacity`. It never silently reduces
+effort, changes submodel, or relaxes safety constraints. Preference and fallback
+order are configuration, owned by the plugin composition root, never by core.
 
 ## Administrator override
 
@@ -158,7 +193,9 @@ A privileged exact-target override may pin both model and effort for:
 - emergency failover.
 
 The override requires a reason and operator identity, is fully audited, and
-cannot expand tools, mutations, budget, or workspace access.
+cannot expand tools, mutations, budget, or workspace access. It disables
+fallback: quota exhaustion of the pinned target waits or fails under the
+override policy and never selects another target.
 
 ## Audit requirements
 
@@ -172,15 +209,17 @@ Every execution snapshot records:
 - provider and CLI version;
 - latency, token use, cost metadata, and completion status; and
 - the catalog version used by the selection decision (plus the evaluation
-  version once v2 evaluations exist).
+  version once v2 evaluations exist);
+- quota-domain identity and availability-snapshot version; and
+- failed-attempt, fallback-attempt, or capacity-wait linkage.
 
 ## Acceptance criteria (v1)
 
 1. Core and team schemas reject `provider`, `model`, and `effort` fields.
 2. Provider catalogs validate effort per model.
-3. Haiku rejects an explicit effort selection.
-4. Sonnet 5 and Opus 5 accept exactly `low`, `medium`, `high`, `xhigh`, and
-   `max` in the initial catalog.
+3. Every provider rejects an effort its selected submodel does not advertise.
+4. DeepSeek, Codex, and Claude publish only targets accepted by the current
+   entitlement preflight; the historical Claude seed is not routing evidence.
 5. Unsupported or capped effort is visible in routing and audit evidence.
 6. `ultracode` cannot be selected through the effort field.
 7. Selection is reproducible from configuration alone: the same catalog, the
@@ -188,6 +227,11 @@ Every execution snapshot records:
    select the same target, with no scored input.
 8. Exact-target replay reproduces both model and effort without changing the
    original work order.
+9. Exhausting one shared quota domain removes all affected submodels, persists
+   and releases the failed attempt, and creates at most one fallback attempt.
+10. With no eligible target, the run waits durably without busy polling and one
+    availability event resumes exactly one attempt; fake executors prove this
+    without burning live quota.
 
 ## Deferred (v2) — do not implement until real usage data exists
 

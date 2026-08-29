@@ -2,17 +2,22 @@
 
 **Date:** 2026-08-25
 
-**Last revised:** 2026-08-28 — executor registry and isolation class, thin
-capability selector, `quota-exhausted`, mailbox deferral, per
-`docs/reviews/2026-08-28-plan-review-adjudication.md`; WorkOrder key-casing
-note (R2), catalog billing model (R6), and the `EX-1` exemption against
-acceptance criterion 16 (R5), per
-`docs/reviews/2026-08-28-adjudication-round-2.md`
+**Last revised:** 2026-08-29 — Revision 4 provider inventory, shared-capacity
+failure semantics, Codex-anchored paired evaluation, and P4 fallback
 
 **Status:** Approved architecture direction
 
 **Scope:** Helium v2 control plane, provider boundary, capability selection, and
 multi-agent execution
+
+**Revision 4 boundary:** This document still defines the same model-blind
+architecture. The active P2-P4 provider set is DeepSeek, Codex, and Claude,
+with multiple provider-owned submodel/effort targets where entitlement permits.
+DeepSeek uses the DSH in-process low-isolation executor; Codex and Claude use
+dedicated out-of-process executors. Codex and DeepSeek are available for the
+current certification sequence. Claude remains unavailable until a fresh
+provider preflight disproves the observed quota exhaustion; a calendar reset
+expectation is not an availability signal. P4 is the current program endpoint.
 
 ## 1. Decision
 
@@ -90,8 +95,9 @@ fixed engine path with provider-neutral team execution.
 - durable cases, rosters, tasks, and immutable artifacts (a general durable
   mailbox is deferred — §10.3);
 - a provider-executor registry whose members declare an isolation class and
-  pass one shared execution-boundary conformance suite, with a DSH in-process
-  executor as one low-isolation member;
+  carry class-honest proof: the shared child-process suite for
+  process/sandboxed members, or explicit floor admission plus DSH behavior
+  tests for an in-process member;
 - configurable cross-reference and adjudication;
 - per-case, team, and agent budgets;
 - cancellation, recovery, replay, and observability;
@@ -169,9 +175,12 @@ swap revisions govern whether the proposal becomes state.
 
 Execution targets resolve through a **provider-executor registry**, never
 through one hardcoded execution path. Each registered provider executor
-declares an `isolationClass` and must pass the same execution-boundary
-conformance suite; the suite, not the executor's own documentation, is what
-admits it to the registry.
+declares an `isolationClass` and carries proof appropriate to that class. A
+process/sandboxed executor must pass the shared execution-boundary conformance
+suite. An in-process executor has no child process for that suite to inspect, so
+it can register only at the explicit floor and must separately prove its DSH
+inheritance, tool-filter, cancellation, and drain behavior. Documentation alone
+admits neither class.
 
 The DSH subagent seam supplies the lifecycle primitives Helium keeps: isolated
 execution, named providers, follow-up, interrupt, list, drain, and cold resume.
@@ -278,9 +287,9 @@ controller state transitions, selection eligibility, evidence acceptance,
 authority, and delivery remain deterministic control-plane responsibilities.
 
 The registry edge is not a single execution mechanism. There is no universal
-spawn path: every provider executor declares an `isolationClass`, passes the
-shared execution-boundary conformance suite, and receives only the work its
-declared class permits. A DSH in-process target and a subscription-backed
+spawn path: every provider executor declares an `isolationClass`, carries the
+class-appropriate proof in §12, and receives only the work its declared class
+permits. A DSH in-process target and a subscription-backed
 out-of-process target are two members of the same registry with different
 classes, not two configurations of one path (§5.3).
 
@@ -462,9 +471,19 @@ A provider plugin is responsible for:
 - sandbox, setting, workspace, and MCP isolation;
 - timeout and process-tree cancellation;
 - usage normalization;
-- provider-specific retries;
+- provider-specific reset-hint interpretation and availability refresh;
+- declaring which native targets share one quota domain;
 - declaring the executor's `isolationClass`; and
 - audit metadata.
+
+Each active provider is a separate workspace plugin package:
+`plugins/provider-deepseek-dsh`, `plugins/provider-codex-subscription`, and
+`plugins/provider-claude-subscription`. They share only the non-core
+`@helium/provider-sdk` edge contract. `plugins/helium` owns the generic
+registry, routing composition, lifecycle host, and availability-event intake;
+it does not own a provider's native catalog or invocation adapter. This package
+boundary is what makes install/remove without a core or harness edit
+falsifiable.
 
 Provider plugins register targets with the catalog. Example providers may use
 DeepSeek APIs, Anthropic APIs or CLI entitlements, OpenAI Responses, Codex CLI,
@@ -473,17 +492,19 @@ branching logic.
 
 Every provider executor declares an `isolationClass` describing what the child
 actually inherits — process, environment, working directory, settings, tool
-composition, and provider/model lineage — and every executor, whatever its
-class, passes the same execution-boundary conformance suite before the registry
-admits it. The declaration is a claim; the suite is the proof. A low class is
-legitimate, an unproven class is not. The DSH in-process executor is a
-low-isolation member because its child inherits parent provider, model, and
-working-directory lineage; subscription-entitlement targets are served by a
+composition, and provider/model lineage. Process/sandboxed declarations require
+the full child-process conformance record. `in-process` is the weakest class and
+is admitted only through the explicit floor record plus DSH behavior tests; it
+cannot over-claim a process boundary. A low class is legitimate, an unproven or
+over-claimed class is not. Subscription-entitlement targets are served by a
 dedicated out-of-process executor (§5.3).
 
 The initial Mac mini entitlement and model-name observations are versioned in
 the [model-selection probe](../reviews/2026-08-25-model-selection-probe.md).
-That file is a provider-catalog seed, not a core routing table.
+That file is a provider-catalog seed, not a core routing table. At runtime each
+provider freezes a versioned, provider-owned catalog snapshot after preflight;
+the snapshot is the only source of enabled submodels, effort variants,
+entitlement, quota-domain membership, and current availability.
 
 Provider-native reasoning levels follow the separate
 [effort-selection design](2026-08-25-provider-effort-selection-design.md).
@@ -506,7 +527,8 @@ Each catalog target carries:
 - its declared `isolationClass`;
 - its billing model — `metered`, which reports token and cost usage and can
   exhaust a budget, or `flat-rate-quota`, which reports neither and can exhaust
-  a session quota that recovers after `retryAfter` (§14);
+  a shared session quota whose recovery is determined by the provider plugin
+  (§14);
 - supported hard constraints (structured output, tool isolation, mutation
   support, context, latency);
 - dynamic availability, including quota state (§14); and
@@ -544,7 +566,8 @@ WorkOrder capability requirements
 1. Validate the task and capability contract.
 2. Remove every target that fails a hard requirement: missing capability tag,
    insufficient `isolationClass`, unsupported tool or mutation policy, context
-   or latency bound, exhausted quota, or unavailable target (§14).
+   or latency bound, or an unavailable target in the published catalog snapshot
+   (§14). Core does not interpret provider reset hints.
 3. From the surviving set, take the configured per-role opaque target
    preference.
 4. If the preferred target is filtered out, walk the configured ordered
@@ -556,8 +579,10 @@ WorkOrder capability requirements
 Preferences and fallbacks are configured per role and refer to opaque target
 IDs only. Core never sees a provider or model name at any step, and a
 preference can never re-admit a target that a hard filter excluded. When the
-surviving set is empty the selector fails with `capability-shortage`; it never
-relaxes a requirement to produce a result.
+surviving set is empty because targets exist but all safe targets are
+temporarily unavailable, the controller records `waiting-for-capacity`;
+`capability-shortage` is reserved for an unsatisfied static requirement.
+Neither state relaxes a requirement to produce a result.
 
 Budget is **charged on completion from the ledger**, not reserved inside
 selection.
@@ -591,7 +616,9 @@ administrator may pin an exact target only for:
 
 The override lives outside the core task schema, requires a reason and operator
 identity, is written to the audit log, and cannot expand tool or mutation
-permissions.
+permissions. It also disables fallback: an unavailable pinned target waits or
+fails according to the override's retry policy; it never silently executes a
+different target.
 
 ## 10. True multi-agent semantics
 
@@ -702,13 +729,15 @@ tools, global settings, MCP servers, instructions, environment secrets, or
 filesystem access. A declared allow-list is not accepted unless the provider's
 actual restriction semantics have been tested.
 
-That proof is the **execution-boundary conformance suite**, and it is one suite
-for every executor regardless of isolation class. Its subject is the execution
-boundary, not any particular provider: the same adversarial cases run against
-the v1 senior CLI boundary, an out-of-process subscription executor, and the
-DSH in-process driver, and each executor's declared `isolationClass` is
-whatever the suite actually demonstrates. An executor whose declaration exceeds
-its measured boundary is not admitted to the registry.
+For process/sandboxed executors, that proof is the shared
+**execution-boundary conformance suite**. Its subject is the child-process
+boundary, not a particular provider: the same adversarial cases run against the
+v1 senior CLI boundary and every out-of-process subscription executor. The DSH
+in-process driver has no child-process boundary to report, so the registry
+admits it only at `conformanceAtFloor()` and separate tests must demonstrate its
+actual inherited workspace/provider/model lineage, tool filter, cancellation,
+and drain behavior. An executor whose declaration exceeds its proof is not
+admitted.
 
 ## 13. Safety and mutation policy
 
@@ -748,18 +777,38 @@ schema-invalid, tool-boundary-violation, provider-error, and
 verification-failed.
 
 `quota-exhausted` is first-class, not a special case of `provider-error` or
-`budget-exhausted`. It carries an opaque `retryAfter` and denotes **dynamic
-provider-availability state**: a flat-rate subscription whose session window is
-spent is unavailable now and available later, without its capabilities having
-changed. It is therefore an availability input to the hard filter (§9.1), never
-a capability score, and never a dollar or token budget — a flat-rate
-subscription cannot report either. A target in `quota-exhausted` is filtered
-out for the duration of `retryAfter` and the selector falls through to the
-configured fallback.
+`budget-exhausted`. It may carry an opaque provider reset hint and denotes
+**dynamic provider-availability state**: a flat-rate subscription whose session
+window is spent is unavailable now and available later, without its
+capabilities having changed. It is therefore an availability input to the hard
+filter (§9.1), never a capability score, and never a dollar or token budget — a
+flat-rate subscription cannot report either.
+
+The provider plugin owns reset-hint interpretation and quota-domain membership.
+If several submodels share one exhausted entitlement, it atomically marks all
+of them unavailable in a new catalog snapshot. Core neither parses provider
+time text nor owns a timer for it. Recovery requires a provider-owned
+availability event and a fresh snapshot.
+
+The exhausted invocation remains a durable failed attempt with its exact
+runtime and catalog snapshot. Its one-shot lease remains consumed/closed and no
+active lease survives. A
+fallback, when allowed, is a **new attempt** carrying the same `WorkOrder`, the
+same immutable artifact references, and the remaining budget; the old attempt
+is never replayed or overwritten. An exact-target override never falls back.
+If no eligible target remains, the case enters durable
+`waiting-for-capacity`, performs no busy polling, and resumes exactly one new
+attempt after capacity returns.
 
 Fallback occurs only when another target satisfies the original capability,
 isolation, and safety contract. The selector cannot relax requirements merely
 to obtain a result.
+
+For a paired quality experiment, quota exhaustion in either the control or
+treatment invalidates the pair rather than contributing a failure score. The
+controller reschedules both members from unchanged inputs after the anchor
+target is available. Resilience drills may exercise cross-provider fallback,
+but those runs cannot satisfy the same-anchor quality gate.
 
 Cascading cancellation stops descendants and provider process trees. Recovery
 marks uncertain external side effects for reconciliation rather than retrying
@@ -796,8 +845,11 @@ The task graph, not a fixed model assignment, defines the team:
 
 The capability selector may resolve different targets for any of these roles on
 different runs, through the configured per-role preference and its ordered
-fallback. The current single-senior job remains the control and fallback during
-shadow evaluation.
+fallback. The P3 primary experiment pins both arms to the same Codex
+model/effort target: a Codex single-agent control and Codex multi-agent
+treatment. DeepSeek and Claude are secondary stratified evaluations; mixed
+providers test resilience. The retained v1 job remains an operational
+compatibility path during shadowing, not the primary quality control.
 
 ## 16. Observability and evaluation
 
@@ -807,6 +859,7 @@ Every execution records:
 - candidate targets and exclusion reasons;
 - capability tags, declared `isolationClass`, and availability/quota state at
   selection time;
+- provider-owned catalog snapshot and quota-domain version at selection time;
 - selected execution lease and fallback path;
 - task, artifact, and claim lineage;
 - provider runtime snapshot;
@@ -824,6 +877,11 @@ false-critical rates, parser-drift classification, dependency inhibition,
 time-to-correct-SOP, duplicate actions, postcondition success, recovery
 attribution, and resource-pressure behavior. The deterministic observation and
 recovery path is evaluated with every model provider disabled.
+
+Capacity behavior is evaluated with fake executors: shared-domain exhaustion,
+ordered fallback, exact-target refusal, all-targets-unavailable waiting,
+single-resume deduplication, and paired-run invalidation. Live certification
+must not deliberately burn a real quota to manufacture this evidence.
 
 Production trajectories may generate offline candidate capability scores,
 prompts, skills, or policies. Promotion requires a normal pull request and
@@ -861,11 +919,13 @@ The architecture is accepted only when:
    behind.
 8. A provider cannot access an undeclared tool, MCP server, setting source, or
    workspace path, and every registered provider executor declares an
-   `isolationClass` proven by the shared execution-boundary conformance suite.
+   `isolationClass` proven by the class-appropriate policy in §12.
 9. Cross-reference exposes contradictions and provenance rather than returning
    a majority vote.
-10. Shadow evaluation demonstrates a measured benefit over the v1 control path
-    at an accepted cost and latency envelope.
+10. Shadow evaluation demonstrates a measured benefit for Codex multi-agent
+    treatment over a same-model/effort Codex single-agent control at an
+    accepted cost and latency envelope; incomplete quota-interrupted pairs are
+    excluded and rescheduled together.
 11. A mutating team cannot execute an action outside a versioned eligible SOP,
     durable authority decision, and exclusive action lease.
 12. Recovery requires verified postconditions and is attributed to the actual
@@ -888,6 +948,12 @@ The architecture is accepted only when:
 18. Every agent-capable topology node has a reviewed autonomy decision that
     compares it with a deterministic workflow baseline and defines human
     takeover.
+19. Shared quota exhaustion removes every target in the affected provider
+    domain, preserves the failed attempt, leaves its lease consumed/closed, and either creates
+    one fallback attempt or enters durable `waiting-for-capacity` without a
+    busy loop.
+20. With every provider unavailable, deterministic Ops collection, policy,
+    verification, watchdog, and operator takeover remain operational.
 
 ## 19. Research basis
 
