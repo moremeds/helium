@@ -10,9 +10,9 @@ packages/core typecheck$ tsc -p tsconfig.json --noEmit
 packages/core typecheck: Done
 packages/fake-flat-rate typecheck$ tsc -p tsconfig.json --noEmit
 packages/fake-metered typecheck$ tsc -p tsconfig.json --noEmit
-packages/fake-flat-rate typecheck: Done
-packages/v1-compat typecheck$ tsc -p tsconfig.json --noEmit
 packages/fake-metered typecheck: Done
+packages/v1-compat typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-flat-rate typecheck: Done
 packages/v1-compat typecheck: Done
 contracts typecheck$ tsc -p tsconfig.json --noEmit
 plugins/helium typecheck$ tsc -p tsconfig.typecheck.json

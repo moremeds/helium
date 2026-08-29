@@ -40,12 +40,12 @@ stdout | plugins/helium/test/e2e/harness.e2e.test.ts > harness e2e (work-order-a
   tenants: 1
 }
 
- ✓ plugins/helium/test/e2e/harness.e2e.test.ts (2 tests) 3853ms
-   ✓ harness e2e (legacy-direct) > polls, triages, escalates, delivers, dedups and survives restart  1939ms
-   ✓ harness e2e (work-order-adapter) > polls, triages, escalates, delivers, dedups and survives restart  1912ms
+ ✓ plugins/helium/test/e2e/harness.e2e.test.ts (2 tests) 3892ms
+   ✓ harness e2e (legacy-direct) > polls, triages, escalates, delivers, dedups and survives restart  1963ms
+   ✓ harness e2e (work-order-adapter) > polls, triages, escalates, delivers, dedups and survives restart  1927ms
 
  Test Files  1 passed (1)
       Tests  2 passed (2)
-   Start at  07:58:49
-   Duration  4.63s (transform 239ms, setup 0ms, collect 565ms, tests 3.85s, environment 0ms, prepare 68ms)
+   Start at  08:08:13
+   Duration  4.82s (transform 265ms, setup 0ms, collect 664ms, tests 3.89s, environment 0ms, prepare 80ms)
 

@@ -8,9 +8,8 @@ $ vitest run --project unit
 
  RUN  v3.2.7 /home/runner/work/helium/helium
 
- ✓  unit  packages/v1-compat/tests/tools.spec.ts (22 tests) 79ms
- ✓  unit  plugins/helium/src/dispatcher.test.ts (14 tests) 1098ms
-   ✓ Dispatcher > recovers from a senior lane that rejects mid-semaphore: the slot is released for the next job  362ms
+ ✓  unit  packages/v1-compat/tests/tools.spec.ts (22 tests) 93ms
+ ✓  unit  plugins/helium/src/dispatcher.test.ts (14 tests) 238ms
 stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > reconciles startup and appends a harness_started row before any job starts
 [helium] startup reconciled { interrupted: 0, orphanedDeliveries: 0, jobs: [ 'a' ], tenants: 1 }
 
@@ -46,22 +45,21 @@ stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > script jobs (Task 
   tenants: 1
 }
 
-stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > expected-tenant inventory > emits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid
 stderr | plugins/helium/src/runtime.test.ts > HeliumRuntime > expected-tenant inventory > emits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid
+stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > expected-tenant inventory > emits a tenant-health row per *.yaml at startup, keeping a malformed tenant as invalid
 [helium] startup reconciled {
+helium: SKIPPING malformed job /tmp/helium-runtime-673Jed/jobs/b-broken.yaml -- this tenant is NOT running: /tmp/helium-runtime-673Jed/jobs/b-broken.yaml: invalid YAML — Flow sequence in block collection must be sufficiently indented and end with a ] at line 1, column 20:
   interrupted: 0,
+
   orphanedDeliveries: 0,
+this: [is not a job
   jobs: [ 'test-job' ],
+                   ^
   tenants: 2
 }
 
-helium: SKIPPING malformed job /tmp/helium-runtime-XqiaqG/jobs/b-broken.yaml -- this tenant is NOT running: /tmp/helium-runtime-XqiaqG/jobs/b-broken.yaml: invalid YAML — Flow sequence in block collection must be sufficiently indented and end with a ] at line 1, column 20:
-
-this: [is not a job
-                   ^
-
-
 stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > expected-tenant inventory > closes crash-orphaned delivery intents at boot
+
 [helium] startup reconciled {
   interrupted: 0,
   orphanedDeliveries: 2,
@@ -69,16 +67,16 @@ stdout | plugins/helium/src/runtime.test.ts > HeliumRuntime > expected-tenant in
   tenants: 1
 }
 
- ✓  unit  plugins/helium/src/runtime.test.ts (12 tests) 685ms
-   ✓ HeliumRuntime > carry-in (Task 2.2): one scheduling loop per job ticks a shared calendar watcher once per cycle, not once per state-change trigger  301ms
- ✓  unit  plugins/helium/src/claude.test.ts (16 tests) 3454ms
+ ✓  unit  plugins/helium/src/runtime.test.ts (12 tests) 679ms
+
+ ✓  unit  plugins/helium/src/claude.test.ts (16 tests) 3465ms
    ✓ runClaude > SIGTERMs a hung child at the deadline and classifies it as a timeout  404ms
-   ✓ runClaude > kills the whole process group at the deadline, leaving no descendant behind  3004ms
- ✓  unit  packages/v1-compat/tests/job.spec.ts (18 tests) 76ms
- ✓  unit  plugins/helium/src/delivery.test.ts (12 tests) 16ms
- ✓  unit  plugins/helium/src/executor-registry.test.ts (13 tests) 12ms
- ✓  unit  packages/core/tests/router.spec.ts (14 tests) 10ms
- ✓  unit  plugins/helium/src/sensor.test.ts (12 tests) 134ms
+   ✓ runClaude > kills the whole process group at the deadline, leaving no descendant behind  3006ms
+ ✓  unit  packages/v1-compat/tests/job.spec.ts (18 tests) 92ms
+ ✓  unit  plugins/helium/src/delivery.test.ts (12 tests) 22ms
+ ✓  unit  plugins/helium/src/executor-registry.test.ts (13 tests) 16ms
+ ✓  unit  packages/core/tests/router.spec.ts (14 tests) 13ms
+ ✓  unit  plugins/helium/src/sensor.test.ts (12 tests) 149ms
 stdout | plugins/helium/src/runtime.script-guard.test.ts > HeliumRuntime script overlap guard (deterministic) > does not run overlapping script instances for the same job — a trigger while one is in flight is skipped
 [helium] startup reconciled {
   interrupted: 0,
@@ -102,36 +100,36 @@ stdout | plugins/helium/src/runtime.script-guard.test.ts > HeliumRuntime script 
 stdout | plugins/helium/src/runtime.script-guard.test.ts > HeliumRuntime script overlap guard (deterministic) > does not run overlapping script instances for the same job — a trigger while one is in flight is skipped
 [helium] script already in flight, skipping trigger { job: 'dsh-canary' }
 
- ✓  unit  plugins/helium/src/runtime.script-guard.test.ts (1 test) 78ms
- ✓  unit  packages/core/tests/capabilities.spec.ts (16 tests) 12ms
- ✓  unit  packages/v1-compat/tests/mcp-selection.spec.ts (9 tests) 6ms
- ✓  unit  packages/core/tests/runs.spec.ts (5 tests) 11ms
- ✓  unit  packages/core/tests/evidence-manifest.spec.ts (6 tests) 24ms
- ✓  unit  packages/core/tests/mcp-selection.spec.ts (5 tests) 10ms
- ✓  unit  plugins/helium/src/dispatch.test.ts (5 tests) 6ms
- ✓  unit  plugins/helium/src/calendar.test.ts (9 tests) 10ms
- ✓  unit  packages/core/tests/tenant-health.spec.ts (7 tests) 5ms
- ✓  unit  packages/core/tests/jsonl.spec.ts (6 tests) 12ms
- ✓  unit  packages/core/tests/work.spec.ts (9 tests) 13ms
- ✓  unit  packages/core/tests/event-store.spec.ts (8 tests) 133ms
- ✓  unit  packages/core/tests/evidence-ledger.spec.ts (9 tests) 8ms
- ✓  unit  packages/v1-compat/tests/adapter.spec.ts (9 tests) 44ms
- ✓  unit  packages/v1-compat/tests/macro-watch-job.spec.ts (2 tests) 24ms
- ✓  unit  plugins/helium/src/script.test.ts (6 tests) 152ms
- ✓  unit  packages/core/tests/execution.spec.ts (8 tests) 5ms
- ✓  unit  plugins/helium/src/index.test.ts (5 tests) 5ms
- ✓  unit  packages/core/tests/evidence-bundle.spec.ts (5 tests) 7ms
+ ✓  unit  plugins/helium/src/runtime.script-guard.test.ts (1 test) 87ms
+ ✓  unit  packages/core/tests/capabilities.spec.ts (16 tests) 11ms
+ ✓  unit  packages/v1-compat/tests/mcp-selection.spec.ts (9 tests) 8ms
+ ✓  unit  packages/core/tests/event-store.spec.ts (8 tests) 15ms
+ ✓  unit  packages/core/tests/evidence-manifest.spec.ts (7 tests) 57ms
+ ✓  unit  packages/core/tests/runs.spec.ts (5 tests) 12ms
+ ✓  unit  packages/core/tests/mcp-selection.spec.ts (5 tests) 8ms
+ ✓  unit  plugins/helium/src/dispatch.test.ts (5 tests) 8ms
+ ✓  unit  plugins/helium/src/calendar.test.ts (9 tests) 13ms
+ ✓  unit  packages/core/tests/tenant-health.spec.ts (7 tests) 7ms
+ ✓  unit  packages/core/tests/jsonl.spec.ts (6 tests) 10ms
+ ✓  unit  packages/core/tests/work.spec.ts (9 tests) 22ms
+ ✓  unit  packages/core/tests/evidence-ledger.spec.ts (9 tests) 11ms
+ ✓  unit  packages/v1-compat/tests/adapter.spec.ts (9 tests) 56ms
+ ✓  unit  packages/v1-compat/tests/macro-watch-job.spec.ts (2 tests) 30ms
+ ✓  unit  plugins/helium/src/script.test.ts (6 tests) 155ms
+ ✓  unit  packages/core/tests/execution.spec.ts (8 tests) 6ms
+ ✓  unit  plugins/helium/src/index.test.ts (5 tests) 6ms
+ ✓  unit  packages/core/tests/evidence-bundle.spec.ts (5 tests) 11ms
  ✓  unit  packages/core/tests/verdict.spec.ts (7 tests) 7ms
- ✓  unit  packages/core/tests/state.spec.ts (4 tests) 23ms
+ ✓  unit  packages/core/tests/state.spec.ts (4 tests) 7ms
  ✓  unit  packages/core/tests/theses.spec.ts (3 tests) 8ms
- ✓  unit  plugins/helium/src/cron.test.ts (5 tests) 18ms
- ✓  unit  plugins/helium/src/toolkit.test.ts (2 tests) 5ms
- ✓  unit  plugins/helium/src/calendar-data.test.ts (3 tests) 14ms
- ✓  unit  packages/core/tests/time.spec.ts (4 tests) 5ms
- ✓  unit  plugins/helium/src/envfile.test.ts (2 tests) 3ms
+ ✓  unit  plugins/helium/src/cron.test.ts (5 tests) 23ms
+ ✓  unit  plugins/helium/src/toolkit.test.ts (2 tests) 6ms
+ ✓  unit  plugins/helium/src/calendar-data.test.ts (3 tests) 17ms
+ ✓  unit  packages/core/tests/time.spec.ts (4 tests) 10ms
+ ✓  unit  plugins/helium/src/envfile.test.ts (2 tests) 4ms
 
  Test Files  36 passed (36)
-      Tests  293 passed (293)
-   Start at  07:58:31
-   Duration  17.61s (transform 803ms, setup 0ms, collect 4.48s, tests 6.21s, environment 7ms, prepare 3.27s)
+      Tests  294 passed (294)
+   Start at  08:07:52
+   Duration  19.79s (transform 924ms, setup 0ms, collect 5.49s, tests 5.38s, environment 10ms, prepare 4.30s)
 

@@ -18,42 +18,44 @@ env:
   PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
 ##[endgroup]
 --- @helium/fake-metered: remove ---
-✓ Lockfile passes supply-chain policies (verified 54s ago)
+✓ Lockfile passes supply-chain policies (verified 1m ago)
 Progress: resolved 1, reused 0, downloaded 0, added 0
-Progress: resolved 26, reused 0, downloaded 0, added 0
-Progress: resolved 421, reused 0, downloaded 0, added 0
-Progress: resolved 615, reused 0, downloaded 0, added 0
-Progress: resolved 618, reused 0, downloaded 0, added 0
+Progress: resolved 25, reused 0, downloaded 0, added 0
+Progress: resolved 307, reused 0, downloaded 0, added 0
+Progress: resolved 532, reused 0, downloaded 0, added 0
 Progress: resolved 619, reused 0, downloaded 0, added 0
 [WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
 Progress: resolved 619, reused 0, downloaded 0, added 0, done
 [WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
-Done in 7.1s using pnpm v11.24.0
+Done in 6.4s using pnpm v11.24.0
 --- @helium/fake-metered: add back ---
-✓ Lockfile passes supply-chain policies (verified 972ms ago)
+✓ Lockfile passes supply-chain policies (verified 1s ago)
 Progress: resolved 1, reused 0, downloaded 0, added 0
-Progress: resolved 313, reused 0, downloaded 0, added 0
-Progress: resolved 620, reused 0, downloaded 0, added 0
+Progress: resolved 131, reused 0, downloaded 0, added 0
+Progress: resolved 576, reused 0, downloaded 0, added 0
 [WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
+Progress: resolved 620, reused 0, downloaded 0, added 0
 Progress: resolved 620, reused 0, downloaded 0, added 0, done
 [WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
-Done in 3.8s using pnpm v11.24.0
+Done in 4.8s using pnpm v11.24.0
 --- @helium/fake-flat-rate: remove ---
-✓ Lockfile passes supply-chain policies (verified 904ms ago)
+✓ Lockfile passes supply-chain policies (verified 1s ago)
 Progress: resolved 1, reused 0, downloaded 0, added 0
-Progress: resolved 312, reused 0, downloaded 0, added 0
-Progress: resolved 619, reused 0, downloaded 0, added 0
+Progress: resolved 130, reused 0, downloaded 0, added 0
+Progress: resolved 576, reused 0, downloaded 0, added 0
 [WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
+Progress: resolved 619, reused 0, downloaded 0, added 0
 Progress: resolved 619, reused 0, downloaded 0, added 0, done
 [WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
-Done in 3.8s using pnpm v11.24.0
+Done in 4.8s using pnpm v11.24.0
 --- @helium/fake-flat-rate: add back ---
-✓ Lockfile passes supply-chain policies (verified 859ms ago)
+✓ Lockfile passes supply-chain policies (verified 1s ago)
 Progress: resolved 1, reused 0, downloaded 0, added 0
-Progress: resolved 313, reused 0, downloaded 0, added 0
-Progress: resolved 620, reused 0, downloaded 0, added 0
+Progress: resolved 131, reused 0, downloaded 0, added 0
+Progress: resolved 575, reused 0, downloaded 0, added 0
 [WARN] 1 deprecated subdependencies found: node-domexception@1.0.0
+Progress: resolved 620, reused 0, downloaded 0, added 0
 Progress: resolved 620, reused 0, downloaded 0, added 0, done
 [WARN] Issues with peer dependencies found. Run "pnpm peers check" to list them.
-Done in 3.7s using pnpm v11.24.0
+Done in 4.7s using pnpm v11.24.0
 PASS: packages/core and plugins/helium unchanged

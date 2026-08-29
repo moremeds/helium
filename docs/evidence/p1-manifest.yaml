@@ -8,13 +8,18 @@
 #
 # WHERE THE HASHES COME FROM
 # --------------------------
-#   run:    https://github.com/moremeds/helium/actions/runs/33242022904
-#   commit: 2da8847  (feat/multi-agent-phase1)
+#   run:    https://github.com/moremeds/helium/actions/runs/33242395526
+#   commit: 5f879d8  (feat/multi-agent-phase1)
 #   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49)
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
+# The recorded run is the one whose tree merges. An earlier run's hashes were
+# discarded when a flaky fsync timeout in the event-store suite was fixed:
+# recording a run whose test suite differs from the merged one would describe a
+# tree that never existed.
+#
 # A hash captured on a developer machine is not admissible. That rule is why
-# the install/removal drill was wired into CI in 2da8847 rather than recorded
+# the install/removal drill was wired into CI in 5f879d8 rather than recorded
 # from the terminal it was first run in: it had passed by hand, and by hand is
 # not evidence.
 #
@@ -41,11 +46,11 @@ claims:
       verifier: command
       command: "pnpm run test:contracts"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+      outputHash: "sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/test-contracts.log"
-        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+        sha256: "63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts"
     failures: "None. The scan's own matching rule is under test alongside it, so a loosened regex fails rather than silently admitting every violation."
@@ -62,11 +67,11 @@ claims:
       verifier: command
       command: "pnpm run test:contracts"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+      outputHash: "sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/test-contracts.log"
-        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+        sha256: "63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project contracts contracts/tests/executor-conformance.contract.spec.ts"
     failures: "None observed. The over-claim case is exercised directly: an executor declaring sandboxed against a process-class record is refused."
@@ -83,11 +88,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+      outputHash: "sha256:dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/test.log"
-        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+        sha256: "dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/router.spec.ts --repeat=20"
     failures: "None. select() is pure and takes an availability-resolved snapshot, so there is no clock or catalog mutation to make a repeat diverge."
@@ -104,13 +109,13 @@ claims:
       verifier: command
       command: "pnpm run test && pnpm run test:contracts"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:f12997fcb1208e858e9800b945e2c64227c646fb5e0d9c6672da9268f3bdc303"
+      outputHash: "sha256:5286c879657c9c9ac8b184d87d949a91f3e07dfebb2f19036ed75e73abc35c2f"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/test.log"
-        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+        sha256: "dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff"
       - path: "docs/evidence/p1/test-contracts.log"
-        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+        sha256: "63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/work.spec.ts plugins/helium/src/executor-registry.test.ts"
     failures: "A result carrying an extra top-level key -- the shape a leaked model name would arrive in -- is refused by the strict schema at the registry boundary."
@@ -127,11 +132,11 @@ claims:
       verifier: command
       command: "bash: pnpm --filter @helium/contracts remove/add each fake package, then git diff --name-only -- packages/core plugins/helium"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0"
-      outputHash: "sha256:3043112ecea97cad77697c1f9afe6cdd0fce451c9992420883f1c4708970e5d2"
+      outputHash: "sha256:c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/install-removal-drill.log"
-        sha256: "3043112ecea97cad77697c1f9afe6cdd0fce451c9992420883f1c4708970e5d2"
+        sha256: "c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "The `fake executor packages install and remove with no core edit` step in .github/workflows/ci.yml"
     failures: "None. The drill fails the job if the diff is non-empty, printing the offending paths."
@@ -148,21 +153,21 @@ claims:
       verifier: command
       command: "pnpm run build && pnpm run typecheck && pnpm run test && pnpm run test:contracts && pnpm run test:e2e-local"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:cc653cfaca8f431c9de712007d99f63863b04271546abf1970b7c86da37539eb"
+      outputHash: "sha256:fd510ed9449ecddf83019c81224dcfa0cfb68f103f4dab28a0db77aed97c5805"
       decision: pass
     artifacts:
       - path: "docs/evidence/p1/build.log"
-        sha256: "e978c83b1b057d662f008e79f8a0d47edd656014772550ab65882e40632e5461"
+        sha256: "afc7406e388bb85565f1c6d73544a117d6f369a1ed8f0ddba0471d68700cb2c4"
       - path: "docs/evidence/p1/typecheck.log"
-        sha256: "d1274a63faa549eddff2d946e1676fe3a65cf9fd76ba743f77c88792aa3f1351"
+        sha256: "5e7ba9ba6bbac0531190582169491c5c8ccd748b771fa0c24f2b1f6d636a785d"
       - path: "docs/evidence/p1/test.log"
-        sha256: "0f5c04a02cae287c2888c8a1d090d1733eae6bb282a96f85eaa54297260e45f8"
+        sha256: "dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff"
       - path: "docs/evidence/p1/test-contracts.log"
-        sha256: "92205145027afbe94eb864e3392f4f1777777b63c5d32a886957800615f9d40b"
+        sha256: "63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082"
       - path: "docs/evidence/p1/test-e2e-local.log"
-        sha256: "824b331ac0c85b846a51ba6a3ebfa0f0f21d18c4f3d4dad3f7500a0846cbd078"
+        sha256: "cf22ada47dc04caf1b079c7aba740ecbc683cbc514e144226dc43a369f58f66c"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
-    reproduction: "git checkout 2da8847 && pnpm install --frozen-lockfile && pnpm run build && pnpm run typecheck && pnpm run test && pnpm run test:contracts && pnpm run test:e2e-local"
+    reproduction: "git checkout 5f879d8 && pnpm install --frozen-lockfile && pnpm run build && pnpm run typecheck && pnpm run test && pnpm run test:contracts && pnpm run test:e2e-local"
     failures: "None. The adapter round trip is asserted to deep-equal the original for every shipped tenant, so a dropped field changes a golden delivery record rather than going unnoticed."
     status: PROVEN
     limitation: "Proves equivalence on the shipped tenants under the local end-to-end harness with stubbed engines. It does not prove equivalence against a live provider, and work-order-adapter is not the default mode."

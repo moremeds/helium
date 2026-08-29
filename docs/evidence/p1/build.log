@@ -14,9 +14,9 @@ contracts/fixtures/plugin-live-dispatch build: Done
 packages/core build: Done
 packages/fake-flat-rate build$ tsc -p tsconfig.json
 packages/fake-metered build$ tsc -p tsconfig.json
-packages/fake-metered build: Done
-packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
 packages/fake-flat-rate build: Done
+packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
+packages/fake-metered build: Done
 packages/v1-compat build: Done
 plugins/helium build$ tsc -p tsconfig.json
 plugins/helium build: Done
