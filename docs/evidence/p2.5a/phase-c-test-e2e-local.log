@@ -40,12 +40,12 @@ $ vitest run -c vitest.e2e.config.ts
   tenants: ^[[33m1^[[39m
 }
 
- ^[[32m✓^[[39m plugins/helium/test/e2e/harness.e2e.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[33m 3902^[[2mms^[[22m^[[39m
-   ^[[33m^[[2m✓^[[22m^[[39m harness e2e (legacy-direct)^[[2m > ^[[22mpolls, triages, escalates, delivers, dedups and survives restart ^[[33m 1967^[[2mms^[[22m^[[39m
-   ^[[33m^[[2m✓^[[22m^[[39m harness e2e (work-order-adapter)^[[2m > ^[[22mpolls, triages, escalates, delivers, dedups and survives restart ^[[33m 1933^[[2mms^[[22m^[[39m
+ ^[[32m✓^[[39m plugins/helium/test/e2e/harness.e2e.test.ts ^[[2m(^[[22m^[[2m2 tests^[[22m^[[2m)^[[22m^[[33m 3896^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m harness e2e (legacy-direct)^[[2m > ^[[22mpolls, triages, escalates, delivers, dedups and survives restart ^[[33m 1959^[[2mms^[[22m^[[39m
+   ^[[33m^[[2m✓^[[22m^[[39m harness e2e (work-order-adapter)^[[2m > ^[[22mpolls, triages, escalates, delivers, dedups and survives restart ^[[33m 1934^[[2mms^[[22m^[[39m
 
 ^[[2m Test Files ^[[22m ^[[1m^[[32m1 passed^[[39m^[[22m^[[90m (1)^[[39m
 ^[[2m      Tests ^[[22m ^[[1m^[[32m2 passed^[[39m^[[22m^[[90m (2)^[[39m
-^[[2m   Start at ^[[22m 16:13:41
-^[[2m   Duration ^[[22m 5.02s^[[2m (transform 365ms, setup 0ms, collect 831ms, tests 3.90s, environment 0ms, prepare 91ms)^[[22m
+^[[2m   Start at ^[[22m 16:20:24
+^[[2m   Duration ^[[22m 5.00s^[[2m (transform 378ms, setup 0ms, collect 801ms, tests 3.90s, environment 0ms, prepare 85ms)^[[22m
 

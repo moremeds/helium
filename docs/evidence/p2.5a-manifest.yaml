@@ -17,8 +17,8 @@
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
 # Ops Phase C:
-#   run:    https://github.com/moremeds/helium/actions/runs/33262299542
-#   commit: 1fb17ae  (feat/ops-phase-c)
+#   run:    https://github.com/moremeds/helium/actions/runs/33262612425
+#   commit: 4b2b57b  (feat/ops-phase-c)
 #   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,70)
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
@@ -37,7 +37,7 @@
 manifestVersion: p0-1
 phase: P2.5a
 scope: offline
-recordedAt: 2026-08-29T16:14:18Z
+recordedAt: 2026-08-29T16:20:59Z
 claims:
   - id: P2.5A-CRASH-MATRIX
     assertion: "A controller terminated at any point in a recovery attempt produces no duplicate attempt, receipt or terminal state, and never blindly retries."
@@ -192,13 +192,13 @@ claims:
       verifier: command
       command: "pnpm run test && pnpm run test:contracts"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:be3a5fcb689d5c7d65667845cc1cb8e8e9996e72e77e98a0e0330319a0a634f6"
+      outputHash: "sha256:c7d2879e99a6838ff8be631ddb403df71487c58bfa53dd9356ef9ddf8118e1a0"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-c-test.log"
-        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+        sha256: "53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
       - path: "docs/evidence/p2.5a/phase-c-test-contracts.log"
-        sha256: "40f673def5dea6de18792bfe6b26ced5f3842d9fa14ddc1deb25e0f33a639715"
+        sha256: "a31bf5155dd4f7b92a109735d89de10bb48e0e478d4b0cc0af81012c3b79b5b6"
     baseline: "Ops Phase B merge 7cae01e, which supplied the core operations contracts but no configuration loader or collector topology."
     reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/bundle-loader.test.ts plugins/ops-agent/src/component-registry.test.ts && pnpm exec vitest run --project contracts contracts/tests/topology-structure.contract.spec.ts contracts/tests/core-neutrality.contract.spec.ts"
     failures: "None. The cross-bundle cases reject incoming dependencies and SOP references before commit, then prove the original bundle can still be disposed without corrupting the remaining graph."
@@ -215,11 +215,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      outputHash: "sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-c-test.log"
-        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+        sha256: "53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
     baseline: "Ops Phase B probe and evidence interfaces, before runnable resource collection and raw-reference propagation existed."
     reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/probes/process.test.ts plugins/ops-agent/src/probes/disk.test.ts plugins/ops-agent/src/probes/macos-resource.test.ts plugins/ops-agent/src/probes/launchd-controller.test.ts packages/core/tests/recovery-evidence-bundle.spec.ts"
     failures: "None. Every fail-closed branch carries the reference returned by the same fake command invocation rather than manufacturing a second reference."
@@ -236,11 +236,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      outputHash: "sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-c-test.log"
-        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+        sha256: "53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
     baseline: "The six sanitized production-derived fixture families from Ops Phase A."
     reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/adapters/livewire.test.ts plugins/ops-agent/src/adapters/argon.test.ts plugins/ops-agent/src/adapters/apex.test.ts plugins/ops-agent/src/adapters/colima.test.ts plugins/ops-agent/src/adapters/postgres.test.ts plugins/ops-agent/src/adapters/helium.test.ts"
     failures: "None. Adapter tests assert that caller evidence references survive unchanged instead of being replaced with adapter-generated artifact names."
@@ -257,11 +257,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+      outputHash: "sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-c-test.log"
-        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+        sha256: "53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
     baseline: "Ops Phase B incident and observation projections, before alert transitions or resource admission policy existed."
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-admission.spec.ts plugins/ops-agent/src/alerts.test.ts"
     failures: "None. Recovery before the for-window matures clears the timer, so a later recurrence must satisfy a fresh complete window."
@@ -271,29 +271,29 @@ claims:
 
   - id: P2.5A-PHASE-C-OFFLINE-GATE
     assertion: "The complete observe-only Phase C tree builds, typechecks, and passes the repository unit, contract and local end-to-end gates at the pinned runtime."
-    acceptanceBound: "At commit 1fb17ae under Node 22.19.0: every workspace build and typecheck passes, 755 unit tests pass, 55 contract tests pass with the one live-provider contract explicitly skipped, and both local end-to-end modes pass."
+    acceptanceBound: "At commit 4b2b57b under Node 22.19.0: every workspace build and typecheck passes, 755 unit tests pass, 55 contract tests pass with the one live-provider contract explicitly skipped, and both local end-to-end modes pass."
     assertionClass: deterministic
     evidencePolicyVersion: p0-1
     verification:
       verifier: command
       command: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:46d9a0f952f8498e1aee7f01b0f3d60c6019a321152a31687e5f0701defb8ba3"
+      outputHash: "sha256:67496972d596b349e810aee9341bb0d1d3706812eeadb707abb98475027f4dde"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/phase-c-build.log"
-        sha256: "ce2cc06ba4cb32090a8cd2d151073542dbe960ebe1a48a2de57c117487dfa637"
+        sha256: "ec26d8592a73520d07748ecaf8adac017e878b7dab9d55b891f064a25083a2cf"
       - path: "docs/evidence/p2.5a/phase-c-typecheck.log"
-        sha256: "822dbcd3e033298944b9f2dd07fe46ded7ef4490d4f4a4ae8442d1665a5646d6"
+        sha256: "f361a9f9894c2212b48dd5d1a195ed92de29e44d32dcba407b0bdfca9ae2cf94"
       - path: "docs/evidence/p2.5a/phase-c-test.log"
-        sha256: "cae66b29e7730b12ca6518ec4c2139b31ecda2571cdc955a428acd6c40ddeb6f"
+        sha256: "53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573"
       - path: "docs/evidence/p2.5a/phase-c-test-contracts.log"
-        sha256: "40f673def5dea6de18792bfe6b26ced5f3842d9fa14ddc1deb25e0f33a639715"
+        sha256: "a31bf5155dd4f7b92a109735d89de10bb48e0e478d4b0cc0af81012c3b79b5b6"
       - path: "docs/evidence/p2.5a/phase-c-test-e2e-local.log"
-        sha256: "5feff5afd10c0dec5895b33c4fb578ff78f19925f076aefae3afeea0b8ed59c9"
+        sha256: "56866f2ac667fff6e84ba9550f6fa117c62a8988f31e2b8796c8fe00cc5aa66c"
     baseline: "Ops Phase B merge 7cae01e and the Phase C gate in the authoritative Ops implementation plan."
     reproduction: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && git diff --check"
-    failures: "None in CI run 33262299542. The live provider contract remained explicitly skipped because CI carries no provider credentials."
+    failures: "None in CI run 33262612425. The live provider contract remained explicitly skipped because CI carries no provider credentials."
     status: PROVEN
     limitation: "The end-to-end engines are local stubs, one live-provider contract is skipped, and neither opsd nor an action controller exists in Phase C. No byte was installed on the mini and no real host command ran."
     nextGate: "Ops Phase D: observe/suggest controller, script certification, adversarial contracts and reversible packaging."
