@@ -1,5 +1,7 @@
 {
   "version": 1,
-  "allowedOperatorHostHashes": [],
+  "allowedOperatorHostHashes": [
+    "0861a84d620b7012d6a120f159f2eb6b73155887bd3c2551b35e8060eb6b9e89"
+  ],
   "forbiddenMiniHostHashes": []
 }

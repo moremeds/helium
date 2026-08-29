@@ -13,12 +13,14 @@ without making a guessed production path executable. The committed authority
 manifest has no entries, and current mutation ownership is `external` or
 `none`, so every mutating SOP is held at effective `observe`.
 
-The signing-host policy is also deliberately uncommissioned: its operator and
-mini hardware-hash lists are empty. After the freeze, a separately approved
-inventory must record both machines' hardware identities, place the operator
-hash only in `allowedOperatorHostHashes`, and place the mini hash in
-`forbiddenMiniHostHashes`. Both approval signing and authority-manifest signing
-fail closed until then. The manifest signer also revalidates component
+The signing-host policy remains deliberately uncommissioned. On 2026-08-30 the
+approved off-mini operator workstation was recorded as a SHA-256 hardware hash
+in `allowedOperatorHostHashes`; its raw hardware UUID was not retained. The mini
+hash remains absent because reading it would start a process during AC#1 and
+irreversibly contaminate that unattended window. After the freeze, the approved
+inventory must place the mini hash only in `forbiddenMiniHostHashes`. Both
+approval signing and authority-manifest signing continue to fail closed until
+both lists are populated. The manifest signer also revalidates component
 ownership, business postconditions, executor registration, and the executable
 hash immediately before signing; a structurally uncertified SOP cannot enter
 the manifest.
