@@ -98,3 +98,10 @@ export {
   type PostgresSnapshot,
 } from "./adapters/postgres.js";
 export { adaptHelium, type HeliumSnapshot } from "./adapters/helium.js";
+export {
+  AlertManager,
+  type AlertDelivery,
+  type AlertEvaluation,
+  type AlertInput,
+  type AlertMessage,
+} from "./alerts.js";
