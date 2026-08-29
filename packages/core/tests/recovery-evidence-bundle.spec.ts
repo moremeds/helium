@@ -30,7 +30,11 @@ const bundle = () => ({
     changedAt: "2026-08-25T00:00:00.000Z",
     changeRef: "artifact://ownership/1",
   },
-  controllerProbe: { result: "clear" as const, observedLabels: ["own.label"] },
+  controllerProbe: {
+    result: "clear" as const,
+    observedLabels: ["own.label"],
+    evidenceRef: "artifact://raw-command/controller-1",
+  },
   lease: { leaseId: "lease-1", operationId: "op-1" },
   intent: {
     actionId: "act-1",
@@ -155,8 +159,22 @@ describe("RecoveryEvidenceSchema", () => {
       ...bundle(),
       outcome: "not-needed",
       attribution: undefined,
-      controllerProbe: { result: "competing", observedLabels: ["a", "b"] },
+      controllerProbe: {
+        result: "competing",
+        observedLabels: ["a", "b"],
+        evidenceRef: "artifact://raw-command/controller-2",
+      },
     });
     expect(parsed.controllerProbe.result).toBe("competing");
+    expect(parsed.controllerProbe.evidenceRef).toBe(
+      "artifact://raw-command/controller-2",
+    );
+  });
+
+  it("refuses a controller admission result with no raw evidence reference", () => {
+    const { evidenceRef: _drop, ...controllerProbe } = bundle().controllerProbe;
+    expect(() =>
+      RecoveryEvidenceSchema.parse({ ...bundle(), controllerProbe }),
+    ).toThrow();
   });
 });

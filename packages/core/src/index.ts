@@ -41,6 +41,7 @@ export * from "./operations/mutation-owner.js";
 export * from "./operations/verify.js";
 export * from "./operations/reconcile.js";
 export * from "./operations/recovery-evidence.js";
+export * from "./operations/admission.js";
 export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";

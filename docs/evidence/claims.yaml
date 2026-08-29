@@ -467,3 +467,123 @@ claims:
       run, no production SOP is certified, and no mutation has been performed on
       any host."
     nextGate: Ops Task 16 and 17, then the post-AC#1 drill gate.
+  - id: P2.5A-OPS-CONFIG-TOPOLOGY
+    phase: P2.5a
+    assertion: Ops configuration loads into an atomic, dependency-aware,
+      effect-scoped registry, and the collector remains structurally isolated
+      from executors and leases.
+    assertionClass: deterministic
+    command: pnpm run test && pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proven against committed YAML and static source traversal in CI.
+      It does not prove configuration reload or disposal inside a deployed
+      long-running daemon.
+    nextGate: "Ops Phase D: compose the standalone controller and adversarial process contracts."
+    outputHash: sha256:c7d2879e99a6838ff8be631ddb403df71487c58bfa53dd9356ef9ddf8118e1a0
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-c-test.log
+        sha256: 53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+      - path: docs/evidence/p2.5a/phase-c-test-contracts.log
+        sha256: a31bf5155dd4f7b92a109735d89de10bb48e0e478d4b0cc0af81012c3b79b5b6
+  - id: P2.5A-RAW-OBSERVATION-REFS
+    phase: P2.5a
+    assertion: Every runnable Phase C host probe fails closed and preserves the
+      runner-supplied raw command references needed to replay its observation or
+      mutation-admission decision.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: The command shapes are authored fixtures and the runners are
+      fakes. This proves propagation after a runner supplies an evidenceRef; it
+      does not prove that a production runner or artifact store persisted the
+      referenced raw bytes.
+    nextGate: "Post-AC#1 read-only host capture, then Ops Phase D controller composition."
+    outputHash: sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-c-test.log
+        sha256: 53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+  - id: P2.5A-INITIAL-ADAPTERS
+    phase: P2.5a
+    assertion: The six initial component adapters emit schema-valid,
+      dimension-specific observations without discarding caller-supplied raw
+      evidence references.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proven against authored and sanitized fixture inputs only. No
+      adapter connected to a live service, database, mount, or credential in
+      this run.
+    nextGate: "Post-AC#1 read-only capture and Ops Phase D controller integration."
+    outputHash: sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-c-test.log
+        sha256: 53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+  - id: P2.5A-ALERT-ADMISSION-PURE
+    phase: P2.5a
+    assertion: Alert transitions and host-pressure admission are deterministic
+      without a model or team controller in the safety path.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Admission is deliberately a pure function in Phase C; it is not
+      enforced by a team controller until P3.5 Task 13b. Alerts use a fake
+      delivery channel and have not been emitted from a deployed collector.
+    nextGate: "P3.5 Task 13b for enforcement; Ops Phase D for controller-side alert integration."
+    outputHash: sha256:53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-c-test.log
+        sha256: 53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+  - id: P2.5A-PHASE-C-OFFLINE-GATE
+    phase: P2.5a
+    assertion: The complete observe-only Phase C tree builds, typechecks, and
+      passes the repository unit, contract and local end-to-end gates at the
+      pinned runtime.
+    assertionClass: deterministic
+    command: pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts &&
+      pnpm test:e2e-local
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,70); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: The end-to-end engines are local stubs, one live-provider
+      contract is skipped, and neither opsd nor an action controller exists in
+      Phase C. No byte was installed on the mini and no real host command ran.
+    nextGate: "Ops Phase D: observe/suggest controller, script certification, adversarial contracts and reversible packaging."
+    outputHash: sha256:67496972d596b349e810aee9341bb0d1d3706812eeadb707abb98475027f4dde
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-c-build.log
+        sha256: ec26d8592a73520d07748ecaf8adac017e878b7dab9d55b891f064a25083a2cf
+      - path: docs/evidence/p2.5a/phase-c-typecheck.log
+        sha256: f361a9f9894c2212b48dd5d1a195ed92de29e44d32dcba407b0bdfca9ae2cf94
+      - path: docs/evidence/p2.5a/phase-c-test.log
+        sha256: 53592d1744c6839379632018950882255898ef665f0e5484f91dafe0b7d60573
+      - path: docs/evidence/p2.5a/phase-c-test-contracts.log
+        sha256: a31bf5155dd4f7b92a109735d89de10bb48e0e478d4b0cc0af81012c3b79b5b6
+      - path: docs/evidence/p2.5a/phase-c-test-e2e-local.log
+        sha256: 56866f2ac667fff6e84ba9550f6fa117c62a8988f31e2b8796c8fe00cc5aa66c
+  - id: P2.5A-LIVE-HOST-OBSERVATION
+    phase: P2.5a
+    assertion: The real mini's resource, controller and component output can be
+      collected read-only into replayable observations without altering host
+      state.
+    assertionClass: deterministic
+    command: "not yet runnable: AC#1 forbids touching the mini before 2026-08-31 and no production runner is deployed"
+    toolVersion: n/a
+    decision: inconclusive
+    status: BLOCKED
+    limitation: No Phase C probe or adapter has run against the mini. This row
+      prevents the offline green gate from being misread as live observation
+      proof.
+    nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."

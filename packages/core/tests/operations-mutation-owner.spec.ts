@@ -34,7 +34,11 @@ const component = (
 const probe = (
   result: ControllerProbeOutcome["result"],
   observedLabels: string[] = [],
-): ControllerProbeOutcome => ({ result, observedLabels });
+): ControllerProbeOutcome => ({
+  result,
+  observedLabels,
+  evidenceRef: "artifact://raw-command/controller-fixture",
+});
 
 describe("canMutate", () => {
   it("permits only opsd ownership with a clear probe", () => {

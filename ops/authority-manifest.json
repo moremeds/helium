@@ -1,0 +1,11 @@
+{
+  "_comment": [
+    "FIXTURE manifest. It grants nothing: entries is empty, so every SOP that",
+    "claims more than `observe` loads at `observe` with a recorded reason.",
+    "Signed by a throwaway key whose private half was never written to disk, so",
+    "no entry can be added to this file. Ops Task 16 replaces both this manifest",
+    "and the trusted key with real operator-signed entries."
+  ],
+  "entries": [],
+  "signature": "Qc+DSXD8W3B5qQ6NDc4tvffXKy2HT1fAIJLQ2DICU2ZB94rNi5mWqJQSZiIzrkx78o81ZAkWuwFb6hY1+SuTAg=="
+}

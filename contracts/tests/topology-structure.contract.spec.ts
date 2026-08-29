@@ -14,11 +14,12 @@
  *     compile-time check over `keyof SensorContext`, so adding an executor,
  *     provider, lease or run member breaks `pnpm typecheck` -- not just this
  *     file.
- *   - The IMPORT-GRAPH lint has NOTHING DECLARED TO WALK at P1. Neither
- *     `packages/core/src/sensors` nor `plugins/ops-agent/src` exists yet; the
- *     first arrives with Ops Task 7 and the sensor modules with Ops Task 10.
- *     `DECLARED_SENSOR_ROOTS` is therefore empty here, and this file must not
- *     be read as proving a sensor topology it has no sensors to check.
+ *   - The IMPORT-GRAPH lint had NOTHING DECLARED TO WALK at P1, because no
+ *     sensor module existed yet. Ops Task 10 created the host probes, so
+ *     `DECLARED_SENSOR_ROOTS` now names `plugins/ops-agent/src/probes` and the
+ *     lint walks a real graph. It does NOT yet cover the collector, which is
+ *     unwritten; this file must not be read as proving more topology than the
+ *     roots it names.
  *
  * A guard that goes green because it found nothing to check is the failure
  * mode this task exists to prevent. That is why an empty declaration list is
@@ -56,11 +57,18 @@ const sensorContextIsNeutral: [SensorContextIsNeutral] extends [never]
 // -------------------------------------------------------- import-graph half
 
 /**
- * Roots the lint walks. EMPTY at Phase 1 by design -- see the module comment.
- * Each later task adds its own root as it creates it: Ops Task 7 adds
- * `plugins/ops-agent/src`, Ops Task 10 adds the sensor modules.
+ * Roots the lint walks. Empty at Phase 1 by design -- see the module comment.
+ * Each later task adds its own root as it creates it.
+ *
+ * Ops Task 10 adds `plugins/ops-agent/src/probes`, the host sensors. The
+ * COLLECTOR is not declared here yet because it does not exist yet; when it
+ * lands it is declared alongside these, and until then this list must not be
+ * read as covering it.
  */
-const DECLARED_SENSOR_ROOTS: string[] = [];
+const DECLARED_SENSOR_ROOTS: string[] = [
+  "plugins/ops-agent/src/probes",
+  "plugins/ops-agent/src/collector.ts",
+];
 
 /**
  * Modules a sensor may never transitively reach. Declared only once the task
@@ -70,6 +78,7 @@ const DECLARED_FORBIDDEN_TARGETS = [
   "plugins/helium/src/executor-registry.ts",
   "packages/fake-metered/src/index.ts",
   "packages/fake-flat-rate/src/index.ts",
+  "packages/core/src/operations/lease.ts",
 ];
 
 function tsFilesUnder(dir: string): string[] {
@@ -92,11 +101,15 @@ function tsFilesUnder(dir: string): string[] {
  */
 export function resolveRoots(names: string[]): string[] {
   return names.flatMap((name) => {
-    const dir = resolve(repoRoot, name);
-    if (!existsSync(dir)) {
+    const path = resolve(repoRoot, name);
+    if (!existsSync(path)) {
       throw new Error(`declared sensor root does not resolve: ${name}`);
     }
-    const files = tsFilesUnder(dir);
+    const files = statSync(path).isDirectory()
+      ? tsFilesUnder(path)
+      : path.endsWith(".ts")
+        ? [path]
+        : [];
     if (files.length === 0) {
       throw new Error(`declared sensor root enumerates no modules: ${name}`);
     }
@@ -118,8 +131,48 @@ export function resolveModules(names: string[]): string[] {
 const STATIC_IMPORT =
   /(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g;
 
-function resolveSpecifier(fromFile: string, specifier: string): string | undefined {
-  if (!specifier.startsWith(".")) return undefined; // package: not a local edge
+interface WorkspacePackage {
+  name: string;
+  root: string;
+}
+
+function workspacePackages(): WorkspacePackage[] {
+  const roots = ["packages", "plugins", "contracts/fixtures"]
+    .flatMap((parent) => {
+      const parentPath = resolve(repoRoot, parent);
+      return readdirSync(parentPath)
+        .sort()
+        .map((entry) => resolve(parentPath, entry))
+        .filter((path) => statSync(path).isDirectory());
+    });
+  roots.push(resolve(repoRoot, "contracts"));
+  return roots
+    .flatMap((root): WorkspacePackage[] => {
+      const manifest = resolve(root, "package.json");
+      if (!existsSync(manifest)) return [];
+      const parsed = JSON.parse(readFileSync(manifest, "utf8")) as { name?: unknown };
+      return typeof parsed.name === "string" ? [{ name: parsed.name, root }] : [];
+    })
+    .sort((a, b) => b.name.length - a.name.length);
+}
+
+const WORKSPACE_PACKAGES = workspacePackages();
+
+export function resolveSpecifier(fromFile: string, specifier: string): string | undefined {
+  const workspacePackage = WORKSPACE_PACKAGES.find(
+    ({ name }) => specifier === name || specifier.startsWith(`${name}/`),
+  );
+  if (workspacePackage !== undefined) {
+    const subpath = specifier.slice(workspacePackage.name.length).replace(/^\//, "");
+    const candidate = subpath === ""
+      ? resolve(workspacePackage.root, "src/index.ts")
+      : resolve(workspacePackage.root, "src", subpath.replace(/\.js$/, ".ts"));
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) {
+      throw new Error(`workspace import does not resolve to source: ${specifier}`);
+    }
+    return candidate;
+  }
+  if (!specifier.startsWith(".")) return undefined;
   const base = resolve(dirname(fromFile), specifier);
   for (const candidate of [
     base.replace(/\.js$/, ".ts"),
@@ -177,10 +230,19 @@ describe("topology: no sensor reaches an executor", () => {
   });
 
   it("records which roots were declared at this run", () => {
-    // Phase 1 declares none. This assertion exists so that the day a root is
-    // added, the change is visible here rather than silently widening a lint
-    // that had been passing on an empty set.
-    expect(DECLARED_SENSOR_ROOTS).toEqual([]);
+    // This assertion exists so that the day a root is added or dropped, the
+    // change is visible here rather than silently widening -- or quietly
+    // emptying -- a lint that had been passing.
+    expect(DECLARED_SENSOR_ROOTS).toEqual([
+      "plugins/ops-agent/src/probes",
+      "plugins/ops-agent/src/collector.ts",
+    ]);
+  });
+
+  it("walks a non-empty set of sensor modules", () => {
+    // Guards the failure mode this file exists to prevent: a lint that goes
+    // green because it found nothing to check.
+    expect(resolveRoots(DECLARED_SENSOR_ROOTS).length).toBeGreaterThan(0);
   });
 
   it("finds no forbidden module reachable from any declared sensor root", () => {
@@ -222,5 +284,18 @@ describe("topology: the lint fails loud rather than passing empty", () => {
     );
     expect(reachable.length).toBeGreaterThan(5);
     expect(reachable.some((p) => p.endsWith("/work.ts"))).toBe(true);
+  });
+
+  it("resolves every forbidden workspace package import to its source entrypoint", () => {
+    const from = resolve(repoRoot, "plugins/ops-agent/src/collector.ts");
+    expect(resolveSpecifier(from, "@helium/fake-metered")).toBe(
+      resolve(repoRoot, "packages/fake-metered/src/index.ts"),
+    );
+    expect(resolveSpecifier(from, "@helium/fake-flat-rate")).toBe(
+      resolve(repoRoot, "packages/fake-flat-rate/src/index.ts"),
+    );
+    expect(resolveSpecifier(from, "dsh-plugin-helium")).toBe(
+      resolve(repoRoot, "plugins/helium/src/index.ts"),
+    );
   });
 });

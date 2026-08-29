@@ -21,7 +21,103 @@ export {
   type RegisteredScript,
 } from "./script-registry.js";
 export {
+  ComponentRegistry,
+  type LoadedSop,
+  type OpsBundle,
+  type RegistryLimits,
+} from "./component-registry.js";
+export { OpsConfigSchema, type OpsConfig } from "./config.js";
+export {
+  loadAuthoritySource,
+  resolveSopAuthority,
+  type AuthoritySource,
+  type ResolvedSopAuthority,
+} from "./authority-manifest-loader.js";
+export {
+  launchdControllerProbe,
+  parseLoadedLabels,
+  type LaunchctlResult,
+  type LaunchctlRunner,
+  type LaunchdControllerProbe,
+} from "./probes/launchd-controller.js";
+export {
   ScriptExecutor,
   type ExecutionReceipt,
   type ExecutionRequest,
 } from "./script-executor.js";
+export {
+  DEFAULT_DISK_THRESHOLDS,
+  checkMountIdentity,
+  classifyDisk,
+  diskProbe,
+  parseDf,
+  type DiskProbeOptions,
+  type DiskThresholds,
+  type ExpectedMount,
+  type MonitoredVolume,
+  type MountIdentity,
+  type VolumeUsage,
+} from "./probes/disk.js";
+export {
+  SUSTAINED_PAGEOUT_RATE,
+  classifyMemory,
+  macosResourceProbe,
+  pageoutRate,
+  parseCpuTop,
+  parseLoadAverage,
+  parseMemoryPressure,
+  parseSize,
+  parseSwapUsage,
+  parseVmStat,
+  type CpuProcessContribution,
+  type CpuTopSample,
+  type LoadAverage,
+  type MacosResourceProbeOptions,
+  type MemoryPressure,
+  type MemorySample,
+  type SwapUsage,
+  type VmStat,
+} from "./probes/macos-resource.js";
+export {
+  classifyProcess,
+  processProbe,
+  type CommandResult,
+  type CommandRunner,
+  type ProcessProbeOptions,
+} from "./probes/process.js";
+export {
+  Collector,
+  type CollectionResult,
+  type CollectorFailure,
+  type CollectorOptions,
+  type ObservationProbe,
+  type ObservationSink,
+} from "./collector.js";
+export { adaptLivewire, type LivewireSnapshot } from "./adapters/livewire.js";
+export { adaptArgon, type ArgonSnapshot } from "./adapters/argon.js";
+export { adaptApex, type ApexSnapshot } from "./adapters/apex.js";
+export {
+  COLIMA_READ_COMMANDS,
+  adaptColima,
+  type ColimaSnapshot,
+} from "./adapters/colima.js";
+export {
+  POSTGRES_READ_PROBES,
+  adaptPostgres,
+  type BackupIntegrityTier,
+  type PostgresSnapshot,
+} from "./adapters/postgres.js";
+export { adaptHelium, type HeliumSnapshot } from "./adapters/helium.js";
+export {
+  AlertManager,
+  type AlertDelivery,
+  type AlertEvaluation,
+  type AlertInput,
+  type AlertMessage,
+} from "./alerts.js";
+export {
+  OpsBundleLoader,
+  type OpsBundleLoaderOptions,
+  type TenantConfigHealth,
+  type TenantInstallResult,
+} from "./bundle-loader.js";

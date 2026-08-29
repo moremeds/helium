@@ -1300,7 +1300,7 @@ the fixture SOPs at this stage; real signed entries arrive with Task 16.
 
 ```bash
 pnpm exec vitest run --project unit plugins/ops-agent/src/component-registry.test.ts plugins/ops-agent/src/config.test.ts plugins/ops-agent/src/authority-manifest-loader.test.ts
-pnpm --filter dsh-plugin-helium-ops build
+pnpm --filter dsh-plugin-ops-agent build
 ```
 
 Expected: PASS.

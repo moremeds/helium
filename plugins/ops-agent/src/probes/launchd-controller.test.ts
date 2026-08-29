@@ -1,4 +1,5 @@
-import { canMutate, type ComponentSpec } from "@helium/core";
+import type { ComponentSpec } from "@helium/core/operations/component.js";
+import { canMutate } from "@helium/core/operations/mutation-owner.js";
 import { describe, expect, it } from "vitest";
 import {
   launchdControllerProbe,
@@ -48,6 +49,14 @@ describe("launchdControllerProbe", () => {
     const launchctl = fakeLaunchctl([OWN]);
     await launchdControllerProbe({ launchctl }).check(component());
     expect(launchctl.calls).toEqual([["list"]]);
+  });
+
+  it("keeps the persisted raw evidence ref on the exact mutation-time check", async () => {
+    const outcome = await launchdControllerProbe({
+      launchctl: fakeLaunchctl([OWN]),
+    }).check(component());
+    expect(outcome.evidenceRef).toBe("artifact://raw-command/fake-launchctl");
+    expect(await canMutate(component(), outcome)).toEqual({ ok: true });
   });
 
   it.each([
@@ -107,6 +116,9 @@ describe("observations", () => {
       parserVersion: "controller-enumeration/1",
     });
     expect(observation.value).toMatchObject({ controllerResult: "competing" });
+    expect(observation.evidenceRefs).toEqual([
+      "artifact://raw-command/fake-launchctl",
+    ]);
     expect(observation.expiresAt > observation.observedAt).toBe(true);
   });
 

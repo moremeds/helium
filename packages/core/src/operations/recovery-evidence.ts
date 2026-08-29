@@ -62,6 +62,7 @@ export const RecoveryEvidenceSchema = z
     controllerProbe: z.strictObject({
       result: z.enum(CONTROLLER_PROBE_RESULTS),
       observedLabels: z.array(z.string().max(256)),
+      evidenceRef: z.string().min(1).max(512),
     }),
 
     lease: z.strictObject({ leaseId: OpsIdSchema, operationId: OpsIdSchema }).optional(),

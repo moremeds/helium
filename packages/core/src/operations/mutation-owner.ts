@@ -26,6 +26,8 @@ export interface ControllerProbeOutcome {
   result: ControllerProbeResult;
   /** Opaque labels observed. Core neither parses nor understands them. */
   observedLabels: string[];
+  /** Persisted raw enumeration used for this exact admission decision. */
+  evidenceRef: string;
   /** Why the probe could not answer, when `result` is `unknown`. */
   detail?: string;
 }

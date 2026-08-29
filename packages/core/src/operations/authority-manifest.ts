@@ -109,7 +109,7 @@ export function resolveAuthority(
 
   const entry = manifest.entries.find((e) => e.sopId === sopFile.id);
   if (entry === undefined) {
-    return { authority: "observe", reason: "sop-not-listed" };
+    return { authority: "observe", reason: "manifest-entry-missing" };
   }
   if (entry.version !== sopFile.version) {
     return { authority: "observe", reason: "manifest-version-mismatch" };
