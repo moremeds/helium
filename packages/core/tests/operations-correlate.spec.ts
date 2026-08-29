@@ -5,7 +5,17 @@ import type { Observation } from "../src/operations/observation.js";
 
 const now = new Date("2026-08-25T04:00:00.000Z");
 
-const spec = (id: string) => ({ version: 1 as const, id, kind: "service" });
+const spec = (id: string) => ({
+  version: 1 as const,
+  id,
+  kind: "service",
+  mutationOwner: {
+    owner: "none" as const,
+    competingLabels: [],
+    changedAt: "2026-08-25T00:00:00.000Z",
+    changeRef: "fixture",
+  },
+});
 
 const graph = DependencyGraph.from(
   [spec("runtime"), spec("api-a"), spec("api-b")],

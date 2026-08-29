@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { DependencyGraph } from "../src/operations/dependency-graph.js";
 
-const spec = (id: string) => ({ version: 1 as const, id, kind: "service" });
+const spec = (id: string) => ({
+  version: 1 as const,
+  id,
+  kind: "service",
+  mutationOwner: {
+    owner: "none" as const,
+    competingLabels: [],
+    changedAt: "2026-08-25T00:00:00.000Z",
+    changeRef: "fixture",
+  },
+});
 
 describe("DependencyGraph", () => {
   it("orders dependencies before dependents", () => {

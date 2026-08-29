@@ -87,6 +87,35 @@ describe("EvidenceManifestSchema", () => {
     ).toBe("statistical");
   });
 
+  // A claim that never ran has no output to hash. Requiring one would force a
+  // fabricated value, which is the opposite of what the record is for.
+  it("requires an output hash for a decided claim and refuses one for an undecided claim", () => {
+    for (const status of ["PROVEN", "PARTIAL", "FAILED"]) {
+      const { outputHash: _drop, ...verification } = claim.verification;
+      expect(() =>
+        EvidenceManifestSchema.parse({
+          ...manifest,
+          claims: [{ ...claim, status, verification }],
+        }),
+      ).toThrow(/requires an output hash/);
+    }
+    for (const status of ["PLANNED", "BLOCKED"]) {
+      expect(() =>
+        EvidenceManifestSchema.parse({
+          ...manifest,
+          claims: [{ ...claim, status }],
+        }),
+      ).toThrow(/a run that did not happen/);
+      expect(() => {
+        const { outputHash: _drop, ...verification } = claim.verification;
+        EvidenceManifestSchema.parse({
+          ...manifest,
+          claims: [{ ...claim, status, verification, artifacts: [] }],
+        });
+      }).not.toThrow();
+    }
+  });
+
   it("admits only the canonical status and scope vocabularies", () => {
     expect(() =>
       EvidenceManifestSchema.parse({ ...manifest, claims: [{ ...claim, status: "VERIFIED" }] }),
@@ -116,6 +145,7 @@ describe("EvidenceManifestSchema", () => {
   it.each([
     ["p0-manifest.yaml", 7, 2],
     ["p1-manifest.yaml", 6, 2],
+    ["p2.5a-manifest.yaml", 7, 1],
   ])("validates the committed %s unchanged", (file, claims, partial) => {
     const path = fileURLToPath(
       new URL(`../../../docs/evidence/${file}`, import.meta.url),
