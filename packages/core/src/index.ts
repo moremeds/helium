@@ -20,6 +20,7 @@ export * from "./work.js";
 export * from "./capabilities.js";
 export * from "./router.js";
 export * from "./execution.js";
+export * from "./sensor-context.js";
 export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";
