@@ -306,21 +306,26 @@ claims:
 
   - id: P2.5A-LIVE-HOST-OBSERVATION
     assertion: "The real mini's resource, controller and component output can be collected read-only into replayable observations without altering host state."
-    acceptanceBound: "After AC#1 closes and separate observation approval is recorded, collect every initial component and host dimension with the exact production runner, persist raw bytes and references, parse without UNKNOWN caused by shape drift, and demonstrate zero writes, process starts, service-manager changes or mutations."
+    acceptanceBound: "Under the recorded weekend commissioning waiver, collect every initial component and host dimension with the exact production runner, persist raw bytes and references, parse without UNKNOWN caused by shape drift, execute no action, leave the selected Helium release and legacy controllers unchanged, and complete the seven-day observe window."
     assertionClass: deterministic
     evidencePolicyVersion: p0-1
     verification:
       verifier: command
-      command: "not yet runnable: AC#1 forbids touching the mini before 2026-08-31 and no production runner is deployed"
-      toolVersion: "n/a"
+      command: "live mini snapshot recorded in docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log; parser regression: pnpm exec vitest run --project unit plugins/ops-agent/src/probes/macos-resource.test.ts"
+      toolVersion: "mini macOS 26.5.1; node 25.9.0; pnpm 11.0.3; local vitest 3.2.7"
+      outputHash: "sha256:e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b"
       decision: inconclusive
-    artifacts: []
-    baseline: "The read-only mini audit of 2026-08-25 and the AC#1 freeze boundary in design section 13.4."
-    reproduction: "Blocked until AC#1 evidence is recorded and a separate read-only observation plan is approved; Phase C itself must not run even a manual one-shot probe on the mini."
-    failures: "Not attempted. Fixture-backed parser success is not evidence that the live host emits the same shapes or that a production runner persists the referenced bytes."
-    status: BLOCKED
-    limitation: "No Phase C probe or adapter has run against the mini. This row prevents the offline green gate from being misread as live observation proof."
-    nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log"
+        sha256: "e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b"
+      - path: "docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log"
+        sha256: "df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578"
+    baseline: "The 2026-08-25 sanitized audit plus the 2026-08-30 operator waiver that leaves v1 AC#1 uncredited and authorizes isolated observe-only commissioning."
+    reproduction: "Inspect the owner-only mini event log and raw artifact directory, verify config mode observe and zero authority entries/action events, and run the live macOS 26 parser regression locally."
+    failures: "The first two live cycles exposed CPU parser shape drift: macOS 26 top retains spaces in the fixed-width COMMAND column. Commit 5637b97 added the captured shape; the next two cycles reported CPU ok with 19.69% and 22.01% busy, memory degraded with a 2.007 pageout/s rate, and zero collection failures."
+    status: PARTIAL
+    limitation: "Only host memory/CPU and fail-closed authority observations are live. The six application/database adapters are not composed into opsd, independent dead-man expectation is not enabled, and the seven-day observation window has only started."
+    nextGate: "Wire and compare every initial live adapter, enable independent opsd dead-man only after its event path is stable, and complete seven continuous observe days with zero action events."
 
   - id: P2.5A-OPSD-MODE-AUTHORITY
     assertion: "The standalone operations controller remains deterministic and fail-closed across observe, suggest, approve and auto modes, with scoped durable approval and authority decisions."
@@ -342,8 +347,8 @@ claims:
     reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/controller.test.ts plugins/ops-agent/src/mode.test.ts plugins/ops-agent/src/ipc.test.ts plugins/ops-agent/src/approval.test.ts plugins/ops-agent/src/bin/opsctl.test.ts plugins/ops-agent/src/index.test.ts && node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs"
     failures: "None in CI run 33270118932. Missing signing policy, a registered mini, exposed key material, stale digest, unresolved ownership and unregistered probes are all refusal cases."
     status: PROVEN
-    limitation: "Proven with temporary state, fake launchctl output, generated test keys and fake executors. No control socket, approval key, authority manifest or executor was installed on the mini."
-    nextGate: "Task 16 live identity commissioning and the post-AC#1 controlled drill."
+    limitation: "The deterministic authority cases remain fixture-proven. A live owner-only control socket and empty authority manifest now run on the mini in observe mode, with zero action events in the commissioning snapshot; no approval key or executor grant is installed."
+    nextGate: "Complete live observe coverage and Task 16; only then review the ownership handoff and controlled drill."
 
   - id: P2.5A-PROVIDER-OUTAGE-CONTINUITY
     assertion: "Exhausting every configured model-provider quota domain cannot stop operations collection or deterministic recovery and cannot create a provider retry busy loop."
@@ -413,7 +418,7 @@ claims:
     reproduction: "node --test scripts/ops/sign-approval.test.mjs scripts/ops/sign-authority-manifest.test.mjs && pnpm exec vitest run --project unit plugins/ops-agent/tests/script-certification.spec.ts packages/core/tests/operations-authority-manifest.spec.ts"
     failures: "None in CI run 33270118932. Nine of nine offline signing and release-cycle subtests passed."
     status: PROVEN
-    limitation: "Only generated fixture keys and fixture scripts were signed. No operator key, mini identity, live executable hash or production grant was created."
+    limitation: "Operator and mini hardware identities are now commissioned without retaining raw UUIDs, and live executable hashes/owners were captured. Only generated fixture keys/scripts were signed; no operator private key or production grant exists."
     nextGate: "P2.5A-LIVE-SCRIPT-CERTIFICATION."
 
   - id: P2.5A-LIVE-SCRIPT-CERTIFICATION
@@ -423,20 +428,22 @@ claims:
     evidencePolicyVersion: p0-1
     verification:
       verifier: command
-      command: "not yet runnable: live paths, hashes, owner UIDs, mutation owners, drill records and the operator signature are intentionally unresolved"
-      toolVersion: "n/a"
+      command: "identity capture complete; certification remains not runnable because no inspected legacy script matches the registered exact argv/blast-radius contract and no drill/signature exists"
+      toolVersion: "mini macOS 26.5.1; node 25.9.0"
       decision: inconclusive
-    artifacts: []
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log"
+        sha256: "df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578"
     baseline: "docs/ops/script-inventory.md and the sentinel executor/SOP registrations committed on feat/ops-phase-d."
-    reproduction: "Blocked until AC#1 closes, a separate mini access plan is approved, live identity capture is recorded, ownership handoff is reviewed, and the operator signs off-mini."
-    failures: "Not attempted. Fixture certification and fail-closed signing do not certify a production executable."
+    reproduction: "Identity capture is recorded. Certification remains blocked until purpose-built exact wrappers and runnable postcondition probes exist, the ownership handoff is reviewed, the controlled drill passes, and the operator signs off-mini."
+    failures: "UIDs, paths, hashes, release targets and external controller labels were captured. The legacy trading-stack and Livewire interfaces do not match the registered exact SOP contracts and were deliberately not promoted."
     status: BLOCKED
     limitation: "Task 16 is not complete. The authority manifest remains empty, production mutation owners remain external or none, executor identities are sentinels, and no controlled drill or operator signature exists."
-    nextGate: "After 2026-08-31 and separate approval: read-only identity capture first; reviewed ownership handoff second; controlled drill and off-mini signature last."
+    nextGate: "Author/review purpose-built wrappers and live postcondition probes; then reviewed ownership handoff, controlled drill, and off-mini signature."
 
   - id: P2.5A-OBSERVE-PACKAGING
-    assertion: "The observe-only macOS package is freeze-guarded, private, reversible, release-compatible and independently dead-man monitored without installing or starting anything."
-    acceptanceBound: "The host clock cannot be overridden; every date through 2026-08-31 refuses before writing; a redirected post-freeze install renders only the declared 0700/0600 state, config and plist paths; uninstall removes only its own files; deploy and rollback validate a compatible opsd/plugin/config target and a non-future post-flip controller cycle; stale or future global, tenant and opsd timestamps fail health; and no test invokes launchctl."
+    assertion: "The observe-only macOS package is private, explicitly authorized, reversible, release-isolated, fail-closed on authority and capable of independent dead-man monitoring."
+    acceptanceBound: "The host clock cannot be overridden; pre-freeze install refuses unless the exact recorded commissioning waiver is supplied and an unknown waiver refuses without writes; install renders only declared 0700/0600 state/config paths and the plist; authority is empty; uninstall removes only its files; the selected Helium release and legacy controllers remain unchanged; deploy/rollback compatibility and non-future cycle gates pass; and independent dead-man integration is completed after the live event path is stable."
     assertionClass: deterministic
     evidencePolicyVersion: p0-1
     verification:
@@ -452,12 +459,14 @@ claims:
         sha256: "461a454aa5b9fd60c198c286e9ed7b9da519123a305e8026c361ad255e763b58"
       - path: "docs/evidence/p2.5a/phase-d-signing.log"
         sha256: "da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3"
+      - path: "docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log"
+        sha256: "e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b"
     baseline: "Ops Phase C, which contained no opsd launchd template, installer, release compatibility gate or independent opsd dead-man check."
     reproduction: "bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh && bash -n scripts/ops/install-observe-only.sh scripts/ops/uninstall-observe-only.sh scripts/ops/run-opsd.sh scripts/release/deploy.sh scripts/release/rollback.sh"
-    failures: "None. The macOS CI job reports ALL PASS and explicitly records that it did not load, start or invoke launchd."
-    status: PROVEN
-    limitation: "All filesystem effects were redirected into temporary directories. Packaging has not been installed, loaded or observed on the mini, and passing this claim is not deployment approval."
-    nextGate: "AC#1 completion evidence plus a separate observe-only deployment approval after Task 16 identity capture."
+    failures: "Offline packaging gates pass. Live commissioning found one macOS 26 CPU parser drift, fixed at 5637b97 before the second candidate completed two clean cycles."
+    status: PARTIAL
+    limitation: "The isolated candidate is installed and running with empty authority; one scoped bootout/uninstall/reinstall demonstrated rollback between candidates. The independent dead-man expectation is not yet enabled and seven observe days have not elapsed."
+    nextGate: "Complete adapter composition, enable independent dead-man after the event path is stable, and accrue seven continuous observe days before suggest mode."
 
   - id: P2.5A-PHASE-D-OFFLINE-GATE
     assertion: "The Phase D code tree, excluding explicitly blocked live commissioning, passes the complete repository and macOS offline gate at the pinned runtime."
@@ -491,5 +500,5 @@ claims:
     reproduction: "pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts && pnpm exec vitest run --project unit plugins/ops-agent/src/script-executor.test.ts && bash scripts/ops/install-observe-only.test.sh && git diff --check"
     failures: "None in CI run 33270118932. The live-provider contract remained explicitly skipped because CI carries no provider credentials."
     status: PROVEN
-    limitation: "This is an offline code gate, not the Phase D commissioning gate. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED; no production proof was opened and no byte or process touched the mini."
-    nextGate: "Keep PR 19 draft until Task 16 and the controlled live drill are completed after AC#1 with separate approval."
+    limitation: "This remains the offline code gate. Live commissioning subsequently began under a separately recorded waiver and is tracked by P2.5A-LIVE-HOST-OBSERVATION; P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
+    nextGate: "Keep PR 19 draft while live observe coverage, Task 16 and the controlled drill remain incomplete."

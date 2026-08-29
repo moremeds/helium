@@ -579,14 +579,24 @@ claims:
       collected read-only into replayable observations without altering host
       state.
     assertionClass: deterministic
-    command: "not yet runnable: AC#1 forbids touching the mini before 2026-08-31 and no production runner is deployed"
-    toolVersion: n/a
+    command: "live mini snapshot recorded in docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log; parser regression: pnpm exec vitest run --project unit plugins/ops-agent/src/probes/macos-resource.test.ts"
+    toolVersion: mini macOS 26.5.1; node 25.9.0; pnpm 11.0.3; local vitest
+      3.2.7
     decision: inconclusive
-    status: BLOCKED
-    limitation: No Phase C probe or adapter has run against the mini. This row
-      prevents the offline green gate from being misread as live observation
-      proof.
-    nextGate: "After 2026-08-31: record AC#1 completion, approve a read-only capture plan, and run the production observation gate before any install."
+    status: PARTIAL
+    limitation: Only host memory/CPU and fail-closed authority observations are
+      live. The six application/database adapters are not composed into opsd,
+      independent dead-man expectation is not enabled, and the seven-day
+      observation window has only started.
+    nextGate: Wire and compare every initial live adapter, enable independent
+      opsd dead-man only after its event path is stable, and complete seven
+      continuous observe days with zero action events.
+    outputHash: sha256:e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log
+        sha256: e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
+      - path: docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log
+        sha256: df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578
   - id: P2.5A-OPSD-MODE-AUTHORITY
     phase: P2.5a
     assertion: The standalone operations controller remains deterministic and
@@ -598,10 +608,12 @@ claims:
       11.24.0; vitest 3.2.7
     decision: pass
     status: PROVEN
-    limitation: Proven with temporary state, fake launchctl output, generated
-      test keys and fake executors. No control socket, approval key, authority
-      manifest or executor was installed on the mini.
-    nextGate: Task 16 live identity commissioning and the post-AC#1 controlled drill.
+    limitation: The deterministic authority cases remain fixture-proven. A live
+      owner-only control socket and empty authority manifest now run on the mini
+      in observe mode, with zero action events in the commissioning snapshot;
+      no approval key or executor grant is installed.
+    nextGate: Complete live observe coverage and Task 16; only then review the
+      ownership handoff and controlled drill.
     outputHash: sha256:8dd20900b599b95387ffa96759b3a6dd0f8dfc1863023e9175dd4cae13b38de2
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-test.log
@@ -664,9 +676,10 @@ claims:
       11.24.0; vitest 3.2.7
     decision: pass
     status: PROVEN
-    limitation: Only generated fixture keys and fixture scripts were signed. No
-      operator key, mini identity, live executable hash or production grant was
-      created.
+    limitation: Operator and mini hardware identities are now commissioned
+      without retaining raw UUIDs, and live executable hashes/owners were
+      captured. Only generated fixture keys/scripts were signed; no operator
+      private key or production grant exists.
     nextGate: P2.5A-LIVE-SCRIPT-CERTIFICATION.
     outputHash: sha256:e399726a6764f7ebc7862affae1639cc48496c3808dae3a3a28747ef56e9a280
     artifacts:
@@ -680,29 +693,35 @@ claims:
       against their live deployment identities, owned by opsd, drill-bounded
       and covered by an operator-signed authority manifest.
     assertionClass: deterministic
-    command: "not yet runnable: live paths, hashes, owner UIDs, mutation owners, drill records and the operator signature are intentionally unresolved"
-    toolVersion: n/a
+    command: "identity capture complete; certification remains not runnable because no inspected legacy script matches the registered exact argv/blast-radius contract and no drill/signature exists"
+    toolVersion: mini macOS 26.5.1; node 25.9.0
     decision: inconclusive
     status: BLOCKED
     limitation: Task 16 is not complete. The authority manifest remains empty,
       production mutation owners remain external or none, executor identities
       are sentinels, and no controlled drill or operator signature exists.
-    nextGate: "After 2026-08-31 and separate approval: read-only identity capture first; reviewed ownership handoff second; controlled drill and off-mini signature last."
+    nextGate: Author/review purpose-built wrappers and live postcondition probes;
+      then reviewed ownership handoff, controlled drill, and off-mini signature.
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log
+        sha256: df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578
   - id: P2.5A-OBSERVE-PACKAGING
     phase: P2.5a
-    assertion: The observe-only macOS package is freeze-guarded, private,
-      reversible, release-compatible and independently dead-man monitored
-      without installing or starting anything.
+    assertion: The observe-only macOS package is private, explicitly authorized,
+      reversible, release-isolated, fail-closed on authority and capable of
+      independent dead-man monitoring.
     assertionClass: deterministic
     command: bash scripts/ops/install-observe-only.test.sh && node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash scripts/deadman/check-heartbeat.test.sh
     toolVersion: macOS runner; node 22.19.0; pnpm 11.24.0
     decision: pass
-    status: PROVEN
-    limitation: All filesystem effects were redirected into temporary
-      directories. Packaging has not been installed, loaded or observed on the
-      mini, and passing this claim is not deployment approval.
-    nextGate: AC#1 completion evidence plus a separate observe-only deployment
-      approval after Task 16 identity capture.
+    status: PARTIAL
+    limitation: The isolated candidate is installed and running with empty
+      authority; one scoped bootout/uninstall/reinstall demonstrated rollback
+      between candidates. The independent dead-man expectation is not yet
+      enabled and seven observe days have not elapsed.
+    nextGate: Complete adapter composition, enable independent dead-man after
+      the event path is stable, and accrue seven continuous observe days before
+      suggest mode.
     outputHash: sha256:c82415675c95661d4dabb6444e514c5d068a47bf655ec320152d8f8b52465d9c
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
@@ -711,6 +730,8 @@ claims:
         sha256: 461a454aa5b9fd60c198c286e9ed7b9da519123a305e8026c361ad255e763b58
       - path: docs/evidence/p2.5a/phase-d-signing.log
         sha256: da1ffbb0f6e67fcbd12f25fdf50edf4a456672c1c182dcfb6e373ae62358e4b3
+      - path: docs/evidence/p2.5a/phase-d-weekend-commissioning-2026-08-30.log
+        sha256: e517eccf489dfc5e72ba415bc29659bae49e9aef259803c77fdb26593ee6289b
   - id: P2.5A-PHASE-D-OFFLINE-GATE
     phase: P2.5a
     assertion: The Phase D code tree, excluding explicitly blocked live
@@ -722,11 +743,12 @@ claims:
       11.24.0; vitest 3.2.7
     decision: pass
     status: PROVEN
-    limitation: This is an offline code gate, not the Phase D commissioning
-      gate. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED;
-      no production proof was opened and no byte or process touched the mini.
-    nextGate: Keep PR 19 draft until Task 16 and the controlled live drill are
-      completed after AC#1 with separate approval.
+    limitation: This remains the offline code gate. Live commissioning
+      subsequently began under a separately recorded waiver and is tracked by
+      P2.5A-LIVE-HOST-OBSERVATION; P2.5A-LIVE-SCRIPT-CERTIFICATION and
+      P2.5A-LIVE-DRILL remain BLOCKED.
+    nextGate: Keep PR 19 draft while live observe coverage, Task 16 and the
+      controlled drill remain incomplete.
     outputHash: sha256:22ea5de56c519a1b100189f73ebedfcbc46a9a4d7622e64bda8acb8c9c88fb47
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-ci-gate.log
