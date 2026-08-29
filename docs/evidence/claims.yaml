@@ -360,10 +360,10 @@ claims:
       daemon under load. It proves the replay contract, not the behaviour of the
       host process under signals.
     nextGate: "Ops Phase C: collector, probes and adapters."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-ATTRIBUTION-NEVER-AUTOMATIC
     phase: P2.5a
     assertion: A controller never claims its own action succeeded merely because the
@@ -378,10 +378,10 @@ claims:
       prove the daemon assembles that evidence correctly from a live host, which
       needs the collector in Ops Phase C.
     nextGate: "Ops Phase C: collector, probes and adapters."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-NOT-NEEDED-NO-AUTOMATION-CREDIT
     phase: P2.5a
     assertion: An action whose pre-action baseline already passed is excluded from
@@ -395,10 +395,10 @@ claims:
     limitation: Proves the exclusion in the classifier and the schema. The promotion
       gate that consumes the statistic does not exist until P4.
     nextGate: "P4: bounded production window and promotion."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-MUTATION-OWNERSHIP-FAIL-CLOSED
     phase: P2.5a
     assertion: No mutation is attempted while component ownership is competing,
@@ -415,10 +415,10 @@ claims:
       host's actual output. Closing this needs a read-only capture from the
       mini, which the AC#1 window forbids until 2026-08-31.
     nextGate: "Ops Phase C Task 10: collector and host probes."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-NO-COMMAND-STRING
     phase: P2.5a
     assertion: No certified action is ever expressed, stored or executed as a
@@ -432,10 +432,10 @@ claims:
     limitation: Proven against a fake repair script. No certified production script
       has been registered or run.
     nextGate: "Ops Task 16: inventory and certify the first existing scripts."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-RECOVERY-BUNDLE-COMPLETE
     phase: P2.5a
     assertion: A recovery claim cannot be recorded without the evidence chain that
@@ -449,10 +449,10 @@ claims:
     limitation: Proves the schema refuses incomplete bundles. No bundle has yet been
       produced from a real recovery, because no recovery has been performed.
     nextGate: "Ops Phase C: collector, probes and adapters."
-    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    outputHash: sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
     artifacts:
       - path: docs/evidence/p2.5a/test.log
-        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+        sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
   - id: P2.5A-LIVE-DRILL
     phase: P2.5a
     assertion: A certified SOP restores a real component's integrity, freshness and

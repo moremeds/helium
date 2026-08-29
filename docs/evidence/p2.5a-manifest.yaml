@@ -10,8 +10,8 @@
 #
 # WHERE THE HASHES COME FROM
 # --------------------------
-#   run:    https://github.com/moremeds/helium/actions/runs/33244178167
-#   commit: a7d5947  (feat/ops-phase-b)
+#   run:    https://github.com/moremeds/helium/actions/runs/33244380149
+#   commit: 3b54957  (feat/ops-phase-b)
 #   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49)
 #   pnpm:   11.24.0   vitest: 3.2.7
 #
@@ -41,11 +41,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-crash-matrix.spec.ts"
     failures: "None. The matrix truncates a real durable log rather than discarding in-memory state, so each case asks what a restarted process can conclude from what actually reached disk."
@@ -62,11 +62,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "The read-only mini audit of 2026-08-25, design sections 3.1 and 3.6."
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reducer.spec.ts"
     failures: "None. A missing receipt with a recorded intent is uncertain rather than external, so an external actor is never credited for a mutation Helium may have performed."
@@ -83,11 +83,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-sop.spec.ts packages/core/tests/operations-verify.spec.ts"
     failures: "None. Without this rule an operator fixing the component concurrently hands the controller a free exit 0 plus passing postconditions, feeding the promotion gate exactly the case it exists to catch."
@@ -104,11 +104,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "Design section 13.2."
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts"
     failures: "None. A partially readable controller table is refused entirely, because a label the parser skipped is exactly the rival it exists to find."
@@ -125,11 +125,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
     reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/script-registry.test.ts plugins/ops-agent/src/script-executor.test.ts"
     failures: "None. The timeout test proves process-group reaping rather than orphaning: a descendant rewrites a marker every 25ms, and after the deadline the marker is deleted and must not reappear."
@@ -146,11 +146,11 @@ claims:
       verifier: command
       command: "pnpm run test"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
-      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      outputHash: "sha256:67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
       decision: pass
     artifacts:
       - path: "docs/evidence/p2.5a/test.log"
-        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+        sha256: "67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6"
     baseline: "The canonical EvidenceBundle from multi-agent Task 7."
     reproduction: "pnpm exec vitest run --project unit packages/core/tests/recovery-evidence-bundle.spec.ts"
     failures: "None."

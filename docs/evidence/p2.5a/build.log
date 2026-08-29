@@ -9,14 +9,14 @@ Scope: 11 of 12 workspace projects
 contracts/fixtures/plugin-live-dispatch build$ tsc -p tsconfig.json
 contracts/fixtures/plugin-restrict-proof build$ tsc -p tsconfig.json
 contracts/fixtures/plugin-live-dispatch build: Done
-packages/core build$ tsc -p tsconfig.json
 contracts/fixtures/plugin-restrict-proof build: Done
+packages/core build$ tsc -p tsconfig.json
 packages/core build: Done
-packages/fake-metered build$ tsc -p tsconfig.json
 packages/fake-flat-rate build$ tsc -p tsconfig.json
-packages/fake-metered build: Done
-packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
+packages/fake-metered build$ tsc -p tsconfig.json
 packages/fake-flat-rate build: Done
+packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
+packages/fake-metered build: Done
 plugins/ops-agent build$ tsc -p tsconfig.json
 plugins/ops-agent build: Done
 packages/v1-compat build: Done
