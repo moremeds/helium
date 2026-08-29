@@ -1,0 +1,56 @@
+{
+  "fixtureVersion": 1,
+  "observedAt": "2026-08-25T03:12:00.000Z",
+  "observations": [
+    {
+      "version": 1,
+      "id": "obs-livewire-status-1",
+      "componentId": "livewire",
+      "probeId": "livewire.status-surface.v1",
+      "observedAt": "2026-08-25T03:11:30.000Z",
+      "expiresAt": "2026-08-25T03:16:30.000Z",
+      "state": "degraded",
+      "dimension": "freshness",
+      "value": { "reportedCoverageAgeDays": 4, "reportedIntradayCoverage": 0 },
+      "evidenceRefs": ["artifact://ops-fixture/livewire/status-surface.json"],
+      "parserVersion": "livewire-status/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-livewire-daily-log-1",
+      "componentId": "livewire",
+      "probeId": "livewire.source-log.v1",
+      "observedAt": "2026-08-25T03:12:00.000Z",
+      "expiresAt": "2026-08-25T03:17:00.000Z",
+      "state": "ok",
+      "dimension": "freshness",
+      "value": { "stream": "daily", "newerThanStatusSurface": true },
+      "evidenceRefs": ["artifact://ops-fixture/livewire/daily-source.log"],
+      "parserVersion": "livewire-source-log/1"
+    },
+    {
+      "version": 1,
+      "id": "obs-livewire-intraday-log-1",
+      "componentId": "livewire",
+      "probeId": "livewire.source-log.v1",
+      "observedAt": "2026-08-25T03:12:00.000Z",
+      "expiresAt": "2026-08-25T03:17:00.000Z",
+      "state": "ok",
+      "dimension": "freshness",
+      "value": { "stream": "intraday", "newerThanStatusSurface": true },
+      "evidenceRefs": ["artifact://ops-fixture/livewire/intraday-source.log"],
+      "parserVersion": "livewire-source-log/1"
+    }
+  ],
+  "expected": {
+    "incidentTerminal": "open",
+    "actionOutcome": null,
+    "attribution": null,
+    "automaticRecoverySucceeded": false,
+    "assertions": {
+      "statusSurfaceDisagreesWithSourceLogs": "PROVEN",
+      "coverageIsActuallyStale": "BLOCKED",
+      "statusSurfaceIsAuthoritative": "FAILED"
+    }
+  }
+}
