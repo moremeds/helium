@@ -17,6 +17,7 @@ export * from "./tenant-health.js";
 export * from "./tools/index.js";
 export * from "./mcp/selection.js";
 export * from "./work.js";
+export * from "./capabilities.js";
 export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";
