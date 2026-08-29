@@ -2,7 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { StateStore, type TriggerStateChange } from "@helium/core";
+import { StateStore } from "@helium/core";
+import { type TriggerStateChange } from "@helium/v1-compat";
 import {
   extractFields,
   hashFields,

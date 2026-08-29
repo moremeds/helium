@@ -25,12 +25,17 @@ import {
   StateStore,
   ThesisStore,
   inventoryTenants,
-  loadJobs,
-  type JobSpec,
   type RunOutcome,
+} from "@helium/core";
+import {
+  adaptV1Job,
+  loadJobs,
+  parseJobYaml,
+  restoreV1Job,
+  type JobSpec,
   type TriggerCalendarWindow,
   type TriggerStateChange,
-} from "@helium/core";
+} from "@helium/v1-compat";
 import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
 import type { Config } from "./config.js";
 import { CronTrigger } from "./cron.js";
@@ -167,7 +172,16 @@ export class HeliumRuntime {
       console.error(
         `helium: SKIPPING malformed job ${path} -- this tenant is NOT running: ${err.message}`,
       );
-    }).filter((j) => j.enabled);
+    })
+      .filter((j) => j.enabled)
+      // `work-order-adapter` mode runs the v1 path on the ROUND TRIP through
+      // the model-blind representation. That makes the whole v1 regression
+      // suite a test of the adapter's fidelity: any field the adapter drops
+      // changes a golden delivery record instead of going unnoticed until a
+      // tenant behaves differently in production.
+      .map((j) =>
+        c.runtimeMode === "work-order-adapter" ? restoreV1Job(adaptV1Job(j)) : j,
+      );
 
     const contextText = readFileSync(c.contextFile, "utf8");
     this.dispatcher = new Dispatcher({
@@ -197,7 +211,12 @@ export class HeliumRuntime {
     // visible as `invalid`, because the operator-visible symptom of it silently
     // vanishing is a fleet that looks entirely healthy while one tenant is not
     // running at all.
-    const inventory = inventoryTenants(this.deps.config.jobsDir);
+    // The parser is injected: parsing a tenant file is v1 job-spec
+    // knowledge and core may not depend on the compatibility package.
+    const inventory = inventoryTenants(
+      this.deps.config.jobsDir,
+      parseJobYaml,
+    );
     for (const tenant of inventory) {
       this.writer.append("tenant-health", {
         tenant: tenant.tenant,

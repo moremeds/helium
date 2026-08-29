@@ -30,7 +30,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import nodemailer, { type Transporter } from "nodemailer";
-import type { JobSpec, JsonlWriter } from "@helium/core";
+import type { JsonlWriter } from "@helium/core";
+import type { JobSpec } from "@helium/v1-compat";
 import type { DispatchResult } from "./dispatch.js";
 import type { TriggerEvent } from "./sensor.js";
 

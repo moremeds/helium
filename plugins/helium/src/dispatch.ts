@@ -24,13 +24,13 @@ import type {} from "@deepseek-ai/dsh-tools";
 import {
   meetsThreshold,
   parseVerdict,
-  type JobSpec,
   type RunLedger,
   type RunOutcome,
   type SensorState,
   type StateStore,
   type TriageVerdict,
 } from "@helium/core";
+import { type JobSpec } from "@helium/v1-compat";
 import type { TriggerEvent } from "./sensor.js";
 
 export const VERDICT_INSTRUCTION =

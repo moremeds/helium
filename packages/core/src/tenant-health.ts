@@ -12,7 +12,20 @@
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseJobYaml } from "./job.js";
+
+/** The two fields {@link inventoryTenants} needs out of a parsed tenant file. */
+export interface ParsedTenant {
+  name: string;
+  enabled: boolean;
+}
+
+/**
+ * How a tenant file becomes a tenant. Injected rather than imported: parsing a
+ * tenant file is v1 job-spec knowledge and lives in `@helium/v1-compat`, while
+ * per-tenant liveness is a domain-neutral concern that stays here. Core may not
+ * depend on the compatibility package, so the caller supplies the parser.
+ */
+export type TenantParser = (text: string, source: string) => ParsedTenant;
 
 /** How a tenant's own YAML file resolved at load time. */
 export type TenantLoad = "loaded" | "invalid" | "disabled";
@@ -47,15 +60,19 @@ export interface HeartbeatRow {
  * name to be known by.
  *
  * @param dir - the jobs directory.
+ * @param parse - the tenant-file parser; throwing marks the tenant `invalid`.
  * @returns one entry per `*.yaml`, in file-name order.
  */
-export function inventoryTenants(dir: string): ExpectedTenant[] {
+export function inventoryTenants(
+  dir: string,
+  parse: TenantParser,
+): ExpectedTenant[] {
   return readdirSync(dir)
     .filter((file) => file.endsWith(".yaml"))
     .sort()
     .map((file) => {
       try {
-        const spec = parseJobYaml(readFileSync(join(dir, file), "utf8"), file);
+        const spec = parse(readFileSync(join(dir, file), "utf8"), file);
         return {
           tenant: spec.name,
           load: spec.enabled ? ("loaded" as const) : ("disabled" as const),

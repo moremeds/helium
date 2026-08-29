@@ -2,31 +2,24 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { inventoryTenants, tenantHealth } from "../src/tenant-health.js";
+import {
+  inventoryTenants,
+  tenantHealth,
+  type TenantParser,
+} from "../src/tenant-health.js";
 
-const MACRO_WATCH = `name: macro-watch
-enabled: true
-triggers:
-  - kind: cron
-    schedule: "0 17 * * 1-5"
-    tz: America/New_York
-engine:
-  triage: { engine: deepseek, model: deepseek-v4-flash }
-  senior: { engine: claude-max }
-escalate_when: severity >= material
-session: fresh
-memory: thesis-file
-tools: [argon_api, livewire_sql]
-allowMutations: false
-max_turns: { triage: 2, senior: 8 }
-timeout: 10m
-budget: { max_triage_per_hour: 30, max_senior_per_day: 12 }
-delivery:
-  jsonl: true
-  email: { to: operator, subject_prefix: "[helium/macro]", max_per_hour: 4 }
-prompt: |
-  Analyze the change.
-`;
+/**
+ * A deliberately minimal stand-in for the real tenant parser. Task 6 made the
+ * parser an injected dependency — parsing a tenant file is v1 job-spec
+ * knowledge that core may not import — so this suite tests the inventory
+ * ordering rule and the injection seam, not the v1 schema. The v1 parser has
+ * its own tests in `@helium/v1-compat`.
+ */
+const parse: TenantParser = (text, source) => {
+  const name = /^name: (\S+)$/m.exec(text);
+  if (name === null) throw new Error(`no name in ${source}`);
+  return { name: name[1], enabled: !/^enabled: false$/m.test(text) };
+};
 
 describe("tenantHealth", () => {
   const deadline = Date.parse("2026-08-29T12:00:00Z");
@@ -91,18 +84,12 @@ describe("tenantHealth", () => {
 describe("inventoryTenants", () => {
   it("inventories every *.yaml before parsing, so a malformed file is still a tenant", () => {
     const dir = mkdtempSync(join(tmpdir(), "helium-tenants-"));
-    writeFileSync(join(dir, "a-macro.yaml"), MACRO_WATCH);
-    writeFileSync(join(dir, "b-broken.yaml"), "this: [is not a job");
-    writeFileSync(
-      join(dir, "c-paused.yaml"),
-      MACRO_WATCH.replace("name: macro-watch", "name: paused").replace(
-        "enabled: true",
-        "enabled: false",
-      ),
-    );
+    writeFileSync(join(dir, "a-first.yaml"), "name: first\nenabled: true\n");
+    writeFileSync(join(dir, "b-broken.yaml"), "this: [is not a tenant");
+    writeFileSync(join(dir, "c-paused.yaml"), "name: paused\nenabled: false\n");
 
-    expect(inventoryTenants(dir)).toEqual([
-      { tenant: "macro-watch", load: "loaded" },
+    expect(inventoryTenants(dir, parse)).toEqual([
+      { tenant: "first", load: "loaded" },
       { tenant: "b-broken", load: "invalid" },
       { tenant: "paused", load: "disabled" },
     ]);
@@ -110,8 +97,8 @@ describe("inventoryTenants", () => {
 
   it("names an unparseable tenant after its file, since it has no parsed name", () => {
     const dir = mkdtempSync(join(tmpdir(), "helium-tenants-bad-"));
-    writeFileSync(join(dir, "typo-watch.yaml"), "not: a: valid: job");
-    expect(inventoryTenants(dir)).toEqual([
+    writeFileSync(join(dir, "typo-watch.yaml"), "nothing: usable");
+    expect(inventoryTenants(dir, parse)).toEqual([
       { tenant: "typo-watch", load: "invalid" },
     ]);
   });

@@ -4,7 +4,13 @@
  * @module @helium/core/verdict
  */
 import { z } from "zod";
-import type { Severity } from "./job.js";
+
+/**
+ * The severity ladder. It lives here rather than with the v1 job spec because
+ * it is a domain-neutral vocabulary this module already re-declares in its own
+ * schema below, and core may not depend on the v1 compatibility package.
+ */
+export type Severity = "noise" | "minor" | "material" | "critical";
 
 export interface TriageVerdict {
   escalate: boolean;

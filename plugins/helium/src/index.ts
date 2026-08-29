@@ -11,12 +11,8 @@ import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import {
-  buildTools,
-  JsonlWriter,
-  type JobSpec,
-  type RunOutcome,
-} from "@helium/core";
+import { JsonlWriter, type RunOutcome } from "@helium/core";
+import { buildTools, type JobSpec } from "@helium/v1-compat";
 import { buildChildEnv, runClaude, type ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";

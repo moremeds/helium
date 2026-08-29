@@ -17,6 +17,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const { inventoryTenants, tenantHealth } = await import(
   join(here, "..", "..", "packages", "core", "lib", "tenant-health.js")
 );
+// The tenant parser is injected (Task 6): parsing a tenant file is v1
+// job-spec knowledge and lives in the compatibility package, so core's
+// inventory takes it as an argument rather than importing it.
+const { parseJobYaml } = await import(
+  join(here, "..", "..", "packages", "v1-compat", "lib", "job.js")
+);
 
 const jobsDir = process.env.HELIUM_JOBS_DIR ?? join(here, "..", "..", "jobs");
 const stateRoot =
@@ -28,7 +34,7 @@ if (!existsSync(jobsDir)) {
   process.exit(2);
 }
 
-const expected = inventoryTenants(jobsDir);
+const expected = inventoryTenants(jobsDir, parseJobYaml);
 if (expected.length === 0) {
   console.error(`no *.yaml tenants in ${jobsDir}`);
   process.exit(2);

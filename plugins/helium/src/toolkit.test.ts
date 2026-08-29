@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildTools } from "@helium/core";
+import { buildTools } from "@helium/v1-compat";
 import { registerEcosystemTools } from "./toolkit.js";
 
 const tools = () =>

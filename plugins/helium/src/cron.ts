@@ -1,5 +1,6 @@
 import { Cron } from "croner";
-import { nowIso, type TriggerCron } from "@helium/core";
+import { nowIso } from "@helium/core";
+import { type TriggerCron } from "@helium/v1-compat";
 import type { TriggerEvent } from "./sensor.js";
 
 /** Pure next-run resolution; the tz is an IANA name, the result is a UTC instant. */

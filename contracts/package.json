@@ -7,7 +7,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@helium/core": "file:../packages/core",
+    "@helium/fake-flat-rate": "file:../packages/fake-flat-rate",
+    "@helium/fake-metered": "file:../packages/fake-metered",
     "@types/node": "^22",
-    "typescript": "^5"
+    "typescript": "^5",
+    "yaml": "^2.9.0"
   }
 }

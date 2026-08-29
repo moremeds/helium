@@ -4,7 +4,7 @@
  */
 import { DuckDBInstance } from "@duckdb/node-api";
 import { z } from "zod";
-import type { EcosystemTool } from "./types.js";
+import type { EcosystemTool } from "@helium/core";
 
 const Params = z.object({
   sql: z.string().min(1),

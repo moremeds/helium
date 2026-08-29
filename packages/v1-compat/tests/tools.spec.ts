@@ -11,7 +11,7 @@ import {
   json,
   startFixture,
   type Fixture,
-} from "../src/testing/http-fixture.js";
+} from "@helium/core/testing/http-fixture.js";
 
 describe("isSelectOnly", () => {
   it("accepts SELECT and WITH, rejects everything else and multi-statement input", () => {

@@ -7,7 +7,7 @@
  * @module dsh-plugin-helium/script
  */
 import { spawn } from "node:child_process";
-import type { JobScriptAction } from "@helium/core";
+import type { JobScriptAction } from "@helium/v1-compat";
 
 const SIGKILL_GRACE_MS = 10_000;
 const OUTPUT_TAIL = 8_000;

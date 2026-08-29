@@ -1,7 +1,16 @@
 import { join } from "node:path";
 import { z } from "zod";
 
+/**
+ * Which path a loaded job takes. `work-order-adapter` routes every job
+ * through `adaptV1Job()` and back before the dispatcher sees it, so the v1
+ * regression suite becomes a test of the adapter's fidelity. Default stays
+ * `legacy-direct` until the adapter has passed that suite.
+ */
+export type RuntimeMode = "legacy-direct" | "work-order-adapter";
+
 export interface Config {
+  runtimeMode: RuntimeMode;
   jobsDir: string;
   stateRoot: string;
   contextFile: string;
@@ -17,6 +26,9 @@ export interface Config {
 }
 
 export const ConfigSchema = z.object({
+  runtimeMode: z
+    .enum(["legacy-direct", "work-order-adapter"])
+    .default("legacy-direct"),
   jobsDir: z.string().min(1),
   stateRoot: z.string().min(1),
   contextFile: z.string().min(1),

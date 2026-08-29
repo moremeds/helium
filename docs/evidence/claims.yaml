@@ -1,0 +1,347 @@
+# The closed claims register.
+#
+# The evidence ledger records decisions; it does not bound the population those
+# decisions are drawn from. An open claim set has no denominator, so nothing in
+# it can ever be found MISSING. This file is that denominator: one row per
+# already-decided or already-scheduled claim, and every later phase gate
+# appends to this same file. No phase creates a second register.
+#
+# The P0 rows are not re-authored here. They are copied from
+# `docs/evidence/p0-manifest.yaml`, and
+# `contracts/tests/claims-register.contract.spec.ts` fails if the two ever
+# disagree on a command, tool version, output hash, decision or status.
+#
+# HOW THIS REGISTER IS RE-VERIFIED, AND WHY NOT BY RE-RUNNING THE COMMAND
+# ----------------------------------------------------------------------
+# The implementation plan asks the register's contract test to "re-run each
+# deterministic claim's command at its pinned tool version and compare the
+# sha256 of the output against the recorded hash". That is not implementable as
+# written, for two independent reasons, so the test does the checkable thing
+# instead and this note records the deviation rather than hiding it:
+#
+#   1. An output hash is not reproducible. The captured output carries
+#      wall-clock durations and start times, so re-running the SAME commit
+#      yields a different hash every time. `p0-manifest.yaml` says so in its own
+#      header. A test comparing them would fail on every run, forever, for a
+#      tree that is entirely correct.
+#   2. Two of the recorded commands are `pnpm run test:contracts`. The register's
+#      contract test IS part of that suite, so re-running the command from
+#      inside it recurses without bound.
+#
+# What the contract test does instead is deterministic and falsifiable:
+#   - it fails on an empty or unparseable register (zero rows is a failure, not
+#     a vacuous pass);
+#   - it re-hashes every committed artifact a decided claim cites and compares
+#     against the recorded `sha256`, so a silently edited or replaced evidence
+#     file fails the gate;
+#   - it cross-checks every P0 row against `p0-manifest.yaml` field by field;
+#   - it requires a `PARTIAL` row to name its missing proof, and refuses a
+#     `PROVEN` row whose verifier decision is not `pass`.
+#
+# The recorded `outputHash` therefore pins one specific CI run's output as an
+# immutable record. Re-running a command re-verifies the ASSERTION, never the
+# hash.
+#
+# A `PLANNED` row carries no hash and no artifacts: it names a claim whose gate
+# has not been reached. It is here so the claim cannot be quietly dropped. The
+# six Phase 1 rows were seeded PLANNED in Task 7 and decided at the Phase 1
+# gate; four are PROVEN and two are PARTIAL with the missing half named.
+registerVersion: 1
+claims:
+  - id: P0-ISOLATION-UNDECLARED-TOOL
+    phase: P0
+    assertion: An execution target cannot invoke a tool outside its declared contract.
+    assertionClass: deterministic
+    command: pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/test-contracts.log
+        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    status: PROVEN
+    limitation: This proves the ARGUMENTS the harness composes and what the child
+      observes of its environment. It does NOT prove the real Claude CLI honours
+      those flags — every fixture is a fake binary. The flag semantics rest on
+      the 2.1.250 help output verified on 2026-08-28, recorded in the
+      implementation plan's Task 1.
+    nextGate: "P1 Task 10: the formal Executor adapts to this same subject shape and
+      inherits this contract."
+  - id: P0-EXECUTION-BOUNDARY-CONFORMANCE
+    phase: P0
+    assertion: The execution-boundary contract is a reusable suite parameterized
+      over a subject, not a one-off test of the senior lane, and a subject
+      cannot declare a stronger isolation class than the harness can
+      demonstrate.
+    assertionClass: deterministic
+    command: pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/test-contracts.log
+        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    status: PARTIAL
+    limitation: "PARTIAL because the SECOND HALF of the acceptance bound is not
+      visible in the artifact. The recorded run proves the first half: the
+      senior lane passes every assertion under both a one-tool and a zero-tool
+      declaration. It does NOT prove that raising declaredIsolationClass to
+      `sandboxed` fails the suite — the grader for that exists
+      (contracts/harness/execution-boundary.ts:346-352) but no committed test
+      declares `sandboxed`, so CI only ever exercises the green path. That half
+      was checked by hand during authoring and by hand is not evidence. Closing
+      it is one added case that declares `sandboxed` and asserts the suite
+      rejects it. Separately, the senior lane is a PROCESS boundary and not a
+      filesystem sandbox: the child can read and write outside its workspace,
+      which the harness grades honestly rather than asserting containment it
+      cannot demonstrate."
+    nextGate: "P1 Task 10: a second subject (the fake executor) exercises the
+      harness's genericity."
+  - id: P0-QUOTA-EXHAUSTED-CLASSIFICATION
+    phase: P0
+    assertion: Subscription session-window exhaustion is classified as
+      `quota-exhausted` with the provider's reset hint carried verbatim, never
+      as a generic error and never folded into a budget.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    status: PROVEN
+    limitation: Proven against fixture envelopes, not against a live provider
+      rate-limit response. The `retryAfter` string is deliberately opaque at P0
+      — nothing parses it into a duration yet, and no selector consumes it.
+    nextGate: "P1 Task 9: the thin selector filters a quota-exhausted target until
+      `retryAfter` and falls back."
+  - id: P0-TOOL-CONTRACT-FAIL-LOUD
+    phase: P0
+    assertion: A misspelled capability rejects only the affected tenant and raises
+      its health state, while a declared-but-unconfigured capability degrades
+      that tenant without stopping the MCP server.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    status: PARTIAL
+    limitation: "PARTIAL because the SECOND HALF of the acceptance bound is not
+      visible in the artifact. The recorded run proves that an unknown tool name
+      throws at job load and that selected() returns the other four tools plus
+      one named degradation. It does NOT prove that the real MCP server PROCESS
+      starts and stays up under that shape — no committed test spawns it.
+      packages/core/tests/mcp-selection.spec.ts only asserts that the built
+      artifact is executable and kept its shebang. The live server was started
+      by hand during authoring, printing `helium-mcp: DEGRADED -- livewire_sql
+      (unconfigured: HELIUM_LIVEWIRE_DB)` on stderr and remaining up, and by
+      hand is not evidence. Closing it is one test that spawns lib/mcp/server.js
+      under that env and asserts it stays alive. Beyond that, neither half is
+      proven under a live senior-lane dispatch against a real MCP client."
+    nextGate: "P1 Task 11: v1 jobs run through the new boundary end to end."
+  - id: P0-DELIVERY-WRITE-AHEAD-CRASH-REPLAY
+    phase: P0
+    assertion: No external delivery side effect occurs that the audit trail has not
+      already announced, and an intent orphaned by a crash reaches a durable
+      terminal state rather than silently disappearing.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    status: PROVEN
+    limitation: "This is NOT exactly-once delivery and must never be described as
+      such: SMTP acceptance followed by a crash before the outcome append is
+      genuinely indeterminate, which is precisely why `uncertain` is a terminal
+      state. What is proven is write-ahead ordering, at most one unresolved
+      intent per deliveryId, no blind retry, and a durable uncertain outcome.
+      Proven against a fake transport, not a real SMTP server."
+    nextGate: "P2 Task 15: recovery reconciliation across the team kernel."
+  - id: P0-TENANT-LIVENESS
+    phase: P0
+    assertion: "Per-tenant liveness is observable: a single silent tenant in an
+      otherwise healthy fleet is detected, and a malformed tenant stays visible
+      rather than vanishing from the expected inventory."
+    assertionClass: deterministic
+    command: node --test scripts/deadman/check-tenant-heartbeats.test.mjs && bash
+      scripts/deadman/check-heartbeat.test.sh
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:03f22c0bdbc72072fb5402414765d7a7e87d09d9bd93aeca90cca89146671f41
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/deadman-tenant-reducer.log
+        sha256: e7b39802e2cc47d2a5c9791deab3862a9f20b618acc29f7cd7428ea7b129f3a3
+      - path: docs/evidence/p0/deadman-drill.log
+        sha256: ef3d6636ee042e46d222e18c6d8bc0f4763b70f47351bf56430159396fd7e70e
+    status: PROVEN
+    limitation: Exercised against fixture job directories and fixture heartbeat
+      files, with a fake mailer, on the CI runner. No real launchd agent, no
+      real SMTP, and no run on the mini — the AC#1 freeze window forbids
+      touching it before 2026-08-31, so nothing here proves the deployed
+      dead-man agent behaves this way.
+    nextGate: "P2.5a: the operations safety substrate consumes these health rows."
+  - id: P0-V1-BEHAVIOR-PRESERVED
+    phase: P0
+    assertion: Every Phase 0 change preserves the shipped v1 behavior it did not
+      deliberately alter.
+    assertionClass: deterministic
+    command: pnpm run build && pnpm run typecheck && pnpm run test && pnpm run
+      test:contracts && pnpm run test:e2e-local
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:c4957d3fee5149077e81082b0d72b6211cb26f73f533d2439692fc3a33b077cb
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p0/build.log
+        sha256: 9c48b44f3cdba5dc098ad0308c7329f1a06392c448b0e9ee12a1bd6baf8c4a7c
+      - path: docs/evidence/p0/typecheck.log
+        sha256: 2db2b2065de8e6e697776ed256a001a67fb2dc8f722072bd4aab54c2c37c5eac
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+      - path: docs/evidence/p0/test-contracts.log
+        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+      - path: docs/evidence/p0/test-e2e-local.log
+        sha256: dfac017c1306f37baf33e500bdf10d70af3726c7f47997343a20eebd1b899a8d
+    status: PROVEN
+    limitation: "A green suite proves no REGRESSION the suite covers. It is not a
+      production-equivalence proof: nothing in Phase 0 has run on the mini, and
+      the v1 daemon has not been restarted under these changes. The 1 skipped
+      contract test is a real gap, not noise — no live provider is exercised
+      anywhere in this manifest."
+    nextGate: "P1 Task 11: v1 jobs adapted through the new boundary."
+  - id: P1-CORE-NEUTRALITY
+    phase: P1
+    assertion: packages/core/src names no provider and no business domain.
+    assertionClass: deterministic
+    command: pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    status: PROVEN
+    limitation: Proves the source scan only. It says nothing about a provider name
+      arriving at runtime through a typed audit field, which is permitted by
+      design.
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+  - id: P1-FAKE-PROVIDER-SUITE
+    phase: P1
+    assertion: Every registered executor passes the shared execution-boundary
+      conformance suite at its declared isolationClass.
+    assertionClass: deterministic
+    command: pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    status: PARTIAL
+    limitation: Only @helium/fake-metered is graded by the suite.
+      @helium/fake-flat-rate declares in-process and is admitted at the floor
+      WITHOUT a suite run, because every assertion in that suite reads a
+      boundary report written by a spawned CLI child and an in-process executor
+      has no child to write one. The floor cannot be over-claimed, which is the
+      only thing the suite catches, but the second half of the bound -- 'both
+      executors graded by the suite' -- is not demonstrated and is not claimed.
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+  - id: P1-CATALOG-REPLAY
+    phase: P1
+    assertion: A recorded catalog and policy replay to the same selection decision
+      on every repeat.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/test.log
+        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+    status: PROVEN
+    limitation: Proves determinism over a snapshot. It does not prove the snapshot
+      itself is reproducible from a running catalog, which needs the durable
+      event log Phase 2 adds.
+    nextGate: "Phase 2 exit: deterministic replay across a restart."
+  - id: P1-EXECUTION-SNAPSHOT-TYPED
+    phase: P1
+    assertion: Every recorded run carries a parsed AgentResult.executionSnapshot,
+      not an uninterpreted runtimeMetadata entry.
+    assertionClass: deterministic
+    command: pnpm run test && pnpm run test:contracts
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:5286c879657c9c9ac8b184d87d949a91f3e07dfebb2f19036ed75e73abc35c2f
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/test.log
+        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    status: PARTIAL
+    limitation: Every run THROUGH THE EXECUTOR REGISTRY carries a parsed snapshot.
+      The v1 triage and senior lanes do not route through the registry at Phase
+      1 -- they still return the legacy DispatchResult -- so 'every recorded
+      run' is not yet true of the production path. Phase 2 moves them onto the
+      registry.
+    nextGate: "Phase 2 exit: provider executors registered behind the lifecycle seam."
+  - id: P1-PLUGIN-INSTALL-NO-CORE-EDIT
+    phase: P1
+    assertion: Each fake executor package can be removed and re-added without
+      editing packages/core or plugins/helium.
+    assertionClass: deterministic
+    command: "bash: pnpm --filter @helium/contracts remove/add each fake package,
+      then git diff --name-only -- packages/core plugins/helium"
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0
+    outputHash: sha256:c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/install-removal-drill.log
+        sha256: c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
+    status: PROVEN
+    limitation: Proves the two fake packages. It does not prove an arbitrary
+      third-party executor plugin installs cleanly, which is a Phase 5 claim.
+    nextGate: "Phase 5: plugin conformance and independent promotion."
+  - id: P1-V1-BEHAVIOR-PRESERVED
+    phase: P1
+    assertion: The v1 regression suite passes in both legacy-direct and
+      work-order-adapter runtime modes.
+    assertionClass: deterministic
+    command: pnpm run build && pnpm run typecheck && pnpm run test && pnpm run
+      test:contracts && pnpm run test:e2e-local
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    outputHash: sha256:fd510ed9449ecddf83019c81224dcfa0cfb68f103f4dab28a0db77aed97c5805
+    decision: pass
+    artifacts:
+      - path: docs/evidence/p1/build.log
+        sha256: afc7406e388bb85565f1c6d73544a117d6f369a1ed8f0ddba0471d68700cb2c4
+      - path: docs/evidence/p1/typecheck.log
+        sha256: 5e7ba9ba6bbac0531190582169491c5c8ccd748b771fa0c24f2b1f6d636a785d
+      - path: docs/evidence/p1/test.log
+        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+      - path: docs/evidence/p1/test-e2e-local.log
+        sha256: cf22ada47dc04caf1b079c7aba740ecbc683cbc514e144226dc43a369f58f66c
+    status: PROVEN
+    limitation: Proves equivalence on the shipped tenants under the local end-to-end
+      harness with stubbed engines. It does not prove equivalence against a live
+      provider, and work-order-adapter is not the default mode.
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
