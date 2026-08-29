@@ -45,6 +45,8 @@ export interface ActionProjection {
   argv?: string[];
   baseline?: { capturedAt: string; samples: PostconditionSample[]; allPassing: boolean };
   controllerProbe?: ControllerProbeOutcome;
+  eligibility?: { eligible: boolean; reasons: string[] };
+  mutationOwner?: MutationOwnership;
   exitCode?: number | null;
   timedOut?: boolean;
   outputDigest?: string;
@@ -239,6 +241,14 @@ export function reduceOperations(
         action.controllerProbe = {
           ...event.controllerProbe,
           observedLabels: [...event.controllerProbe.observedLabels],
+        };
+        action.eligibility = {
+          eligible: event.eligibility.eligible,
+          reasons: [...event.eligibility.reasons],
+        };
+        action.mutationOwner = {
+          ...event.mutationOwner,
+          competingLabels: [...event.mutationOwner.competingLabels],
         };
         break;
       }

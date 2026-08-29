@@ -85,8 +85,11 @@ function certificationFixture(root, raw, executable) {
     environmentProfile: {},
     timeoutMs: 1_000,
     maxOutputBytes: 1_000,
+    expectedOwnerUid: process.getuid?.() ?? 0,
   }));
-  return { components, checks, executors };
+  const registeredProbes = join(root, "registered-probes.json");
+  writeFileSync(registeredProbes, JSON.stringify({ version: 1, probeIds: ["fixture.v1"] }));
+  return { components, checks, executors, registeredProbes };
 }
 
 test("signs exact certified SOP id/version/digest/authority entries with Ed25519", async () => {
@@ -107,6 +110,7 @@ test("signs exact certified SOP id/version/digest/authority entries with Ed25519
     "--components-dir", fixture.components,
     "--checks-dir", fixture.checks,
     "--executors-dir", fixture.executors,
+    "--registered-probes", fixture.registeredProbes,
     "--private-key", key,
     "--output", output,
   ], { signingHost });
@@ -140,6 +144,7 @@ test("refuses a registered mini, an exposed key, and a stale declared digest", a
     "--components-dir", fixture.components,
     "--checks-dir", fixture.checks,
     "--executors-dir", fixture.executors,
+    "--registered-probes", fixture.registeredProbes,
     "--private-key", key,
     "--output", join(dir, "refused.json"),
   ];
@@ -182,9 +187,63 @@ test("refuses a structurally uncertified SOP before signing", async () => {
       "--components-dir", fixture.components,
       "--checks-dir", fixture.checks,
       "--executors-dir", fixture.executors,
+      "--registered-probes", fixture.registeredProbes,
       "--private-key", key,
       "--output", join(root, "manifest.json"),
     ], { signingHost }),
     /mutation-owner-not-opsd:external/,
   );
+});
+
+test("refuses unresolved executable ownership, release assertions, and unregistered probes", async () => {
+  const root = join(dir, "identity-probe-refusals");
+  mkdirSync(root);
+  const executable = join(root, "fixture-executable");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const raw = sop();
+  const fixture = certificationFixture(root, raw, executable);
+  const sops = join(root, "sops");
+  mkdirSync(sops);
+  const sopPath = join(sops, "fixture.json");
+  const refreshSop = () => {
+    raw.digest = `sha256:${createHash("sha256").update(canonicalJson(
+      Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")),
+    )).digest("hex")}`;
+    writeFileSync(sopPath, JSON.stringify(raw));
+  };
+  refreshSop();
+  const { privateKey } = generateKeyPairSync("ed25519");
+  const key = join(root, "operator.pem");
+  writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  const args = [
+    "--sops-dir", sops,
+    "--components-dir", fixture.components,
+    "--checks-dir", fixture.checks,
+    "--executors-dir", fixture.executors,
+    "--registered-probes", fixture.registeredProbes,
+    "--private-key", key,
+    "--output", join(root, "manifest.json"),
+  ];
+  const executorPath = join(fixture.executors, "fixture.json");
+  const executor = JSON.parse(readFileSync(executorPath, "utf8"));
+
+  const { expectedOwnerUid: _owner, ...ownerless } = executor;
+  writeFileSync(executorPath, JSON.stringify(ownerless));
+  await assert.rejects(runManifestSigner(args, { signingHost }), /expectedOwnerUid/);
+
+  executor.identity = { kind: "release", value: "release-42" };
+  writeFileSync(executorPath, JSON.stringify(executor));
+  raw.action.executable.identity = { ...executor.identity };
+  refreshSop();
+  await assert.rejects(runManifestSigner(args, { signingHost }), /release-identity-unverifiable/);
+
+  executor.identity = {
+    kind: "sha256",
+    value: createHash("sha256").update(readFileSync(executable)).digest("hex"),
+  };
+  writeFileSync(executorPath, JSON.stringify(executor));
+  raw.action.executable.identity = { ...executor.identity };
+  refreshSop();
+  writeFileSync(fixture.registeredProbes, JSON.stringify({ version: 1, probeIds: [] }));
+  await assert.rejects(runManifestSigner(args, { signingHost }), /unregistered probe/);
 });

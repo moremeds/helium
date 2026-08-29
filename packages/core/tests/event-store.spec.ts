@@ -72,7 +72,7 @@ describe("event store", () => {
     );
   });
 
-  it("drops a truncated final line and recovers, never repairing the record", () => {
+  it("drops a truncated final line and remains append-safe after recovery", () => {
     const d = dir();
     const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
@@ -85,6 +85,12 @@ describe("event store", () => {
 
     const reopened = openEventStore(d, { schema: RecordSchema, sync: noSync });
     expect(reopened.replay()).toEqual([first, second]);
+    reopened.append(third);
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([
+      first,
+      second,
+      third,
+    ]);
   });
 
   it("replays through a snapshot plus its tail", () => {

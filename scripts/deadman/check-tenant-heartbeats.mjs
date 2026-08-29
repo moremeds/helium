@@ -64,7 +64,8 @@ for (const file of files) {
   }
 }
 
-const health = tenantHealth(expected, rows, Date.now() - staleS * 1000);
+const now = Date.now();
+const health = tenantHealth(expected, rows, now - staleS * 1000, now);
 const bad = health.filter((h) => h.state !== "healthy" && h.state !== "disabled");
 
 for (const h of health) {

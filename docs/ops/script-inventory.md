@@ -23,6 +23,15 @@ ownership, business postconditions, executor registration, and the executable
 hash immediately before signing; a structurally uncertified SOP cannot enter
 the manifest.
 
+Executable ownership is likewise explicit: `expectedOwnerUid: 0` in the
+committed sentinel registrations is not a guessed deployment owner. It keeps
+the registrations non-executable until the post-freeze inventory replaces it
+with the verified uid. The signer also requires a separately exported
+`--registered-probes` inventory from the actual host probe registry; it never
+derives runnable probe ids from the submitted check files. Until every
+postcondition probe is present in that inventory, an above-observe grant cannot
+be signed.
+
 IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
 ## trading-stack-reconcile

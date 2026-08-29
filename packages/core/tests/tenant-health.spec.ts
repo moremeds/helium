@@ -79,6 +79,13 @@ describe("tenantHealth", () => {
       { tenant: "macro-watch", state: "missing" },
     ]);
   });
+
+  it("does not let a future timestamp keep a dead tenant healthy", () => {
+    const expected = [{ tenant: "macro-watch", load: "loaded" as const }];
+    const rows = [{ ts: "2026-08-29T13:00:00Z", job: "macro-watch" }];
+    expect(tenantHealth(expected, rows, deadline, Date.parse("2026-08-29T12:10:00Z")))
+      .toEqual([{ tenant: "macro-watch", state: "missing" }]);
+  });
 });
 
 describe("inventoryTenants", () => {

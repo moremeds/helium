@@ -1,5 +1,5 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
@@ -120,7 +120,11 @@ function sop(authority: SopAuthority, graceMs = 0): SopDefinition {
 
 function registry(
   authority: SopAuthority,
-  options: { manifest?: boolean; graceMs?: number } = { manifest: true },
+  options: {
+    manifest?: boolean;
+    graceMs?: number;
+    componentOwner?: "opsd" | "external" | "none";
+  } = { manifest: true },
 ): ComponentRegistry {
   const definition = sop(authority, options.graceMs);
   const entries: AuthorityManifestEntry[] = [
@@ -149,7 +153,13 @@ function registry(
   });
   r.install({
     tenantId: "fixture",
-    components: [component],
+    components: [{
+      ...component,
+      mutationOwner: {
+        ...component.mutationOwner,
+        owner: options.componentOwner ?? "opsd",
+      },
+    }],
     checks: [check],
     sops: [definition],
   } satisfies OpsBundle);
@@ -215,6 +225,7 @@ interface HarnessOptions {
   componentLocks?: ComponentActionLockPort;
   store?: MemoryStore;
   stateDir?: string;
+  componentOwner?: "opsd" | "external" | "none";
 }
 
 function harness(options: HarnessOptions) {
@@ -244,6 +255,7 @@ function harness(options: HarnessOptions) {
     registry: registry(options.authority ?? "auto", {
       manifest: options.manifest,
       graceMs: options.graceMs,
+      componentOwner: options.componentOwner,
     }),
     store,
     now,
@@ -287,7 +299,9 @@ function harness(options: HarnessOptions) {
       bootId: "boot-test",
     }),
     approvals,
-    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence")),
+    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
+      readSourceArtifact: (ref) => JSON.stringify({ ref }),
+    }),
     createExecutor() {
       factoryCalls += 1;
       return executor;
@@ -305,7 +319,9 @@ function harness(options: HarnessOptions) {
     approvals,
     controller,
     stateDir,
-    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence")),
+    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
+      readSourceArtifact: (ref) => JSON.stringify({ ref }),
+    }),
     factoryCalls: () => factoryCalls,
   };
 }
@@ -402,6 +418,22 @@ describe("OpsController modes", () => {
         digest,
         authority: "auto",
       },
+    });
+  });
+
+  it("records a failed automatic recovery as FAILED with a failing verifier", async () => {
+    const h = harness({ mode: "auto", postconditionStates: ["fail"] });
+    await h.controller.tick();
+    const terminal = h.store.events.find((event) => event.type === "action-verified");
+    expect(terminal?.type).toBe("action-verified");
+    if (terminal?.type !== "action-verified") throw new Error("missing terminal event");
+    const bundle = JSON.parse(
+      readFileSync(join(h.stateDir, "evidence", terminal.recoveryEvidence.ref.split("/").at(-1)!), "utf8"),
+    );
+    expect(bundle).toMatchObject({
+      outcome: "failed",
+      status: "FAILED",
+      verifier: { decision: "fail" },
     });
   });
 
@@ -507,6 +539,38 @@ describe("OpsController modes", () => {
       .toMatchObject({ reason: "component-lock-held" });
   });
 
+  it("reclaims a dead pre-intent component lock even when no action event exists", async () => {
+    const lockDir = mkdtempSync(join(tmpdir(), "helium-controller-orphan-lock-"));
+    const orphanOwner = new FileComponentActionLocks({
+      dir: lockDir,
+      bootId: "boot-orphan",
+      pid: 999_999,
+      isAlive: () => false,
+    });
+    expect(orphanOwner.acquire({
+      componentId: component.id,
+      leaseId: "lease-orphan",
+      sopDigest: digest,
+      acquiredAt: NOW.toISOString(),
+      expiresAt: new Date(NOW.getTime() + 60_000).toISOString(),
+    }).ok).toBe(true);
+
+    const h = harness({
+      mode: "auto",
+      componentLocks: new FileComponentActionLocks({
+        dir: lockDir,
+        bootId: "boot-orphan",
+        isAlive: () => false,
+      }),
+    });
+    const result = await h.controller.tick();
+    expect(result.actions[0]).toMatchObject({
+      disposition: "execute",
+      outcome: "succeeded",
+    });
+    expect(h.executor.runs).toBe(1);
+  });
+
   it("reconciles a persisted intent to uncertain on startup and never reruns it", async () => {
     const seed = harness({ mode: "auto" });
     const incidentKey = "fixture-service|integrity|failed|fixture-service";
@@ -522,17 +586,28 @@ describe("OpsController modes", () => {
       { v: 1, id: "restart-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-99"] },
       { v: 1, id: "restart-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-restart", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "restart-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-restart", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
-      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" } },
+      { v: 1, id: "restart-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-restart", leaseId: "lease-restart", operationId: "op-restart", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/restart" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner },
     ]) seed.store.append(event);
 
     const restarted = harness({
       mode: "auto",
       store: seed.store,
       stateDir: seed.stateDir,
+      componentOwner: "external",
     });
     await restarted.controller.tick();
     expect(seed.store.state().actions["act-restart"]?.state).toBe("uncertain");
     expect(restarted.executor.runs).toBe(0);
     expect(seed.store.events.filter((event) => event.type === "action-verified")).toHaveLength(1);
+    const terminal = seed.store.events.find((event) => event.type === "action-verified");
+    if (terminal?.type !== "action-verified") throw new Error("missing terminal event");
+    const bundle = JSON.parse(readFileSync(
+      join(seed.stateDir, "evidence", terminal.recoveryEvidence.ref.split("/").at(-1)!),
+      "utf8",
+    ));
+    expect(bundle).toMatchObject({
+      eligibility: { eligible: true, reasons: [] },
+      mutationOwner: { owner: "opsd" },
+    });
   });
 });

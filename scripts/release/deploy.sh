@@ -176,17 +176,7 @@ restart_opsd_if_loaded() {
 
 opsd_cycle_after() {
   local target="$1" since="$2"
-  node -e '
-    const {readFileSync}=require("node:fs");
-    let text="";try{text=readFileSync(process.argv[1],"utf8");}catch{}
-    const since=Number(process.argv[2])*1000,target=process.argv[3];
-    const ok=text.split("\n").filter(Boolean).some(line=>{try{
-      const row=JSON.parse(line),event=row?.record;
-      return event?.type==="controller-cycle-recorded" &&
-        event.releaseRef===target && Date.parse(event.at)>since &&
-        event.observationCount>0;
-    }catch{return false;}});
-    process.stdout.write(ok?"1":"0");' "$OPSD_EVENT_LOG" "$since" "$target"
+  node "$DEST/scripts/release/opsd-cycle-after.mjs" "$OPSD_EVENT_LOG" "$since" "$target"
 }
 
 opsd_required=0
@@ -238,9 +228,9 @@ while [ $SECONDS -lt $end ]; do
     const {readFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");
     const d=join(process.env.HELIUM_STATE_ROOT,"jsonl");
     const f=readdirSync(d).filter(x=>x.startsWith("heartbeat-")).sort().pop();
-    const since=Number(process.argv[1])*1000;
+    const since=Number(process.argv[1])*1000,now=Date.now();
     const n=readFileSync(join(d,f),"utf8").split("\n").filter(Boolean)
-      .filter(l=>{try{return Date.parse(JSON.parse(l).ts)>since;}catch{return false;}}).length;
+      .filter(l=>{try{const at=Date.parse(JSON.parse(l).ts);return at>since&&at<=now;}catch{return false;}}).length;
     console.log(n);' "$flip_start")
   say "  heartbeat rows since flip: $fresh"
   opsd_fresh=1

@@ -26,6 +26,7 @@ const flags = new Set([
   "--components-dir",
   "--checks-dir",
   "--executors-dir",
+  "--registered-probes",
   "--private-key",
   "--output",
 ]);
@@ -48,9 +49,23 @@ function parseArgs(argv) {
     componentsDir: values.get("--components-dir"),
     checksDir: values.get("--checks-dir"),
     executorsDir: values.get("--executors-dir"),
+    registeredProbes: values.get("--registered-probes"),
     privateKey: values.get("--private-key"),
     output: values.get("--output"),
   };
+}
+
+function loadRegisteredProbeIds(path) {
+  const value = loadDocument(path);
+  if (value.version !== 1 || !Array.isArray(value.probeIds) ||
+      value.probeIds.some((id) => typeof id !== "string" || id === "")) {
+    throw new Error(`${path}: registered probe inventory must be version 1 with probeIds`);
+  }
+  const ids = [...new Set(value.probeIds)];
+  if (ids.length !== value.probeIds.length) {
+    throw new Error(`${path}: duplicate registered probe id`);
+  }
+  return ids.sort();
 }
 
 function loadDocument(path) {
@@ -133,10 +148,10 @@ export async function runManifestSigner(argv, testOptions = undefined) {
   }
   const checkValues = loadDirectory(parsed.checksDir);
   const parsedChecks = checkValues.map((value) => CheckDefinitionSchema.parse(value));
-  const checks = CheckRegistry.load(
-    parsedChecks,
-    [...new Set(parsedChecks.map((check) => check.probe.probeId))],
-  );
+  // The inventory is exported from the host's actual probe registry. Never
+  // derive it from the submitted checks: doing so would let every declared
+  // postcondition certify itself without a runnable implementation.
+  const checks = CheckRegistry.load(parsedChecks, loadRegisteredProbeIds(parsed.registeredProbes));
   const scripts = ScriptRegistry.load(loadDirectory(parsed.executorsDir));
 
   const entries = readdirSync(parsed.sopsDir)

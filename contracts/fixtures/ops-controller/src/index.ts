@@ -261,7 +261,9 @@ export async function runControllerScenario(
       bootId: "fixture-boot",
     }),
     approvals: new ApprovalLedger({ trustedKey: publicKey, now: () => now }),
-    evidence: new FileRecoveryEvidenceStore(join(options.stateDir, "evidence")),
+    evidence: new FileRecoveryEvidenceStore(join(options.stateDir, "evidence"), {
+      readSourceArtifact: (ref) => JSON.stringify({ ref }),
+    }),
     createExecutor: () => executor,
     argvFor: () => [],
     nextId: (prefix) => `${prefix}-${++eventSequence}`,

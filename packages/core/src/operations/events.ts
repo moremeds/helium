@@ -100,6 +100,13 @@ export const ActionIntentRecordedSchema = z.strictObject({
     observedLabels: z.array(z.string().max(256)),
     evidenceRef: z.string().min(1).max(512),
   }),
+  /** Exact admission-time policy result; never reconstructed from later config. */
+  eligibility: z.strictObject({
+    eligible: z.boolean(),
+    reasons: z.array(z.string().max(200)),
+  }),
+  /** Exact admission-time ownership; never reconstructed from later config. */
+  mutationOwner: MutationOwnershipSchema,
 });
 
 export const ActionReceiptRecordedSchema = z.strictObject({

@@ -12,6 +12,12 @@ const bundle = () => ({
   componentId: "runtime",
   incidentId: "inc-1",
   observations: [{ ref: "artifact://obs/1", sha256: hash }],
+  rawArtifacts: [
+    { ref: "artifact://raw-command/controller-1", sha256: hash },
+    { ref: "artifact://baseline/1", sha256: hash },
+    { ref: "artifact://baseline/2", sha256: hash },
+    { ref: "artifact://postcondition/1", sha256: hash },
+  ],
   incidentSnapshot: { ref: "artifact://incident/1", sha256: hash },
   sopId: "restart",
   sopVersion: 1,
@@ -36,14 +42,17 @@ const bundle = () => ({
     evidenceRef: "artifact://raw-command/controller-1",
   },
   lease: { leaseId: "lease-1", operationId: "op-1" },
+  baseline: {
+    capturedAt: "2026-08-25T04:00:00.000Z",
+    allPassing: false,
+    samples: [
+      { checkId: "runtime-up", state: "fail" as const, observedAt: "2026-08-25T04:00:00.000Z", evidenceRefs: ["artifact://baseline/1"] },
+      { checkId: "runtime-ready", state: "fail" as const, observedAt: "2026-08-25T04:00:00.000Z", evidenceRefs: ["artifact://baseline/2"] },
+    ],
+  },
   intent: {
     actionId: "act-1",
     argv: ["--restart"],
-    baseline: {
-      capturedAt: "2026-08-25T04:00:00.000Z",
-      allPassing: false,
-      sampleCount: 2,
-    },
   },
   receipt: {
     exitCode: 0,
@@ -111,6 +120,11 @@ describe("RecoveryEvidenceSchema", () => {
       ...base,
       outcome: "not-needed",
       attribution: undefined,
+      baseline: {
+        ...base.baseline,
+        allPassing: true,
+        samples: base.baseline.samples.map((sample) => ({ ...sample, state: "pass" as const })),
+      },
       notApplicable: {
         intent: "baseline already satisfied every postcondition; nothing was spawned",
         receipt: "no script ran",
@@ -136,7 +150,7 @@ describe("RecoveryEvidenceSchema", () => {
     expect(() =>
       RecoveryEvidenceSchema.parse({
         ...b,
-        intent: { ...b.intent, baseline: { ...b.intent.baseline, allPassing: true } },
+        baseline: { ...b.baseline, allPassing: true },
       }),
     ).toThrow(/at least one failing postcondition/);
   });
@@ -199,6 +213,14 @@ describe("RecoveryEvidenceSchema", () => {
       ...withoutAction,
       outcome: "not-needed",
       attribution: undefined,
+      baseline: {
+        ...withoutAction.baseline,
+        allPassing: true,
+        samples: withoutAction.baseline.samples.map((sample) => ({
+          ...sample,
+          state: "pass" as const,
+        })),
+      },
       notApplicable: {
         intent: "controller admission refused before intent",
         receipt: "no process was started",

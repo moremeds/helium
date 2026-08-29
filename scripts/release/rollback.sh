@@ -129,17 +129,8 @@ while [ $SECONDS -lt $end ]; do
   pid=$(launchctl print "gui/$(id -u)/com.helium.dsh" 2>/dev/null | awk '/pid =/{print $3}')
   opsd_fresh=1
   if [ "$opsd_loaded" = "1" ]; then
-    opsd_fresh=$(node -e '
-      const {readFileSync}=require("node:fs");
-      let text="";try{text=readFileSync(process.argv[1],"utf8");}catch{}
-      const since=Number(process.argv[2])*1000,target=process.argv[3];
-      const ok=text.split("\n").filter(Boolean).some(line=>{try{
-        const row=JSON.parse(line),event=row?.record;
-        return event?.type==="controller-cycle-recorded" &&
-          event.releaseRef===target && Date.parse(event.at)>since &&
-          event.observationCount>0;
-      }catch{return false;}});
-      process.stdout.write(ok?"1":"0");' "$OPSD_EVENT_LOG" "$flip_start" "$target")
+    opsd_fresh=$(node "$target/scripts/release/opsd-cycle-after.mjs" \
+      "$OPSD_EVENT_LOG" "$flip_start" "$target")
   fi
   if [ -n "$pid" ] && [ "$opsd_fresh" = "1" ]; then
     ok=1

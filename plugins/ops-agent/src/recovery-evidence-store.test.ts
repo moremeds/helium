@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { OperationsEvent, RecoveryEvidence } from "@helium/core";
@@ -12,12 +12,14 @@ function fixture(artifacts: {
   receipt: { ref: string; sha256: string };
   observation: { ref: string; sha256: string };
   incident: { ref: string; sha256: string };
+  raw: Array<{ ref: string; sha256: string }>;
 }): RecoveryEvidence {
   return {
     assertionId: "recovery-act-1",
     componentId: "runtime",
     incidentId: "inc-1",
     observations: [artifacts.observation],
+    rawArtifacts: artifacts.raw,
     incidentSnapshot: artifacts.incident,
     sopId: "repair",
     sopVersion: 1,
@@ -34,13 +36,22 @@ function fixture(artifacts: {
     controllerProbe: {
       result: "clear",
       observedLabels: [],
-      evidenceRef: "artifact://controller/1",
+      evidenceRef: "artifact://ops/raw/controller.json",
     },
     lease: { leaseId: "lease-1", operationId: "op-1" },
+    baseline: {
+      capturedAt: NOW,
+      allPassing: false,
+      samples: [{
+        checkId: "ready",
+        state: "fail",
+        observedAt: NOW,
+        evidenceRefs: ["artifact://ops/raw/baseline.json"],
+      }],
+    },
     intent: {
       actionId: "act-1",
       argv: [],
-      baseline: { capturedAt: NOW, allPassing: false, sampleCount: 1 },
     },
     receipt: {
       exitCode: 0,
@@ -52,7 +63,7 @@ function fixture(artifacts: {
       checkId: "ready",
       state: "pass",
       observedAt: NOW,
-      evidenceRefs: ["artifact://check/1"],
+      evidenceRefs: ["artifact://ops/raw/postcondition.json"],
     }],
     outcome: "succeeded",
     attribution: "automatic",
@@ -64,18 +75,44 @@ function fixture(artifacts: {
 }
 
 function persistFixture(store: FileRecoveryEvidenceStore) {
+  const raw = store.hashArtifacts([
+    "artifact://ops/raw/observation.json",
+    "artifact://ops/raw/controller.json",
+    "artifact://ops/raw/baseline.json",
+    "artifact://ops/raw/postcondition.json",
+  ]);
   const artifacts = {
     receipt: store.persistArtifact("receipt", { output: "bounded" }),
-    observation: store.persistArtifact("observation", { state: "failed" }),
+    observation: store.persistArtifact("observation", {
+      version: 1,
+      id: "obs-1",
+      componentId: "runtime",
+      probeId: "fixture.v1",
+      observedAt: NOW,
+      expiresAt: "2026-08-30T00:01:00.000Z",
+      state: "failed",
+      dimension: "readiness",
+      evidenceRefs: ["artifact://ops/raw/observation.json"],
+      parserVersion: "fixture/1",
+    }),
     incident: store.persistArtifact("incident", { state: "open" }),
+    raw,
   };
   return { artifacts, bundle: fixture(artifacts) };
+}
+
+function sourceBackedStore(dir: string) {
+  const sources = new Map<string, string>();
+  const store = new FileRecoveryEvidenceStore(dir, {
+    readSourceArtifact: (ref) => sources.get(ref) ?? JSON.stringify({ ref }),
+  });
+  return { store, sources };
 }
 
 describe("FileRecoveryEvidenceStore", () => {
   it("publishes a schema-valid hashed bundle before verifying its terminal event", () => {
     const dir = mkdtempSync(join(tmpdir(), "helium-recovery-evidence-"));
-    const store = new FileRecoveryEvidenceStore(dir);
+    const { store } = sourceBackedStore(dir);
     const { bundle } = persistFixture(store);
     const ref = store.persistBundle(bundle);
     const event = {
@@ -99,7 +136,7 @@ describe("FileRecoveryEvidenceStore", () => {
 
   it("rejects missing and hash-mismatched evidence during replay", () => {
     const dir = mkdtempSync(join(tmpdir(), "helium-recovery-tamper-"));
-    const store = new FileRecoveryEvidenceStore(dir);
+    const { store } = sourceBackedStore(dir);
     const { bundle } = persistFixture(store);
     const ref = store.persistBundle(bundle);
     const path = join(dir, basename(ref.ref));
@@ -118,7 +155,7 @@ describe("FileRecoveryEvidenceStore", () => {
 
   it("rejects missing nested artifacts and terminal fields that disagree with the bundle", () => {
     const dir = mkdtempSync(join(tmpdir(), "helium-recovery-nested-"));
-    const store = new FileRecoveryEvidenceStore(dir);
+    const { store, sources } = sourceBackedStore(dir);
     const { artifacts, bundle } = persistFixture(store);
     const ref = store.persistBundle(bundle);
     const event = {
@@ -139,5 +176,31 @@ describe("FileRecoveryEvidenceStore", () => {
     chmodSync(receiptPath, 0o600);
     rmSync(receiptPath);
     expect(() => store.verifyEvent(event)).toThrow(/missing recovery evidence artifact/);
+
+    const restored = store.persistArtifact("receipt", { output: "bounded" });
+    expect(restored.ref).toBe(artifacts.receipt.ref);
+    sources.set("artifact://ops/raw/controller.json", "tampered");
+    expect(() => store.verifyEvent(event)).toThrow(/raw evidence hash mismatch/);
+  });
+
+  it("replays production raw artifacts by exact path and hash", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "helium-recovery-raw-"));
+    const rawDir = join(stateDir, "raw");
+    mkdirSync(rawDir, { mode: 0o700 });
+    for (const name of ["observation.json", "controller.json", "baseline.json", "postcondition.json"]) {
+      writeFileSync(join(rawDir, name), `${name}\n`, { mode: 0o600 });
+    }
+    const store = new FileRecoveryEvidenceStore(join(stateDir, "evidence"));
+    const { bundle } = persistFixture(store);
+    const ref = store.persistBundle(bundle);
+    const event = {
+      v: 1, id: "terminal-raw", at: NOW, type: "action-verified",
+      actionId: "act-1", outcome: "succeeded", attribution: "automatic",
+      postconditionRefs: ["ready"], postconditionSamples: bundle.postconditionSamples,
+      recoveryEvidence: ref,
+    } satisfies OperationsEvent;
+    expect(() => store.verifyEvent(event)).not.toThrow();
+    writeFileSync(join(rawDir, "controller.json"), "tampered\n", { mode: 0o600 });
+    expect(() => store.verifyEvent(event)).toThrow(/raw evidence hash mismatch/);
   });
 });

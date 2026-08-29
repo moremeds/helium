@@ -83,6 +83,7 @@ describe("mutation action boundary", () => {
       executorId: "repair", path, identity: { kind: "sha256", value: identity },
       argvSchema: { id: "repair-argv", params: [] }, cwd: dir,
       environmentProfile: { PATH: "/usr/bin:/bin" }, timeoutMs: 1_000, maxOutputBytes: 1_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
     }]);
     writeFileSync(path, "#!/usr/bin/env node\nprocess.exit(1);\n", { mode: 0o700 });
     expect(registry.verifyIdentity(registry.get("repair")!)).toMatchObject({ ok: false, reason: "script-drift" });
@@ -110,7 +111,7 @@ describe("mutation action boundary", () => {
     const sequence: OperationsEvent[] = [
       { v: 1, id: "event-1", at: at(1), type: "action-proposed", actionId: "act-1", incidentId: "inc-1", componentId: "runtime", sopId: "repair", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "event-2", at: at(2), type: "action-authorized", actionId: "act-1", authority: "auto" },
-      { v: 1, id: "event-3", at: at(3), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: at(3), samples: [{ ...postconditionSample, state: "fail", observedAt: at(3) }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" } },
+      { v: 1, id: "event-3", at: at(3), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: at(3), samples: [{ ...postconditionSample, state: "fail", observedAt: at(3) }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: { owner: "opsd", competingLabels: [], changedAt: at(3), changeRef: "artifact://ownership/1" } },
       { v: 1, id: "event-4", at: at(4), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2, startedAt: at(4), finishedAt: at(4) },
       { v: 1, id: "event-5", at: at(5), type: "action-verified", actionId: "act-1", outcome: "succeeded", postconditionRefs: ["ready"], postconditionSamples: [postconditionSample], recoveryEvidence: terminalEvidence },
     ];
@@ -167,6 +168,7 @@ describe("mutation action boundary", () => {
       identity: { kind: "sha256", value: createHash("sha256").update("").digest("hex") },
       argvSchema: { id: "repair-argv", params: [{ flag: "--target", valuePattern: "[A-Za-z0-9_-]+", required: true }] },
       cwd: dir, environmentProfile: {}, timeoutMs: 1_000, maxOutputBytes: 1_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
     }]);
     expect(() => registry.validateArgv(registry.get("repair")!, ["--target", "$(rm -rf /)"])).toThrow();
     expect(() => ScriptRegistry.load([{ ...registry.get("repair"), command: "docker restart" }])).toThrow();
@@ -212,7 +214,7 @@ describe("signed authority and evidence boundary", () => {
     expect(() => RecoveryEvidenceSchema.parse(missing)).toThrow();
     expect(() => RecoveryEvidenceSchema.parse({
       ...base,
-      intent: { ...base.intent, baseline: { ...base.intent.baseline, allPassing: true } },
+      baseline: { ...base.baseline, allPassing: true },
     })).toThrow(/failing postcondition/);
   });
 
@@ -222,7 +224,7 @@ describe("signed authority and evidence boundary", () => {
     const events: OperationsEvent[] = [
       { v: 1, id: "terminal-1", at: NOW.toISOString(), type: "action-proposed", actionId: "act-1", incidentId: "inc-1", componentId: "runtime", sopId: "repair", sopVersion: 1, sopDigest: digest },
       { v: 1, id: "terminal-2", at: NOW.toISOString(), type: "action-authorized", actionId: "act-1", authority: "auto" },
-      { v: 1, id: "terminal-3", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [{ ...postconditionSample, state: "fail" }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" } },
+      { v: 1, id: "terminal-3", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-1", leaseId: "lease-1", operationId: "op-1", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [{ ...postconditionSample, state: "fail" }], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: { owner: "opsd", competingLabels: [], changedAt: NOW.toISOString(), changeRef: "artifact://ownership/1" } },
       { v: 1, id: "terminal-4", at: NOW.toISOString(), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2, startedAt: NOW.toISOString(), finishedAt: NOW.toISOString() },
       { v: 1, id: "terminal-5", at: NOW.toISOString(), type: "action-verified", actionId: "act-1", outcome: "failed", postconditionRefs: ["ready"], postconditionSamples: [{ ...postconditionSample, state: "fail" }], recoveryEvidence: terminalEvidence },
       { v: 1, id: "terminal-6", at: NOW.toISOString(), type: "observation-recorded", observation: {
@@ -257,6 +259,11 @@ function recoveryBundle() {
   return {
     assertionId: "recovery-1", componentId: "runtime", incidentId: "inc-1",
     observations: [{ ref: "artifact://obs/1", sha256: hash }],
+    rawArtifacts: [
+      { ref: "artifact://controller/1", sha256: hash },
+      { ref: "artifact://check/baseline", sha256: hash },
+      { ref: "artifact://check/ready", sha256: hash },
+    ],
     incidentSnapshot: { ref: "artifact://incident/1", sha256: hash },
     sopId: "repair", sopVersion: 1, sopDigest: digest,
     authorityManifestEntry: { sopId: "repair", version: 1, digest, authority: "auto" as const },
@@ -264,7 +271,8 @@ function recoveryBundle() {
     mutationOwner: { owner: "opsd" as const, competingLabels: [], changedAt: NOW.toISOString(), changeRef: "artifact://owner/1" },
     controllerProbe: { result: "clear" as const, observedLabels: [], evidenceRef: "artifact://controller/1" },
     lease: { leaseId: "lease-1", operationId: "op-1" },
-    intent: { actionId: "act-1", argv: [], baseline: { capturedAt: NOW.toISOString(), allPassing: false, sampleCount: 1 } },
+    baseline: { capturedAt: NOW.toISOString(), allPassing: false, samples: [{ checkId: "ready", state: "fail" as const, observedAt: NOW.toISOString(), evidenceRefs: ["artifact://check/baseline"] }] },
+    intent: { actionId: "act-1", argv: [] },
     receipt: {
       exitCode: 0,
       timedOut: false,

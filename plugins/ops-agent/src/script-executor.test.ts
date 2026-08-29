@@ -36,6 +36,7 @@ function rig(
     environmentProfile: { PATH: process.env.PATH ?? "/usr/bin:/bin", OPS_PROFILE: "minimal" },
     timeoutMs: 10_000,
     maxOutputBytes: 512,
+    expectedOwnerUid: process.getuid?.() ?? 0,
     ...overrides,
   } as RegisteredScript;
   return { dir: d, script, executor: new ScriptExecutor(ScriptRegistry.load([script])) };

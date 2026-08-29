@@ -12,6 +12,7 @@ import { createHash, createPublicKey, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
+  fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -538,7 +539,14 @@ class PersistingCommandRunner implements CommandRunner {
     writeFileSync(resolve(this.artifactDir, name), `${JSON.stringify(payload)}\n`, {
       mode: 0o600,
       flag: "wx",
+      flush: true,
     });
+    const dirFd = openSync(this.artifactDir, "r");
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
     return {
       stdout: result.stdout,
       // A truncated successful command is not a successful observation. The

@@ -66,6 +66,13 @@ const intentRecorded: OperationsEvent = {
     observedLabels: [],
     evidenceRef: "artifact://controller/1",
   },
+  eligibility: { eligible: true, reasons: [] },
+  mutationOwner: {
+    owner: "opsd",
+    competingLabels: [],
+    changedAt: at(3),
+    changeRef: "artifact://ownership/1",
+  },
 };
 const operatorIntervened: OperationsEvent = {
   v: 1,

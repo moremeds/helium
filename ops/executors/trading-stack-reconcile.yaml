@@ -17,3 +17,4 @@ environmentProfile:
   PATH: /usr/bin:/bin:/usr/sbin:/sbin
 timeoutMs: 120000
 maxOutputBytes: 65536
+expectedOwnerUid: 0

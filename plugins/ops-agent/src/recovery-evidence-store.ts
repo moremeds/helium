@@ -12,9 +12,10 @@ import {
   statSync,
   writeSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   canonicalJson,
+  ObservationSchema,
   RecoveryEvidenceSchema,
   type EvidenceRef,
   type OperationsEvent,
@@ -30,13 +31,20 @@ export interface TerminalEvidenceRef extends EvidenceRef {
 
 export interface RecoveryEvidencePort {
   persistArtifact(kind: string, value: unknown): EvidenceRef;
+  hashArtifacts(refs: readonly string[]): EvidenceRef[];
   persistBundle(bundle: RecoveryEvidence): TerminalEvidenceRef;
   verifyEvent(event: OperationsEvent): void;
   verifyHistory(events: readonly OperationsEvent[]): void;
 }
 
 export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
-  constructor(private readonly dir: string) {
+  constructor(
+    private readonly dir: string,
+    private readonly options: {
+      /** Test/fixture seam. Production resolves only artifact://ops/raw refs. */
+      readSourceArtifact?: (ref: string) => string | Buffer;
+    } = {},
+  ) {
     ensurePrivateDirectory(dir);
   }
 
@@ -45,6 +53,16 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
       throw new Error(`invalid evidence artifact kind: ${kind}`);
     }
     return this.#persist(`${kind}`, canonicalJson(value));
+  }
+
+  hashArtifacts(refs: readonly string[]): EvidenceRef[] {
+    return [...new Set(refs)].sort().map((ref) => {
+      const raw = this.#readSource(ref);
+      return {
+        ref,
+        sha256: createHash("sha256").update(raw).digest("hex"),
+      };
+    });
   }
 
   persistBundle(raw: RecoveryEvidence): TerminalEvidenceRef {
@@ -89,13 +107,66 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
         canonicalJson(bundle.postconditionSamples.map((sample) => sample.checkId))) {
       throw new Error(`recovery evidence postcondition refs mismatch: ${event.actionId}`);
     }
+    const observationValues = bundle.observations.map((nested) =>
+      ObservationSchema.parse(JSON.parse(this.#read(nested))));
     for (const nested of [
-      ...bundle.observations,
       bundle.incidentSnapshot,
       ...(bundle.receipt === undefined ? [] : [bundle.receipt.evidence]),
     ]) {
       this.#read(nested);
     }
+    const expectedSources = [...new Set([
+      ...observationValues.flatMap((observation) => observation.evidenceRefs),
+      bundle.controllerProbe.evidenceRef,
+      ...(bundle.baseline === undefined
+        ? []
+        : bundle.baseline.samples.flatMap((sample) => sample.evidenceRefs)),
+      ...bundle.postconditionSamples.flatMap((sample) => sample.evidenceRefs),
+    ])].sort();
+    const actualSources = [...new Set(bundle.rawArtifacts.map((artifact) => artifact.ref))].sort();
+    if (canonicalJson(actualSources) !== canonicalJson(expectedSources)) {
+      throw new Error(`recovery evidence raw artifact set mismatch: ${event.actionId}`);
+    }
+    for (const artifact of bundle.rawArtifacts) {
+      const actual = createHash("sha256").update(this.#readSource(artifact.ref)).digest("hex");
+      if (actual !== artifact.sha256) {
+        throw new Error(`raw evidence hash mismatch: ${artifact.ref}`);
+      }
+    }
+  }
+
+  #readSource(ref: string): string | Buffer {
+    if (this.options.readSourceArtifact !== undefined) {
+      return this.options.readSourceArtifact(ref);
+    }
+    const prefix = "artifact://ops/raw/";
+    if (!ref.startsWith(prefix)) throw new Error(`unsupported raw evidence ref: ${ref}`);
+    const name = ref.slice(prefix.length);
+    if (name === "" || basename(name) !== name) {
+      throw new Error(`unsafe raw evidence ref: ${ref}`);
+    }
+    const rawDir = join(dirname(this.dir), "raw");
+    const root = statSync(rawDir);
+    if (!root.isDirectory() || (root.mode & 0o077) !== 0) {
+      throw new Error(`raw evidence directory must be owner-only: ${rawDir}`);
+    }
+    if (typeof process.getuid === "function" && root.uid !== process.getuid()) {
+      throw new Error(`raw evidence directory has a different owner: ${rawDir}`);
+    }
+    const path = join(rawDir, name);
+    let file;
+    try {
+      file = lstatSync(path);
+    } catch {
+      throw new Error(`missing raw evidence artifact: ${ref}`);
+    }
+    if (!file.isFile() || (file.mode & 0o077) !== 0) {
+      throw new Error(`raw evidence artifact must be owner-only: ${ref}`);
+    }
+    if (typeof process.getuid === "function" && file.uid !== process.getuid()) {
+      throw new Error(`raw evidence artifact has a different owner: ${ref}`);
+    }
+    return readFileSync(path);
   }
 
   #persist(kind: string, body: string): EvidenceRef {

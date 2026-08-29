@@ -36,6 +36,18 @@ jobs:
       - run: pnpm run test:e2e-local
       - run: node --test scripts/deadman/check-tenant-heartbeats.test.mjs
       - run: bash scripts/deadman/check-heartbeat.test.sh
+      - name: offline ops signing and release-boundary tests
+        run: >-
+          node --test
+          scripts/ops/sign-approval.test.mjs
+          scripts/ops/sign-authority-manifest.test.mjs
+          scripts/release/opsd-cycle-after.test.mjs
+      - name: repeat adversarial ops boundaries 20 times
+        run: >-
+          bash scripts/test-repeat.sh 20
+          pnpm exec vitest run --project contracts
+          contracts/tests/ops-action-boundary.contract.spec.ts
+          contracts/tests/ops-controller.contract.spec.ts
       # The Phase 1 exit gate claims each fake executor package can be removed
       # and re-added without editing core or the plugin. That claim was only
       # ever checked by hand, and a hash captured on a developer machine is not
@@ -74,3 +86,20 @@ jobs:
       # HELIUM_LIVE is never set here: CI holds no secrets and makes no
       # network LLM calls (spec §12, plan global constraints).
       - run: pnpm run test:contracts
+
+  ops-macos-offline:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      # Redirected temporary roots only: this renders and removes packaging,
+      # but never loads launchd or touches a live host installation.
+      - run: bash scripts/ops/install-observe-only.test.sh

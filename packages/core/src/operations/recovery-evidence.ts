@@ -15,14 +15,14 @@
  */
 import { z } from "zod";
 import { EVIDENCE_STATUSES, VERIFIER_DECISIONS } from "../evidence/bundle.js";
-import { ACTION_OUTCOMES } from "./action.js";
+import { ACTION_OUTCOMES, PostconditionSampleSchema } from "./action.js";
 import { MutationOwnershipSchema, OpsIdSchema } from "./component.js";
 import { ATTRIBUTIONS } from "./events.js";
 import { CONTROLLER_PROBE_RESULTS } from "./mutation-owner.js";
 import { SOP_AUTHORITIES } from "./sop.js";
 
 /** Fields that may be absent only with a stated reason. */
-export const OPTIONAL_RECOVERY_FIELDS = ["intent", "receipt", "lease"] as const;
+export const OPTIONAL_RECOVERY_FIELDS = ["baseline", "intent", "receipt", "lease"] as const;
 export type OptionalRecoveryField = (typeof OPTIONAL_RECOVERY_FIELDS)[number];
 
 const HashedRefSchema = z.strictObject({
@@ -38,6 +38,8 @@ export const RecoveryEvidenceSchema = z
 
     /** Raw observations, each with a content hash. */
     observations: z.array(HashedRefSchema).min(1),
+    /** Every raw probe/check/controller artifact cited below, with its own hash. */
+    rawArtifacts: z.array(HashedRefSchema).min(1),
     /** The incident and dependency picture the decision was made against. */
     incidentSnapshot: HashedRefSchema,
 
@@ -66,15 +68,17 @@ export const RecoveryEvidenceSchema = z
     }),
 
     lease: z.strictObject({ leaseId: OpsIdSchema, operationId: OpsIdSchema }).optional(),
+    baseline: z
+      .strictObject({
+        capturedAt: z.string().min(1),
+        samples: z.array(PostconditionSampleSchema).min(1),
+        allPassing: z.boolean(),
+      })
+      .optional(),
     intent: z
       .strictObject({
         actionId: OpsIdSchema,
         argv: z.array(z.string().max(4096)),
-        baseline: z.strictObject({
-          capturedAt: z.string().min(1),
-          allPassing: z.boolean(),
-          sampleCount: z.number().int().nonnegative(),
-        }),
       })
       .optional(),
     receipt: z
@@ -111,6 +115,7 @@ export const RecoveryEvidenceSchema = z
     /** Why an optional field is absent. Never omit the field silently. */
     notApplicable: z
       .strictObject({
+        baseline: z.string().min(1).max(300).optional(),
         intent: z.string().min(1).max(300).optional(),
         receipt: z.string().min(1).max(300).optional(),
         lease: z.string().min(1).max(300).optional(),
@@ -150,6 +155,9 @@ export const RecoveryEvidenceSchema = z
       if (bundle.controllerProbe.result !== "clear") {
         issue(["controllerProbe"], "a recorded intent requires a clear controller probe");
       }
+      if (bundle.baseline === undefined) {
+        issue(["baseline"], "a recorded intent requires its exact baseline samples");
+      }
     }
     if (bundle.receipt !== undefined && bundle.intent === undefined) {
       issue(["receipt"], "an execution receipt requires a recorded intent");
@@ -158,7 +166,9 @@ export const RecoveryEvidenceSchema = z
     if (bundle.outcome === "succeeded") {
       if (bundle.intent === undefined || bundle.receipt === undefined) {
         issue(["outcome"], "a succeeded outcome requires both an intent and a receipt");
-      } else if (bundle.intent.baseline.allPassing) {
+      } else if (bundle.baseline === undefined) {
+        issue(["baseline"], "a succeeded outcome requires its exact baseline");
+      } else if (bundle.baseline.allPassing) {
         issue(
           ["outcome"],
           "a succeeded outcome requires a baseline with at least one failing postcondition",
@@ -180,6 +190,9 @@ export const RecoveryEvidenceSchema = z
     }
     if (bundle.attribution === "automatic" && bundle.intent === undefined) {
       issue(["attribution"], "automatic attribution requires a recorded intent");
+    }
+    if (bundle.outcome === "not-needed" && bundle.baseline?.allPassing !== true) {
+      issue(["baseline"], "a not-needed outcome requires an all-passing baseline");
     }
   });
 export type RecoveryEvidence = z.infer<typeof RecoveryEvidenceSchema>;

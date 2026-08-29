@@ -446,6 +446,14 @@ export class OpsController {
               allPassing: false,
             },
             controllerProbe: atSpawn,
+            eligibility: {
+              eligible: candidate.eligible,
+              reasons: [
+                ...candidate.loaded.certificationReasons,
+                ...candidate.policyReasons,
+              ],
+            },
+            mutationOwner: component.mutationOwner,
           });
           return { admitted: true };
         },
@@ -604,11 +612,13 @@ export class OpsController {
     if (controllerProbe === undefined) {
       throw new Error(`cannot verify action without controller probe evidence: ${action.actionId}`);
     }
-    const observations = incident.observationIds.map((id) => {
+    const observationValues = incident.observationIds.map((id) => {
       const observation = this.options.store.state().observations[id];
       if (observation === undefined) throw new Error(`missing incident observation: ${id}`);
-      return this.options.evidence.persistArtifact("observation", observation);
+      return observation;
     });
+    const observations = observationValues.map((observation) =>
+      this.options.evidence.persistArtifact("observation", observation));
     const incidentSnapshot = this.options.evidence.persistArtifact("incident", {
       incident,
       dependencyIds: this.options.registry.graph().transitiveDependenciesOf(component.id),
@@ -646,41 +656,59 @@ export class OpsController {
           : outcome === "not-needed"
             ? undefined
             : "automatic";
-    const status = outcome === "uncertain" ? "PARTIAL" : "PROVEN";
+    const status = outcome === "uncertain"
+      ? "PARTIAL"
+      : outcome === "failed"
+        ? "FAILED"
+        : "PROVEN";
     const missingIntent = action.argv === undefined || baseline === undefined;
     const missingReceipt = receipt === undefined;
     const missingLease = lease === undefined;
+    const missingBaseline = baseline === undefined;
+    const rawArtifacts = this.options.evidence.hashArtifacts([
+      ...observationValues.flatMap((observation) => observation.evidenceRefs),
+      controllerProbe.evidenceRef,
+      ...(baseline === undefined
+        ? []
+        : baseline.samples.flatMap((sample) => sample.evidenceRefs)),
+      ...samples.flatMap((sample) => sample.evidenceRefs),
+    ]);
     return {
       assertionId: `recovery-${action.actionId}`,
       componentId: action.componentId,
       incidentId: action.incidentId,
       observations,
+      rawArtifacts,
       incidentSnapshot,
       sopId: action.sopId,
       sopVersion: action.sopVersion,
       sopDigest: action.sopDigest,
       authorityManifestEntry: action.authorityManifestEntry,
       authority: action.authority as RecoveryEvidence["authority"],
-      eligibility: {
+      eligibility: action.eligibility ?? {
         eligible: loaded.certified,
         reasons: [...loaded.certificationReasons],
       },
-      mutationOwner: component.mutationOwner,
+      mutationOwner: action.mutationOwner ?? component.mutationOwner,
       controllerProbe,
       ...(missingLease
         ? {}
         : { lease: { leaseId: lease!.leaseId, operationId: lease!.operationId } }),
+      ...(missingBaseline
+        ? {}
+        : {
+            baseline: {
+              capturedAt: baseline!.capturedAt,
+              samples: baseline!.samples,
+              allPassing: baseline!.allPassing,
+            },
+          }),
       ...(missingIntent
         ? {}
         : {
             intent: {
               actionId: action.actionId,
               argv: action.argv!,
-              baseline: {
-                capturedAt: baseline!.capturedAt,
-                allPassing: baseline!.allPassing,
-                sampleCount: baseline!.samples.length,
-              },
             },
           }),
       ...(missingReceipt ? {} : { receipt }),
@@ -695,16 +723,21 @@ export class OpsController {
       verifier: {
         identity: "helium-opsd",
         version: "verify/1",
-        decision: outcome === "uncertain" ? "inconclusive" : "pass",
+        decision: outcome === "uncertain"
+          ? "inconclusive"
+          : outcome === "failed"
+            ? "fail"
+            : "pass",
       },
       replayRef: `eventlog://operations/action/${action.actionId}`,
       status,
       limitation: outcome === "uncertain"
         ? "The persisted action prefix cannot prove execution or attribution."
         : "",
-      ...(missingIntent || missingReceipt || missingLease
+      ...(missingBaseline || missingIntent || missingReceipt || missingLease
         ? {
             notApplicable: {
+              ...(missingBaseline ? { baseline: "no pre-action baseline was recorded" } : {}),
               ...(missingIntent ? { intent: "no write-ahead intent was recorded" } : {}),
               ...(missingReceipt ? { receipt: "no executor receipt was recorded" } : {}),
               ...(missingLease ? { lease: "no durable action lease was recorded" } : {}),
@@ -739,11 +772,20 @@ export class OpsController {
 
   async #reconcileStartup(): Promise<void> {
     if (this.#startupReconciled) return;
+    // A process can die after acquiring the OS lock but before its first
+    // durable action event. Such a lock cannot be discovered by replaying the
+    // action log, so reconcile every registered component once at startup.
+    // Keep this out of acquire(): two live contenders must never race while
+    // deciding whether the other's newly-created lock is stale.
+    for (const component of this.options.registry
+      .components()
+      .sort((a, b) => a.id.localeCompare(b.id))) {
+      this.options.componentLocks.reconcile(component.id);
+    }
     const actions = Object.values(this.options.store.state().actions)
       .filter((action) => ["authorized", "intent-recorded", "executed"].includes(action.state))
       .sort((a, b) => a.actionId.localeCompare(b.actionId));
     for (const action of actions) {
-      this.options.componentLocks.reconcile(action.componentId);
       const loaded = this.options.registry.sop(action.sopId);
       const postconditions = loaded === undefined
         ? []

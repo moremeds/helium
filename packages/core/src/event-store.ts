@@ -19,6 +19,7 @@ import {
   closeSync,
   chmodSync,
   existsSync,
+  ftruncateSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -111,10 +112,29 @@ export function openEventStore<T>(
     `sha256:${createHash("sha256").update(canonicalJson(record)).digest("hex")}`;
 
   /**
-   * Read the log, dropping a torn final line.
+   * Remove only an unterminated final append before deriving the next
+   * sequence number. Leaving the fragment in place would make the first new
+   * append part of the same malformed line and poison all later replay.
+   */
+  const repairTornTail = (): void => {
+    if (!existsSync(logPath)) return;
+    const raw = readFileSync(logPath);
+    if (raw.length === 0 || raw.at(-1) === 0x0a) return;
+    const lastNewline = raw.lastIndexOf(0x0a);
+    const fd = openSync(logPath, "r+");
+    try {
+      ftruncateSync(fd, lastNewline + 1);
+      sync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  };
+
+  /**
+   * Read the log after startup has removed any torn final line.
    *
    * A file that does not end in a newline had its last append interrupted, so
-   * that fragment is dropped -- never parsed leniently and never repaired. Any
+   * that fragment is removed before replay -- never parsed leniently. Any
    * OTHER unreadable line is corruption in the middle of the log and is fatal:
    * silently skipping it would hand the caller a history that never happened.
    */
@@ -124,9 +144,7 @@ export function openEventStore<T>(
     if (raw === "") return [];
     const lines = raw.split("\n");
     const tail = lines.pop();
-    if (tail !== "") {
-      // Torn write: no terminating newline. Drop it.
-    }
+    if (tail !== "") throw new Error(`${logPath}: unterminated final record`);
     return lines.map((line, i) => {
       let parsed: Envelope;
       try {
@@ -153,6 +171,7 @@ export function openEventStore<T>(
     });
   };
 
+  repairTornTail();
   let seq = readLog().length;
 
   const readSnapshot = (log: Envelope[]): { lastSeq: number; records: T[] } | undefined => {
