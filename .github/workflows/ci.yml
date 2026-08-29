@@ -36,6 +36,27 @@ jobs:
       - run: pnpm run test:e2e-local
       - run: node --test scripts/deadman/check-tenant-heartbeats.test.mjs
       - run: bash scripts/deadman/check-heartbeat.test.sh
+      # The Phase 1 exit gate claims each fake executor package can be removed
+      # and re-added without editing core or the plugin. That claim was only
+      # ever checked by hand, and a hash captured on a developer machine is not
+      # admissible -- so the drill runs here, last, because it deliberately
+      # mutates node_modules and the lockfile.
+      - name: fake executor packages install and remove with no core edit
+        run: |
+          set -eu
+          for pkg in fake-metered fake-flat-rate; do
+            echo "--- @helium/$pkg: remove ---"
+            pnpm --filter @helium/contracts remove "@helium/$pkg"
+            echo "--- @helium/$pkg: add back ---"
+            pnpm --filter @helium/contracts add -D "@helium/$pkg@file:../packages/$pkg"
+          done
+          changed=$(git diff --name-only -- packages/core plugins/helium)
+          if [ -n "$changed" ]; then
+            echo "FAIL: install/removal edited core or the plugin:"
+            echo "$changed"
+            exit 1
+          fi
+          echo "PASS: packages/core and plugins/helium unchanged"
 
   contracts:
     runs-on: ubuntu-latest
