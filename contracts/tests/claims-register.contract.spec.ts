@@ -64,7 +64,11 @@ interface ManifestClaim {
 const MANIFESTS: Record<string, string> = {
   P0: "docs/evidence/p0-manifest.yaml",
   P1: "docs/evidence/p1-manifest.yaml",
+  "P2.5a": "docs/evidence/p2.5a-manifest.yaml",
 };
+
+/** Statuses that assert something actually ran. The rest owe no hash. */
+const UNDECIDED = new Set(["PLANNED", "BLOCKED"]);
 
 const manifests = Object.fromEntries(
   Object.entries(MANIFESTS).map(([phase, path]) => [
@@ -91,9 +95,9 @@ describe("closed claims register", () => {
   it("covers every phase that has landed a manifest", () => {
     // A phase whose manifest is not listed would have its rows silently
     // uncross-checked. Assert the composition rather than trusting the loop.
-    expect(Object.keys(MANIFESTS).sort()).toEqual(["P0", "P1"]);
+    expect(Object.keys(MANIFESTS).sort()).toEqual(["P0", "P1", "P2.5a"]);
     const phases = [...new Set(register.claims.map((c) => c.phase))].sort();
-    expect(phases).toEqual(["P0", "P1"]);
+    expect(phases).toEqual(["P0", "P1", "P2.5a"]);
   });
 
   it.each(Object.keys(MANIFESTS))(
@@ -129,7 +133,7 @@ describe("closed claims register", () => {
   it("re-hashes every artifact a decided claim cites", () => {
     let checked = 0;
     for (const claim of register.claims) {
-      if (claim.status === "PLANNED") continue;
+      if (UNDECIDED.has(claim.status)) continue;
       expect(claim.artifacts?.length, `${claim.id} cites no artifact`).toBeGreaterThan(0);
       for (const artifact of claim.artifacts ?? []) {
         const path = at(artifact.path);
@@ -146,7 +150,7 @@ describe("closed claims register", () => {
 
   it("keeps every decided claim's output hash consistent with its artifacts", () => {
     for (const claim of register.claims) {
-      if (claim.status === "PLANNED") continue;
+      if (UNDECIDED.has(claim.status)) continue;
       const joined = Buffer.concat(
         (claim.artifacts ?? []).map((a) => readFileSync(at(a.path))),
       );
@@ -171,11 +175,13 @@ describe("closed claims register", () => {
     }
   });
 
-  it("gives a PLANNED claim a gate that will decide it, and no hash", () => {
-    for (const claim of register.claims) {
-      if (claim.status !== "PLANNED") continue;
+  it("gives an undecided claim a gate that will decide it, and no hash", () => {
+    const undecided = register.claims.filter((c) => UNDECIDED.has(c.status));
+    expect(undecided.length).toBeGreaterThan(0);
+    for (const claim of undecided) {
       expect(claim.nextGate, `${claim.id}`).toBeTruthy();
       expect(claim.outputHash, `${claim.id} records a hash it cannot have`).toBeUndefined();
+      expect(claim.limitation, `${claim.id} does not say what is unproven`).toBeTruthy();
     }
   });
 });

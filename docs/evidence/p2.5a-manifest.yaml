@@ -1,0 +1,177 @@
+# Phase 2.5a exit evidence — Ops Phase B
+#
+# The operations substrate spans Ops Phases A-D, all of which are program phase
+# P2.5a. This manifest is the single P2.5a record and is appended to as each
+# Ops phase gate is reached; the rows below are Ops Phase B's.
+#
+# Validated against EvidenceManifestSchema by
+# packages/core/tests/evidence-manifest.spec.ts, alongside the P0 and P1
+# manifests.
+#
+# WHERE THE HASHES COME FROM
+# --------------------------
+#   run:    https://github.com/moremeds/helium/actions/runs/33244178167
+#   commit: a7d5947  (feat/ops-phase-b)
+#   node:   22.19.0 (pinned, .github/workflows/ci.yml:21,49)
+#   pnpm:   11.24.0   vitest: 3.2.7
+#
+# A hash captured on a developer machine is not admissible. Captured output
+# carries wall-clock durations, so re-running the same commit yields a
+# different hash; the hash pins this run, and `reproduction` re-runs the
+# assertion rather than the hash.
+#
+# WHAT IS DELIBERATELY NOT CLAIMED
+# --------------------------------
+# Every row here is offline. No SOP has been certified against a live host, no
+# drill has run against a real component, and nothing has been deployed. The
+# live-drill gate is recorded as its own BLOCKED claim rather than left
+# unstated, because a manifest that lists only what passed reads as
+# completeness.
+manifestVersion: p0-1
+phase: P2.5a
+scope: offline
+recordedAt: 2026-08-29T09:10:00Z
+claims:
+  - id: P2.5A-CRASH-MATRIX
+    assertion: "A controller terminated at any point in a recovery attempt produces no duplicate attempt, receipt or terminal state, and never blindly retries."
+    acceptanceBound: "For all eight crash points in the attempt sequence, and for a torn-write variant of each: no duplicate event id survives a restart, at most one terminal action state exists, at most one receipt is recorded, at most one lease is ever active across repeated re-acquires, and every reconciliation decision has rerun=false."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-crash-matrix.spec.ts"
+    failures: "None. The matrix truncates a real durable log rather than discarding in-memory state, so each case asks what a restarted process can conclude from what actually reached disk."
+    status: PROVEN
+    limitation: "Simulates termination by truncating the log, not by killing a live daemon under load. It proves the replay contract, not the behaviour of the host process under signals."
+    nextGate: "Ops Phase C: collector, probes and adapters."
+
+  - id: P2.5A-ATTRIBUTION-NEVER-AUTOMATIC
+    assertion: "A controller never claims its own action succeeded merely because the target later became healthy."
+    acceptanceBound: "Across the full attribution matrix: a non-zero exit with passing postconditions is uncertain and never automatic; an operator intervention during an in-flight action yields superseded-by-operator with operator attribution whatever the postconditions say; and the production-derived incident fixture attributes to the operator with automation FAILED."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "The read-only mini audit of 2026-08-25, design sections 3.1 and 3.6."
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reducer.spec.ts"
+    failures: "None. A missing receipt with a recorded intent is uncertain rather than external, so an external actor is never credited for a mutation Helium may have performed."
+    status: PROVEN
+    limitation: "Proves the classifier against recorded evidence shapes. It does not prove the daemon assembles that evidence correctly from a live host, which needs the collector in Ops Phase C."
+    nextGate: "Ops Phase C: collector, probes and adapters."
+
+  - id: P2.5A-NOT-NEEDED-NO-AUTOMATION-CREDIT
+    assertion: "An action whose pre-action baseline already passed is excluded from every automation-credit statistic."
+    acceptanceBound: "A baseline with all postconditions passing terminates the action not-needed before any spawn; automation credit is granted only to a genuine succeeded; and succeeded is unreachable from an all-passing baseline under every combination of receipt, postcondition verdict and intent."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-sop.spec.ts packages/core/tests/operations-verify.spec.ts"
+    failures: "None. Without this rule an operator fixing the component concurrently hands the controller a free exit 0 plus passing postconditions, feeding the promotion gate exactly the case it exists to catch."
+    status: PROVEN
+    limitation: "Proves the exclusion in the classifier and the schema. The promotion gate that consumes the statistic does not exist until P4."
+    nextGate: "P4: bounded production window and promotion."
+
+  - id: P2.5A-MUTATION-OWNERSHIP-FAIL-CLOSED
+    assertion: "No mutation is attempted while component ownership is competing, external, absent, or unverifiable."
+    acceptanceBound: "canMutate returns ok only for owner opsd with a clear probe; a timeout, non-zero exit, truncated output and unparseable output each yield unknown and therefore refusal; and at every prefix of the handoff and rollback sequences at most one mutation controller is enabled, with a crash between disable and enable leaving zero."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "Design section 13.2."
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts"
+    failures: "None. A partially readable controller table is refused entirely, because a label the parser skipped is exactly the rival it exists to find."
+    status: PARTIAL
+    limitation: "Every probe result comes from the fake runner. No test invokes the real service-manager binary, by design, so the parser is proven against the table shape this program believes the host emits -- not against that host's actual output. Closing this needs a read-only capture from the mini, which the AC#1 window forbids until 2026-08-31."
+    nextGate: "Ops Phase C Task 10: collector and host probes."
+
+  - id: P2.5A-NO-COMMAND-STRING
+    assertion: "No certified action is ever expressed, stored or executed as a command string."
+    acceptanceBound: "The SOP, registry and intent schemas reject a command or shell key; the executor spawns with shell:false and its source contains no shell invocation; a shell metacharacter argument reaches the child as a literal; and every off-schema argv is refused before anything is spawned."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
+    reproduction: "pnpm exec vitest run --project unit plugins/ops-agent/src/script-registry.test.ts plugins/ops-agent/src/script-executor.test.ts"
+    failures: "None. The timeout test proves process-group reaping rather than orphaning: a descendant rewrites a marker every 25ms, and after the deadline the marker is deleted and must not reappear."
+    status: PROVEN
+    limitation: "Proven against a fake repair script. No certified production script has been registered or run."
+    nextGate: "Ops Task 16: inventory and certify the first existing scripts."
+
+  - id: P2.5A-RECOVERY-BUNDLE-COMPLETE
+    assertion: "A recovery claim cannot be recorded without the evidence chain that makes it checkable, and absent evidence is declared rather than omitted."
+    acceptanceBound: "The recovery bundle refuses omission of hashed observations, incident snapshot, SOP digest, signed authority manifest entry, mutation ownership, controller probe, postcondition samples, verifier or replay reference; refuses to omit intent, receipt or lease without a notApplicableReason; refuses a succeeded outcome with no receipt or an all-passing baseline; and reuses the canonical five-status vocabulary."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm run test"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/test.log"
+        sha256: "2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03"
+    baseline: "The canonical EvidenceBundle from multi-agent Task 7."
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/recovery-evidence-bundle.spec.ts"
+    failures: "None."
+    status: PROVEN
+    limitation: "Proves the schema refuses incomplete bundles. No bundle has yet been produced from a real recovery, because no recovery has been performed."
+    nextGate: "Ops Phase C: collector, probes and adapters."
+
+  - id: P2.5A-LIVE-DRILL
+    assertion: "A certified SOP restores a real component's integrity, freshness and coverage under a controlled drill."
+    acceptanceBound: "The corrupt fixture and a controlled drill both pass integrity, freshness and coverage, against a real component on a real host."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "not yet runnable: no drill harness and no certified production SOP exist"
+      toolVersion: "n/a"
+      decision: inconclusive
+    artifacts: []
+    baseline: "Design section 3.6, which already records this assertion as BLOCKED."
+    reproduction: "Blocked. Requires a certified SOP, a drill harness, and a host the AC#1 observation window permits touching."
+    failures: "Not attempted. Recording this as anything other than BLOCKED would imply a drill happened."
+    status: BLOCKED
+    limitation: "Nothing about targeted repair is proven. The design recorded this as BLOCKED before any code existed and it remains BLOCKED: no drill has run, no production SOP is certified, and no mutation has been performed on any host."
+    nextGate: "Ops Task 16 and 17, then the post-AC#1 drill gate."

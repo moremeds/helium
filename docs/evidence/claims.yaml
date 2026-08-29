@@ -55,11 +55,7 @@ claims:
     command: pnpm run test:contracts
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/test-contracts.log
-        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
     status: PROVEN
     limitation: This proves the ARGUMENTS the harness composes and what the child
       observes of its environment. It does NOT prove the real Claude CLI honours
@@ -68,6 +64,10 @@ claims:
       implementation plan's Task 1.
     nextGate: "P1 Task 10: the formal Executor adapts to this same subject shape and
       inherits this contract."
+    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    artifacts:
+      - path: docs/evidence/p0/test-contracts.log
+        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
   - id: P0-EXECUTION-BOUNDARY-CONFORMANCE
     phase: P0
     assertion: The execution-boundary contract is a reusable suite parameterized
@@ -78,11 +78,7 @@ claims:
     command: pnpm run test:contracts
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/test-contracts.log
-        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
     status: PARTIAL
     limitation: "PARTIAL because the SECOND HALF of the acceptance bound is not
       visible in the artifact. The recorded run proves the first half: the
@@ -99,6 +95,10 @@ claims:
       cannot demonstrate."
     nextGate: "P1 Task 10: a second subject (the fake executor) exercises the
       harness's genericity."
+    outputHash: sha256:80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
+    artifacts:
+      - path: docs/evidence/p0/test-contracts.log
+        sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
   - id: P0-QUOTA-EXHAUSTED-CLASSIFICATION
     phase: P0
     assertion: Subscription session-window exhaustion is classified as
@@ -108,17 +108,17 @@ claims:
     command: pnpm run test
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/test.log
-        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     status: PROVEN
     limitation: Proven against fixture envelopes, not against a live provider
       rate-limit response. The `retryAfter` string is deliberately opaque at P0
       — nothing parses it into a duration yet, and no selector consumes it.
     nextGate: "P1 Task 9: the thin selector filters a quota-exhausted target until
       `retryAfter` and falls back."
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
   - id: P0-TOOL-CONTRACT-FAIL-LOUD
     phase: P0
     assertion: A misspelled capability rejects only the affected tenant and raises
@@ -128,11 +128,7 @@ claims:
     command: pnpm run test
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/test.log
-        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     status: PARTIAL
     limitation: "PARTIAL because the SECOND HALF of the acceptance bound is not
       visible in the artifact. The recorded run proves that an unknown tool name
@@ -147,6 +143,10 @@ claims:
       under that env and asserts it stays alive. Beyond that, neither half is
       proven under a live senior-lane dispatch against a real MCP client."
     nextGate: "P1 Task 11: v1 jobs run through the new boundary end to end."
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
   - id: P0-DELIVERY-WRITE-AHEAD-CRASH-REPLAY
     phase: P0
     assertion: No external delivery side effect occurs that the audit trail has not
@@ -156,11 +156,7 @@ claims:
     command: pnpm run test
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/test.log
-        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
     status: PROVEN
     limitation: "This is NOT exactly-once delivery and must never be described as
       such: SMTP acceptance followed by a crash before the outcome append is
@@ -169,6 +165,10 @@ claims:
       intent per deliveryId, no blind retry, and a durable uncertain outcome.
       Proven against a fake transport, not a real SMTP server."
     nextGate: "P2 Task 15: recovery reconciliation across the team kernel."
+    outputHash: sha256:bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
+    artifacts:
+      - path: docs/evidence/p0/test.log
+        sha256: bf0bcb88ba24a994d5c9d9bbbc3904812dd86760ce2be53ed4db6dc2e6d59584
   - id: P0-TENANT-LIVENESS
     phase: P0
     assertion: "Per-tenant liveness is observable: a single silent tenant in an
@@ -179,13 +179,7 @@ claims:
       scripts/deadman/check-heartbeat.test.sh
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:03f22c0bdbc72072fb5402414765d7a7e87d09d9bd93aeca90cca89146671f41
     decision: pass
-    artifacts:
-      - path: docs/evidence/p0/deadman-tenant-reducer.log
-        sha256: e7b39802e2cc47d2a5c9791deab3862a9f20b618acc29f7cd7428ea7b129f3a3
-      - path: docs/evidence/p0/deadman-drill.log
-        sha256: ef3d6636ee042e46d222e18c6d8bc0f4763b70f47351bf56430159396fd7e70e
     status: PROVEN
     limitation: Exercised against fixture job directories and fixture heartbeat
       files, with a fake mailer, on the CI runner. No real launchd agent, no
@@ -193,6 +187,12 @@ claims:
       touching it before 2026-08-31, so nothing here proves the deployed
       dead-man agent behaves this way.
     nextGate: "P2.5a: the operations safety substrate consumes these health rows."
+    outputHash: sha256:03f22c0bdbc72072fb5402414765d7a7e87d09d9bd93aeca90cca89146671f41
+    artifacts:
+      - path: docs/evidence/p0/deadman-tenant-reducer.log
+        sha256: e7b39802e2cc47d2a5c9791deab3862a9f20b618acc29f7cd7428ea7b129f3a3
+      - path: docs/evidence/p0/deadman-drill.log
+        sha256: ef3d6636ee042e46d222e18c6d8bc0f4763b70f47351bf56430159396fd7e70e
   - id: P0-V1-BEHAVIOR-PRESERVED
     phase: P0
     assertion: Every Phase 0 change preserves the shipped v1 behavior it did not
@@ -202,8 +202,15 @@ claims:
       test:contracts && pnpm run test:e2e-local
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,41); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:c4957d3fee5149077e81082b0d72b6211cb26f73f533d2439692fc3a33b077cb
     decision: pass
+    status: PROVEN
+    limitation: "A green suite proves no REGRESSION the suite covers. It is not a
+      production-equivalence proof: nothing in Phase 0 has run on the mini, and
+      the v1 daemon has not been restarted under these changes. The 1 skipped
+      contract test is a real gap, not noise — no live provider is exercised
+      anywhere in this manifest."
+    nextGate: "P1 Task 11: v1 jobs adapted through the new boundary."
+    outputHash: sha256:c4957d3fee5149077e81082b0d72b6211cb26f73f533d2439692fc3a33b077cb
     artifacts:
       - path: docs/evidence/p0/build.log
         sha256: 9c48b44f3cdba5dc098ad0308c7329f1a06392c448b0e9ee12a1bd6baf8c4a7c
@@ -215,13 +222,6 @@ claims:
         sha256: 80c3b17abb6052e9d883b7d3973e4c542d2e060888edce5d0e99379a82381445
       - path: docs/evidence/p0/test-e2e-local.log
         sha256: dfac017c1306f37baf33e500bdf10d70af3726c7f47997343a20eebd1b899a8d
-    status: PROVEN
-    limitation: "A green suite proves no REGRESSION the suite covers. It is not a
-      production-equivalence proof: nothing in Phase 0 has run on the mini, and
-      the v1 daemon has not been restarted under these changes. The 1 skipped
-      contract test is a real gap, not noise — no live provider is exercised
-      anywhere in this manifest."
-    nextGate: "P1 Task 11: v1 jobs adapted through the new boundary."
   - id: P1-CORE-NEUTRALITY
     phase: P1
     assertion: packages/core/src names no provider and no business domain.
@@ -229,16 +229,16 @@ claims:
     command: pnpm run test:contracts
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
     decision: pass
-    artifacts:
-      - path: docs/evidence/p1/test-contracts.log
-        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
     status: PROVEN
     limitation: Proves the source scan only. It says nothing about a provider name
       arriving at runtime through a typed audit field, which is permitted by
       design.
     nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    artifacts:
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
   - id: P1-FAKE-PROVIDER-SUITE
     phase: P1
     assertion: Every registered executor passes the shared execution-boundary
@@ -247,11 +247,7 @@ claims:
     command: pnpm run test:contracts
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
     decision: pass
-    artifacts:
-      - path: docs/evidence/p1/test-contracts.log
-        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
     status: PARTIAL
     limitation: Only @helium/fake-metered is graded by the suite.
       @helium/fake-flat-rate declares in-process and is admitted at the floor
@@ -261,6 +257,10 @@ claims:
       only thing the suite catches, but the second half of the bound -- 'both
       executors graded by the suite' -- is not demonstrated and is not claimed.
     nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+    outputHash: sha256:63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
+    artifacts:
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
   - id: P1-CATALOG-REPLAY
     phase: P1
     assertion: A recorded catalog and policy replay to the same selection decision
@@ -269,16 +269,16 @@ claims:
     command: pnpm run test
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
     decision: pass
-    artifacts:
-      - path: docs/evidence/p1/test.log
-        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
     status: PROVEN
     limitation: Proves determinism over a snapshot. It does not prove the snapshot
       itself is reproducible from a running catalog, which needs the durable
       event log Phase 2 adds.
     nextGate: "Phase 2 exit: deterministic replay across a restart."
+    outputHash: sha256:dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+    artifacts:
+      - path: docs/evidence/p1/test.log
+        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
   - id: P1-EXECUTION-SNAPSHOT-TYPED
     phase: P1
     assertion: Every recorded run carries a parsed AgentResult.executionSnapshot,
@@ -287,13 +287,7 @@ claims:
     command: pnpm run test && pnpm run test:contracts
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:5286c879657c9c9ac8b184d87d949a91f3e07dfebb2f19036ed75e73abc35c2f
     decision: pass
-    artifacts:
-      - path: docs/evidence/p1/test.log
-        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
-      - path: docs/evidence/p1/test-contracts.log
-        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
     status: PARTIAL
     limitation: Every run THROUGH THE EXECUTOR REGISTRY carries a parsed snapshot.
       The v1 triage and senior lanes do not route through the registry at Phase
@@ -301,6 +295,12 @@ claims:
       run' is not yet true of the production path. Phase 2 moves them onto the
       registry.
     nextGate: "Phase 2 exit: provider executors registered behind the lifecycle seam."
+    outputHash: sha256:5286c879657c9c9ac8b184d87d949a91f3e07dfebb2f19036ed75e73abc35c2f
+    artifacts:
+      - path: docs/evidence/p1/test.log
+        sha256: dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff
+      - path: docs/evidence/p1/test-contracts.log
+        sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
   - id: P1-PLUGIN-INSTALL-NO-CORE-EDIT
     phase: P1
     assertion: Each fake executor package can be removed and re-added without
@@ -309,15 +309,15 @@ claims:
     command: "bash: pnpm --filter @helium/contracts remove/add each fake package,
       then git diff --name-only -- packages/core plugins/helium"
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0
-    outputHash: sha256:c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
     decision: pass
-    artifacts:
-      - path: docs/evidence/p1/install-removal-drill.log
-        sha256: c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
     status: PROVEN
     limitation: Proves the two fake packages. It does not prove an arbitrary
       third-party executor plugin installs cleanly, which is a Phase 5 claim.
     nextGate: "Phase 5: plugin conformance and independent promotion."
+    outputHash: sha256:c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
+    artifacts:
+      - path: docs/evidence/p1/install-removal-drill.log
+        sha256: c8adc00b4b1f45372498ac800f4970c63c912c5ca03dd3aab56aa6cd1244d359
   - id: P1-V1-BEHAVIOR-PRESERVED
     phase: P1
     assertion: The v1 regression suite passes in both legacy-direct and
@@ -327,8 +327,13 @@ claims:
       test:contracts && pnpm run test:e2e-local
     toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
       11.24.0; vitest 3.2.7
-    outputHash: sha256:fd510ed9449ecddf83019c81224dcfa0cfb68f103f4dab28a0db77aed97c5805
     decision: pass
+    status: PROVEN
+    limitation: Proves equivalence on the shipped tenants under the local end-to-end
+      harness with stubbed engines. It does not prove equivalence against a live
+      provider, and work-order-adapter is not the default mode.
+    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+    outputHash: sha256:fd510ed9449ecddf83019c81224dcfa0cfb68f103f4dab28a0db77aed97c5805
     artifacts:
       - path: docs/evidence/p1/build.log
         sha256: afc7406e388bb85565f1c6d73544a117d6f369a1ed8f0ddba0471d68700cb2c4
@@ -340,8 +345,125 @@ claims:
         sha256: 63028fe4a9df62910051692c0c10d05db8702af8ba94f0ac11835a1a97ac5082
       - path: docs/evidence/p1/test-e2e-local.log
         sha256: cf22ada47dc04caf1b079c7aba740ecbc683cbc514e144226dc43a369f58f66c
+  - id: P2.5A-CRASH-MATRIX
+    phase: P2.5a
+    assertion: A controller terminated at any point in a recovery attempt produces
+      no duplicate attempt, receipt or terminal state, and never blindly
+      retries.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
     status: PROVEN
-    limitation: Proves equivalence on the shipped tenants under the local end-to-end
-      harness with stubbed engines. It does not prove equivalence against a live
-      provider, and work-order-adapter is not the default mode.
-    nextGate: "Phase 2 exit: controller kill matrix and deterministic replay."
+    limitation: Simulates termination by truncating the log, not by killing a live
+      daemon under load. It proves the replay contract, not the behaviour of the
+      host process under signals.
+    nextGate: "Ops Phase C: collector, probes and adapters."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-ATTRIBUTION-NEVER-AUTOMATIC
+    phase: P2.5a
+    assertion: A controller never claims its own action succeeded merely because the
+      target later became healthy.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proves the classifier against recorded evidence shapes. It does not
+      prove the daemon assembles that evidence correctly from a live host, which
+      needs the collector in Ops Phase C.
+    nextGate: "Ops Phase C: collector, probes and adapters."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-NOT-NEEDED-NO-AUTOMATION-CREDIT
+    phase: P2.5a
+    assertion: An action whose pre-action baseline already passed is excluded from
+      every automation-credit statistic.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proves the exclusion in the classifier and the schema. The promotion
+      gate that consumes the statistic does not exist until P4.
+    nextGate: "P4: bounded production window and promotion."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-MUTATION-OWNERSHIP-FAIL-CLOSED
+    phase: P2.5a
+    assertion: No mutation is attempted while component ownership is competing,
+      external, absent, or unverifiable.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PARTIAL
+    limitation: Every probe result comes from the fake runner. No test invokes the
+      real service-manager binary, by design, so the parser is proven against
+      the table shape this program believes the host emits -- not against that
+      host's actual output. Closing this needs a read-only capture from the
+      mini, which the AC#1 window forbids until 2026-08-31.
+    nextGate: "Ops Phase C Task 10: collector and host probes."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-NO-COMMAND-STRING
+    phase: P2.5a
+    assertion: No certified action is ever expressed, stored or executed as a
+      command string.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proven against a fake repair script. No certified production script
+      has been registered or run.
+    nextGate: "Ops Task 16: inventory and certify the first existing scripts."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-RECOVERY-BUNDLE-COMPLETE
+    phase: P2.5a
+    assertion: A recovery claim cannot be recorded without the evidence chain that
+      makes it checkable, and absent evidence is declared rather than omitted.
+    assertionClass: deterministic
+    command: pnpm run test
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm
+      11.24.0; vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: Proves the schema refuses incomplete bundles. No bundle has yet been
+      produced from a real recovery, because no recovery has been performed.
+    nextGate: "Ops Phase C: collector, probes and adapters."
+    outputHash: sha256:2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+    artifacts:
+      - path: docs/evidence/p2.5a/test.log
+        sha256: 2eddc4e1fe3080e4a3c16294d00c37b51b36bea249cad0690eda43ac3af2ac03
+  - id: P2.5A-LIVE-DRILL
+    phase: P2.5a
+    assertion: A certified SOP restores a real component's integrity, freshness and
+      coverage under a controlled drill.
+    assertionClass: deterministic
+    command: "not yet runnable: no drill harness and no certified production SOP exist"
+    toolVersion: n/a
+    decision: inconclusive
+    status: BLOCKED
+    limitation: "Nothing about targeted repair is proven. The design recorded this
+      as BLOCKED before any code existed and it remains BLOCKED: no drill has
+      run, no production SOP is certified, and no mutation has been performed on
+      any host."
+    nextGate: Ops Task 16 and 17, then the post-AC#1 drill gate.

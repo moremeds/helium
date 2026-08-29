@@ -1,0 +1,22 @@
+##[group]Run pnpm run typecheck
+pnpm run typecheck
+shell: /usr/bin/bash -e {0}
+env:
+  PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+##[endgroup]
+$ pnpm -r --if-present run typecheck
+Scope: 11 of 12 workspace projects
+packages/core typecheck$ tsc -p tsconfig.json --noEmit
+packages/core typecheck: Done
+packages/fake-flat-rate typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-metered typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-metered typecheck: Done
+packages/v1-compat typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-flat-rate typecheck: Done
+plugins/ops-agent typecheck$ tsc -p tsconfig.typecheck.json
+packages/v1-compat typecheck: Done
+plugins/ops-agent typecheck: Done
+contracts typecheck$ tsc -p tsconfig.json --noEmit
+plugins/helium typecheck$ tsc -p tsconfig.typecheck.json
+contracts typecheck: Done
+plugins/helium typecheck: Done

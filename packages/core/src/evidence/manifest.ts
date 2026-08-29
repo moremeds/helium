@@ -59,7 +59,11 @@ export const VerificationSchema = z.strictObject({
   verifier: z.literal("command"),
   command: z.string().min(1),
   toolVersion: z.string().min(1),
-  outputHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /**
+   * Required for any status that implies a run; absent for `PLANNED` and
+   * `BLOCKED`, which have no output to hash. See the claim-level refinement.
+   */
+  outputHash: z.string().regex(/^sha256:[0-9a-f]{64}$/).optional(),
   decision: z.enum(VERIFIER_DECISIONS),
 });
 
@@ -75,7 +79,7 @@ const ClaimShape = z.strictObject({
   assertionClass: z.enum(ASSERTION_CLASSES),
   evidencePolicyVersion: z.string().min(1),
   verification: VerificationSchema,
-  artifacts: z.array(ManifestArtifactSchema).min(1),
+  artifacts: z.array(ManifestArtifactSchema),
   baseline: z.string().min(1),
   reproduction: z.string().min(1),
   failures: z.string().min(1),
@@ -88,7 +92,37 @@ const ClaimShape = z.strictObject({
   confidence: z.number().min(0).max(1).optional(),
 });
 
+/** Statuses that assert something was actually run and observed. */
+const DECIDED_STATUSES = new Set(["PROVEN", "PARTIAL", "FAILED"]);
+
 export const ManifestClaimSchema = ClaimShape.superRefine((claim, ctx) => {
+  // A decided claim owes an output hash and at least one artifact. A PLANNED
+  // or BLOCKED claim owes neither: nothing ran, so there is nothing to hash,
+  // and inventing a value to satisfy a schema is exactly the fabrication the
+  // evidence record exists to prevent.
+  if (DECIDED_STATUSES.has(claim.status)) {
+    if (claim.verification.outputHash === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["verification", "outputHash"],
+        message: `status ${claim.status} requires an output hash`,
+      });
+    }
+    if (claim.artifacts.length === 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["artifacts"],
+        message: `status ${claim.status} requires at least one artifact`,
+      });
+    }
+  } else if (claim.verification.outputHash !== undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["verification", "outputHash"],
+      message: `status ${claim.status} records a hash for a run that did not happen`,
+    });
+  }
+
   if (claim.assertionClass !== "statistical") return;
   for (const field of P0_STATISTICAL_CLAIM_FIELDS) {
     if (claim[field] === undefined) {
