@@ -44,6 +44,14 @@ const ExactArgvSchema = z.array(z.string().min(1)).min(1).max(20).superRefine((a
     ctx.addIssue({ code: "custom", message: "shell executables are forbidden" });
   }
 });
+const ParquetIntegrityOutputSchema = z.object({
+  checked: z.number().int().nonnegative().max(100),
+  valid: z.number().int().nonnegative().max(100),
+  invalid: z.array(z.object({
+    path: AbsolutePathSchema,
+    reason: z.string().min(1).max(500),
+  }).strict()).max(100),
+}).strict();
 
 const DatabaseEndpointSchema = z.object({
   postgresHost: z.string().min(1),
@@ -67,6 +75,7 @@ export const ProductionObservationTargetsSchema = z.object({
   }).strict(),
   livewire: z.object({
     statusArgv: ExactArgvSchema,
+    integrityFiles: z.array(AbsolutePathSchema).min(1).max(100),
     degradedAfterMs: PositiveMsSchema,
     failedAfterMs: PositiveMsSchema,
   }).strict(),
@@ -140,6 +149,9 @@ export const ProductionObservationTargetsSchema = z.object({
   if (new Set(volumeIds).size !== volumeIds.length) {
     ctx.addIssue({ code: "custom", path: ["host", "volumes"], message: "duplicate volume id" });
   }
+  if (new Set(value.livewire.integrityFiles).size !== value.livewire.integrityFiles.length) {
+    ctx.addIssue({ code: "custom", path: ["livewire", "integrityFiles"], message: "duplicate integrity file" });
+  }
 });
 
 export type ProductionObservationTargets = z.infer<typeof ProductionObservationTargetsSchema>;
@@ -193,7 +205,7 @@ export function createProductionObservationProbes(
     throw new Error("production observation runtime paths must be absolute");
   }
   const probes = [
-    livewireProbe(targets),
+    livewireProbe(targets, runtime),
     argonProbe(targets),
     apexProbe(targets),
     colimaProbe(targets),
@@ -270,7 +282,37 @@ function parseHttpJson(result: CommandResult): { status: number; body: Record<st
   return { status, body: parsed as Record<string, unknown> };
 }
 
-function livewireProbe(targets: ProductionObservationTargets): ObservationProbe {
+function parseParquetIntegrity(
+  result: CommandResult,
+  expectedFiles: readonly string[],
+): { valid?: boolean; error?: string } {
+  if (result.timedOut || result.exitCode !== 0) {
+    return { valid: undefined, error: "integrity checker unavailable" };
+  }
+  try {
+    const parsed = ParquetIntegrityOutputSchema.parse(JSON.parse(result.stdout));
+    if (
+      parsed.checked !== expectedFiles.length ||
+      parsed.valid + parsed.invalid.length !== parsed.checked ||
+      parsed.invalid.some((row) => !expectedFiles.includes(row.path))
+    ) {
+      return { valid: undefined, error: "integrity checker scope mismatch" };
+    }
+    return parsed.invalid.length === 0
+      ? { valid: true }
+      : {
+          valid: false,
+          error: parsed.invalid.map((row) => `${row.path}: ${row.reason}`).join("; "),
+        };
+  } catch {
+    return { valid: undefined, error: "invalid integrity checker output" };
+  }
+}
+
+function livewireProbe(
+  targets: ProductionObservationTargets,
+  runtime: ProductionObservationRuntime,
+): ObservationProbe {
   return {
     probeId: "livewire.production-snapshot.v1",
     async observe(runner, now) {
@@ -279,6 +321,12 @@ function livewireProbe(targets: ProductionObservationTargets): ObservationProbe 
         throw new Error("livewire status command failed");
       }
       const text = statusResult.stdout;
+      const integrityResult = await persistedRun(runner, [
+        targets.livewire.statusArgv[0]!,
+        resolve(runtime.releaseDir, "scripts/ops/check-parquet-integrity.py"),
+        ...targets.livewire.integrityFiles.flatMap((path) => ["--path", path]),
+      ], 30_000);
+      const integrity = parseParquetIntegrity(integrityResult, targets.livewire.integrityFiles);
       const found = /^Livewire status\s*$/m.test(text);
       const measuredState = !found
         ? "unknown"
@@ -297,7 +345,10 @@ function livewireProbe(targets: ProductionObservationTargets): ObservationProbe 
         ? undefined
         : `${coverage[1]}T23:59:59.999Z`;
       return adaptLivewire({
-        ...context(now, targets.ttlMs, "livewire-status/1", [statusResult]),
+        ...context(now, targets.ttlMs, "livewire-status+parquet-footer/1", [
+          statusResult,
+          integrityResult,
+        ]),
         status: {
           found,
           state: measuredState,
@@ -305,7 +356,7 @@ function livewireProbe(targets: ProductionObservationTargets): ObservationProbe 
           ...(ratios.length === 0 ? {} : { intradayCoverage: Math.min(...ratios) }),
         },
         sourceLogs: {},
-        parquet: { valid: undefined },
+        parquet: integrity,
         ibAvailable: /\bIB down\b/i.test(text) ? false : undefined,
         expectedCoverageAt: now.toISOString(),
         freshness: {

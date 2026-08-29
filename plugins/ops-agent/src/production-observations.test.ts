@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ObservationSchema, type Observation } from "@helium/core";
 import type { CommandResult, CommandRunner } from "./probes/process.js";
@@ -24,6 +28,7 @@ const targets = ProductionObservationTargetsSchema.parse({
   },
   livewire: {
     statusArgv: ["/opt/livewire/python", "/opt/livewire/livewire_ops.py", "status"],
+    integrityFiles: ["/lake/bronze/asset_class=equity/symbol=NULG/1m.parquet"],
     degradedAfterMs: 259_200_000,
     failedAfterMs: 432_000_000,
   },
@@ -100,6 +105,16 @@ function fixtureRunner(options: {
     async run(argv) {
       (calls as string[][]).push([...argv]);
       const joined = argv.join(" ");
+      if (argv[1] === "/release/scripts/ops/check-parquet-integrity.py") {
+        return reply(JSON.stringify({
+          checked: 1,
+          valid: 0,
+          invalid: [{
+            path: "/lake/bronze/asset_class=equity/symbol=NULG/1m.parquet",
+            reason: "missing trailing PAR1 magic",
+          }],
+        }), "parquet-integrity");
+      }
       if (argv[0] === "/opt/livewire/python") {
         return reply([
           "Livewire status",
@@ -224,7 +239,7 @@ describe("production observation probes", () => {
     expect(observations.find((row) => row.probeId === "livewire.status-parser.v1")?.state)
       .toBe("failed");
     expect(observations.find((row) => row.probeId === "livewire.parquet-integrity.v1")?.state)
-      .toBe("unknown");
+      .toBe("failed");
     expect(observations.find((row) => row.probeId === "argon.backup-freshness.v1")?.state)
       .toBe("failed");
     expect(observations.find((row) => row.probeId === "apex.livewire-revision.v1")?.state)
@@ -240,6 +255,12 @@ describe("production observation probes", () => {
     expect(calls.every((argv) => argv[0]?.startsWith("/"))).toBe(true);
     expect(calls.some((argv) => ["/bin/sh", "/bin/bash", "/bin/zsh"].includes(argv[0] ?? "")))
       .toBe(false);
+    expect(calls).toContainEqual([
+      "/opt/livewire/python",
+      "/release/scripts/ops/check-parquet-integrity.py",
+      "--path",
+      "/lake/bronze/asset_class=equity/symbol=NULG/1m.parquet",
+    ]);
   });
 
   it("does not rerun expensive application probes before their configured interval", async () => {
@@ -297,5 +318,38 @@ describe("production observation probes", () => {
       : [observations];
     expect(rows.find((row) => row.probeId === "apex.postgres-dependency.v1")?.state)
       .toBe("ok");
+  });
+
+  it("checks configured Parquet footer structure without reading the data body", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-parquet-integrity-"));
+    try {
+      const valid = join(root, "valid.parquet");
+      const truncated = join(root, "truncated.parquet");
+      writeFileSync(valid, Buffer.concat([
+        Buffer.from("PAR1"),
+        Buffer.alloc(4),
+        Buffer.from("PAR1"),
+      ]));
+      writeFileSync(truncated, "PAR1truncated");
+      const script = fileURLToPath(new URL(
+        "../../../scripts/ops/check-parquet-integrity.py",
+        import.meta.url,
+      ));
+      const result = spawnSync("/usr/bin/python3", [
+        script,
+        "--path",
+        valid,
+        "--path",
+        truncated,
+      ], { encoding: "utf8" });
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({
+        checked: 2,
+        valid: 1,
+        invalid: [{ path: truncated, reason: "missing trailing PAR1 magic" }],
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

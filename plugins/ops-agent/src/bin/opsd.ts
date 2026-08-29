@@ -321,6 +321,7 @@ export function validateOpsdRelease(
   if (parsed.observationTargetsPath !== undefined) {
     loadProductionObservationTargets(parsed.observationTargetsPath);
     statSync(resolve(parsed.releaseDir, "scripts/ops/read-latest-heartbeats.mjs"));
+    statSync(resolve(parsed.releaseDir, "scripts/ops/check-parquet-integrity.py"));
   }
 }
 
