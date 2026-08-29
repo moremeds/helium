@@ -8,6 +8,12 @@ const component = {
   version: 1,
   id: "fixture-service",
   kind: "service",
+  mutationOwner: {
+    owner: "none" as const,
+    competingLabels: [],
+    changedAt: "2026-08-25T00:00:00.000Z",
+    changeRef: "fixture",
+  },
 };
 
 describe("ComponentSpecSchema", () => {
@@ -35,6 +41,36 @@ describe("ComponentSpecSchema", () => {
     expect(() =>
       ComponentSpecSchema.parse({ ...component, kind: "k".repeat(200) }),
     ).toThrow();
+  });
+
+  // A component with no recorded owner is a component nobody has decided
+  // about, and defaulting that to "we may mutate it" is the crash-matrix cell
+  // that produces a genuine duplicate production mutation.
+  it("refuses a component that declares no mutation owner", () => {
+    const { mutationOwner: _drop, ...without } = component;
+    expect(() => ComponentSpecSchema.parse(without)).toThrow();
+  });
+
+  it("refuses an owner outside the closed set", () => {
+    expect(() =>
+      ComponentSpecSchema.parse({
+        ...component,
+        mutationOwner: { ...component.mutationOwner, owner: "maybe" },
+      }),
+    ).toThrow();
+  });
+
+  it("keeps competing controller labels as opaque strings", () => {
+    const parsed = ComponentSpecSchema.parse({
+      ...component,
+      mutationOwner: {
+        ...component.mutationOwner,
+        owner: "external" as const,
+        externalOwnerLabel: "some.host.job",
+        competingLabels: ["some.host.job", "another.host.job"],
+      },
+    });
+    expect(parsed.mutationOwner.competingLabels).toHaveLength(2);
   });
 });
 

@@ -37,6 +37,7 @@ export * from "./operations/store.js";
 export * from "./operations/lease.js";
 export * from "./operations/recovery-budget.js";
 export * from "./operations/component-lock.js";
+export * from "./operations/mutation-owner.js";
 export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";

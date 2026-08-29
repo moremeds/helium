@@ -10,7 +10,7 @@
  */
 import { z } from "zod";
 import { ACTION_OUTCOMES } from "./action.js";
-import { OpsIdSchema } from "./component.js";
+import { MutationOwnershipSchema, OpsIdSchema } from "./component.js";
 import { INCIDENT_STATES } from "./incident.js";
 import { IsoTimestampSchema, ObservationSchema } from "./observation.js";
 import { SOP_AUTHORITIES } from "./sop.js";
@@ -112,6 +112,19 @@ export const OperatorIntervenedSchema = z.strictObject({
   confirmed: z.boolean(),
 });
 
+/**
+ * A change of mutation ownership. Recorded as an event so `mutationOwner` and
+ * its `changeRef` appear in the component projection, and therefore in every
+ * recovery evidence bundle for that component -- an ownership decision that
+ * lived only in configuration would be invisible to the evidence record.
+ */
+export const MutationOwnershipChangedSchema = z.strictObject({
+  ...base,
+  type: z.literal("mutation-ownership-changed"),
+  componentId: OpsIdSchema,
+  ownership: MutationOwnershipSchema,
+});
+
 export const AlertRaisedSchema = z.strictObject({
   ...base,
   type: z.literal("alert-raised"),
@@ -130,6 +143,7 @@ export const OperationsEventSchema = z.discriminatedUnion("type", [
   ActionReceiptRecordedSchema,
   ActionVerifiedSchema,
   OperatorIntervenedSchema,
+  MutationOwnershipChangedSchema,
   AlertRaisedSchema,
 ]);
 export type OperationsEvent = z.infer<typeof OperationsEventSchema>;

@@ -12,6 +12,7 @@
 import type { ActionOutcome } from "./action.js";
 import type { Attribution, OperationsEvent } from "./events.js";
 import type { IncidentState } from "./incident.js";
+import type { MutationOwnership } from "./component.js";
 import type { Observation } from "./observation.js";
 
 /** Non-terminal action states, plus the six terminal outcomes. */
@@ -58,6 +59,8 @@ export interface AlertProjection {
 
 export interface OperationsState {
   observations: Record<string, Observation>;
+  /** componentId -> current mutation ownership, as last recorded by an event. */
+  ownership: Record<string, MutationOwnership>;
   incidents: Record<string, IncidentProjection>;
   actions: Record<string, ActionProjection>;
   alerts: AlertProjection[];
@@ -83,6 +86,7 @@ const REQUIRED_PRIOR: Readonly<Record<string, ActionState[]>> = {
 export function emptyOperationsState(): OperationsState {
   return {
     observations: {},
+    ownership: {},
     incidents: {},
     actions: {},
     alerts: [],
@@ -103,6 +107,7 @@ export function reduceOperations(
 ): OperationsState {
   const state: OperationsState = {
     observations: { ...initial.observations },
+    ownership: { ...initial.ownership },
     incidents: { ...initial.incidents },
     actions: { ...initial.actions },
     alerts: [...initial.alerts],
@@ -237,6 +242,10 @@ export function reduceOperations(
               : "automatic";
         break;
       }
+
+      case "mutation-ownership-changed":
+        state.ownership[event.componentId] = event.ownership;
+        break;
 
       case "alert-raised":
         state.alerts.push({
