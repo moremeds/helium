@@ -15,9 +15,6 @@
  * @module @helium/core/sensor-context
  */
 
-/** What a sensor may not conclude when it cannot observe. Never a model call. */
-export type SensorState<T> = { known: true; value: T } | { known: false };
-
 export interface SensorContext<TEvent = unknown, TObservation = unknown> {
   /** The event or observation being normalized. */
   readonly event: TEvent;

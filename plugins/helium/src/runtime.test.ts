@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { jsonlFileName } from "@helium/core";
 import { CalendarWindowWatcher } from "./calendar.js";
+import type { Config } from "./config.js";
 import type { DispatchResult } from "./dispatch.js";
 import {
   augmentCronPayload,
@@ -69,7 +70,11 @@ const CALENDAR_WINDOW = (
     window: { before: 5m, after: 5m }
     interval_during: ${intervalMs}ms`;
 
-function rig(jobYaml: string, calendarYaml?: string) {
+function rig(
+  jobYaml: string,
+  calendarYaml?: string,
+  runtimeMode: Config["runtimeMode"] = "legacy-direct",
+) {
   const root = mkdtempSync(join(tmpdir(), "helium-runtime-"));
   const jobsDir = join(root, "jobs");
   const calendarsDir = join(root, "calendars");
@@ -82,6 +87,7 @@ function rig(jobYaml: string, calendarYaml?: string) {
   writeFileSync(join(root, "ecosystem.md"), "# ctx\n", "utf8");
   const deps: RuntimeDeps = {
     config: {
+      runtimeMode,
       jobsDir,
       stateRoot: join(root, "state"),
       contextFile: join(root, "ecosystem.md"),

@@ -28,8 +28,10 @@ import {
   type RunOutcome,
 } from "@helium/core";
 import {
+  adaptV1Job,
   loadJobs,
   parseJobYaml,
+  restoreV1Job,
   type JobSpec,
   type TriggerCalendarWindow,
   type TriggerStateChange,
@@ -170,7 +172,16 @@ export class HeliumRuntime {
       console.error(
         `helium: SKIPPING malformed job ${path} -- this tenant is NOT running: ${err.message}`,
       );
-    }).filter((j) => j.enabled);
+    })
+      .filter((j) => j.enabled)
+      // `work-order-adapter` mode runs the v1 path on the ROUND TRIP through
+      // the model-blind representation. That makes the whole v1 regression
+      // suite a test of the adapter's fidelity: any field the adapter drops
+      // changes a golden delivery record instead of going unnoticed until a
+      // tenant behaves differently in production.
+      .map((j) =>
+        c.runtimeMode === "work-order-adapter" ? restoreV1Job(adaptV1Job(j)) : j,
+      );
 
     const contextText = readFileSync(c.contextFile, "utf8");
     this.dispatcher = new Dispatcher({

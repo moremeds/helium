@@ -91,6 +91,7 @@ function rig() {
       claudeTokenFile: join(root, "token.env"),
       proxy: "",
       mcpBin: "",
+      runtimeMode: "legacy-direct",
       emailTo: "unit@example.invalid",
     },
     engines: {

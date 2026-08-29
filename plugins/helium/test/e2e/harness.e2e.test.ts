@@ -71,7 +71,14 @@ async function waitFor(
   throw new Error(`waitFor: predicate never became true within ${timeoutMs}ms`);
 }
 
-describe("harness e2e", () => {
+// Run the whole golden path in BOTH runtime modes. `work-order-adapter`
+// routes every job through adaptV1Job() and back before the dispatcher sees
+// it, so this is what turns the v1 regression path into a test of the
+// adapter's fidelity: a dropped field changes a delivery record here rather
+// than surfacing later as a tenant behaving differently in production.
+describe.each(["legacy-direct", "work-order-adapter"] as const)(
+  "harness e2e (%s)",
+  (runtimeMode) => {
   it("polls, triages, escalates, delivers, dedups and survives restart", async () => {
     const root = mkdtempSync(join(tmpdir(), "helium-e2e-"));
     const stateRoot = join(root, "state");
@@ -115,6 +122,7 @@ describe("harness e2e", () => {
       });
       return new HeliumRuntime({
         config: {
+          runtimeMode,
           jobsDir,
           stateRoot,
           contextFile: join(root, "ecosystem.md"),
@@ -249,4 +257,5 @@ describe("harness e2e", () => {
     rt2.stop();
     await fx.close();
   }, 20_000);
-});
+  },
+);

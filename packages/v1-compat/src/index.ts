@@ -8,4 +8,5 @@
  * @module @helium/v1-compat
  */
 export * from "./job.js";
+export * from "./adapter.js";
 export * from "./tools/index.js";
