@@ -94,7 +94,7 @@ claims:
       - path: "docs/evidence/p1/test.log"
         sha256: "dd1d402c3b762af607390bf54993fa6ca95d6b019c6c05669c8b4c23b540a3ff"
     baseline: "v1 behavior at 72a48265b44ed0de7d204bd82cc766aedbaf81d8"
-    reproduction: "pnpm exec vitest run --project unit packages/core/tests/router.spec.ts --repeat=20"
+    reproduction: "pnpm exec vitest run --project unit packages/core/tests/router.spec.ts  # the 20 repeats are a loop inside the test; vitest 3.2.7 has no --repeat flag"
     failures: "None. select() is pure and takes an availability-resolved snapshot, so there is no clock or catalog mutation to make a repeat diverge."
     status: PROVEN
     limitation: "Proves determinism over a snapshot. It does not prove the snapshot itself is reproducible from a running catalog, which needs the durable event log Phase 2 adds."
