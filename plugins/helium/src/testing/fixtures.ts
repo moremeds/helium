@@ -4,7 +4,7 @@
  * both suites exercise the same shape.
  * @module dsh-plugin-helium/testing/fixtures
  */
-import type { JobSpec } from "@helium/core";
+import type { JobSpec } from "@helium/v1-compat";
 import type { TriggerEvent } from "../sensor.js";
 
 export const job = {

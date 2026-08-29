@@ -2,11 +2,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import {
-  nowIso,
-  type StateStore,
-  type TriggerCalendarWindow,
-} from "@helium/core";
+import { nowIso, type StateStore } from "@helium/core";
+import { type TriggerCalendarWindow } from "@helium/v1-compat";
 import type { TriggerEvent } from "./sensor.js";
 
 export interface CalendarEvent {

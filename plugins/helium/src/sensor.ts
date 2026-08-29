@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
-import {
-  nowIso,
-  type StateStore,
-  type Trigger,
-  type TriggerStateChange,
-} from "@helium/core";
+import { nowIso, type StateStore } from "@helium/core";
+import { type Trigger, type TriggerStateChange } from "@helium/v1-compat";
 
 export interface TriggerEvent {
   job: string;

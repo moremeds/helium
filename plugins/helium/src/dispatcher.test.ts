@@ -7,8 +7,8 @@ import {
   RunLedger,
   StateStore,
   jsonlFileName,
-  type JobSpec,
 } from "@helium/core";
+import { type JobSpec } from "@helium/v1-compat";
 import { Dispatcher, budgetCheck, pruneFires, Semaphore } from "./dispatch.js";
 import { ev, job } from "./testing/fixtures.js";
 

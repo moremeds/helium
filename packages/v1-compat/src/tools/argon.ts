@@ -4,7 +4,7 @@
  * @module @helium/core/tools/argon
  */
 import { z } from "zod";
-import type { EcosystemTool, ToolRunContext } from "./types.js";
+import type { EcosystemTool, ToolRunContext } from "@helium/core";
 
 /** Verified argon routes (2026-08-23). Read-only surface. */
 export const ARGON_READ_PREFIXES = [

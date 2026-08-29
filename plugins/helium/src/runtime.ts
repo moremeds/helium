@@ -25,12 +25,15 @@ import {
   StateStore,
   ThesisStore,
   inventoryTenants,
-  loadJobs,
-  type JobSpec,
   type RunOutcome,
+} from "@helium/core";
+import {
+  loadJobs,
+  parseJobYaml,
+  type JobSpec,
   type TriggerCalendarWindow,
   type TriggerStateChange,
-} from "@helium/core";
+} from "@helium/v1-compat";
 import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
 import type { Config } from "./config.js";
 import { CronTrigger } from "./cron.js";
@@ -197,7 +200,12 @@ export class HeliumRuntime {
     // visible as `invalid`, because the operator-visible symptom of it silently
     // vanishing is a fleet that looks entirely healthy while one tenant is not
     // running at all.
-    const inventory = inventoryTenants(this.deps.config.jobsDir);
+    // The parser is injected: parsing a tenant file is v1 job-spec
+    // knowledge and core may not depend on the compatibility package.
+    const inventory = inventoryTenants(
+      this.deps.config.jobsDir,
+      parseJobYaml,
+    );
     for (const tenant of inventory) {
       this.writer.append("tenant-health", {
         tenant: tenant.tenant,

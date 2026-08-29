@@ -127,11 +127,39 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/v1-compat:
+    dependencies:
+      '@duckdb/node-api':
+        specifier: 1.5.5-r.4
+        version: 1.5.5-r.4
+      '@helium/core':
+        specifier: file:../core
+        version: link:../core
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.4.3)
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   plugins/helium:
     dependencies:
       '@helium/core':
         specifier: file:../../packages/core
         version: link:../../packages/core
+      '@helium/v1-compat':
+        specifier: file:../../packages/v1-compat
+        version: link:../../packages/v1-compat
       croner:
         specifier: 10.0.1
         version: 10.0.1

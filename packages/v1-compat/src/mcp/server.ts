@@ -1,21 +1,23 @@
 #!/usr/bin/env node
 /**
- * helium-mcp — stdio MCP server exposing buildTools() to a `claude -p`
- * senior-lane child (spec §4). Tool set selection (env-filtered by
- * HELIUM_TOOLS and HELIUM_ALLOW_MUTATIONS) lives in ./selection.js, kept
- * separate so it is unit-testable without importing this module's own
- * top-level side effect below (a real StdioServerTransport connection).
+ * helium-mcp — stdio MCP server exposing the v1 toolkit to the senior-lane
+ * child process (spec §4). Tool set selection (env-filtered by HELIUM_TOOLS
+ * and HELIUM_ALLOW_MUTATIONS) is core's `selected()`, kept separate so it is
+ * unit-testable without importing this module's own top-level side effect
+ * below (a real StdioServerTransport connection); the catalog it filters is
+ * built here, because building it names business domains.
  *
  * SDK shape verified live against the installed @modelcontextprotocol/sdk
  * 1.30.0 types (task-1.7-report.md Spike B): McpServer + StdioServerTransport,
  * server.registerTool(name, { description, inputSchema }, cb) where
  * inputSchema is a zod raw shape (ZodRawShape).
- * @module @helium/core/mcp/server
+ * @module @helium/v1-compat/mcp/server
  */
+import { selected } from "@helium/core";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { selected } from "./selection.js";
+import { catalogFromEnv } from "../tools/index.js";
 
 const server = new McpServer({ name: "helium", version: "0.2.0" });
 // `selected()` is called at module top level, so it is contractually
@@ -25,7 +27,7 @@ const server = new McpServer({ name: "helium", version: "0.2.0" });
 // degradation instead, reported on stderr -- never stdout, which is the MCP
 // protocol channel -- so the tenant's health row can say which capability is
 // missing and why.
-const selection = selected();
+const selection = selected(catalogFromEnv());
 if (selection.degraded.length > 0) {
   console.error(
     `helium-mcp: DEGRADED -- ${selection.degraded

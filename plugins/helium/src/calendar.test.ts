@@ -2,7 +2,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { StateStore, type TriggerCalendarWindow } from "@helium/core";
+import { StateStore } from "@helium/core";
+import { type TriggerCalendarWindow } from "@helium/v1-compat";
 import {
   CalendarWindowWatcher,
   activeWindow,

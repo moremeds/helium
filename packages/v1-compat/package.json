@@ -1,5 +1,5 @@
 {
-  "name": "@helium/core",
+  "name": "@helium/v1-compat",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "./*": "./lib/*"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && chmod +x lib/mcp/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
@@ -18,8 +18,8 @@
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.5-r.4",
+    "@helium/core": "file:../core",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "diff": "9.0.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }

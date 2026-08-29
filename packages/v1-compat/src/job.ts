@@ -9,9 +9,9 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { validateToolSelection } from "./tools/index.js";
-import { DURATION_PATTERN, parseDuration } from "./time.js";
+import { DURATION_PATTERN, parseDuration, type Severity } from "@helium/core";
 
-export type Severity = "noise" | "minor" | "material" | "critical";
+export type { Severity };
 
 export interface TriggerStateChange {
   kind: "state-change";

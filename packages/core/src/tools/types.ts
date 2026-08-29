@@ -19,3 +19,15 @@ export interface EcosystemTool {
   /** Returns a JSON string; ctx is test-only injection. */
   run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string>;
 }
+
+/**
+ * One entry in a build's tool vocabulary: every name a build knows about,
+ * independent of which are configured in the running environment. The
+ * vocabulary itself is assembled by whoever owns the concrete toolkits; core
+ * only defines its shape and consumes it in the selection filter.
+ */
+export interface ToolVocabularyEntry {
+  mutating: boolean;
+  /** Absent means the tool is always present in a built catalog. */
+  requiresEnv?: string;
+}

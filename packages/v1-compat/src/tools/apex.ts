@@ -3,7 +3,7 @@
  * prefix) HTTP tools: a read-only GET tool plus a fail-closed compute POST.
  * @module @helium/core/tools/apex
  */
-import type { EcosystemTool } from "./types.js";
+import type { EcosystemTool } from "@helium/core";
 import { postTool, readTool } from "./argon.js";
 
 /**
