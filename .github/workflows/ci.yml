@@ -28,6 +28,14 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
+      # The Phase 0 gate requires these three alongside `test`, and none of them
+      # ran here before: `pnpm test` does not reach the e2e project (separate
+      # config) and neither dead-man test is wired to a package.json script. An
+      # unrun test is not evidence, and the P0 evidence manifest may only record
+      # an output hash from a CI run at the pinned Node version.
+      - run: pnpm run test:e2e-local
+      - run: node --test scripts/deadman/check-tenant-heartbeats.test.mjs
+      - run: bash scripts/deadman/check-heartbeat.test.sh
 
   contracts:
     runs-on: ubuntu-latest

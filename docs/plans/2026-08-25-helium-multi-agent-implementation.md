@@ -874,9 +874,14 @@ git diff --check
 ```
 
 The two `scripts/deadman/` tests are listed explicitly because neither is wired
-into a `package.json` script or into CI: `pnpm test` does not reach them, so a
-gate that runs only the `pnpm` commands never executes two of the tests Task 5
-creates. Run them by hand until they are wired up.
+into a `package.json` script: `pnpm test` does not reach them, so a gate that
+runs only the `pnpm` commands never executes two of the tests Task 5 creates.
+They are now wired into CI's `check` job alongside `pnpm test:e2e-local`, which
+`pnpm test` also does not reach — an unrun test is not evidence, and the P0
+manifest may only record an output hash from a CI run at the pinned Node
+version. Wiring them exposed two BSD-only constructs (`date -v` and
+`mktemp -t <prefix>`) that fail under GNU coreutils; both are now written in the
+portable form.
 
 **The gate's evidence is invalid until Task 1 Step 3c has landed.** Without
 `exclude: [...configDefaults.exclude, ".worktrees/**"]` in

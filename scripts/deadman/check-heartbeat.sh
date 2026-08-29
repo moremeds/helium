@@ -85,7 +85,7 @@ check_tenants() {
     fi
   fi
 
-  tbody=$(mktemp -t helium-deadman-tenant)
+  tbody=$(mktemp "${TMPDIR:-/tmp}/helium-deadman-tenant.XXXXXX")
   {
     echo "helium: the process is alive, but at least one TENANT is not."
     echo
@@ -126,7 +126,7 @@ if [ -f "$sentinel" ]; then
   fi
 fi
 
-body_file=$(mktemp -t helium-deadman)
+body_file=$(mktemp "${TMPDIR:-/tmp}/helium-deadman.XXXXXX")
 trap 'rm -f "$body_file"' EXIT
 {
   echo "helium heartbeat is stale."

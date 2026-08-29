@@ -2,7 +2,7 @@
 # Local drill for check-heartbeat.sh. No network, no real SMTP.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-tmp=$(mktemp -d -t helium-deadman-test)
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/helium-deadman-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/state/jsonl"
 cat >"$tmp/fake-mailer" <<'EOS'
@@ -47,6 +47,16 @@ prompt: |
 EOJ
 }
 write_job macro-watch
+
+# `date -v` is BSD-only and this drill now runs in CI on Linux, where GNU date
+# has no such flag. node is already a hard dependency of the script under test,
+# so use it for the one relative timestamp this drill needs.
+iso_ago() {
+  "${HELIUM_NODE_BIN:-node}" -e \
+    'process.stdout.write(new Date(Date.now() - Number(process.argv[1]) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"))' \
+    "$1"
+}
+
 run() {
   set +e
   bash "$here/check-heartbeat.sh" >/dev/null 2>&1
@@ -78,14 +88,14 @@ printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
 }
 echo "case 4: 20-minute-old heartbeat -> 10"
 printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
-  "$(date -u -v-20M +%Y-%m-%dT%H:%M:%SZ)" \
+  "$(iso_ago 1200)" \
   >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
 [ "$(run)" = 10 ] || {
   echo FAIL-4
   exit 1
 }
 echo "case 5: jsonl/ subdirectory never created (state root exists, jsonl/ does not) -> 10, not a crash"
-tmp5=$(mktemp -d -t helium-deadman-test-nojsonl)
+tmp5=$(mktemp -d "${TMPDIR:-/tmp}/helium-deadman-test-nojsonl.XXXXXX")
 mail5="$tmp5/mail.log"
 : >"$tmp5/helium.env"
 [ ! -d "$tmp5/state/jsonl" ] || {
