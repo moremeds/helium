@@ -194,7 +194,11 @@ export function parseCpuTop(text: string): CpuTopSample | undefined {
   const processes: CpuProcessContribution[] = [];
   for (const line of lines.slice(header + 1)) {
     if (line.trim() === "") continue;
-    const match = /^\s*(\d+)\s+(\S+)\s+([0-9.,]+)\s*$/.exec(line);
+    // `top` renders COMMAND as a fixed-width display column, not as a
+    // whitespace-delimited token. Long application names are truncated with
+    // their spaces intact (for example `Google Chrome He`), so the last numeric
+    // column is the only safe delimiter.
+    const match = /^\s*(\d+)\s+(.+?)\s+([0-9]+(?:[.,][0-9]+)?)\s*$/.exec(line);
     if (match === null) return undefined;
     const pid = Number(match[1]);
     const cpuPercent = number(match[3]);
