@@ -26,6 +26,10 @@ The waiver permits only:
 - its own socket, logs, observations and append-only events.
 
 It does not permit a Helium release flip, DSH/legacy-controller restart,
-dead-man change, SOP grant, ownership handoff, repair, or controlled mutation
-drill. The rollback is exact-label `launchctl bootout` followed by the scoped
-uninstaller; evidence is preserved before state removal if rollback is needed.
+SOP grant, ownership handoff, repair, or controlled mutation drill. After a
+valid opsd event path exists, it permits one narrowly reversible dead-man
+integration: preserve the original `com.helium.deadman.plist`, add only
+`HELIUM_OPSD_EXPECTED=1` and the exact opsd event-log path, lint it, and reload
+that exact scheduled label. Rollback restores the preserved plist and reloads
+the same label. Opsd rollback is exact-label `launchctl bootout` followed by the
+scoped uninstaller; evidence is preserved before state removal if needed.

@@ -9,8 +9,9 @@ Mac mini change.
 - The operator's 2026-08-30 weekend commissioning waiver decouples one
   reversible, isolated observe-only install from AC#1. AC#1 is left uncredited,
   not called PASS. The waiver does not authorize a Helium release flip, DSH or
-  legacy-controller restart, dead-man modification, SOP grant, repair,
-  ownership handoff or controlled drill.
+  legacy-controller restart, SOP grant, repair, ownership handoff or controlled
+  drill. After the first valid opsd event, the waiver permits the exact
+  reversible dead-man integration described below.
 - Merging or deploying the repository does not install `opsd`.
 - The committed authority manifest grants no mutation authority. The unresolved
   production script paths, hashes, owners, live postconditions, drill evidence,
@@ -74,9 +75,11 @@ After the first valid observation is present at
 `/Users/moremeds/.helium/ops/state/events.jsonl`, enable the independent host
 dead-man check by setting `HELIUM_OPSD_EXPECTED=1` and
 `HELIUM_OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl` in the
-installed dead-man job, then reload that job. Do not declare the controller
-expected until the log path has been verified. A fresh DSH heartbeat cannot
-suppress an opsd-stale alert.
+installed dead-man job, then reload that exact job. Preserve the original plist
+under the private ops root before editing, lint the replacement before its
+atomic move, and retain the reverse restore/reload command as rollback. Do not
+declare the controller expected until the log path has been verified. A fresh
+DSH heartbeat cannot suppress an opsd-stale alert.
 
 Observe for at least seven days before considering any authority promotion.
 Track observation freshness, collection failures, incident noise, daemon

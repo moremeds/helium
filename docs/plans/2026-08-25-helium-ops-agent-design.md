@@ -949,9 +949,14 @@ The exact waiver `ops-phase-d-weekend-2026-08-30` may install and load only an
 isolated `com.helium.opsd` in `observe` mode with the committed empty authority
 manifest. It may create only the installer-owned private ops directory, config,
 plist, socket, event/log files and LaunchAgent process. It may not flip the
-Helium release, restart DSH or any existing controller, modify the dead-man,
-grant an SOP, run a repair, or perform the ownership handoff/drill. Bootout plus
-the scoped uninstaller is the required rollback.
+Helium release, restart DSH or any legacy controller, grant an SOP, run a
+repair, or perform the ownership handoff/drill. Bootout plus the scoped
+uninstaller is the required rollback.
+
+Once a valid opsd event path is observed, the waiver also permits adding only
+the opsd expected/event-log keys to the existing scheduled Helium dead-man,
+with the original plist preserved and exact-label reload/restore as rollback.
+This adds independent liveness coverage; it grants no recovery authority.
 
 **Window 2 — installed and observing.** P4: rollout Stage 1's observe-only days
 and Stage 2's suggest-only days, at least seven of each. Here `opsd` **is**
