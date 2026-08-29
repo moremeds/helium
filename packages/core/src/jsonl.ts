@@ -6,7 +6,6 @@
  */
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { nowIso } from "./time.js";
 
 /** The UTC calendar date (`YYYY-MM-DD`) an instant belongs to. */
 export function utcDate(at: Date = new Date()): string {
@@ -29,8 +28,17 @@ export class JsonlWriter {
   /** The directory the daily files live in. */
   readonly dir: string;
 
-  constructor(dir: string) {
+  /** The one clock both the file name and the record timestamp are read from. */
+  private readonly clock: () => Date;
+
+  /**
+   * @param dir - the directory the daily files live in.
+   * @param clock - the instant source; injectable so a caller's clock and this
+   *   writer's cannot disagree about which UTC day a record belongs to.
+   */
+  constructor(dir: string, clock: () => Date = () => new Date()) {
     this.dir = dir;
+    this.clock = clock;
     mkdirSync(dir, { recursive: true });
   }
 
@@ -40,8 +48,11 @@ export class JsonlWriter {
    * @param record - the record; a `ts` it already carries is preserved.
    */
   append(stream: string, record: Record<string, unknown>): void {
-    const line = JSON.stringify({ ts: nowIso(), ...record });
-    appendFileSync(join(this.dir, jsonlFileName(stream)), `${line}\n`);
+    // One clock read: the file the row lands in and the row's own `ts` can
+    // never straddle a UTC midnight boundary.
+    const at = this.clock();
+    const line = JSON.stringify({ ts: at.toISOString(), ...record });
+    appendFileSync(join(this.dir, jsonlFileName(stream, at)), `${line}\n`);
   }
 
   /**

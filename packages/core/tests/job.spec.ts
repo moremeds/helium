@@ -234,3 +234,76 @@ describe("loadJobs", () => {
     expect(() => loadJobs(dir)).toThrow(/broken\.yaml/);
   });
 });
+
+// Task 3: the tool contract is validated at JOB LOAD, against the tool
+// vocabulary — every name the build knows about — not against the catalog this
+// environment happens to have configured. Doing it here rather than inside
+// selected() is load-bearing: mcp/server.ts calls selected() at module top
+// level, so a throw from there kills the whole MCP server and the senior lane
+// loses EVERY tool instead of one capability. Here, loadJobs()'s existing
+// handler path rejects only the affected tenant and reports it.
+describe("job-load tool contract", () => {
+  it("rejects a misspelled capability, naming it", () => {
+    expect(() =>
+      parseJobYaml(
+        MACRO_WATCH.replace(
+          "tools: [argon_api, livewire_sql]",
+          "tools: [argon_api, livewyre_sql]",
+        ),
+        "jobs/macro-watch.yaml",
+      ),
+    ).toThrow(/unknown tools: livewyre_sql/);
+  });
+
+  it("accepts livewire_sql even though no lake is configured in this process", () => {
+    // The shipped macro-watch job declares it; livewireTools() returns [] here.
+    // A catalog-based check would reject the real production job as a typo.
+    expect(() => parseJobYaml(MACRO_WATCH, "jobs/macro-watch.yaml")).not.toThrow();
+  });
+
+  it("rejects a mutating tool that the job does not permit", () => {
+    expect(() =>
+      parseJobYaml(
+        MACRO_WATCH.replace(
+          "tools: [argon_api, livewire_sql]",
+          "tools: [argon_api, argon_rescan]",
+        ),
+        "jobs/macro-watch.yaml",
+      ),
+    ).toThrow(/require mutation permission: argon_rescan/);
+  });
+
+  // No mutating provider contract is certified at P0, so the flag would be a
+  // no-op that reads as a granted permission. Reject it rather than advertise
+  // it. (Every shipped job sets `allowMutations: false` today, verified across
+  // jobs/*.yaml, so this rejects nothing in production.)
+  it("rejects allowMutations: true until a mutating provider contract is certified", () => {
+    expect(() =>
+      parseJobYaml(
+        MACRO_WATCH.replace("allowMutations: false", "allowMutations: true"),
+        "jobs/macro-watch.yaml",
+      ),
+    ).toThrow(/allowMutations/);
+  });
+
+  // The whole point of validating at load: one bad tenant, not all of them.
+  it("rejects only the tenant with the bad capability and keeps the others running", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-jobs-tool-"));
+    writeFileSync(join(dir, "a-macro.yaml"), MACRO_WATCH);
+    writeFileSync(
+      join(dir, "b-typo.yaml"),
+      MACRO_WATCH.replace("name: macro-watch", "name: typo-watch").replace(
+        "tools: [argon_api, livewire_sql]",
+        "tools: [argon_api, livewyre_sql]",
+      ),
+    );
+    const seen: string[] = [];
+    const jobs = loadJobs(dir, (path, err) => {
+      seen.push(`${path.split("/").pop()}: ${err.message}`);
+    });
+    expect(jobs.map((job) => job.name)).toEqual(["macro-watch"]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/b-typo\.yaml/);
+    expect(seen[0]).toMatch(/unknown tools: livewyre_sql/);
+  });
+});

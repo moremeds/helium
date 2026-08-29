@@ -8,6 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { validateToolSelection } from "./tools/index.js";
 import { DURATION_PATTERN, parseDuration } from "./time.js";
 
 export type Severity = "noise" | "minor" | "material" | "critical";
@@ -296,7 +297,25 @@ export function parseJobYaml(text: string, source: string): JobSpec {
       .join("; ");
     throw new Error(`${source}: ${detail}`);
   }
-  return toJobSpec(result.data);
+  const spec = toJobSpec(result.data);
+  // Task 3: the tool contract is enforced here, at job load, and nowhere
+  // downstream. `mcp/server.ts` calls `selected()` at module top level, so the
+  // same check inside selection would take the entire MCP server down instead
+  // of rejecting one tenant. Reaching this throw puts the file on
+  // `loadJobs()`'s onInvalid path, which skips exactly this tenant, reports it
+  // on stderr, and leaves every other tenant running.
+  if (spec.allowMutations) {
+    throw new Error(
+      `${source}: allowMutations: true is refused until a mutating provider ` +
+        `contract is certified — do not advertise a no-op permission`,
+    );
+  }
+  try {
+    validateToolSelection(spec.tools, { allowMutations: spec.allowMutations });
+  } catch (error) {
+    throw new Error(`${source}: ${(error as Error).message}`);
+  }
+  return spec;
 }
 
 /**

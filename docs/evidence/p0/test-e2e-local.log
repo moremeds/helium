@@ -1,0 +1,34 @@
+##[group]Run pnpm run test:e2e-local
+pnpm run test:e2e-local
+shell: /usr/bin/bash -e {0}
+env:
+  PNPM_HOME: /home/runner/setup-pnpm/node_modules/.bin
+##[endgroup]
+$ vitest run -c vitest.e2e.config.ts
+
+ RUN  v3.2.7 /home/runner/work/helium/helium
+
+stdout | plugins/helium/test/e2e/harness.e2e.test.ts > harness e2e > polls, triages, escalates, delivers, dedups and survives restart
+[helium] startup reconciled {
+  interrupted: 0,
+  orphanedDeliveries: 0,
+  jobs: [ 'e2e-watch' ],
+  tenants: 1
+}
+
+stdout | plugins/helium/test/e2e/harness.e2e.test.ts > harness e2e > polls, triages, escalates, delivers, dedups and survives restart
+[helium] startup reconciled {
+  interrupted: 0,
+  orphanedDeliveries: 0,
+  jobs: [ 'e2e-watch' ],
+  tenants: 1
+}
+
+ ✓ plugins/helium/test/e2e/harness.e2e.test.ts (1 test) 1966ms
+   ✓ harness e2e > polls, triages, escalates, delivers, dedups and survives restart  1964ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  02:53:40
+   Duration  2.91s (transform 252ms, setup 0ms, collect 647ms, tests 1.97s, environment 0ms, prepare 87ms)
+

@@ -9,4 +9,5 @@ export * from "./state.js";
 export * from "./runs.js";
 export * from "./verdict.js";
 export * from "./theses.js";
+export * from "./tenant-health.js";
 export * from "./tools/index.js";

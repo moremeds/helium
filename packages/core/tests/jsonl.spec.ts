@@ -28,6 +28,31 @@ describe("JsonlWriter", () => {
     });
   });
 
+  it("takes the file name and the ts from one read of an injected clock", () => {
+    const dir = makeDir();
+    // A clock that advances past UTC midnight between the two appends: with a
+    // single read per append, each row's `ts` matches the file it landed in.
+    const instants = [
+      new Date("2026-08-23T23:59:59.500Z"),
+      new Date("2026-08-24T00:00:00.500Z"),
+    ];
+    let next = 0;
+    const writer = new JsonlWriter(dir, () => instants[next++]!);
+    writer.append("runs", { job: "macro-watch" });
+    writer.append("runs", { job: "macro-watch" });
+    expect(readdirSync(dir).sort()).toEqual([
+      "runs-2026-08-23.jsonl",
+      "runs-2026-08-24.jsonl",
+    ]);
+    for (const at of instants) {
+      const day = at.toISOString().slice(0, 10);
+      const row = JSON.parse(
+        readFileSync(join(dir, `runs-${day}.jsonl`), "utf8").trim(),
+      );
+      expect(row).toEqual({ ts: at.toISOString(), job: "macro-watch" });
+    }
+  });
+
   it("keeps a caller-supplied ts", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-23T23:30:00.000Z"));

@@ -5,13 +5,19 @@
  * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { buildTools, JsonlWriter } from "@helium/core";
-import { buildChildEnv, runClaude } from "./claude.js";
+import {
+  buildTools,
+  JsonlWriter,
+  type JobSpec,
+  type RunOutcome,
+} from "@helium/core";
+import { buildChildEnv, runClaude, type ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
 import { TriageRunner, type SeniorLane } from "./dispatch.js";
@@ -39,48 +45,100 @@ export function runGuarded(label: string, fn: () => void): void {
 }
 
 /**
+ * Translates one `runClaude()` result into the `SeniorLane` outcome shape
+ * {@link HeliumRuntime}'s `Dispatcher` expects. `quota-exhausted` is reported
+ * under its own label with the provider's opaque reset hint attached — never
+ * as a plain `error` — because it is dynamic provider-availability state, not
+ * a capability change and not a budget: the target is simply unavailable until
+ * `retryAfter`.
+ */
+export function seniorOutcome(result: ClaudeResult): {
+  outcome: RunOutcome;
+  analysis?: string;
+  error?: string;
+} {
+  if (result.ok) return { outcome: "run_completed", analysis: result.text };
+  if (result.classification === "timeout") {
+    return {
+      outcome: "timed_out",
+      error: "senior lane exceeded its wall clock",
+    };
+  }
+  if (result.classification === "quota-exhausted") {
+    const until = result.retryAfter ? ` (retry after ${result.retryAfter})` : "";
+    return {
+      outcome: "run_failed",
+      error: `quota-exhausted${until}${result.text ? `: ${result.text}` : ""}`,
+    };
+  }
+  return {
+    outcome: "run_failed",
+    error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
+  };
+}
+
+/**
  * Senior lane: spawns the host `claude -p` binary and translates its result
  * into the `SeniorLane` outcome shape {@link HeliumRuntime}'s `Dispatcher`
- * expects. `mcpConfigPath` is the file `apply()` writes once at startup
- * (spec §4) so the child reaches the ecosystem tools over MCP stdio.
+ * expects. The MCP stdio config the child reads (spec §4) is written per
+ * attempt, into that attempt's workspace, from the job's own declared tool
+ * contract — see {@link writeMcpConfig}.
+ *
+ * Each attempt runs in its OWN empty directory below
+ * `<stateRoot>/workspaces/<job>/`, never `process.cwd()`: the senior child is
+ * the least-trusted thing this daemon starts, and handing it the daemon's
+ * working directory hands it the whole checkout. The directory is removed once
+ * the child has reached quiescence (`runClaude()` resolves only after the
+ * process group has closed).
  */
-function buildSeniorLane(cfg: Config, mcpConfigPath: string): SeniorLane {
+function buildSeniorLane(cfg: Config, workspacesDir: string): SeniorLane {
   return {
     async dispatch(job, _ev, prompt) {
       const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
-      const result = await runClaude({
-        prompt,
-        cwd: process.cwd(),
-        maxTurns: job.maxTurns.senior,
-        timeoutMs: job.timeoutMs,
-        allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
-        mcpConfigPath,
-        env,
-      });
-      if (result.ok) return { outcome: "run_completed", analysis: result.text };
-      if (result.classification === "timeout") {
-        return {
-          outcome: "timed_out",
-          error: "senior lane exceeded its wall clock",
-        };
+      const workspace = join(workspacesDir, job.name, randomUUID());
+      mkdirSync(workspace, { recursive: true });
+      try {
+        return seniorOutcome(
+          await runClaude({
+            prompt,
+            cwd: workspace,
+            maxTurns: job.maxTurns.senior,
+            timeoutMs: job.timeoutMs,
+            allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
+            mcpConfigPath: writeMcpConfig(cfg, job, workspace),
+            env,
+          }),
+        );
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
       }
-      return {
-        outcome: "run_failed",
-        error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
-      };
     },
   };
 }
 
 /**
- * Writes the MCP stdio config the senior lane's `claude -p --mcp-config`
- * child reads (spec §4): one server, `helium`, pointed at `config.mcpBin`
- * with the ecosystem toolkit's env contract. Written once at startup to
- * `<stateRoot>/mcp.json` — a stable, writable path that survives a
- * symlink-swapped release deploy (task-2.7-report.md; task-3.3-brief.md).
+ * Writes the MCP stdio config for ONE senior attempt, into that attempt's own
+ * workspace, derived from the job's declared contract.
+ *
+ * Previously this was written once at startup to `<stateRoot>/mcp.json` with a
+ * hardcoded five-name `HELIUM_TOOLS` string. That made the tool contract a
+ * constant rather than a property of the tenant: a job could declare any tool
+ * list it liked and the child still received the same fixed set, so a
+ * misspelled capability in a job's YAML could never produce a bad
+ * `HELIUM_TOOLS` and never trip the job-load validator. Deriving it from
+ * `job.tools` — the same list already used to build the `mcp__helium__*`
+ * allow-list — is what makes that validator reachable.
+ *
+ * `HELIUM_ALLOW_MUTATIONS` likewise follows the job rather than a literal `0`.
+ * Job load currently refuses `allowMutations: true` outright, so it is always
+ * `"0"` today; writing it truthfully means the flag is never a no-op that
+ * merely looks like a granted permission.
+ *
+ * Per-attempt rather than per-daemon because the file now varies by job, and
+ * the attempt workspace is already created and removed around the child.
  */
-function writeMcpConfig(config: Config): string {
-  const path = join(config.stateRoot, "mcp.json");
+function writeMcpConfig(config: Config, job: JobSpec, dir: string): string {
+  const path = join(dir, "mcp.json");
   writeFileSync(
     path,
     JSON.stringify(
@@ -90,9 +148,8 @@ function writeMcpConfig(config: Config): string {
             command: config.mcpBin,
             args: [],
             env: {
-              HELIUM_TOOLS:
-                "argon_api,apex_api,livewire_sql,thesis_read,thesis_write",
-              HELIUM_ALLOW_MUTATIONS: "0",
+              HELIUM_TOOLS: job.tools.join(","),
+              HELIUM_ALLOW_MUTATIONS: job.allowMutations ? "1" : "0",
               HELIUM_ARGON_BASE: config.argonBase,
               HELIUM_APEX_BASE: config.apexBase,
               ...(config.livewireDb
@@ -139,18 +196,18 @@ export function apply(ctx: Context, raw: Config): void {
     tools.filter((t) => !t.mutating),
   );
 
-  const mcpConfigPath = writeMcpConfig(cfg);
   const runtime = new HeliumRuntime({
     config: cfg,
     engines: {
       triage: new TriageRunner(ctx),
-      senior: buildSeniorLane(cfg, mcpConfigPath),
+      senior: buildSeniorLane(cfg, paths.workspaces),
     },
     delivery: {
       deliver: (job, ev, result) => delivery.deliver(job, ev, result),
       budgetExhausted: (job, ev, info) =>
         delivery.budgetExhausted(job, ev, info),
       heartbeat: (row) => delivery.heartbeat(row),
+      reconcileDeliveries: () => delivery.reconcileDeliveries(),
     },
   });
   ctx.effect(() => {

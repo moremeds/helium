@@ -255,17 +255,33 @@ verbatim, and `plugins/helium/src/index.ts` must not report it as a plain
 `.worktrees/multi-agent-phase0/plugins/helium/test/e2e/harness.e2e.test.ts` are
 picked up. The gate would then execute whatever a worktree happens to contain,
 at whatever commit it happens to sit on, and fold that into the evidence hash.
-Add the exclusion:
+Add the exclusion — spreading `configDefaults.exclude` back in, which is
+required, not stylistic:
 
 ```ts
+import { configDefaults, defineConfig } from "vitest/config";
+
 export default defineConfig({
   test: {
     include: ["**/*.e2e.test.ts"],
-    exclude: [".worktrees/**"],
+    exclude: [...configDefaults.exclude, ".worktrees/**"],
     testTimeout: 30_000,
   },
 });
 ```
+
+A bare `exclude: [".worktrees/**"]` **replaces** vitest's default exclude list
+rather than extending it, and `**/node_modules/**` is one of those defaults.
+Dropping it makes the gate collect
+`node_modules/.pnpm/node_modules/dsh-plugin-helium/test/e2e/*.e2e.test.ts` —
+a pnpm workspace symlink back to `plugins/helium` (`readlink` →
+`../../../plugins/helium`) — so every e2e file runs **twice**, once through its
+real path and once through the symlink. Verified on 2026-08-29 by running the
+gate under both configurations from this repository: the bare form collects two
+files, the spread form collects one. Since Step 3c exists precisely to make
+`pnpm test:e2e-local` reproducible, the bare form defeats the step's own
+purpose. `vitest.config.ts` already uses the spread form, so this also matches
+the house style.
 
 This lands in Task 1 because Task 1 is the first P0 task and every later P0 gate
 run depends on it. Until the exclusion exists, `pnpm test:e2e-local` is not a
@@ -858,16 +874,24 @@ git diff --check
 ```
 
 The two `scripts/deadman/` tests are listed explicitly because neither is wired
-into a `package.json` script or into CI: `pnpm test` does not reach them, so a
-gate that runs only the `pnpm` commands never executes two of the tests Task 5
-creates. Run them by hand until they are wired up.
+into a `package.json` script: `pnpm test` does not reach them, so a gate that
+runs only the `pnpm` commands never executes two of the tests Task 5 creates.
+They are now wired into CI's `check` job alongside `pnpm test:e2e-local`, which
+`pnpm test` also does not reach — an unrun test is not evidence, and the P0
+manifest may only record an output hash from a CI run at the pinned Node
+version. Wiring them exposed two BSD-only constructs (`date -v` and
+`mktemp -t <prefix>`) that fail under GNU coreutils; both are now written in the
+portable form.
 
 **The gate's evidence is invalid until Task 1 Step 3c has landed.** Without
-`exclude: [".worktrees/**"]` in `vitest.e2e.config.ts`, `pnpm test:e2e-local`
-also collects `*.e2e.test.ts` files from any `.worktrees/` checkout, at whatever
-commit those sit on — the command is then not reproducible and its output hash
-does not describe this tree. Confirm the exclusion is present before recording
-any e2e row in the manifest.
+`exclude: [...configDefaults.exclude, ".worktrees/**"]` in
+`vitest.e2e.config.ts`, `pnpm test:e2e-local` also collects `*.e2e.test.ts`
+files from any `.worktrees/` checkout, at whatever commit those sit on — the
+command is then not reproducible and its output hash does not describe this
+tree. Confirm the exclusion is present, **and that it spreads the vitest
+defaults back in**, before recording any e2e row in the manifest; the bare form
+re-admits `node_modules` and double-counts every e2e file through the workspace
+symlink. The gate row is correct only when the run reports exactly one e2e file.
 
 Expected: all commands pass. Do not deploy. Open a PR and obtain review of the
 isolation proof and delivery crash matrix before starting Phase 1.

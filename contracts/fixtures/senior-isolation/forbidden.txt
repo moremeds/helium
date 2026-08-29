@@ -1,0 +1,5 @@
+# Obviously-fake sentinel. Never a real secret.
+# This file lives OUTSIDE every execution workspace on purpose: the
+# conformance harness hands its path to the fake `claude` CLI as an escape
+# probe and grades the subject on whether the child could reach it.
+HELIUM_FORBIDDEN_SECRET=helium-fake-sentinel-not-a-real-secret-0000
