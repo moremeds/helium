@@ -75,11 +75,12 @@ function setup() {
     dispose: disposeRun,
   });
   const drain = vi.fn(async () => {});
+  const interrupt = vi.fn();
   const subagents: TeamSubagentRuntime = {
     start,
     drainDescendants: drain,
     followup: vi.fn(async () => "message-1"),
-    interrupt: vi.fn(),
+    interrupt,
     listChildren: vi.fn(async () => []),
     listDescendants: vi.fn(async () => []),
   };
@@ -168,6 +169,7 @@ function setup() {
     start,
     disposeRun,
     drain,
+    interrupt,
     ensure,
     parentDispose,
     processRun,
@@ -282,6 +284,31 @@ describe("DshTeamHost", () => {
     });
     expect(fx.disposeRun).toHaveBeenCalledOnce();
   });
+
+  it("interrupts and disposes a child whose result ignores cancellation", async () => {
+    const fx = setup();
+    const controller = new AbortController();
+    fx.start.mockResolvedValueOnce({
+      id: "child-hung",
+      result: new Promise(() => {}),
+      dispose: fx.disposeRun,
+    });
+    const pending = fx.host.run(
+      "team-1",
+      work(),
+      lease(fx.leases, "target-dsh"),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(fx.start).toHaveBeenCalledOnce());
+    controller.abort();
+    const out = await pending;
+    expect(out).toMatchObject({
+      outcome: "failed",
+      failure: { class: "cancelled" },
+    });
+    expect(fx.interrupt).toHaveBeenCalledWith("child-hung", { id: "parent-1" });
+    expect(fx.disposeRun).toHaveBeenCalledOnce();
+  }, 1_000);
 });
 
 describe("CordisTeamSubagentRuntime", () => {

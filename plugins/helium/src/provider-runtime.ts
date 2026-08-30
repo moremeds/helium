@@ -15,34 +15,27 @@ import {
   LeaseStore,
   WorkOrderSchema,
   type AgentResult,
+  type Availability,
   type ConformanceRecord,
   type ExecutionTargetId,
   type SelectionPolicy,
   type WorkOrder,
 } from "@helium/core";
-import type {
-  EntitlementCertification,
-  RegisteredProviderTargets,
-} from "@helium/provider-sdk/registration";
-import {
-  claudeSubscriptionCatalog,
-  type ClaudeCatalog,
-} from "@helium/provider-claude-subscription/catalog";
+import type { RegisteredProviderTargets } from "@helium/provider-sdk/registration";
 import {
   registerCertifiedClaudeTargets,
 } from "@helium/provider-claude-subscription/executor";
-import type { ClaudeInvocationResult } from "@helium/provider-claude-subscription/invoke";
 import {
-  codexSubscriptionCatalog,
-  type CodexCatalog,
-} from "@helium/provider-codex-subscription/catalog";
+  invokeClaude,
+} from "@helium/provider-claude-subscription/invoke";
 import {
   registerCertifiedCodexTargets,
 } from "@helium/provider-codex-subscription/executor";
-import type { CodexInvocationResult } from "@helium/provider-codex-subscription/invoke";
+import {
+  invokeCodex,
+} from "@helium/provider-codex-subscription/invoke";
 import {
   deepseekDshCatalog,
-  type DeepSeekCatalog,
 } from "@helium/provider-deepseek-dsh/catalog";
 import {
   registerCertifiedDeepSeekTargets,
@@ -54,31 +47,20 @@ import {
   CordisTeamParentFactory,
   CordisTeamSubagentRuntime,
   DshTeamHost,
+  type TeamParentFactory,
+  type TeamSubagentRuntime,
 } from "./dsh-team-host.js";
 import { ExecutorRegistry } from "./executor-registry.js";
 import { ProviderAvailability } from "./provider-availability.js";
+import {
+  productionProviderCertifications,
+  type ProviderCertifications,
+} from "./provider-certifications.js";
 import { RoutingService } from "./routing-service.js";
 import type { SeniorLane } from "./dispatch.js";
 
-type ProviderCatalogWithSource =
-  | ClaudeCatalog
-  | CodexCatalog
-  | DeepSeekCatalog;
-
-function certification(catalog: ProviderCatalogWithSource): EntitlementCertification {
-  return {
-    certificationVersion: `${catalog.catalogVersion}:enabled-v1`,
-    catalogSnapshotHash: catalog.snapshotHash,
-    recordedAt: catalog.source.recordedAt,
-    source: catalog.source.kind,
-    targets: catalog.targets
-      .filter((target) => target.enabled)
-      .map((target) => ({
-        targetRef: target.targetRef,
-        variants: target.effort.supported ? [...target.effort.options] : [null],
-      })),
-  };
-}
+type ProviderId = "codex" | "deepseek" | "claude";
+type AvailabilityRefresher = () => Promise<Availability>;
 
 function conformance(
   targetId: ExecutionTargetId,
@@ -108,18 +90,14 @@ function targetProfile() {
   };
 }
 
-function findTarget(
+function optionalTarget(
   registered: RegisteredProviderTargets,
   targetRef: string,
   effort: string,
-): ExecutionTargetId {
-  const found = registered.find(
+): ExecutionTargetId | undefined {
+  return registered.find(
     (entry) => entry.native.targetRef === targetRef && entry.native.effort === effort,
-  );
-  if (found === undefined) {
-    throw new Error(`production policy names uncertified target ${targetRef}/${effort}`);
-  }
-  return found.profile.targetId;
+  )?.profile.targetId;
 }
 
 class DurableNdjsonAudit {
@@ -146,9 +124,14 @@ class DurableNdjsonAudit {
 }
 
 export interface ProviderRuntimeOptions {
-  codexInvoke?: (input: never) => Promise<CodexInvocationResult>;
-  claudeInvoke?: (input: never) => Promise<ClaudeInvocationResult>;
+  codexInvoke?: typeof invokeCodex;
+  claudeInvoke?: typeof invokeClaude;
   deepseekBoundary?: DeepSeekDshBoundary;
+  certifications?: ProviderCertifications;
+  availabilityRefreshers?: Partial<Record<ProviderId, AvailabilityRefresher>>;
+  availabilityRefreshDelayMs?: number;
+  subagents?: TeamSubagentRuntime;
+  parents?: TeamParentFactory;
 }
 
 export interface ProviderRuntimeConfig {
@@ -174,6 +157,9 @@ export class ProviderRuntime {
   };
   readonly #domainDisposers: Array<() => void> = [];
   readonly #cfg: ProviderRuntimeConfig;
+  readonly #refreshers = new Map<ProviderId, AvailabilityRefresher>();
+  readonly #refreshTimers = new Map<ProviderId, NodeJS.Timeout>();
+  readonly #refreshDelayMs: number;
 
   constructor(
     ctx: Pick<Context, "agents" | "sessions" | "sessionPersistence" | "subagents">,
@@ -181,6 +167,13 @@ export class ProviderRuntime {
     options: ProviderRuntimeOptions = {},
   ) {
     this.#cfg = cfg;
+    this.#refreshDelayMs = options.availabilityRefreshDelayMs ?? 15 * 60_000;
+    if (!Number.isSafeInteger(this.#refreshDelayMs) || this.#refreshDelayMs < 1_000) {
+      throw new Error("provider availability refresh delay must be at least one second");
+    }
+    const certifications = options.certifications ?? productionProviderCertifications;
+    const codexInvoker = options.codexInvoke ?? invokeCodex;
+    const claudeInvoker = options.claudeInvoke ?? invokeClaude;
     const availabilityAudit = new DurableNdjsonAudit(
       join(cfg.stateRoot, "audit", "provider-availability.ndjson"),
     );
@@ -194,25 +187,21 @@ export class ProviderRuntime {
         }),
     });
     this.registry = new ExecutorRegistry({
-      onResult: (result) => {
-        this.availability.observe(result);
-      },
+      onResult: (result) => this.#observeResult(result),
     });
     const processProof = (targetId: ExecutionTargetId) =>
       conformance(targetId, "process", "2026-08-30T00:00:00.000Z");
     this.registered = {
       codex: registerCertifiedCodexTargets({
-        certification: certification(codexSubscriptionCatalog),
+        certification: certifications.codex,
         capabilityCatalog: this.capabilities,
         executorRegistry: this.registry,
         conformanceFor: processProof,
         targetProfile: targetProfile(),
-        ...(options.codexInvoke === undefined
-          ? {}
-          : { invoke: options.codexInvoke as never }),
+        invoke: codexInvoker,
       }),
       deepseek: registerCertifiedDeepSeekTargets({
-        certification: certification(deepseekDshCatalog),
+        certification: certifications.deepseek,
         capabilityCatalog: this.capabilities,
         executorRegistry: this.registry,
         conformanceFor: (targetId) =>
@@ -228,14 +217,12 @@ export class ProviderRuntime {
           } satisfies DeepSeekDshBoundary),
       }),
       claude: registerCertifiedClaudeTargets({
-        certification: certification(claudeSubscriptionCatalog),
+        certification: certifications.claude,
         capabilityCatalog: this.capabilities,
         executorRegistry: this.registry,
         conformanceFor: processProof,
         targetProfile: targetProfile(),
-        ...(options.claudeInvoke === undefined
-          ? {}
-          : { invoke: options.claudeInvoke as never }),
+        invoke: claudeInvoker,
       }),
     };
 
@@ -257,16 +244,20 @@ export class ProviderRuntime {
       );
     }
 
+    const ordered = [
+      optionalTarget(this.registered.codex, "gpt-5.6-sol", "high"),
+      optionalTarget(this.registered.deepseek, "deepseek-v4-flash", "high"),
+      optionalTarget(this.registered.claude, "claude-opus-5", "max"),
+    ].filter((target): target is ExecutionTargetId => target !== undefined);
+    if (ordered.length === 0) {
+      throw new Error("production provider policy has no certified target");
+    }
     const policy: SelectionPolicy = {
       policyVersion: "phase-2-production-v1",
       roles: {
         "v1-senior": {
-          preferred: findTarget(this.registered.codex, "gpt-5.6-sol", "high"),
-          fallback: [
-            findTarget(this.registered.deepseek, "deepseek-v4-pro", "high"),
-            findTarget(this.registered.deepseek, "deepseek-v4-flash", "high"),
-            findTarget(this.registered.claude, "claude-opus-5", "max"),
-          ],
+          preferred: ordered[0]!,
+          fallback: ordered.slice(1),
         },
       },
     };
@@ -282,10 +273,10 @@ export class ProviderRuntime {
     this.host = new DshTeamHost({
       registry: this.registry,
       leases: this.leases,
-      subagents: new CordisTeamSubagentRuntime(ctx.subagents),
-      parents: new CordisTeamParentFactory(ctx),
+      subagents: options.subagents ?? new CordisTeamSubagentRuntime(ctx.subagents),
+      parents: options.parents ?? new CordisTeamParentFactory(ctx),
       workspacesDir: cfg.workspacesDir,
-      env: buildChildEnv(cfg, { PATH: process.env.PATH ?? "" }),
+      env: this.#childEnv(),
       outputSchemaFor: () => ({
         type: "object",
         properties: { analysis: { type: "string" } },
@@ -293,19 +284,80 @@ export class ProviderRuntime {
         additionalProperties: false,
       }),
       maxDepth: 1,
-      observeResult: (result) => {
-        this.availability.observe(result);
-      },
+      observeResult: (result) => this.#observeResult(result),
     });
+
+    const codexRefresh: AvailabilityRefresher = async () => {
+      const workspace = join(
+        this.#cfg.workspacesDir,
+        "provider-refresh",
+        `codex-${randomUUID()}`,
+      );
+      mkdirSync(workspace, { recursive: true, mode: 0o700 });
+      try {
+        const result = await codexInvoker({
+          model: "gpt-5.6-sol",
+          effort: "high",
+          prompt: "Return exactly: HELIUM_PROVIDER_AVAILABLE",
+          cwd: workspace,
+          timeoutMs: 120_000,
+          sandbox: "read-only",
+          env: this.#childEnv(),
+          allowedTools: [],
+        });
+        if (result.ok) return { state: "available" };
+        if (result.classification === "quota-exhausted") {
+          return {
+            state: "quota-exhausted",
+            ...(result.retryAfter === undefined ? {} : { retryAfter: result.retryAfter }),
+          };
+        }
+        return { state: "unavailable" };
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    };
+    for (const [provider, refresher] of Object.entries({
+      codex: codexRefresh,
+      ...options.availabilityRefreshers,
+    }) as Array<[ProviderId, AvailabilityRefresher]>) {
+      this.#refreshers.set(provider, refresher);
+    }
   }
 
   async start(): Promise<void> {
     await this.registry.reconcileOrphanProcesses(this.#cfg.workspacesDir);
+    const exhausted = new Set(
+      this.availability
+        .snapshot()
+        .domains.filter((entry) => entry.availability.state === "quota-exhausted")
+        .map((entry) => entry.quotaDomain),
+    );
+    for (const provider of this.#refreshers.keys()) {
+      if (exhausted.has(this.#domain(provider))) {
+        await this.refreshProviderAvailability(provider);
+      }
+    }
+  }
+
+  /** Runs the provider-owned probe, then publishes its opaque domain state. */
+  async refreshProviderAvailability(provider: ProviderId) {
+    const refresher = this.#refreshers.get(provider);
+    if (refresher === undefined) {
+      throw new Error(`provider has no availability refresher: ${provider}`);
+    }
+    const availability = await refresher();
+    const published = this.availability.publish(this.#domain(provider), availability);
+    if (availability.state === "quota-exhausted") this.#scheduleRefresh(provider);
+    return published;
   }
 
   seniorLane(mcpConfigFor: (job: JobSpec, dir: string) => string): SeniorLane {
     return {
       dispatch: async (job, _event, prompt) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), job.timeoutMs);
+        timeout.unref();
         const configDir = join(
           this.#cfg.workspacesDir,
           "routing-config",
@@ -327,8 +379,14 @@ export class ProviderRuntime {
           acceptance: { outputSchema: "v1-senior-analysis" },
         });
         try {
-          return await this.#runSenior(work, job, mcpConfigFor(job, configDir));
+          return await this.#runSenior(
+            work,
+            job,
+            mcpConfigFor(job, configDir),
+            controller.signal,
+          );
         } finally {
+          clearTimeout(timeout);
           rmSync(configDir, { recursive: true, force: true });
         }
       },
@@ -336,6 +394,8 @@ export class ProviderRuntime {
   }
 
   async dispose(): Promise<void> {
+    for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
+    this.#refreshTimers.clear();
     await this.host.drain();
     for (const dispose of this.#domainDisposers.reverse()) dispose();
     this.registered.claude.dispose();
@@ -343,13 +403,69 @@ export class ProviderRuntime {
     this.registered.codex.dispose();
   }
 
+  #domain(provider: ProviderId): string {
+    return {
+      codex: "codex-subscription-session",
+      deepseek: "deepseek-api-key",
+      claude: "claude-subscription-session",
+    }[provider];
+  }
+
+  #childEnv(): Record<string, string> {
+    return buildChildEnv(this.#cfg, {
+      PATH: process.env.PATH ?? "",
+      ...(process.env.HOME === undefined ? {} : { HOME: process.env.HOME }),
+      ...(process.env.CODEX_HOME === undefined
+        ? {}
+        : { CODEX_HOME: process.env.CODEX_HOME }),
+    });
+  }
+
+  #providerFor(targetId: string): ProviderId | undefined {
+    for (const provider of ["codex", "deepseek", "claude"] as const) {
+      if (
+        this.registered[provider].some(
+          (entry) => String(entry.profile.targetId) === targetId,
+        )
+      ) {
+        return provider;
+      }
+    }
+    return undefined;
+  }
+
+  #observeResult(result: AgentResult): void {
+    this.availability.observe(result);
+    if (result.failure?.class !== "quota-exhausted") return;
+    const provider = this.#providerFor(result.executionSnapshot.targetId);
+    if (provider !== undefined) this.#scheduleRefresh(provider);
+  }
+
+  #scheduleRefresh(provider: ProviderId): void {
+    if (this.#refreshers.get(provider) === undefined || this.#refreshTimers.has(provider)) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.#refreshTimers.delete(provider);
+      void this.refreshProviderAvailability(provider).catch(() => {
+        this.#scheduleRefresh(provider);
+      });
+    }, this.#refreshDelayMs);
+    timer.unref();
+    this.#refreshTimers.set(provider, timer);
+  }
+
   async #runSenior(
     work: WorkOrder,
     job: JobSpec,
     mcpConfigPath: string,
+    signal: AbortSignal,
   ): Promise<Awaited<ReturnType<SeniorLane["dispatch"]>>> {
     const tried = new Set<string>();
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (signal.aborted) {
+        return { outcome: "timed_out", error: "senior lane exceeded its wall clock" };
+      }
       const routed = await this.routing.route({
         work,
         reservedCost: 0,
@@ -369,12 +485,15 @@ export class ProviderRuntime {
         `v1-${job.name}`,
         work,
         routed.lease,
-        new AbortController().signal,
+        signal,
         {
-          env: buildChildEnv(this.#cfg, { PATH: process.env.PATH ?? "" }),
+          env: this.#childEnv(),
           mcpConfigPath,
         },
       );
+      if (signal.aborted) {
+        return { outcome: "timed_out", error: "senior lane exceeded its wall clock" };
+      }
       if (result.failure?.class === "quota-exhausted") continue;
       return resultToSenior(result);
     }

@@ -208,7 +208,30 @@ export class DshTeamHost {
         toolFilter: { allow: [...work.constraints.tools] },
         persona: executor.dsh.persona,
       });
-      const terminal = await run.result;
+      const terminal = await new Promise<TeamSubagentTerminal>((resolve, reject) => {
+        const abort = () => {
+          try {
+            this.#subagents.interrupt(run!.id, parent.parent);
+          } finally {
+            reject(new Error("team subagent cancelled"));
+          }
+        };
+        void run!.result.then(
+          (value) => {
+            signal.removeEventListener("abort", abort);
+            resolve(value);
+          },
+          (error: unknown) => {
+            signal.removeEventListener("abort", abort);
+            reject(error);
+          },
+        );
+        if (signal.aborted) {
+          abort();
+          return;
+        }
+        signal.addEventListener("abort", abort, { once: true });
+      });
       const result = executor.fromSubagentResult(
         work,
         terminal,
