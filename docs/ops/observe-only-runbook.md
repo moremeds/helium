@@ -140,8 +140,11 @@ Stage that canonical input at the fixed
 `~/.helium/ops/promotions/trading-stack-reconcile/promotion-input.json` path.
 On the mini, `promotion-package.mjs export` performs a read-only inventory of
 the exact candidate config, promotion input, signed authority, public key,
-wrapper/delegate, release opsd binary, current opsd plist and both legacy
-plists. Transfer only that unsigned inventory and the canonical promotion input
+wrapper/delegate, release opsd binary, current observe opsd plist, separate
+candidate approve plist and both legacy plists. The candidate plist must point
+to the exact candidate release runner and the stable active config path;
+preflight parses and rejects any old-release runner before launchd changes.
+Transfer only that unsigned inventory and the canonical promotion input
 to the registered operator workstation. There,
 `promotion-package.mjs sign` checks that the inventory is bound to the same
 release, expiry, rollback reference and promotion-input hash before signing it.

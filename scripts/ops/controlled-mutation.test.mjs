@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import {
+  assertCandidateOpsdPlist,
   createControlledMutationLayout,
   runControlledMutation,
 } from "./controlled-mutation.mjs";
@@ -66,6 +67,7 @@ class FakeLaunchctl {
     if (argv[0] === "bootstrap") {
       const byPath = new Map([
         [this.layout.opsdPlist, "com.helium.opsd"],
+        [this.layout.candidateOpsdPlist, "com.helium.opsd"],
         [this.layout.legacyRuntimePlist, "com.moremeds.colima-runtime-watchdog"],
         [this.layout.legacyAfterDataLakePlist, "com.moremeds.colima-after-datalake"],
       ]);
@@ -144,6 +146,7 @@ function fixture() {
   write(layout.delegate, "delegate\n", 0o500);
   write(layout.opsdBinary, "opsd\n", 0o500);
   write(layout.opsdPlist, "opsd plist\n", 0o600);
+  write(layout.candidateOpsdPlist, "candidate opsd plist\n", 0o600);
   write(layout.legacyRuntimePlist, "runtime plist\n", 0o600);
   write(layout.legacyAfterDataLakePlist, "after datalake plist\n", 0o600);
   write(layout.eventsPath, "", 0o600);
@@ -158,6 +161,7 @@ function fixture() {
     delegate: layout.delegate,
     opsdBinary: layout.opsdBinary,
     opsdPlist: layout.opsdPlist,
+    candidateOpsdPlist: layout.candidateOpsdPlist,
     legacyRuntimePlist: layout.legacyRuntimePlist,
     legacyAfterDataLakePlist: layout.legacyAfterDataLakePlist,
   };
@@ -189,10 +193,11 @@ function options(f, overrides = {}) {
   return {
     layout: f.layout,
     runner: f.runner,
-    validateCandidate: async ({ executable, configPath, releaseDir }) => {
+    validateCandidate: async ({ executable, configPath, releaseDir, plistPath }) => {
       assert.equal(executable, f.layout.opsdBinary);
       assert.equal(configPath, f.layout.candidateConfig);
       assert.equal(releaseDir, f.promotion.release.dir);
+      assert.equal(plistPath, f.layout.candidateOpsdPlist);
     },
     now: () => NOW,
     ...overrides,
@@ -206,6 +211,28 @@ test("exposes only preflight, handoff, and rollback", async () => {
     createControlledMutationLayout().expectedPromotionKeySha256,
     /^[0-9a-f]{64}$/,
   );
+});
+
+test("candidate plist is bound to the exact release runner and active config", () => {
+  const releaseDir = "/Users/moremeds/projects/helium-ops-candidates/candidate";
+  const configPath = "/Users/moremeds/.helium/ops/config/opsd.json";
+  const plist = {
+    Label: "com.helium.opsd",
+    ProgramArguments: ["/bin/bash", `${releaseDir}/scripts/ops/run-opsd.sh`],
+    WorkingDirectory: releaseDir,
+    RunAtLoad: true,
+    KeepAlive: true,
+    EnvironmentVariables: {
+      HELIUM_OPSD_CONFIG: configPath,
+      HELIUM_NODE_BIN: "/opt/homebrew/bin/node",
+      HOME: "/Users/moremeds",
+    },
+  };
+  assert.doesNotThrow(() => assertCandidateOpsdPlist(plist, { configPath, releaseDir }));
+  assert.throws(() => assertCandidateOpsdPlist({
+    ...plist,
+    ProgramArguments: ["/bin/bash", "/old/release/scripts/ops/run-opsd.sh"],
+  }, { configPath, releaseDir }), /exact release and config/);
 });
 
 test("preflight is read-only and rejects identity or path ambiguity", async () => {
@@ -274,9 +301,9 @@ test("handoff releases both legacy labels before switching and proves a zero-act
   assert.ok(lstatSync(f.layout.backupManifest).isFile());
   const calls = f.runner.calls.map((call) => call.join(" "));
   assert.ok(calls.findIndex((line) => line.includes("bootout") && line.includes("runtime-watchdog")) <
-    calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.opsdPlist)));
+    calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
   assert.ok(calls.findIndex((line) => line.includes("bootout") && line.includes("after-datalake")) <
-    calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.opsdPlist)));
+    calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
 });
 
 test("rollback restores observe config and the exact legacy controller family", async () => {
