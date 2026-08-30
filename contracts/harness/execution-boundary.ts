@@ -315,9 +315,11 @@ export function runExecutionBoundaryConformance(
               "features.shell_tool=false",
               "features.unified_exec=false",
               "tools.web_search=false",
-              "tools.view_image=false",
               "features.multi_agent=false",
-              "agents.enabled=false",
+              "features.apps=false",
+              "features.browser_use=false",
+              "features.computer_use=false",
+              "features.image_generation=false",
             ]) {
               expect(observed.argv).toContain(value);
             }

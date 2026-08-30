@@ -52,9 +52,11 @@ const proof = {
     falseConfig("features.shell_tool") &&
     falseConfig("features.unified_exec") &&
     falseConfig("tools.web_search") &&
-    falseConfig("tools.view_image") &&
     falseConfig("features.multi_agent") &&
-    config.get("agents.enabled") === "false" &&
+    falseConfig("features.apps") &&
+    falseConfig("features.browser_use") &&
+    falseConfig("features.computer_use") &&
+    falseConfig("features.image_generation") &&
     mcpServers.every((server) => config.has(`mcp_servers.${server}.enabled_tools`)),
   settingsIsolated:
     argv.includes("--ignore-user-config") && argv.includes("--ignore-rules"),
