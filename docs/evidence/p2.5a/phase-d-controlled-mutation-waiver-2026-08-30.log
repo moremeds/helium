@@ -1,0 +1,28 @@
+Helium controlled mutation weekend waiver
+Recorded at: 2026-08-30 HKT
+Scope: one approve-only, one-attempt trading-stack container reconcile drill
+
+Operator direction recorded in the active project task:
+  - v1 observe mode performed no mutations and should not cause the weekend
+    maintenance window to be missed;
+  - merge readiness first, then proceed with the controlled mutation;
+  - Codex may continue so long as every action is reversible.
+
+This waiver permits the single Task 9 drill before the seven-day observe window
+has elapsed. It does not close, shorten, or earn credit for that observation
+window. It does not authorize suggest or auto mode, a second attempt, a generic
+restart, image pull, prune, volume/mount change, IB Gateway change, unrelated
+container restart, provider call, or any action without the exact signed
+promotion/approval chain and a restorable backup.
+
+Required stop conditions remain binding:
+  - any identity, owner, mode, hash, topology, clock, evidence, or signature
+    mismatch;
+  - any collection failure or nonzero pre-existing action count;
+  - any container other than trading-cadvisor changing state;
+  - inability to restore observe config and both exact legacy launchd owners;
+  - baseline other than evidenced fail for the exact expected-container check;
+  - more than one attempt or any uncertain terminal evidence.
+
+The live outcome remains unclaimed until post-mutation evidence is committed
+and verified by PR CI.

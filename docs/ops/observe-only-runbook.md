@@ -94,11 +94,12 @@ irrelevant to the deterministic collector path.
 
 ## Controlled mutation handoff (not yet commissioned)
 
-The offline readiness branch adds `scripts/ops/controlled-mutation.mjs`, but
-its production signing-key fingerprint is deliberately `UNCOMMISSIONED` until
-Task 7 creates and independently records the real Ed25519 trust root. Therefore
-the tool currently refuses production preflight and cannot be used to shorten
-the seven-day observation gate.
+`scripts/ops/controlled-mutation.mjs` pins the public-key fingerprint
+commissioned on the registered operator workstation; the private key remains
+off-mini and outside Git. Production preflight still refuses unless every
+artifact is bound by that key. The 2026-08-30 controlled-mutation waiver permits
+one approve-only, one-attempt drill during the weekend window; it earns no
+seven-day observation credit and does not authorize suggest or auto mode.
 
 After that gate closes and the signed promotion package is independently
 reviewed, the only accepted sequence is:
