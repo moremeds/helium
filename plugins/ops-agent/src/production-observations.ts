@@ -576,7 +576,6 @@ function colimaProbe(targets: ProductionObservationTargets): ObservationProbe {
       const inventoryResult = await persistedRun(runner, [
         targets.colima.dockerPath,
         "ps",
-        "--all",
         "--no-trunc",
         "--format",
         "{{json .Names}}",

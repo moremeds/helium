@@ -112,6 +112,11 @@ reviewed, the only accepted sequence is:
 4. `rollback` — stop approve-mode opsd, restore the backed-up observe config,
    restore both exact legacy plists/labels, then restart observe-mode opsd.
 
+The controlled container drill stops one expected container. Production
+inventory uses running-only `docker ps`; a stopped container is therefore a
+failed expected-set observation, while the certified reconcile can restore it
+with the pinned no-pull compose path.
+
 The tool accepts no path flags or free-form command. It never deletes a source
 plist. Every state-changing step is journaled and fsynced before and after, and
 the fake-host suite injects a crash after every handoff prefix and requires

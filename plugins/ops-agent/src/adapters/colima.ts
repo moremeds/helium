@@ -4,7 +4,7 @@ import { makeObservation, type AdapterContext } from "./shared.js";
 
 export const COLIMA_READ_COMMANDS = {
   status: ["colima", "status", "--json"],
-  inventory: ["docker", "ps", "--all", "--no-trunc", "--format", "{{json .}}"],
+  inventory: ["docker", "ps", "--no-trunc", "--format", "{{json .}}"],
   inspect: ["docker", "inspect", "--type", "container"],
 } as const;
 
