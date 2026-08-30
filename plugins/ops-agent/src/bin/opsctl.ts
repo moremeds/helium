@@ -5,14 +5,15 @@ import { pathToFileURL } from "node:url";
 import { OpsControlClient } from "../ipc.js";
 
 export interface OpsctlArgs {
-  command: "approve" | "record-intervention";
+  command: "approve" | "record-intervention" | "record-suggestion-decision";
   socketPath: string;
   envelopePath: string;
 }
 
 export function parseOpsctlArgs(argv: readonly string[]): OpsctlArgs {
   const command = argv[0];
-  if (command !== "approve" && command !== "record-intervention") {
+  if (command !== "approve" && command !== "record-intervention" &&
+      command !== "record-suggestion-decision") {
     throw new Error(`unknown opsctl command: ${command ?? "<missing>"}`);
   }
   const values = new Map<string, string>();

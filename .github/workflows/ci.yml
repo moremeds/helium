@@ -42,7 +42,9 @@ jobs:
           scripts/ops/actions/install-action-wrapper.test.mjs
           scripts/ops/actions/trading-stack-reconcile.test.mjs
           scripts/ops/sign-approval.test.mjs
+          scripts/ops/sign-suggestion-decision.test.mjs
           scripts/ops/sign-authority-manifest.test.mjs
+          scripts/ops/configure-suggest-only.test.mjs
           scripts/ops/controlled-mutation.test.mjs
           scripts/ops/export-promotion-input.test.mjs
           scripts/ops/promotion-package.test.mjs

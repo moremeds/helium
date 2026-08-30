@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApprovalLedger,
   FileOperatorEnvelopeStore,
+  FileSuggestionDecisionStore,
   OperatorEnvelopeVerifier,
   approvalSigningPayload,
   interventionSigningPayload,
@@ -189,5 +190,29 @@ describe("OperatorEnvelopeVerifier", () => {
         persistence: new FileOperatorEnvelopeStore(dir),
       }).acceptIntervention(envelope),
     ).toThrow(/replay/);
+  });
+});
+
+describe("FileSuggestionDecisionStore", () => {
+  it("persists one hash-chained decision per exact proposed action", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-suggestion-decisions-"));
+    const decision = {
+      actionId: "act-1",
+      incidentId: "inc-1",
+      componentId: "fixture-service",
+      sopId: "repair-fixture",
+      sopVersion: 1,
+      sopDigest: `sha256:${"a".repeat(64)}`,
+      decision: "alternate" as const,
+      reason: "Use the existing operator runbook.",
+      at: NOW.toISOString(),
+      operatorId: "operator-1",
+    };
+    const first = new FileSuggestionDecisionStore(dir);
+    first.record(decision);
+    expect(new FileSuggestionDecisionStore(dir).all()).toEqual([
+      { version: 1, ...decision },
+    ]);
+    expect(() => first.record(decision)).toThrow(/already recorded/);
   });
 });

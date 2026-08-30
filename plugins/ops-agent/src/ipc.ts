@@ -5,8 +5,10 @@ import { z } from "zod";
 import {
   SignedApprovalEnvelopeSchema,
   SignedInterventionEnvelopeSchema,
+  SignedSuggestionDecisionEnvelopeSchema,
   type ApprovalLedger,
   type OperatorEnvelopeVerifier,
+  type SuggestionDecisionStorePort,
 } from "./approval.js";
 import type { OperationsStorePort } from "./controller.js";
 
@@ -18,6 +20,10 @@ const ControlRequestSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("record-intervention"),
     envelope: SignedInterventionEnvelopeSchema,
+  }),
+  z.strictObject({
+    type: z.literal("record-suggestion-decision"),
+    envelope: SignedSuggestionDecisionEnvelopeSchema,
   }),
 ]);
 export type ControlRequest = z.infer<typeof ControlRequestSchema>;
@@ -32,6 +38,7 @@ export interface OpsControlServerOptions {
   socketPath: string;
   approvals: ApprovalLedger;
   interventions: OperatorEnvelopeVerifier;
+  suggestionDecisions: SuggestionDecisionStorePort;
   store: OperationsStorePort;
   now: () => Date;
   nextId?: (prefix: string) => string;
@@ -156,20 +163,48 @@ export class OpsControlServer {
       return { ok: true, value: accepted };
     }
 
-    const accepted = this.options.interventions.acceptIntervention(
+    if (parsed.data.type === "record-intervention") {
+      const accepted = this.options.interventions.acceptIntervention(
+        parsed.data.envelope,
+      );
+      this.options.store.append({
+        v: 1,
+        id: this.options.nextId?.("evt-operator-intervened") ??
+          `evt-operator-intervened-${++this.#sequence}`,
+        at: this.options.now().toISOString(),
+        type: "operator-intervened",
+        componentId: accepted.componentId,
+        kind: accepted.interventionKind,
+        confirmed: accepted.confirmed,
+      });
+      return { ok: true, value: { recorded: true, operatorId: accepted.operatorId } };
+    }
+
+    const proposed = parsed.data.envelope.decision;
+    const action = this.options.store.state().actions[proposed.actionId];
+    if (action === undefined || action.state !== "proposed") {
+      throw new Error(`suggestion decision requires proposed action: ${proposed.actionId}`);
+    }
+    if (action.incidentId !== proposed.incidentId ||
+        action.componentId !== proposed.componentId ||
+        action.sopId !== proposed.sopId ||
+        action.sopVersion !== proposed.sopVersion ||
+        action.sopDigest !== proposed.sopDigest) {
+      throw new Error(`suggestion decision does not match action: ${proposed.actionId}`);
+    }
+    if (this.options.suggestionDecisions.all().some(
+      (value) => value.actionId === proposed.actionId,
+    )) {
+      throw new Error(`suggestion decision already recorded: ${proposed.actionId}`);
+    }
+    const accepted = this.options.interventions.acceptSuggestionDecision(
       parsed.data.envelope,
     );
-    this.options.store.append({
-      v: 1,
-      id: this.options.nextId?.("evt-operator-intervened") ??
-        `evt-operator-intervened-${++this.#sequence}`,
-      at: this.options.now().toISOString(),
-      type: "operator-intervened",
-      componentId: accepted.componentId,
-      kind: accepted.interventionKind,
-      confirmed: accepted.confirmed,
-    });
-    return { ok: true, value: { recorded: true, operatorId: accepted.operatorId } };
+    this.options.suggestionDecisions.record(accepted);
+    return {
+      ok: true,
+      value: { recorded: true, actionId: accepted.actionId, operatorId: accepted.operatorId },
+    };
   }
 }
 

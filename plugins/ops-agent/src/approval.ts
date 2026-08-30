@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { canonicalJson } from "@helium/core";
+import { canonicalJson, openEventStore } from "@helium/core";
 import type { OperatorApproval } from "@helium/core/operations/authority.js";
 import { z } from "zod";
 
@@ -85,9 +85,41 @@ export type SignedInterventionEnvelope = z.infer<
   typeof SignedInterventionEnvelopeSchema
 >;
 
+const SuggestionDecisionPayloadSchema = z.strictObject({
+  actionId: OpsIdSchema,
+  incidentId: OpsIdSchema,
+  componentId: OpsIdSchema,
+  sopId: OpsIdSchema,
+  sopVersion: z.number().int().positive(),
+  sopDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  decision: z.enum(["accepted", "rejected", "alternate"]),
+  reason: z.string().min(1).max(1000),
+  at: IsoTimestampSchema,
+});
+
+const UnsignedSuggestionDecisionEnvelopeSchema = z.strictObject({
+  kind: z.literal("suggestion-decision"),
+  operatorId: OpsIdSchema,
+  nonce: NonceSchema,
+  issuedAt: IsoTimestampSchema,
+  expiresAt: IsoTimestampSchema,
+  decision: SuggestionDecisionPayloadSchema,
+});
+
+export const SignedSuggestionDecisionEnvelopeSchema =
+  UnsignedSuggestionDecisionEnvelopeSchema.extend({
+    signature: z.string().min(1).max(4096),
+  }).strict();
+export type SignedSuggestionDecisionEnvelope = z.infer<
+  typeof SignedSuggestionDecisionEnvelopeSchema
+>;
+
 type UnsignedApprovalEnvelope = z.infer<typeof UnsignedApprovalEnvelopeSchema>;
 type UnsignedInterventionEnvelope = z.infer<
   typeof UnsignedInterventionEnvelopeSchema
+>;
+type UnsignedSuggestionDecisionEnvelope = z.infer<
+  typeof UnsignedSuggestionDecisionEnvelopeSchema
 >;
 
 export function approvalSigningPayload(
@@ -101,6 +133,13 @@ export function interventionSigningPayload(
   raw: UnsignedInterventionEnvelope,
 ): Buffer {
   const value = UnsignedInterventionEnvelopeSchema.parse(raw);
+  return Buffer.from(canonicalJson(value), "utf8");
+}
+
+export function suggestionDecisionSigningPayload(
+  raw: UnsignedSuggestionDecisionEnvelope,
+): Buffer {
+  const value = UnsignedSuggestionDecisionEnvelopeSchema.parse(raw);
   return Buffer.from(canonicalJson(value), "utf8");
 }
 
@@ -262,6 +301,74 @@ export interface AcceptedIntervention {
   operatorId: string;
 }
 
+export interface AcceptedSuggestionDecision {
+  actionId: string;
+  incidentId: string;
+  componentId: string;
+  sopId: string;
+  sopVersion: number;
+  sopDigest: string;
+  decision: "accepted" | "rejected" | "alternate";
+  reason: string;
+  at: string;
+  operatorId: string;
+}
+
+const SuggestionDecisionRecordSchema = z.strictObject({
+  version: z.literal(1),
+  actionId: OpsIdSchema,
+  incidentId: OpsIdSchema,
+  componentId: OpsIdSchema,
+  sopId: OpsIdSchema,
+  sopVersion: z.number().int().positive(),
+  sopDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  decision: z.enum(["accepted", "rejected", "alternate"]),
+  reason: z.string().min(1).max(1000),
+  at: IsoTimestampSchema,
+  operatorId: OpsIdSchema,
+});
+export type SuggestionDecisionRecord = z.infer<typeof SuggestionDecisionRecordSchema>;
+
+export interface SuggestionDecisionStorePort {
+  record(value: AcceptedSuggestionDecision): SuggestionDecisionRecord;
+  all(): SuggestionDecisionRecord[];
+}
+
+/**
+ * Separate, hash-chained decision ledger. Keeping it outside events.jsonl
+ * preserves rollback to an older observe-only opsd that does not know this
+ * P4 review record type.
+ */
+export class FileSuggestionDecisionStore implements SuggestionDecisionStorePort {
+  readonly #log;
+  readonly #records: SuggestionDecisionRecord[];
+
+  constructor(stateDir: string) {
+    this.#log = openEventStore(join(stateDir, "suggestion-decisions"), {
+      schema: SuggestionDecisionRecordSchema,
+    });
+    this.#records = this.#log.replay();
+    const ids = new Set(this.#records.map((value) => value.actionId));
+    if (ids.size !== this.#records.length) {
+      throw new Error("duplicate suggestion decision in durable ledger");
+    }
+  }
+
+  record(value: AcceptedSuggestionDecision): SuggestionDecisionRecord {
+    if (this.#records.some((record) => record.actionId === value.actionId)) {
+      throw new Error(`suggestion decision already recorded: ${value.actionId}`);
+    }
+    const record = SuggestionDecisionRecordSchema.parse({ version: 1, ...value });
+    this.#log.append(record);
+    this.#records.push(record);
+    return { ...record };
+  }
+
+  all(): SuggestionDecisionRecord[] {
+    return this.#records.map((value) => ({ ...value }));
+  }
+}
+
 export class OperatorEnvelopeVerifier {
   readonly #persistence: OperatorEnvelopePersistence;
 
@@ -289,6 +396,24 @@ export class OperatorEnvelopeVerifier {
     this.#persistence.consumeNonce(envelope.nonce);
     return {
       ...envelope.intervention,
+      operatorId: envelope.operatorId,
+    };
+  }
+
+  acceptSuggestionDecision(raw: unknown): AcceptedSuggestionDecision {
+    const envelope = SignedSuggestionDecisionEnvelopeSchema.parse(raw);
+    const { signature: _signature, ...unsigned } = envelope;
+    verifyEnvelope(
+      suggestionDecisionSigningPayload(unsigned),
+      envelope.signature,
+      this.options.trustedKey,
+    );
+    if (Date.parse(envelope.expiresAt) <= this.options.now().getTime()) {
+      throw new Error("operator suggestion decision envelope is expired");
+    }
+    this.#persistence.consumeNonce(envelope.nonce);
+    return {
+      ...envelope.decision,
       operatorId: envelope.operatorId,
     };
   }

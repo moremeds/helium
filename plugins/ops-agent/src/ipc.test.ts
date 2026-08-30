@@ -19,6 +19,9 @@ import {
   OperatorEnvelopeVerifier,
   approvalSigningPayload,
   interventionSigningPayload,
+  suggestionDecisionSigningPayload,
+  type SuggestionDecisionRecord,
+  type SuggestionDecisionStorePort,
 } from "./approval.js";
 import type { OperationsStorePort } from "./controller.js";
 import { OpsControlClient, OpsControlServer } from "./ipc.js";
@@ -103,8 +106,77 @@ function intervention(nonce: string) {
   };
 }
 
+function suggestionDecision(nonce: string, overrides = {}) {
+  const unsigned = {
+    kind: "suggestion-decision" as const,
+    operatorId: "operator-1",
+    nonce,
+    issuedAt: "2026-08-29T23:59:00.000Z",
+    expiresAt: "2026-08-30T00:10:00.000Z",
+    decision: {
+      actionId: "act-suggest-1",
+      incidentId: "inc-suggest-1",
+      componentId: "fixture",
+      sopId: "repair-fixture",
+      sopVersion: 1,
+      sopDigest: `sha256:${"a".repeat(64)}`,
+      decision: "rejected" as const,
+      reason: "The existing watchdog remains the preferred owner.",
+      at: NOW.toISOString(),
+      ...overrides,
+    },
+  };
+  return {
+    ...unsigned,
+    signature: sign(
+      null,
+      suggestionDecisionSigningPayload(unsigned),
+      privateKey,
+    ).toString("base64"),
+  };
+}
+
+function seedSuggestion(store: MemoryStore) {
+  store.append({
+    v: 1,
+    id: "evt-inc-suggest-1",
+    at: NOW.toISOString(),
+    type: "incident-opened",
+    incidentId: "inc-suggest-1",
+    componentId: "fixture",
+    dimension: "readiness",
+    observationIds: [],
+  });
+  store.append({
+    v: 1,
+    id: "evt-act-suggest-1",
+    at: NOW.toISOString(),
+    type: "action-proposed",
+    actionId: "act-suggest-1",
+    incidentId: "inc-suggest-1",
+    componentId: "fixture",
+    sopId: "repair-fixture",
+    sopVersion: 1,
+    sopDigest: `sha256:${"a".repeat(64)}`,
+  });
+}
+
 async function server(path = socketPath(), maxRequestBytes?: number) {
   const store = new MemoryStore();
+  const decisionRecords: SuggestionDecisionRecord[] = [];
+  const suggestionDecisions: SuggestionDecisionStorePort = {
+    record(value) {
+      if (decisionRecords.some((record) => record.actionId === value.actionId)) {
+        throw new Error(`suggestion decision already recorded: ${value.actionId}`);
+      }
+      const record = { version: 1 as const, ...value };
+      decisionRecords.push(record);
+      return record;
+    },
+    all() {
+      return decisionRecords.map((value) => ({ ...value }));
+    },
+  };
   const approvals = new ApprovalLedger({ trustedKey: publicKey, now: () => NOW });
   const instance = new OpsControlServer({
     socketPath: path,
@@ -113,12 +185,20 @@ async function server(path = socketPath(), maxRequestBytes?: number) {
       trustedKey: publicKey,
       now: () => NOW,
     }),
+    suggestionDecisions,
     store,
     now: () => NOW,
     ...(maxRequestBytes === undefined ? {} : { maxRequestBytes }),
   });
   await instance.start();
-  return { instance, store, approvals, client: new OpsControlClient(path), path };
+  return {
+    instance,
+    store,
+    approvals,
+    suggestionDecisions,
+    client: new OpsControlClient(path),
+    path,
+  };
 }
 
 describe("OpsControlServer", () => {
@@ -216,6 +296,50 @@ describe("OpsControlServer", () => {
         kind: "manual-repair",
         confirmed: true,
       });
+    } finally {
+      await instance.stop();
+    }
+  });
+
+  it("records a signed accept, reject, or alternate decision for one exact proposal", async () => {
+    const { instance, client, store, suggestionDecisions } = await server();
+    try {
+      seedSuggestion(store);
+      await client.request({
+        type: "record-suggestion-decision",
+        envelope: suggestionDecision("ipc-suggestion-decision-1"),
+      });
+      expect(suggestionDecisions.all()).toEqual([expect.objectContaining({
+        version: 1,
+        actionId: "act-suggest-1",
+        incidentId: "inc-suggest-1",
+        componentId: "fixture",
+        sopId: "repair-fixture",
+        sopVersion: 1,
+        sopDigest: `sha256:${"a".repeat(64)}`,
+        decision: "rejected",
+        operatorId: "operator-1",
+      })]);
+      expect(store.events).toHaveLength(2);
+      expect(store.state().actions["act-suggest-1"].state).toBe("proposed");
+    } finally {
+      await instance.stop();
+    }
+  });
+
+  it("rejects a mismatched suggestion decision without consuming its nonce", async () => {
+    const { instance, client, store } = await server();
+    try {
+      seedSuggestion(store);
+      const nonce = "ipc-suggestion-mismatch";
+      await expect(client.request({
+        type: "record-suggestion-decision",
+        envelope: suggestionDecision(nonce, { incidentId: "inc-other" }),
+      })).rejects.toThrow(/does not match action/);
+      await expect(client.request({
+        type: "record-suggestion-decision",
+        envelope: suggestionDecision(nonce),
+      })).resolves.toMatchObject({ recorded: true, actionId: "act-suggest-1" });
     } finally {
       await instance.stop();
     }

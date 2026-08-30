@@ -117,6 +117,47 @@ Track observation freshness, collection failures, incident noise, daemon
 restarts, log rotation, and dead-man delivery. Provider/model availability is
 irrelevant to the deterministic collector path.
 
+## Suggest-only promotion
+
+Suggest-only is a non-executing runtime cap, not mutation authority. Production
+loads it only from an exact signed promotion bundle: the same certifiable SOP
+identity that could later enter approve mode, but with no executor reachable
+from the running daemon. An empty authority manifest cannot produce a
+suggestion and must not be represented as a successful suggest rollout.
+
+Use `scripts/ops/configure-suggest-only.mjs` to prepare the configuration. The
+tool exposes only `preflight`, `apply`, `restore`, and `status`. `preflight`
+validates the signed bundle with the selected release without changing the
+active config. `apply` and `restore` refuse while `com.helium.opsd` is loaded,
+store an exact hash-backed observe config for rollback, and never call
+`launchctl` themselves.
+
+The operator sequence is:
+
+1. stage an operator-signed authority manifest and public key for the exact
+   selected release and the one-attempt promotion bundle;
+2. run `preflight` while observe-only remains live;
+3. boot out only `com.helium.opsd`, run `apply`, and bootstrap the unchanged
+   installed plist;
+4. require a fresh target-release cycle before introducing a controlled
+   suggestion case;
+5. verify a durable `action-proposed` record and the complete absence of
+   authorization, intent, receipt, executor, or terminal-action records;
+6. create an exact `suggestion-decision` envelope naming the proposal's action,
+   incident, component, SOP version, and SOP digest; sign it off-mini with
+   `scripts/ops/sign-suggestion-decision.mjs`; and submit it through
+   `opsctl record-suggestion-decision`; and
+7. to leave suggest-only, boot out `com.helium.opsd`, run `restore`, bootstrap
+   the same plist, and prove a fresh observe cycle.
+
+Both legacy Colima controllers remain loaded throughout suggest-only. A
+suggestion never asserts or transfers mutation ownership. The independent
+dead-man remains loaded and watches the short opsd restart window.
+Suggestion decisions use their own private, hash-chained event store below the
+Ops state directory. They do not add a new record type to the main operations
+log, so rollback to the prior observe-only release does not fail while replaying
+a decision that release did not yet know.
+
 ## Controlled mutation handoff
 
 `scripts/ops/controlled-mutation.mjs` pins the public-key fingerprint
