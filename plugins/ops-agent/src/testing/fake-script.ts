@@ -25,6 +25,8 @@ export interface FakeScriptOptions {
   spawnDescendant?: boolean;
   /** Sleep this long before exiting. */
   sleepMs?: number;
+  /** Keep running after SIGTERM so the executor must escalate to SIGKILL. */
+  ignoreTerm?: boolean;
 }
 
 /**
@@ -43,6 +45,7 @@ export function writeFakeScript(
   const body = `#!/usr/bin/env node
 const opts = ${JSON.stringify(options)};
 const marker = ${JSON.stringify(descendantMarker ?? null)};
+if (opts.ignoreTerm) process.on("SIGTERM", () => {});
 if (opts.reportArgv) {
   for (const a of process.argv.slice(2)) process.stdout.write("ARG:" + a + "\\n");
 }
