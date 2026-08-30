@@ -8,8 +8,10 @@ import {
   EVIDENCE_STATUSES,
   EvidenceBundleSchema,
   type EvidenceBundle,
+  type EvidenceStage,
   type EvidenceStatus,
 } from "./bundle.js";
+import { ClaimSchema, type Claim } from "./claims.js";
 
 /**
  * How far up the ladder a status sits. `FAILED` and `BLOCKED` are outcomes,
@@ -113,6 +115,122 @@ export class EvidenceLedger {
   /** Every assertion the ledger has ever recorded a decision for. */
   assertions(): string[] {
     return [...this.#byAssertion.keys()].sort();
+  }
+}
+
+export type ClaimPublisherRole = "agent" | "verifier" | "renderer";
+
+export interface ClaimDecision {
+  actorRole: ClaimPublisherRole;
+  claim: Claim;
+  evidence: EvidenceBundle;
+}
+
+export interface AcceptedClaimEntry {
+  acceptedAt: string;
+  actorRole: Exclude<ClaimPublisherRole, "renderer">;
+  claim: Claim;
+  evidence: EvidenceBundle;
+}
+
+export interface AcceptedClaimPolicy {
+  allowPartial: boolean;
+}
+
+const REQUIRED_CLAIM_STAGES: Readonly<
+  Record<Claim["kind"], readonly EvidenceStage[]>
+> = {
+  fact: ["raw", "replay"],
+  inference: ["raw", "replay"],
+  judgment: ["raw"],
+};
+
+/** A claim-specific accepted view derived from the generic evidence ledger. */
+export class AcceptedClaimLedger {
+  readonly #evidence = new EvidenceLedger();
+  readonly #entries: AcceptedClaimEntry[] = [];
+
+  constructor(readonly policy: AcceptedClaimPolicy) {}
+
+  publish(input: ClaimDecision, now: Date = new Date()): AcceptedClaimEntry {
+    if (input.actorRole === "renderer") {
+      throw new Error("renderer cannot add or promote claims");
+    }
+    const claim = ClaimSchema.parse(input.claim);
+    if (claim.evidenceRefs.length === 0) throw new Error("claim has missing provenance");
+    if (claim.kind === "fact" && claim.asOf === undefined) {
+      throw new Error("factual claim requires an as-of time");
+    }
+    if (claim.kind !== "fact" && claim.assumptions.length === 0) {
+      throw new Error(`${claim.kind} claim requires named assumptions`);
+    }
+    if (input.evidence.assertionId !== claim.key) {
+      throw new Error("claim key does not match evidence assertion id");
+    }
+    if (input.evidence.assertion !== claim.statement) {
+      throw new Error("claim statement does not match evidence assertion");
+    }
+    if (input.evidence.assertionClass !== `claim:${claim.kind}`) {
+      throw new Error(`claim kind requires assertion class claim:${claim.kind}`);
+    }
+    for (const stage of REQUIRED_CLAIM_STAGES[claim.kind]) {
+      if (!input.evidence.requiredStages.includes(stage)) {
+        throw new Error(`claim policy requires evidence stage: ${stage}`);
+      }
+    }
+    const hashedRefs = new Set(
+      Object.values(input.evidence.stages).flatMap((refs) =>
+        (refs ?? []).map((entry) => entry.ref),
+      ),
+    );
+    for (const ref of claim.evidenceRefs) {
+      if (!hashedRefs.has(ref)) {
+        throw new Error(`claim provenance ${ref} is not bound to hashed evidence`);
+      }
+    }
+    if (input.evidence.status === "PARTIAL" && !this.policy.allowPartial) {
+      throw new Error("delivery policy does not permit PARTIAL claims");
+    }
+    if (input.evidence.status !== "PROVEN" && input.evidence.status !== "PARTIAL") {
+      throw new Error(`status ${input.evidence.status} cannot enter accepted claim view`);
+    }
+
+    const evidence = this.#evidence.accept(input.evidence, now);
+    const entry: AcceptedClaimEntry = {
+      acceptedAt: now.toISOString(),
+      actorRole: input.actorRole,
+      claim,
+      evidence,
+    };
+    this.#entries.push(entry);
+    return entry;
+  }
+
+  remove(actorRole: ClaimPublisherRole, _key: string): never {
+    if (actorRole === "renderer") throw new Error("renderer cannot remove claims");
+    throw new Error("accepted claim ledger is append-only; claims cannot be removed");
+  }
+
+  current(key: string): AcceptedClaimEntry | undefined {
+    return this.#entries.findLast((entry) => entry.claim.key === key);
+  }
+
+  entries(): readonly AcceptedClaimEntry[] {
+    return structuredClone(this.#entries);
+  }
+
+  static replay(
+    entries: readonly AcceptedClaimEntry[],
+    policy: AcceptedClaimPolicy,
+  ): AcceptedClaimLedger {
+    const ledger = new AcceptedClaimLedger(policy);
+    for (const entry of entries) {
+      ledger.publish(
+        { actorRole: entry.actorRole, claim: entry.claim, evidence: entry.evidence },
+        new Date(entry.acceptedAt),
+      );
+    }
+    return ledger;
   }
 }
 
