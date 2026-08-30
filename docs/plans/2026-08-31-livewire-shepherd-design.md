@@ -206,7 +206,11 @@ Symbols are intervals, not identities. Silver membership and bars join through
 a stable `security_id`. Every mapping includes exchange, currency, effective
 interval, evidence, and a confidence/adjudication state. Reuse of the same
 ticker for a different security creates a new identity; it never splices price
-history.
+history. The internal identity is generated and linked to versioned external
+identifier intervals; it is never derived from ticker alone. CIK, composite or
+share-class FIGI, exchange, issuer history, and corporate-action evidence are
+used under a frozen priority/collision policy. Insufficient or conflicting
+identity evidence remains unresolved and cannot enter PIT Silver.
 
 ## 7. Claims and verification ledgers
 
@@ -564,10 +568,13 @@ The Shepherd program uses its own task IDs and does not reuse P3/P4 labels:
 | `LS-07 Periodic Agent Verification` | Cost-bounded research/adjudication teams, sampling, issue escalation, and resume behavior. |
 | `LS-08 Historical PIT Expansion` | Evidence-bounded backward reconstruction toward full historical S&P 500/NDX-100 daily Silver. |
 
-The first working path is `LS-01 -> LS-02 -> LS-03 -> LS-05 -> LS-06`.
-`LS-04` can proceed in parallel once the current universe is verified.
-`LS-07` is added as soon as real unresolved work exists. `LS-08` is a rolling
-coverage expansion, not a reason to delay useful current-member operation.
+The first working path is `LS-01 -> LS-02 source/identity foundations`, then the
+minimum `LS-07` source-conflict team, followed by `LS-02` reconciliation,
+`LS-03 -> LS-05 -> LS-06`. This puts research/adjudication in place before the
+first real Wikipedia-versus-preset disagreement instead of pretending that
+reconciliation is purely deterministic. `LS-04` can proceed in parallel once
+the current universe is verified. `LS-08` is a rolling coverage expansion, not
+a reason to delay useful current-member operation.
 
 ## 20. Working-system completion gates
 
