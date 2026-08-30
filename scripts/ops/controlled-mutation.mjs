@@ -30,9 +30,10 @@ const LEGACY_HASHES = {
 // fingerprint. Production preflight refuses until that independent trust root
 // exists; a package cannot establish trust by signing itself with a bundled key.
 const TRUSTED_PROMOTION_PUBLIC_KEY_SHA256 = "UNCOMMISSIONED";
-const ARTIFACT_KEYS = [
+export const CONTROLLED_MUTATION_ARTIFACT_KEYS = [
   "activeConfig",
   "candidateConfig",
+  "promotionInput",
   "authorityManifest",
   "publicKey",
   "wrapper",
@@ -56,6 +57,7 @@ export function createControlledMutationLayout(home = "/Users/moremeds", uid = 5
     promotionRoot,
     activeConfig: join(opsRoot, "config", "opsd.json"),
     candidateConfig: join(promotionRoot, "opsd.approve.json"),
+    promotionInput: join(promotionRoot, "promotion-input.json"),
     authorityManifest: join(promotionRoot, "authority-manifest.json"),
     publicKey: join(promotionRoot, "authority-manifest.pub.pem"),
     promotionPackage: join(promotionRoot, "promotion-package.json"),
@@ -87,8 +89,16 @@ export async function runControlledMutation(command, options = {}) {
   }
   const layout = options.layout ?? createControlledMutationLayout();
   const runner = options.runner ?? productionLaunchctlRunner();
+  const validateCandidate = options.validateCandidate ?? productionCandidateValidator();
   const now = options.now ?? (() => new Date());
-  const context = { layout, runner, now, crashAfterStep: options.crashAfterStep, step: 0 };
+  const context = {
+    layout,
+    runner,
+    validateCandidate,
+    now,
+    crashAfterStep: options.crashAfterStep,
+    step: 0,
+  };
   const packageState = await validatePreflight(context, command);
   if (command === "preflight") return { state: "ready", promotionId: PROMOTION_ID };
   if (command === "handoff") return await handoff(context, packageState);
@@ -103,6 +113,13 @@ async function validatePreflight(context, command) {
       typeof envelope.signature !== "string") {
     throw new Error("invalid promotion package");
   }
+  const payloadKeys = [
+    "version", "promotionId", "issuedAt", "expiresAt",
+    "promotionInputSha256", "release", "rollbackRef", "artifacts",
+  ].sort();
+  if (JSON.stringify(Object.keys(envelope.payload).sort()) !== JSON.stringify(payloadKeys)) {
+    throw new Error("promotion package payload shape is not exact");
+  }
   const issuedAt = Date.parse(envelope.payload.issuedAt);
   const expiresAt = Date.parse(envelope.payload.expiresAt);
   const current = now().getTime();
@@ -112,13 +129,27 @@ async function validatePreflight(context, command) {
   if (issuedAt > current) throw new Error("promotion package is future-dated");
   if (expiresAt <= current) throw new Error("promotion package is expired");
 
-  const expectedPaths = Object.fromEntries(ARTIFACT_KEYS.map((key) => [key, layout[key]]));
+  const promotion = loadCanonicalPromotionInput(layout.promotionInput);
+  if (envelope.payload.promotionInputSha256 !== promotion.inputSha256 ||
+      canonicalJson(envelope.payload.release) !== canonicalJson(promotion.release) ||
+      envelope.payload.rollbackRef !== promotion.rollbackRef ||
+      envelope.payload.issuedAt !== promotion.issuedAt ||
+      envelope.payload.expiresAt !== promotion.expiresAt) {
+    throw new Error("promotion package does not match the canonical promotion input");
+  }
+  const expectedPaths = Object.fromEntries(CONTROLLED_MUTATION_ARTIFACT_KEYS.map((key) => [
+    key,
+    key === "opsdBinary"
+      ? join(promotion.release.dir, "plugins", "ops-agent", "lib", "bin", "opsd.js")
+      : layout[key],
+  ]));
   const artifacts = envelope.payload.artifacts;
   if (artifacts === null || typeof artifacts !== "object" ||
-      JSON.stringify(Object.keys(artifacts).sort()) !== JSON.stringify([...ARTIFACT_KEYS].sort())) {
+      JSON.stringify(Object.keys(artifacts).sort()) !==
+        JSON.stringify([...CONTROLLED_MUTATION_ARTIFACT_KEYS].sort())) {
     throw new Error("promotion artifact set is not exact");
   }
-  for (const key of ARTIFACT_KEYS) {
+  for (const key of CONTROLLED_MUTATION_ARTIFACT_KEYS) {
     const expectedPath = expectedPaths[key];
     const artifact = artifacts[key];
     if (artifact?.path !== expectedPath) throw new Error(`arbitrary artifact path refused: ${key}`);
@@ -157,14 +188,30 @@ async function validatePreflight(context, command) {
     throw new Error("promotion package signature is invalid");
   }
   const candidate = JSON.parse(readFileSync(layout.candidateConfig, "utf8"));
-  if (candidate.mode !== "approve" || typeof candidate.promotionBundleDir !== "string") {
+  const expectedBundle = join(
+    promotion.release.dir,
+    "ops",
+    "promotions",
+    PROMOTION_ID,
+  );
+  if (candidate.mode !== "approve" || candidate.releaseDir !== promotion.release.dir ||
+      candidate.promotionBundleDir !== expectedBundle ||
+      candidate.authorityManifestPath !== layout.authorityManifest ||
+      candidate.trustedKeyPath !== layout.publicKey) {
     throw new Error("candidate config is not strict approve mode");
   }
   const authority = JSON.parse(readFileSync(layout.authorityManifest, "utf8"));
   if (!Array.isArray(authority.entries) || authority.entries.length !== 1 ||
-      authority.entries[0]?.sopId !== "trading-stack-container-reconcile") {
+      authority.entries[0]?.sopId !== "trading-stack-container-reconcile" ||
+      authority.promotion?.promotionId !== PROMOTION_ID ||
+      authority.promotion?.inputSha256 !== promotion.inputSha256) {
     throw new Error("authority manifest does not grant the exact promotion SOP");
   }
+  await context.validateCandidate({
+    executable: expectedPaths.opsdBinary,
+    configPath: layout.candidateConfig,
+    releaseDir: promotion.release.dir,
+  });
   const relevant = await relevantLabels(context);
   const extras = relevant.filter((label) =>
     label !== OPSD_LABEL && label !== LEGACY_RUNTIME_LABEL && label !== LEGACY_AFTER_DATALAKE_LABEL);
@@ -176,7 +223,7 @@ async function validatePreflight(context, command) {
     const active = JSON.parse(readFileSync(layout.activeConfig, "utf8"));
     if (active.mode !== "observe") throw new Error("preflight requires active observe config");
   }
-  return { envelope, artifacts };
+  return { envelope, artifacts, promotion };
 }
 
 async function handoff(context, packageState) {
@@ -254,7 +301,7 @@ function ensureBackup(layout, packageState) {
   }
   mkdirPrivate(layout.backupRoot);
   const files = {};
-  for (const key of ARTIFACT_KEYS) {
+  for (const key of CONTROLLED_MUTATION_ARTIFACT_KEYS) {
     const source = layout[key];
     const target = join(layout.backupRoot, `${key}.bin`);
     copyFileSync(source, target, constants.COPYFILE_EXCL);
@@ -280,7 +327,7 @@ function validateBackup(layout, packageState) {
   assertRegularOwnerOnly(layout.backupManifest, layout.uid, 0o600, "backup manifest");
   const backup = JSON.parse(readFileSync(layout.backupManifest, "utf8"));
   if (backup.version !== 1) throw new Error("backup manifest version mismatch");
-  for (const key of ARTIFACT_KEYS) {
+  for (const key of CONTROLLED_MUTATION_ARTIFACT_KEYS) {
     const row = backup.files?.[key];
     const expectedPath = join(layout.backupRoot, `${key}.bin`);
     if (row?.path !== expectedPath || row.sha256 !== sha256(expectedPath)) {
@@ -424,6 +471,18 @@ function sha256(path) {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+function loadCanonicalPromotionInput(path) {
+  const value = JSON.parse(readFileSync(path, "utf8"));
+  if (value?.version !== 1 || value.promotionId !== PROMOTION_ID ||
+      typeof value.inputSha256 !== "string") {
+    throw new Error("canonical promotion input is invalid");
+  }
+  const { inputSha256, ...unsigned } = value;
+  const actual = createHash("sha256").update(canonicalJson(unsigned)).digest("hex");
+  if (inputSha256 !== actual) throw new Error("promotion input hash mismatch");
+  return value;
+}
+
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -473,6 +532,46 @@ function productionLaunchctlRunner() {
         }));
       });
     },
+  };
+}
+
+function productionCandidateValidator() {
+  return async ({ executable, configPath, releaseDir }) => {
+    const { spawn } = await import("node:child_process");
+    await new Promise((resolvePromise, rejectPromise) => {
+      const child = spawn(process.execPath, [
+        executable,
+        "--check-config",
+        configPath,
+        "--release",
+        releaseDir,
+      ], {
+        shell: false,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
+      });
+      let stderr = "";
+      let bytes = 0;
+      let settled = false;
+      const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
+      child.stderr.on("data", (chunk) => {
+        bytes += chunk.length;
+        if (bytes > 64_000) child.kill("SIGKILL");
+        else stderr += chunk.toString();
+      });
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (error === undefined) resolvePromise();
+        else rejectPromise(error);
+      };
+      child.once("error", (error) => finish(error));
+      child.once("close", (code) => {
+        if (code === 0 && bytes <= 64_000) finish();
+        else finish(new Error(`candidate opsd config check failed: ${code ?? 1}: ${stderr.slice(-4_000)}`));
+      });
+    });
   };
 }
 

@@ -298,6 +298,8 @@ Run the node test plus packaging tests. Expected: PASS.
 **Files:**
 - Create: `scripts/ops/export-promotion-input.mjs`
 - Create: `scripts/ops/export-promotion-input.test.mjs`
+- Create: `scripts/ops/promotion-package.mjs`
+- Create: `scripts/ops/promotion-package.test.mjs`
 - Modify: `scripts/ops/sign-authority-manifest.mjs`
 - Modify: `scripts/ops/sign-authority-manifest.test.mjs`
 - Modify: `scripts/ops/sign-approval.mjs`
@@ -306,7 +308,7 @@ Run the node test plus packaging tests. Expected: PASS.
 
 **Step 1: Write failing export/signing tests**
 
-Require one canonical promotion package containing release commit, bundle file hashes, compiled registered-probe inventory hash, component owner decision, executor identity, SOP digest, expiry, and rollback reference. Signing must reject a package whose release, probes, owner, SOP, or executor differs from the files it signs. Approval signing must bind the live incident id, SOP id/digest, exact promotion id, nonce, issue/expiry time, and one attempt.
+Require one canonical logical promotion input containing release commit, bundle file hashes, compiled registered-probe inventory hash, component owner decision, executor identity, SOP digest, expiry, and rollback reference. Require a separate host-exported deployment package that binds every staged artifact to that same logical input and is signed only on the registered operator host. Signing must reject a package whose release, probes, owner, SOP, executor, expiry, rollback reference, staged artifact set, or promotion-input hash differs. Approval signing must bind the live incident id, SOP id/digest, exact promotion id, nonce, issue/expiry time, and one attempt.
 
 **Step 2: Verify RED**
 
@@ -314,7 +316,7 @@ Run the three node test files. Expected: FAIL because no canonical promotion exp
 
 **Step 3: Implement minimal canonical export**
 
-Keep the private key off-mini and outside Git. Export public material only. Output files use exclusive create, mode 0600, fsync, and refuse overwrite. Do not generate or copy a private key from deployment code.
+Keep the private key off-mini and outside Git. Export public material only. The mini exports exact staged artifact identities read-only; the registered operator host signs that inventory only after matching it to the canonical logical input; live preflight re-hashes every artifact and runs the candidate opsd config check before launchd changes. Output files use exclusive create, mode 0600, fsync, and refuse overwrite. Do not generate or copy a private key from deployment code.
 
 **Step 4: Verify GREEN**
 

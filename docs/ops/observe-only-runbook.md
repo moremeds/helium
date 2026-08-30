@@ -130,6 +130,20 @@ or attempt differs. Private keys remain on the commissioned operator signing
 host; deployment receives only the public key, signed manifest, signed approval
 and reviewed promotion material.
 
+Stage that canonical input at the fixed
+`~/.helium/ops/promotions/trading-stack-reconcile/promotion-input.json` path.
+On the mini, `promotion-package.mjs export` performs a read-only inventory of
+the exact candidate config, promotion input, signed authority, public key,
+wrapper/delegate, release opsd binary, current opsd plist and both legacy
+plists. Transfer only that unsigned inventory and the canonical promotion input
+to the registered operator workstation. There,
+`promotion-package.mjs sign` checks that the inventory is bound to the same
+release, expiry, rollback reference and promotion-input hash before signing it.
+Return only the signed package to the fixed `promotion-package.json` path. The
+live `preflight` re-hashes every staged artifact, verifies the independent
+signature, and runs the candidate release's own `--check-config` path before
+any launchd write.
+
 ## Rollback and uninstall
 
 Release rollback validates that the target contains both the ops-agent plugin

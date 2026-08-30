@@ -92,7 +92,12 @@ class FakeLaunchctl {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "helium-controlled-mutation-"));
   roots.push(root);
-  const layout = createControlledMutationLayout(root, process.getuid?.() ?? 0);
+  const baseLayout = createControlledMutationLayout(root, process.getuid?.() ?? 0);
+  const releaseDir = join(root, "release");
+  const layout = {
+    ...baseLayout,
+    opsdBinary: join(releaseDir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
+  };
   for (const dir of [layout.opsRoot, layout.launchdRoot, layout.promotionRoot]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
@@ -103,16 +108,38 @@ function fixture() {
     writeFileSync(path, value, { mode });
     chmodSync(path, mode);
   };
-  write(layout.activeConfig, JSON.stringify({ version: 1, mode: "observe", releaseDir: "/candidate/release" }), 0o600);
+  write(layout.activeConfig, JSON.stringify({ version: 1, mode: "observe", releaseDir }), 0o600);
   write(layout.candidateConfig, JSON.stringify({
     version: 1,
     mode: "approve",
-    releaseDir: "/candidate/release",
-    promotionBundleDir: "/candidate/release/ops/promotions/trading-stack-reconcile",
+    releaseDir,
+    promotionBundleDir: join(releaseDir, "ops", "promotions", "trading-stack-reconcile"),
+    authorityManifestPath: layout.authorityManifest,
+    trustedKeyPath: layout.publicKey,
   }), 0o600);
-  write(layout.authorityManifest, JSON.stringify({ entries: [{ sopId: "trading-stack-container-reconcile" }], signature: "fixture" }), 0o600);
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   write(layout.publicKey, publicKey.export({ type: "spki", format: "pem" }), 0o600);
+  const unsignedPromotion = {
+    version: 1,
+    promotionId: "trading-stack-reconcile",
+    issuedAt: new Date(NOW.getTime() - 60_000).toISOString(),
+    expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+    release: { dir: releaseDir, commit: "fixture-commit" },
+    rollbackRef: "rollback://observe-config-and-two-legacy-plists",
+  };
+  const promotion = {
+    ...unsignedPromotion,
+    inputSha256: createHash("sha256").update(canonical(unsignedPromotion)).digest("hex"),
+  };
+  write(layout.promotionInput, JSON.stringify(promotion), 0o600);
+  write(layout.authorityManifest, JSON.stringify({
+    entries: [{ sopId: "trading-stack-container-reconcile" }],
+    promotion: {
+      promotionId: promotion.promotionId,
+      inputSha256: promotion.inputSha256,
+    },
+    signature: "fixture",
+  }), 0o600);
   write(layout.wrapper, "wrapper\n", 0o500);
   write(layout.delegate, "delegate\n", 0o500);
   write(layout.opsdBinary, "opsd\n", 0o500);
@@ -124,6 +151,7 @@ function fixture() {
   const artifactPaths = {
     activeConfig: layout.activeConfig,
     candidateConfig: layout.candidateConfig,
+    promotionInput: layout.promotionInput,
     authorityManifest: layout.authorityManifest,
     publicKey: layout.publicKey,
     wrapper: layout.wrapper,
@@ -142,8 +170,11 @@ function fixture() {
   const payload = {
     version: 1,
     promotionId: "trading-stack-reconcile",
-    issuedAt: new Date(NOW.getTime() - 60_000).toISOString(),
-    expiresAt: new Date(NOW.getTime() + 3_600_000).toISOString(),
+    issuedAt: promotion.issuedAt,
+    expiresAt: promotion.expiresAt,
+    promotionInputSha256: promotion.inputSha256,
+    release: promotion.release,
+    rollbackRef: promotion.rollbackRef,
     artifacts,
   };
   write(layout.promotionPackage, JSON.stringify({
@@ -151,11 +182,21 @@ function fixture() {
     signature: sign(null, Buffer.from(canonical(payload)), privateKey).toString("base64"),
   }), 0o600);
   const runner = new FakeLaunchctl(layout);
-  return { root, layout, runner, privateKey };
+  return { root, layout, runner, privateKey, promotion };
 }
 
 function options(f, overrides = {}) {
-  return { layout: f.layout, runner: f.runner, now: () => NOW, ...overrides };
+  return {
+    layout: f.layout,
+    runner: f.runner,
+    validateCandidate: async ({ executable, configPath, releaseDir }) => {
+      assert.equal(executable, f.layout.opsdBinary);
+      assert.equal(configPath, f.layout.candidateConfig);
+      assert.equal(releaseDir, f.promotion.release.dir);
+    },
+    now: () => NOW,
+    ...overrides,
+  };
 }
 
 test("exposes only preflight, handoff, and rollback", async () => {
@@ -209,6 +250,14 @@ test("preflight rejects future packages, extra controllers, and unsigned drift",
   await assert.rejects(
     runControlledMutation("preflight", options(drift)),
     /hash mismatch/,
+  );
+
+  const invalidCandidate = fixture();
+  await assert.rejects(
+    runControlledMutation("preflight", options(invalidCandidate, {
+      validateCandidate: async () => { throw new Error("candidate invalid"); },
+    })),
+    /candidate invalid/,
   );
 });
 
