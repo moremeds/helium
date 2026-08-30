@@ -1,7 +1,7 @@
 id: livewire-input-available
 kind: business
 probe:
-  probeId: livewire.input-source.v1
+  probeId: livewire.status-parser.v1
   args: {}
 expect:
   dimension: source-available

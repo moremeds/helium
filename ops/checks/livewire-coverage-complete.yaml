@@ -1,12 +1,12 @@
 id: livewire-coverage-complete
 kind: business
 probe:
-  probeId: livewire.coverage.v1
+  probeId: livewire.status-parser.v1
   args: {}
 expect:
   dimension: coverage
-  operator: eq
-  value: true
+  operator: gte
+  value: 1
 onUnavailable: unknown
 timeoutMs: 120000
 owner: ops

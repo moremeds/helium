@@ -1,7 +1,7 @@
 id: colima-transport-ready
 kind: business
 probe:
-  probeId: colima.transport.v1
+  probeId: colima.guest-runtime.v1
   args: {}
 expect:
   dimension: readiness

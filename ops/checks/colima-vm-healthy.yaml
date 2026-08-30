@@ -1,7 +1,7 @@
 id: colima-vm-healthy
 kind: business
 probe:
-  probeId: colima.vm-status.v1
+  probeId: colima.vm-state.v1
   args: {}
 expect:
   dimension: readiness
