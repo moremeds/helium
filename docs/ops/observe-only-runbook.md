@@ -124,8 +124,13 @@ non-`opsd` ownership, a stale SOP digest, or an executor/wrapper mismatch. Its
 `0600` output binds the exact release, all promotion files, registered probes,
 owner decision, executor, one-attempt SOP, expiry, and rollback reference.
 
-`sign-authority-manifest.mjs --promotion-input ...` signs the SOP grant together
-with that promotion id and canonical input hash. `sign-approval.mjs` requires
+`sign-authority-manifest.mjs --promotion-input ... --release-checkout ...
+--executor-source ...` signs the SOP grant together with that promotion id and
+canonical input hash. The checkout and source are the operator workstation's
+clean local bytes for the Mini-bound release commit and executor identity; the
+signed manifest still names the Mini production path and UID. This separation
+lets the signer independently verify code without pretending the Mini's
+absolute paths exist on the operator workstation. `sign-approval.mjs` requires
 the same input and refuses any approval whose incident/SOP/digest/promotion/hash
 or attempt differs. Private keys remain on the commissioned operator signing
 host; deployment receives only the public key, signed manifest, signed approval

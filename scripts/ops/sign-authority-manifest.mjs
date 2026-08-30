@@ -2,7 +2,7 @@
 /** Sign exact above-observe SOP grants on an operator workstation. */
 import { createHash, createPrivateKey, sign } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { constants, closeSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { constants, closeSync, lstatSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -32,8 +32,18 @@ const flags = new Set([
   "--private-key",
   "--output",
   "--promotion-input",
+  "--release-checkout",
+  "--executor-source",
 ]);
-const requiredFlags = new Set([...flags].filter((flag) => flag !== "--promotion-input"));
+const requiredFlags = new Set([
+  "--sops-dir",
+  "--components-dir",
+  "--checks-dir",
+  "--executors-dir",
+  "--registered-probes",
+  "--private-key",
+  "--output",
+]);
 
 function parseArgs(argv) {
   const values = new Map();
@@ -48,6 +58,11 @@ function parseArgs(argv) {
   for (const flag of requiredFlags) {
     if (!values.has(flag)) throw new Error(`sign-authority-manifest requires ${flag}`);
   }
+  const promotionFlags = ["--promotion-input", "--release-checkout", "--executor-source"];
+  const promotionCount = promotionFlags.filter((flag) => values.has(flag)).length;
+  if (promotionCount !== 0 && promotionCount !== promotionFlags.length) {
+    throw new Error("promotion signing requires --promotion-input, --release-checkout, and --executor-source together");
+  }
   return {
     sopsDir: values.get("--sops-dir"),
     componentsDir: values.get("--components-dir"),
@@ -57,6 +72,8 @@ function parseArgs(argv) {
     privateKey: values.get("--private-key"),
     output: values.get("--output"),
     promotionInput: values.get("--promotion-input"),
+    releaseCheckout: values.get("--release-checkout"),
+    executorSource: values.get("--executor-source"),
   };
 }
 
@@ -102,7 +119,7 @@ function loadSop(path) {
   return value;
 }
 
-function assertCertifiable(sop, components, checks, scripts) {
+function assertCertifiable(sop, components, checks, scripts, executorSource = undefined) {
   const component = components.get(sop.componentId);
   if (component === undefined) {
     throw new Error(`SOP ${sop.id} names unknown component: ${sop.componentId}`);
@@ -123,9 +140,23 @@ function assertCertifiable(sop, components, checks, scripts) {
       script.timeoutMs < sop.action.timeoutMs) {
     throw new Error(`SOP ${sop.id} action does not match its registered executor`);
   }
-  const identity = scripts.verifyIdentity(script);
-  if (!identity.ok) {
-    throw new Error(`SOP ${sop.id} executor identity is not certified: ${identity.reason}`);
+  if (executorSource === undefined) {
+    const identity = scripts.verifyIdentity(script);
+    if (!identity.ok) {
+      throw new Error(`SOP ${sop.id} executor identity is not certified: ${identity.reason}`);
+    }
+  } else {
+    const sourceStat = lstatSync(executorSource);
+    if (sourceStat.isSymbolicLink() || !sourceStat.isFile()) {
+      throw new Error(`SOP ${sop.id} executor source must be a regular non-symlink file`);
+    }
+    if ((sourceStat.mode & 0o022) !== 0) {
+      throw new Error(`SOP ${sop.id} executor source is group- or world-writable`);
+    }
+    const sourceHash = createHash("sha256").update(readFileSync(executorSource)).digest("hex");
+    if (script.identity.kind !== "sha256" || script.identity.value !== sourceHash) {
+      throw new Error(`SOP ${sop.id} executor source differs from production identity`);
+    }
   }
 }
 
@@ -165,7 +196,7 @@ export async function runManifestSigner(argv, testOptions = undefined) {
     .map((name) => SopDefinitionSchema.parse(loadSop(join(parsed.sopsDir, name))))
     .filter((sop) => sop.authority === "approve" || sop.authority === "auto")
     .map((sop) => {
-      assertCertifiable(sop, components, checks, scripts);
+      assertCertifiable(sop, components, checks, scripts, parsed.executorSource);
       return {
         sopId: sop.id,
         version: sop.version,
@@ -219,8 +250,8 @@ function validatePromotionInput(
   const actualInputHash = createHash("sha256").update(canonicalJson(unsigned)).digest("hex");
   if (inputSha256 !== actualInputHash) throw new Error("promotion input hash mismatch");
   const actualCommit = resolveReleaseCommit === undefined
-    ? execFileSync("git", ["-C", value.release?.dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
-    : resolveReleaseCommit(value.release?.dir);
+    ? execFileSync("git", ["-C", parsed.releaseCheckout, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    : resolveReleaseCommit(parsed.releaseCheckout);
   if (actualCommit !== value.release?.commit) throw new Error("promotion release differs from signing checkout");
   const registeredBytes = readFileSync(parsed.registeredProbes);
   if (value.registeredProbes?.sha256 !== createHash("sha256").update(registeredBytes).digest("hex") ||
