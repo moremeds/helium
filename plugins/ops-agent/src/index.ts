@@ -54,15 +54,22 @@ export { OpsControlClient, OpsControlServer } from "./ipc.js";
 export {
   ApprovalLedger,
   FileOperatorEnvelopeStore,
+  FileSuggestionDecisionStore,
   OperatorEnvelopeVerifier,
   SignedApprovalEnvelopeSchema,
   SignedInterventionEnvelopeSchema,
   approvalSigningPayload,
   interventionSigningPayload,
+  suggestionDecisionSigningPayload,
+  SignedSuggestionDecisionEnvelopeSchema,
   type AcceptedIntervention,
+  type AcceptedSuggestionDecision,
   type AcceptedApproval,
   type SignedApprovalEnvelope,
   type SignedInterventionEnvelope,
+  type SignedSuggestionDecisionEnvelope,
+  type SuggestionDecisionRecord,
+  type SuggestionDecisionStorePort,
   type OperatorEnvelopePersistence,
 } from "./approval.js";
 export {

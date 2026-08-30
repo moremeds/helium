@@ -35,6 +35,7 @@ import { z } from "zod";
 import {
   ApprovalLedger,
   FileOperatorEnvelopeStore,
+  FileSuggestionDecisionStore,
   OperatorEnvelopeVerifier,
 } from "../approval.js";
 import { DurableOpsAnalysisClient } from "../analysis-client.js";
@@ -261,11 +262,11 @@ export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
   observationTargetsPath: AbsolutePathSchema.optional(),
   intervalMs: z.number().int().positive().max(86_400_000),
 }).strict().superRefine((config, ctx) => {
-  if (config.mode === "approve" && config.promotionBundleDir === undefined) {
+  if (config.mode !== "observe" && config.promotionBundleDir === undefined) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["promotionBundleDir"],
-      message: "approve mode requires an explicit promotion bundle",
+      message: `${config.mode} mode requires an explicit promotion bundle`,
     });
   }
 });
@@ -359,9 +360,10 @@ interface OpsCompositionOverrides {
 }
 
 /**
- * Concrete provider-free composition used by the launchd binary. Approve mode
- * is admitted only through a separately signed, identity-checked promotion
- * bundle; observe and suggest cannot reach a real executor.
+ * Concrete provider-free composition used by the launchd binary. Suggest and
+ * approve modes are admitted only through a separately signed,
+ * identity-checked promotion bundle; observe and suggest cannot reach a real
+ * executor.
  */
 export function composeOpsDaemon(
   config: OpsdRuntimeConfig,
@@ -425,6 +427,7 @@ export function composeOpsDaemon(
     socketPath: parsed.socketPath,
     approvals,
     interventions,
+    suggestionDecisions: new FileSuggestionDecisionStore(parsed.stateDir),
     store,
     now,
   });
@@ -578,7 +581,7 @@ function loadConfiguredDocuments(
 }
 
 function activeBundleBase(config: OpsdRuntimeConfig): string {
-  return config.mode === "approve"
+  return config.mode !== "observe"
     ? config.promotionBundleDir as string
     : config.releaseDir;
 }
@@ -588,9 +591,10 @@ function assertRuntimeAuthority(
   loader: OpsBundleLoader,
   scripts: ScriptRegistry,
 ): { promotionId: string; inputSha256: string } | undefined {
-  if (config.mode !== "approve") return undefined;
+  if (config.mode === "observe") return undefined;
+  const mode = config.mode;
   const sops = loader.registry.sops();
-  if (sops.length === 0) throw new Error("approve promotion bundle contains no SOP");
+  if (sops.length === 0) throw new Error(`${mode} promotion bundle contains no SOP`);
   const manifest = z.object({
     entries: z.array(z.object({
       sopId: z.string(),
@@ -610,16 +614,16 @@ function assertRuntimeAuthority(
     authority: definition.authority,
   }));
   if (JSON.stringify(manifest.entries) !== JSON.stringify(expectedEntries)) {
-    throw new Error("approve authority manifest does not exactly match the promotion SOP set");
+    throw new Error(`${mode} authority manifest does not exactly match the promotion SOP set`);
   }
   for (const loaded of sops) {
     if (loaded.definition.authority !== "approve" || loaded.authority !== "approve" ||
         loaded.authorityManifestEntry === undefined) {
-      throw new Error(`approve SOP lacks an exact signed authority grant: ${loaded.definition.id}`);
+      throw new Error(`${mode} SOP lacks an exact signed authority grant: ${loaded.definition.id}`);
     }
     if (!loaded.certified) {
       throw new Error(
-        `approve SOP is not certified: ${loaded.definition.id}: ${loaded.certificationReasons.join(", ")}`,
+        `${mode} SOP is not certified: ${loaded.definition.id}: ${loaded.certificationReasons.join(", ")}`,
       );
     }
     const script = scripts.get(loaded.definition.action.executorId);
@@ -628,14 +632,14 @@ function assertRuntimeAuthority(
         script.identity.value !== loaded.definition.action.executable.identity?.value ||
         script.argvSchema.id !== loaded.definition.action.argvSchemaId ||
         script.timeoutMs < loaded.definition.action.timeoutMs) {
-      throw new Error(`approve SOP action does not match its registered executor: ${loaded.definition.id}`);
+      throw new Error(`${mode} SOP action does not match its registered executor: ${loaded.definition.id}`);
     }
     const argv = compiledActionArgv(loaded.definition.id);
     scripts.validateArgv(script, argv);
     const identity = scripts.verifyIdentity(script);
     if (!identity.ok) {
       throw new Error(
-        `approve executor identity is not certified: ${loaded.definition.id}: ${identity.reason}`,
+        `${mode} executor identity is not certified: ${loaded.definition.id}: ${identity.reason}`,
       );
     }
   }

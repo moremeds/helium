@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseOpsctlArgs } from "./opsctl.js";
 
 describe("opsctl arguments", () => {
-  it.each(["approve", "record-intervention"] as const)(
+  it.each(["approve", "record-intervention", "record-suggestion-decision"] as const)(
     "accepts only an envelope submission for %s",
     (command) => {
       expect(

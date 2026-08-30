@@ -157,12 +157,12 @@ describe("opsd executable boundary", () => {
     expect(() => loadOpsdRuntimeConfig(path)).toThrow(/mode/);
   });
 
-  it("supports observe and suggest but requires an explicit bundle for approve", () => {
+  it("keeps observe independent but requires an explicit bundle above observe", () => {
     const root = mkdtempSync(join(tmpdir(), "helium-opsd-modes-"));
     roots.push(root);
     const config = {
       version: 1 as const,
-      mode: "suggest" as const,
+      mode: "observe" as const,
       releaseDir,
       componentsDir: "ops/components",
       dependenciesDir: "ops/dependencies",
@@ -183,9 +183,28 @@ describe("opsd executable boundary", () => {
     };
 
     expect(() => composeOpsDaemon(config)).not.toThrow();
+    expect(() => composeOpsDaemon({ ...config, mode: "suggest" as const })).toThrow(
+      /suggest.*promotion bundle/i,
+    );
     expect(() => composeOpsDaemon({ ...config, mode: "approve" as const })).toThrow(
       /approve.*promotion bundle/i,
     );
+  });
+
+  it("loads the exact signed promotion bundle in suggest mode", () => {
+    const valid = approveFixture();
+    const suggest = { ...valid.config, mode: "suggest" as const };
+    expect(() => validateOpsdRelease(suggest)).not.toThrow();
+    expect(() => composeOpsDaemon(suggest)).not.toThrow();
+
+    const unsigned = approveFixture();
+    const manifest = JSON.parse(readFileSync(unsigned.authorityManifestPath, "utf8"));
+    writeFileSync(unsigned.authorityManifestPath, JSON.stringify({
+      ...manifest,
+      signature: Buffer.alloc(64).toString("base64"),
+    }));
+    expect(() => composeOpsDaemon({ ...unsigned.config, mode: "suggest" as const }))
+      .toThrow(/exact signed authority grant/i);
   });
 
   it("requires an exact signed, owned, identity-matched approve composition", () => {
