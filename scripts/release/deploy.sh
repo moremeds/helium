@@ -91,10 +91,7 @@ fi
 # own hazard -- this is the gate that keeps a bad file from ever getting there.
 # (3.7 AC#2 drill: a stray `dedup_ttl:` key crash-looped the daemon for 2m12s.)
 say "validating job files"
-if ! node -e '
-  const {loadJobs}=require(process.argv[1]+"/packages/core/lib/job.js");
-  const jobs=loadJobs(process.argv[1]+"/jobs");
-  console.log("  "+jobs.length+" job file(s) parse cleanly: "+jobs.map(j=>j.name).join(", "));' "$DEST"; then
+if ! node "$DEST/scripts/release/validate-jobs.mjs" "$DEST"; then
   echo "job validation FAILED — aborting before flip" >&2
   exit 75
 fi

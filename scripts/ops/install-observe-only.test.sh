@@ -165,6 +165,12 @@ if grep -Fq 'HELIUM_LIVE=1' "$repo/scripts/release/deploy.sh"; then
   exit 1
 fi
 node --check "$repo/scripts/release/codex-preflight.mjs"
+node --test "$repo/scripts/release/validate-jobs.test.mjs"
+grep -Fq 'scripts/release/validate-jobs.mjs' "$repo/scripts/release/deploy.sh"
+if grep -Fq 'packages/core/lib/job.js' "$repo/scripts/release/deploy.sh"; then
+  echo "FAIL: deploy still validates jobs through the removed core boundary"
+  exit 1
+fi
 
 echo "case 5b: review-only canary switch is exact and reversible"
 canary_plist="$tmp/com.helium.dsh.plist"
