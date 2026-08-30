@@ -132,6 +132,13 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
   writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   const raw = sop();
   const fixture = certificationFixture(root, raw, executable);
+  const remoteExecutable = "/Users/moremeds/.helium/ops/actions/fixture/fixture-executable";
+  raw.action.executable.path = remoteExecutable;
+  const executorPath = join(fixture.executors, "fixture.json");
+  const remoteExecutor = JSON.parse(readFileSync(executorPath, "utf8"));
+  remoteExecutor.path = remoteExecutable;
+  remoteExecutor.expectedOwnerUid = 501;
+  writeFileSync(executorPath, JSON.stringify(remoteExecutor));
   raw.digest = `sha256:${createHash("sha256").update(canonicalJson(
     Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")),
   )).digest("hex")}`;
@@ -195,6 +202,8 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
     "--private-key", key,
     "--output", output,
     "--promotion-input", promotionPath,
+    "--release-checkout", root,
+    "--executor-source", executable,
   ];
   await runManifestSigner(args, {
     signingHost,
@@ -215,11 +224,13 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
   promotion.componentOwner.owner = "external";
   const driftPath = join(root, "promotion-drift.json");
   writeFileSync(driftPath, JSON.stringify(promotion));
-  await assert.rejects(runManifestSigner([
-    ...args.slice(0, args.indexOf("--output")),
-    "--output", join(root, "drift-manifest.json"),
-    "--promotion-input", driftPath,
-  ], { signingHost, resolveReleaseCommit: () => "fixture-commit" }), /input hash mismatch|owner differs/);
+  const driftArgs = [...args];
+  driftArgs[driftArgs.indexOf("--output") + 1] = join(root, "drift-manifest.json");
+  driftArgs[driftArgs.indexOf("--promotion-input") + 1] = driftPath;
+  await assert.rejects(runManifestSigner(
+    driftArgs,
+    { signingHost, resolveReleaseCommit: () => "fixture-commit" },
+  ), /input hash mismatch|owner differs/);
 });
 
 test("refuses a registered mini, an exposed key, and a stale declared digest", async () => {
