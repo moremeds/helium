@@ -119,4 +119,3 @@ function agentTotals(team: TeamRunProjection, agentId: string): BudgetAmount {
 function caseTotals(state: TeamState): BudgetAmount {
   return sum(Object.values(state.teams).flatMap((team) => Object.values(team.budgetReservations)));
 }
-
