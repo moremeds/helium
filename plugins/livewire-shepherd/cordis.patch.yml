@@ -1,0 +1,7 @@
+# The service row is not added to a deployed profile until LS-01.4 supplies
+# validated runtime configuration and the daemon shell.
+- insert:
+    - id: livewire-shepherd
+      name: "dsh-plugin-livewire-shepherd"
+      config:
+        stateRoot: !!js process.env.HELIUM_LIVEWIRE_SHEPHERD_STATE_ROOT
