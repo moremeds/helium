@@ -1,6 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import {
   ProviderProcessExitedBeforeReceiptError,
+  spawnSupervisedProviderProcess,
   writeProviderProcessReceipt,
 } from "@helium/provider-sdk/process-receipt";
 import type { ClaudeEffort } from "./catalog.js";
@@ -107,12 +108,12 @@ export async function invokeClaude(
   }
 
   return await new Promise<ClaudeInvocationResult>((resolve) => {
-    const child = spawn("claude", args, {
+    const child = spawnSupervisedProviderProcess("claude", args, {
       cwd: input.cwd,
       env: input.env,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
     });
+    child.on("error", () => {});
     if (child.pid === undefined) {
       resolve({
         ok: false,
@@ -202,8 +203,8 @@ export async function invokeClaude(
       try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
       resolve(result);
     };
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     const timer = setTimeout(() => {
       terminal = "timeout";
       stopChild();

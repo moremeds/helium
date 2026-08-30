@@ -47,6 +47,21 @@ async function waitFor(path: string): Promise<void> {
 }
 
 describe("invokeClaude", () => {
+  it("returns a normalized provider error when the Claude executable is unavailable", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
+    const out = await invokeClaude({
+      model: "claude-sonnet-5",
+      effort: "high",
+      prompt: "NO BINARY",
+      cwd: workspace,
+      maxTurns: 2,
+      timeoutMs: 5_000,
+      allowedTools: [],
+      env: { PATH: mkdtempSync(join(tmpdir(), "helium-empty-path-")) },
+    });
+    expect(out).toMatchObject({ ok: false, classification: "error" });
+  });
+
   it("passes exact model and effort and retains the complete modelUsage map", async () => {
     const { dir, capture } = fakeClaude({
       type: "result",

@@ -63,7 +63,9 @@ class CodexExecutor implements Executor {
           ? "workspace-write"
           : "read-only",
       env: context.env,
-      allowedTools: context.allowedTools,
+      allowedTools: context.allowedTools.map((tool) =>
+        tool.startsWith("mcp__") ? tool : `mcp__helium__${tool}`,
+      ),
       mcpConfigPath: context.mcpConfigPath,
       signal,
     });

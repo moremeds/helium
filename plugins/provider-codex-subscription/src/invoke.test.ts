@@ -48,6 +48,21 @@ async function waitFor(path: string): Promise<void> {
 }
 
 describe("invokeCodex", () => {
+  it("returns a normalized provider error when the Codex executable is unavailable", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
+    const out = await invokeCodex({
+      model: "gpt-5.6-sol",
+      effort: "high",
+      prompt: "NO BINARY",
+      cwd: workspace,
+      timeoutMs: 5_000,
+      sandbox: "read-only",
+      env: { PATH: mkdtempSync(join(tmpdir(), "helium-empty-path-")) },
+      allowedTools: [],
+    });
+    expect(out).toMatchObject({ ok: false, classification: "error" });
+  });
+
   it("invokes the exact native model and reasoning effort in an owned workspace", async () => {
     const { dir, capture } = fakeCodex();
     const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));

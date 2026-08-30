@@ -107,4 +107,41 @@ describe("ProviderAvailability", () => {
     expect(availability.observe(result).changed).toBe(true);
     expect(capabilities.snapshot(new Date()).targets[0]?.available).toBe(false);
   });
+
+  it("uses provider initial availability only until durable refresh overrides it", () => {
+    const path = statePath();
+    const firstCatalog = catalog();
+    const first = new ProviderAvailability(firstCatalog, { statePath: path });
+    first.registerDomain("shared-session", [ExecutionTargetId("target-a")], {
+      state: "quota-exhausted",
+      retryAfter: "provider-hint",
+    });
+    expect(firstCatalog.snapshot(new Date()).targets[0]?.availability).toEqual({
+      state: "quota-exhausted",
+      retryAfter: "provider-hint",
+    });
+    first.publish("shared-session", { state: "available" });
+
+    const restartedCatalog = catalog();
+    const restarted = new ProviderAvailability(restartedCatalog, { statePath: path });
+    restarted.registerDomain("shared-session", [ExecutionTargetId("target-a")], {
+      state: "quota-exhausted",
+    });
+    expect(restartedCatalog.snapshot(new Date()).targets[0]?.availability).toEqual({
+      state: "available",
+    });
+  });
+
+  it("emits one change for a new state and none for its duplicate", () => {
+    const capabilities = catalog();
+    const changes: string[] = [];
+    const availability = new ProviderAvailability(capabilities, {
+      statePath: statePath(),
+      onChange: (snapshot) => changes.push(snapshot.version),
+    });
+    availability.registerDomain("shared-session", [ExecutionTargetId("target-a")]);
+    expect(availability.publish("shared-session", { state: "unavailable" }).changed).toBe(true);
+    expect(availability.publish("shared-session", { state: "unavailable" }).changed).toBe(false);
+    expect(changes).toHaveLength(1);
+  });
 });

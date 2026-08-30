@@ -153,6 +153,7 @@ export class DshTeamHost {
     work: WorkOrder,
     lease: ExecutionLease,
     signal: AbortSignal,
+    context?: { env?: Record<string, string>; mcpConfigPath?: string },
   ): Promise<AgentResult> {
     const executor = this.#registry.get(lease.targetId);
     if (executor === undefined) {
@@ -164,10 +165,10 @@ export class DshTeamHost {
         lease,
         leases: this.#leases,
         workspacesDir: this.#workspacesDir,
-        env: this.#env,
-        ...(this.#mcpConfigPath === undefined
+        env: context?.env ?? this.#env,
+        ...((context?.mcpConfigPath ?? this.#mcpConfigPath) === undefined
           ? {}
-          : { mcpConfigPath: this.#mcpConfigPath }),
+          : { mcpConfigPath: context?.mcpConfigPath ?? this.#mcpConfigPath }),
         signal,
       });
     }

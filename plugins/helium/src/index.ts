@@ -5,20 +5,20 @@
  * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
 import { JsonlWriter, type RunOutcome } from "@helium/core";
 import { buildTools, type JobSpec } from "@helium/v1-compat";
-import { buildChildEnv, runClaude, type ClaudeResult } from "./claude.js";
+import type { ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
 import { TriageRunner, type SeniorLane } from "./dispatch.js";
 import { readEnvFile } from "./envfile.js";
 import { HeliumRuntime } from "./runtime.js";
+import { ProviderRuntime } from "./provider-runtime.js";
 import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
@@ -96,33 +96,6 @@ export function seniorOutcome(
  * the child has reached quiescence (`runClaude()` resolves only after the
  * process group has closed).
  */
-function buildSeniorLane(cfg: Config, workspacesDir: string): SeniorLane {
-  return {
-    async dispatch(job, _ev, prompt) {
-      const env = buildChildEnv(cfg, { PATH: process.env.PATH ?? "" });
-      const workspace = join(workspacesDir, job.name, randomUUID());
-      mkdirSync(workspace, { recursive: true });
-      try {
-        return seniorOutcome(
-          await runClaude({
-            model: "claude-opus-5",
-            effort: "max",
-            prompt,
-            cwd: workspace,
-            maxTurns: job.maxTurns.senior,
-            timeoutMs: job.timeoutMs,
-            allowedTools: job.tools.map((t) => `mcp__helium__${t}`),
-            mcpConfigPath: writeMcpConfig(cfg, job, workspace),
-            env,
-          }),
-        );
-      } finally {
-        rmSync(workspace, { recursive: true, force: true });
-      }
-    },
-  };
-}
-
 /**
  * Writes the MCP stdio config for ONE senior attempt, into that attempt's own
  * workspace, derived from the job's declared contract.
@@ -144,7 +117,7 @@ function buildSeniorLane(cfg: Config, workspacesDir: string): SeniorLane {
  * Per-attempt rather than per-daemon because the file now varies by job, and
  * the attempt workspace is already created and removed around the child.
  */
-function writeMcpConfig(config: Config, job: JobSpec, dir: string): string {
+export function writeMcpConfig(config: Config, job: JobSpec, dir: string): string {
   const path = join(dir, "mcp.json");
   writeFileSync(
     path,
@@ -203,11 +176,19 @@ export function apply(ctx: Context, raw: Config): void {
     tools.filter((t) => !t.mutating),
   );
 
+  const providers = new ProviderRuntime(ctx, {
+    stateRoot: paths.state,
+    workspacesDir: paths.workspaces,
+    claudeTokenFile: cfg.claudeTokenFile,
+    envFile: cfg.envFile,
+    proxy: cfg.proxy,
+  });
+
   const runtime = new HeliumRuntime({
     config: cfg,
     engines: {
       triage: new TriageRunner(ctx),
-      senior: buildSeniorLane(cfg, paths.workspaces),
+      senior: providers.seniorLane((job, dir) => writeMcpConfig(cfg, job, dir)),
     },
     delivery: {
       deliver: (job, ev, result) => delivery.deliver(job, ev, result),
@@ -217,10 +198,13 @@ export function apply(ctx: Context, raw: Config): void {
       reconcileDeliveries: () => delivery.reconcileDeliveries(),
     },
   });
-  ctx.effect(() => {
+  ctx.effect(async () => {
+    await ctx.get("loader")?.await();
+    await providers.start();
     runtime.start();
-    return () => {
+    return async () => {
       runtime.stop();
+      await providers.dispose();
     };
   }, "helium.runtime()");
 

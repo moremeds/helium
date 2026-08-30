@@ -7,6 +7,7 @@ import {
   PROCESS_RECEIPT_FILE,
   ProviderProcessExitedBeforeReceiptError,
   reapOrphanProviderProcesses,
+  spawnSupervisedProviderProcess,
   writeProviderProcessReceipt,
 } from "../src/process-receipt.js";
 
@@ -73,5 +74,26 @@ describe("provider process receipts", () => {
       expect.objectContaining({ pid: child.pid, outcome: "identity-mismatch" }),
     ]);
     expect(() => process.kill(child.pid!, 0)).not.toThrow();
+  });
+
+  it("reaps the owned process group after its launcher execs the provider", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-process-reaper-"));
+    const workspace = join(root, "work", "exec-attempt");
+    const child = spawnSupervisedProviderProcess(
+      "/bin/sh",
+      ["-c", "/bin/sleep 0.1; exec /bin/sleep 100"],
+      { stdio: "ignore" },
+    );
+    if (child.pid === undefined) throw new Error("missing child pid");
+    children.add(child.pid);
+    writeProviderProcessReceipt({ workspace, pid: child.pid, provider: "fixture" });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    const outcomes = await reapOrphanProviderProcesses(root, { graceMs: 50 });
+    expect(outcomes).toEqual([
+      expect.objectContaining({ pid: child.pid, outcome: "reaped" }),
+    ]);
+    expect(existsSync(workspace)).toBe(false);
+    children.delete(child.pid);
   });
 });

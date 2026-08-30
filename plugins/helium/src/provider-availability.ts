@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -34,13 +34,19 @@ export class ProviderAvailability {
   readonly #targetDomains = new Map<string, string>();
   readonly #statePath: string;
   readonly #sync: (fd: number) => void;
+  readonly #onChange: (snapshot: ProviderAvailabilitySnapshot) => void;
 
   constructor(
     private readonly capabilities: CapabilityCatalog,
-    options: { statePath: string; sync?: (fd: number) => void },
+    options: {
+      statePath: string;
+      sync?: (fd: number) => void;
+      onChange?: (snapshot: ProviderAvailabilitySnapshot) => void;
+    },
   ) {
     this.#statePath = options.statePath;
     this.#sync = options.sync ?? fsyncSync;
+    this.#onChange = options.onChange ?? (() => {});
     if (existsSync(this.#statePath)) {
       const parsed = JSON.parse(readFileSync(this.#statePath, "utf8")) as {
         version?: unknown;
@@ -56,7 +62,11 @@ export class ProviderAvailability {
     }
   }
 
-  registerDomain(quotaDomain: string, targets: ExecutionTargetId[]): () => void {
+  registerDomain(
+    quotaDomain: string,
+    targets: ExecutionTargetId[],
+    initial: Availability = { state: "available" },
+  ): () => void {
     if (quotaDomain.trim() === "") throw new Error("quota domain must not be empty");
     if (this.#domains.has(quotaDomain)) {
       throw new Error(`duplicate quota domain: ${quotaDomain}`);
@@ -75,7 +85,7 @@ export class ProviderAvailability {
       }
     }
     this.#domains.set(quotaDomain, [...targets]);
-    const state = this.#states.get(quotaDomain) ?? { state: "available" as const };
+    const state = this.#states.get(quotaDomain) ?? AvailabilitySchema.parse(initial);
     this.#states.set(quotaDomain, state);
     for (const target of targets) {
       this.#targetDomains.set(String(target), quotaDomain);
@@ -110,7 +120,9 @@ export class ProviderAvailability {
       this.capabilities.setAvailability(target, availability);
     }
     this.#states.set(quotaDomain, availability);
-    return { changed: true, snapshot: this.snapshot() };
+    const snapshot = this.snapshot();
+    this.#onChange(snapshot);
+    return { changed: true, snapshot };
   }
 
   observe(result: AgentResult): {
@@ -150,7 +162,7 @@ export class ProviderAvailability {
       version: 1,
       states: Object.fromEntries([...states].sort(([a], [b]) => a.localeCompare(b))),
     })}\n`;
-    const temporary = `${this.#statePath}.${process.pid}.tmp`;
+    const temporary = `${this.#statePath}.${randomUUID()}.tmp`;
     const fd = openSync(temporary, "w", 0o600);
     try {
       writeFileSync(fd, body, "utf8");

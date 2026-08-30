@@ -40,7 +40,7 @@ function fixture() {
       },
     },
     now: () => now,
-    audit: () => {},
+    audit: async () => {},
   });
   const work = WorkOrderSchema.parse({
     id: "work-1",
@@ -80,9 +80,9 @@ describe("RoutingService", () => {
         } as never),
     ).toThrow(/audit sink/i);
   });
-  it("uses configured preference/fallback and issues the ordinary lease", () => {
+  it("uses configured preference/fallback and issues the ordinary lease", async () => {
     const { service, work } = fixture();
-    const routed = service.route({
+    const routed = await service.route({
       work,
       reservedCost: 1,
       leaseExpiresAt: "2026-08-30T10:05:00.000Z",
@@ -92,13 +92,13 @@ describe("RoutingService", () => {
     expect(routed.audit.mode).toBe("normal");
   });
 
-  it("pins an exact target, audits authority, and does not walk fallback", () => {
+  it("pins an exact target, audits authority, and does not walk fallback", async () => {
     const { catalog, service, work } = fixture();
     catalog.setAvailability(ExecutionTargetId("target-c"), {
       state: "quota-exhausted",
       retryAfter: "opaque-hint",
     });
-    const routed = service.route({
+    const routed = await service.route({
       work,
       exactTarget: override("target-c"),
       reservedCost: 1,
@@ -121,9 +121,9 @@ describe("RoutingService", () => {
     });
   });
 
-  it("rechecks static safety instead of using the override to bypass it", () => {
+  it("rechecks static safety instead of using the override to bypass it", async () => {
     const { service, work } = fixture();
-    const routed = service.route({
+    const routed = await service.route({
       work,
       exactTarget: override("target-a"),
       reservedCost: 1,
@@ -133,23 +133,52 @@ describe("RoutingService", () => {
     expect(routed.lease).toBeUndefined();
   });
 
-  it("fails closed on expired authority and budget expansion", () => {
+  it("fails closed on expired authority and budget expansion", async () => {
     const { service, work } = fixture();
-    expect(() =>
+    await expect(
       service.route({
         work,
         exactTarget: { ...override("target-b"), expiresAt: "2026-08-30T09:59:59Z" },
         reservedCost: 1,
         leaseExpiresAt: "2026-08-30T10:05:00.000Z",
       }),
-    ).toThrow(/expired/i);
-    expect(() =>
+    ).rejects.toThrow(/expired/i);
+    await expect(
       service.route({
         work,
         exactTarget: override("target-b"),
         reservedCost: 3,
         leaseExpiresAt: "2026-08-30T10:05:00.000Z",
       }),
-    ).toThrow(/cost/i);
+    ).rejects.toThrow(/cost/i);
+  });
+
+  it("does not issue a lease until the durable audit append succeeds", async () => {
+    const { catalog, leases, work } = fixture();
+    const service = new RoutingService({
+      catalog,
+      leases,
+      policy: {
+        policyVersion: "policy-v1",
+        roles: {
+          analyst: {
+            preferred: ExecutionTargetId("target-b"),
+            fallback: [],
+          },
+        },
+      },
+      now: () => now,
+      audit: async () => {
+        throw new Error("durable append failed");
+      },
+    });
+    await expect(
+      service.route({
+        work,
+        reservedCost: 1,
+        leaseExpiresAt: "2026-08-30T10:05:00.000Z",
+      }),
+    ).rejects.toThrow(/durable append failed/i);
+    expect(leases.outstanding()).toEqual([]);
   });
 });

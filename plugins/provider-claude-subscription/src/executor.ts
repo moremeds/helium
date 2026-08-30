@@ -58,7 +58,9 @@ class ClaudeExecutor implements Executor {
       cwd: context.workspace,
       maxTurns: 16,
       timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
-      allowedTools: context.allowedTools,
+      allowedTools: context.allowedTools.map((tool) =>
+        tool.startsWith("mcp__") ? tool : `mcp__helium__${tool}`,
+      ),
       mcpConfigPath: context.mcpConfigPath,
       env: context.env,
       signal,

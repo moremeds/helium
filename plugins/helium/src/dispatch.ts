@@ -122,7 +122,7 @@ export class TriageRunner implements TriageLane {
 
   async dispatch(
     job: JobSpec,
-    ev: TriggerEvent,
+    _ev: TriggerEvent,
     prompt: string,
   ): Promise<TriageOutcome> {
     await this.ctx.get("loader")?.await();

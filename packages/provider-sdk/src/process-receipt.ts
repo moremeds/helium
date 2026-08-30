@@ -1,4 +1,9 @@
-import { execFileSync } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcess,
+  type SpawnOptions,
+} from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -44,21 +49,60 @@ export interface ReapOutcome {
 }
 
 const PS = existsSync("/bin/ps") ? "/bin/ps" : "/usr/bin/ps";
+const SUPERVISOR_SOURCE = String.raw`
+const { spawn } = await import("node:child_process");
+const [command, ...args] = process.argv.slice(1);
+if (command === undefined) process.exit(127);
+process.on("SIGTERM", () => {});
+process.on("SIGINT", () => {});
+const child = spawn(command, args, {
+  cwd: process.cwd(),
+  env: process.env,
+  stdio: "inherit",
+});
+child.once("error", (error) => {
+  process.stderr.write("provider spawn failed: " + error.message + "\\n");
+  process.exitCode = 127;
+});
+child.once("close", (code, signal) => {
+  process.exitCode = signal === null ? (code ?? 1) : 1;
+});
+`;
+
+/** Spawn a stable process-group leader that never execs the provider binary. */
+export function spawnSupervisedProviderProcess(
+  command: string,
+  args: string[],
+  options: Pick<SpawnOptions, "cwd" | "env" | "stdio">,
+): ChildProcess {
+  return spawn(
+    process.execPath,
+    ["--input-type=module", "--eval", SUPERVISOR_SOURCE, "--", command, ...args],
+    {
+    ...options,
+    detached: true,
+    },
+  );
+}
 
 function identityHash(pid: number): string | undefined {
   let output: string;
+  let status: string;
   try {
     output = execFileSync(
       PS,
-      ["-p", String(pid), "-o", "stat=", "-o", "lstart=", "-o", "command="],
+      ["-p", String(pid), "-o", "lstart=", "-o", "command="],
       { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     ).trim();
+    status = execFileSync(PS, ["-p", String(pid), "-o", "stat="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
   } catch {
     return undefined;
   }
   if (output === "") return undefined;
-  const status = /^\s*(\S+)/.exec(output)?.[1];
-  if (status?.startsWith("Z")) return undefined;
+  if (status.startsWith("Z")) return undefined;
   return `sha256:${createHash("sha256").update(output).digest("hex")}`;
 }
 

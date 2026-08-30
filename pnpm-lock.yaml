@@ -276,6 +276,12 @@ importers:
       '@helium/provider-claude-subscription':
         specifier: file:../provider-claude-subscription
         version: link:../provider-claude-subscription
+      '@helium/provider-codex-subscription':
+        specifier: file:../provider-codex-subscription
+        version: link:../provider-codex-subscription
+      '@helium/provider-deepseek-dsh':
+        specifier: file:../provider-deepseek-dsh
+        version: link:../provider-deepseek-dsh
       '@helium/provider-sdk':
         specifier: file:../../packages/provider-sdk
         version: link:../../packages/provider-sdk

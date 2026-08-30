@@ -1,7 +1,8 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import {
   ProviderProcessExitedBeforeReceiptError,
+  spawnSupervisedProviderProcess,
   writeProviderProcessReceipt,
 } from "@helium/provider-sdk/process-receipt";
 import type { CodexEffort } from "./catalog.js";
@@ -245,12 +246,12 @@ export async function invokeCodex(input: {
   ];
 
   return await new Promise<CodexInvocationResult>((resolve) => {
-    const child = spawn("codex", args, {
+    const child = spawnSupervisedProviderProcess("codex", args, {
       cwd: input.cwd,
       env: input.env,
       stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
     });
+    child.on("error", () => {});
     if (child.pid === undefined) {
       resolve({
         ok: false,
@@ -318,8 +319,8 @@ export async function invokeCodex(input: {
       try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
       resolve(result);
     };
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     const timer = setTimeout(() => {
       terminal = "timeout";
       stopChild();

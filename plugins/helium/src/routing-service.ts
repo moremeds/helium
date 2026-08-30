@@ -36,14 +36,14 @@ export class RoutingService {
   readonly #leases: LeaseStore;
   readonly #policy: SelectionPolicy;
   readonly #now: () => Date;
-  readonly #audit: (record: RoutingAuditRecord) => void;
+  readonly #audit: (record: RoutingAuditRecord) => Promise<void>;
 
   constructor(input: {
     catalog: CapabilityCatalog;
     leases: LeaseStore;
     policy: SelectionPolicy;
     now?: () => Date;
-    audit: (record: RoutingAuditRecord) => void;
+    audit: (record: RoutingAuditRecord) => Promise<void>;
   }) {
     this.#catalog = input.catalog;
     this.#leases = input.leases;
@@ -55,12 +55,12 @@ export class RoutingService {
     this.#audit = input.audit;
   }
 
-  route(input: {
+  async route(input: {
     work: WorkOrder;
     exactTarget?: unknown;
     reservedCost: number;
     leaseExpiresAt: string;
-  }): RoutingResult {
+  }): Promise<RoutingResult> {
     const now = this.#now();
     if (!Number.isFinite(input.reservedCost) || input.reservedCost < 0) {
       throw new Error("reserved cost must be finite and non-negative");
@@ -118,7 +118,7 @@ export class RoutingService {
     };
     // Audit before lease issuance: a failed durable sink cannot leave an
     // authorized-but-unrecorded execution reservation behind.
-    this.#audit(audit);
+    await this.#audit(audit);
     if (decision.selected === undefined) return { decision, audit };
     const lease = this.#leases.issue({
       targetId: decision.selected,
