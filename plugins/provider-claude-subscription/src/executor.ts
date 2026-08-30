@@ -104,6 +104,18 @@ class ClaudeExecutor implements Executor {
   }
 }
 
+export function createClaudeExecutor(input: {
+  targetId: ExecutionTargetId;
+  native: ProviderNativeVariant;
+  invoke?: ClaudeInvoker;
+}): Executor {
+  return new ClaudeExecutor(
+    input.targetId,
+    input.native,
+    input.invoke ?? invokeClaude,
+  );
+}
+
 export function registerCertifiedClaudeTargets(input: {
   certification: EntitlementCertification;
   capabilityCatalog: Parameters<typeof registerCertifiedTargets>[0]["capabilityCatalog"];
@@ -122,6 +134,6 @@ export function registerCertifiedClaudeTargets(input: {
     executorRegistry: input.executorRegistry,
     conformanceFor: input.conformanceFor,
     createExecutor: (targetId, native) =>
-      new ClaudeExecutor(targetId, native, input.invoke ?? invokeClaude),
+      createClaudeExecutor({ targetId, native, invoke: input.invoke }),
   });
 }

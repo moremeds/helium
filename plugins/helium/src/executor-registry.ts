@@ -40,6 +40,7 @@ const RANK: Readonly<Record<string, number>> = Object.fromEntries(
  */
 export interface BoundarySubjectLike {
   readonly name: string;
+  readonly dialect?: "claude-cli" | "codex-cli";
   readonly declaredIsolationClass: IsolationClass;
   invoke(input: {
     prompt: string;
@@ -57,9 +58,11 @@ export interface BoundarySubjectLike {
 export function asBoundarySubject(
   executor: Executor,
   name: string,
+  dialect?: "claude-cli" | "codex-cli",
 ): BoundarySubjectLike {
   return {
     name,
+    ...(dialect === undefined ? {} : { dialect }),
     declaredIsolationClass: executor.isolationClass,
     async invoke(input) {
       const work: WorkOrder = {

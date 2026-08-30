@@ -131,6 +131,9 @@ const report = {
     allowedToolsCount: countFlag("--allowedTools"),
     mcpServers,
     mcpConfigError,
+    exposedTools: (flagValue("--allowedTools") ?? "")
+      .split(",")
+      .filter(Boolean),
     workspaceEntries,
     escape: { readOutside, writeOutside, wroteInsideWorkspace },
   },

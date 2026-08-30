@@ -33,6 +33,7 @@ describe("invokeCodex", () => {
       timeoutMs: 5_000,
       sandbox: "read-only",
       env: { PATH: dir },
+      allowedTools: [],
     });
     const argv = readFileSync(capture, "utf8").trim().split("\n");
     expect(argv).toEqual(
@@ -58,5 +59,110 @@ describe("invokeCodex", () => {
       effectiveEffort: "xhigh",
       usage: { inputTokens: 11, outputTokens: 3 },
     });
+  });
+
+  it("isolates settings and exposes only the declared MCP tools", async () => {
+    const { dir, capture } = fakeCodex();
+    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
+    const mcpConfigPath = join(workspace, "mcp.json");
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          helium: {
+            command: "/usr/bin/env",
+            args: ["node", "server.mjs"],
+            env: { HELIUM_SCOPE: "fixture" },
+          },
+        },
+      }),
+    );
+
+    await invokeCodex({
+      model: "gpt-5.6-sol",
+      effort: "high",
+      prompt: "BOUNDARY",
+      cwd: workspace,
+      timeoutMs: 5_000,
+      sandbox: "read-only",
+      env: { PATH: dir },
+      allowedTools: ["mcp__helium__thesis_read"],
+      mcpConfigPath,
+    });
+
+    const argv = readFileSync(capture, "utf8").trim().split("\n");
+    expect(argv).toEqual(
+      expect.arrayContaining([
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--strict-config",
+        "features.shell_tool=false",
+        "features.unified_exec=false",
+        "tools.web_search=false",
+        "tools.view_image=false",
+        "features.multi_agent=false",
+        "agents.enabled=false",
+        'mcp_servers.helium.command="/usr/bin/env"',
+        'mcp_servers.helium.args=["node","server.mjs"]',
+        'mcp_servers.helium.env={ HELIUM_SCOPE = "fixture" }',
+        'mcp_servers.helium.enabled_tools=["thesis_read"]',
+        "mcp_servers.helium.required=true",
+      ]),
+    );
+  });
+
+  it("keeps every configured MCP server disabled when the tool list is empty", async () => {
+    const { dir, capture } = fakeCodex();
+    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
+    const mcpConfigPath = join(workspace, "mcp.json");
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: {
+          helium: { command: "/usr/bin/env", args: ["node", "server.mjs"] },
+        },
+      }),
+    );
+
+    await invokeCodex({
+      model: "gpt-5.6-sol",
+      effort: "high",
+      prompt: "BOUNDARY",
+      cwd: workspace,
+      timeoutMs: 5_000,
+      sandbox: "read-only",
+      env: { PATH: dir },
+      allowedTools: [],
+      mcpConfigPath,
+    });
+
+    const argv = readFileSync(capture, "utf8").trim().split("\n");
+    expect(argv).toContain("mcp_servers.helium.enabled_tools=[]");
+  });
+
+  it("rejects a declared tool that is not addressed to a configured MCP server", async () => {
+    const { dir } = fakeCodex();
+    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
+    const mcpConfigPath = join(workspace, "mcp.json");
+    writeFileSync(
+      mcpConfigPath,
+      JSON.stringify({
+        mcpServers: { helium: { command: "/usr/bin/env" } },
+      }),
+    );
+
+    await expect(
+      invokeCodex({
+        model: "gpt-5.6-sol",
+        effort: "high",
+        prompt: "BOUNDARY",
+        cwd: workspace,
+        timeoutMs: 5_000,
+        sandbox: "read-only",
+        env: { PATH: dir },
+        allowedTools: ["mcp__other__undeclared"],
+        mcpConfigPath,
+      }),
+    ).rejects.toThrow(/configured MCP server/i);
   });
 });

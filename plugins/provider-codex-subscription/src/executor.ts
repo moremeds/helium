@@ -63,6 +63,8 @@ class CodexExecutor implements Executor {
           ? "workspace-write"
           : "read-only",
       env: context.env,
+      allowedTools: context.allowedTools,
+      mcpConfigPath: context.mcpConfigPath,
       signal,
     });
     const failureClass =
@@ -109,6 +111,18 @@ class CodexExecutor implements Executor {
   }
 }
 
+export function createCodexExecutor(input: {
+  targetId: ExecutionTargetId;
+  native: ProviderNativeVariant;
+  invoke?: CodexInvoker;
+}): Executor {
+  return new CodexExecutor(
+    input.targetId,
+    input.native,
+    input.invoke ?? invokeCodex,
+  );
+}
+
 export function registerCertifiedCodexTargets(input: {
   certification: EntitlementCertification;
   capabilityCatalog: Parameters<typeof registerCertifiedTargets>[0]["capabilityCatalog"];
@@ -127,6 +141,6 @@ export function registerCertifiedCodexTargets(input: {
     executorRegistry: input.executorRegistry,
     conformanceFor: input.conformanceFor,
     createExecutor: (targetId, native) =>
-      new CodexExecutor(targetId, native, input.invoke ?? invokeCodex),
+      createCodexExecutor({ targetId, native, invoke: input.invoke }),
   });
 }
