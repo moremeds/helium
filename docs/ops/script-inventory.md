@@ -73,7 +73,9 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 - Exact path: `/__HELIUM_UNCERTIFIED__/trading-stack-reconcile`; remains a non-deployable sentinel
 - Release or hash identity: unresolved until immutable wrapper installation; executor digest remains the zero sentinel
 - Wrapper source: `scripts/ops/actions/trading-stack-reconcile.mjs`
+- Wrapper installer: `scripts/ops/actions/install-action-wrapper.mjs`
 - Wrapper source identity: SHA-256 `15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074`
+- Planned immutable path: `$OPS_ROOT/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs`
 - Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh` owned by UID 501, non-group/world-writable, SHA-256 `3da35c87a76a90a55669c5e86db038e92fb21f6ff737526a0a1d6dc1c613da2e`
 - Deployment state: not deployed
 - Argv schema: `trading-stack-reconcile-argv-v1`; fixed `--scope containers --pull false`

@@ -113,6 +113,12 @@ describe("initial operations script inventory", () => {
       "- Wrapper source: `scripts/ops/actions/trading-stack-reconcile.mjs`",
     );
     expect(entry).toContain(
+      "- Wrapper installer: `scripts/ops/actions/install-action-wrapper.mjs`",
+    );
+    expect(entry).toContain(
+      "- Planned immutable path: `$OPS_ROOT/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs`",
+    );
+    expect(entry).toContain(
       "- Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh`",
     );
     expect(entry).toContain("- Deployment state: not deployed");
