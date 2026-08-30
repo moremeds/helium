@@ -303,12 +303,14 @@ describe("reduceShepherd", () => {
         attemptId: "attempt-1",
         leaseId: "lease-1",
         outcome: "completed",
+        nextState: "EVIDENCE_PENDING",
       },
     }) satisfies ShepherdEvent;
     const reduced = reduceShepherd([discovered(unit), lease, intent, outcome]);
     expect(reduced.workUnits[unit.workUnitId]?.activeLease).toBeUndefined();
     expect(reduced.workUnits[unit.workUnitId]?.attempts["attempt-1"]?.state)
       .toBe("completed");
+    expect(reduced.workUnits[unit.workUnitId]?.state).toBe("EVIDENCE_PENDING");
     expect(() => reduceShepherd([discovered(unit), lease, intent, outcome, outcome]))
       .toThrow(/duplicate event/i);
   });

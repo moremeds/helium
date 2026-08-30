@@ -28,23 +28,28 @@ export function openShepherdStore(
   root: string,
   options: ShepherdStoreOptions = {},
 ): ShepherdStore {
-  const eventStore = openEventStore(join(root, "events"), {
-    schema: ShepherdEventSchema,
-    ...(options.sync === undefined ? {} : { sync: options.sync }),
-  });
+  const openEvents = () => openEventStore(join(root, "events"), {
+      schema: ShepherdEventSchema,
+      ...(options.sync === undefined ? {} : { sync: options.sync }),
+    });
+  const initialEventStore = openEvents();
   const artifactRoot = join(root, "artifacts");
   const artifacts = new ContentAddressedArtifactStore(artifactRoot, options);
-  let projection = loadVerified(eventStore.replay(), artifacts);
+  let projection = loadVerified(initialEventStore.replay(), artifacts);
 
   return {
-    logPath: eventStore.logPath,
-    snapshotPath: eventStore.snapshotPath,
+    logPath: initialEventStore.logPath,
+    snapshotPath: initialEventStore.snapshotPath,
     artifactRoot,
     artifacts,
 
     append(event: ShepherdEvent): AppendedEvent {
       const parsed = ShepherdEventSchema.parse(event);
       verifyEventEvidence(parsed, artifacts);
+      // A Shepherd process may remain alive while another process appends.
+      // Reopen here so the sequence/hash anchor is read from disk inside the
+      // caller's cross-process coordination section, never from startup cache.
+      const eventStore = openEvents();
       const next = reduceShepherd([...eventStore.replay(), parsed]);
       const appended = eventStore.append(parsed);
       projection = next;
@@ -52,16 +57,16 @@ export function openShepherdStore(
     },
 
     events(): ShepherdEvent[] {
-      return eventStore.replay();
+      return openEvents().replay();
     },
 
     load(): ShepherdProjection {
-      projection = loadVerified(eventStore.replay(), artifacts);
+      projection = loadVerified(openEvents().replay(), artifacts);
       return projection;
     },
 
     snapshot(): SnapshotInfo {
-      return eventStore.snapshot();
+      return openEvents().snapshot();
     },
   };
 }
@@ -93,6 +98,7 @@ function evidenceFor(event: ShepherdEvent): HashedArtifactRef[] {
     case "claim/recorded":
     case "claim/verified":
     case "repair/verification-recorded":
+    case "coverage/recorded":
       return event.payload.evidence;
     case "attempt/outcome-recorded":
       return event.payload.evidence ?? [];

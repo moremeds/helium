@@ -74,6 +74,36 @@ describe("openShepherdStore", () => {
     expect(openShepherdStore(directory, { sync: noSync }).events()).toHaveLength(2);
   });
 
+  it("refreshes the on-disk sequence for a second long-lived store handle", () => {
+    const directory = root();
+    const first = openShepherdStore(directory, { sync: noSync });
+    const second = openShepherdStore(directory, { sync: noSync });
+    const work = unit();
+    first.append({
+      version: 1,
+      eventId: "discover-1",
+      at: now,
+      type: "work-unit/discovered",
+      payload: { unit: work },
+    });
+    second.append({
+      version: 1,
+      eventId: "wait-1",
+      at: now,
+      type: "work-unit/transitioned",
+      payload: {
+        workUnitId: work.workUnitId,
+        expectedRevision: 0,
+        revision: 1,
+        from: "DISCOVERED",
+        to: "AWAITING_PROVIDER",
+        reason: "second process observed provider wait",
+      },
+    });
+    expect(first.events()).toHaveLength(2);
+    expect(first.load().workUnits[work.workUnitId]?.revision).toBe(1);
+  });
+
   it("verifies attached CAS bytes on append and every replay", () => {
     const directory = root();
     const store = openShepherdStore(directory, { sync: noSync });

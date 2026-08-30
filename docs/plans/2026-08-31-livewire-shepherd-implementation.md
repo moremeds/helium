@@ -107,6 +107,7 @@ not a claim that code already exists.
 | AR-06 receipt outcome/state combinations were unconstrained | failed work could claim `VERIFIED` | read-only receipt semantic refinement and separate mutation receipt | CLOSED-IN-PLAN |
 | AR-07 first gate depended on continuous historical expansion | no working system could be promoted until the full long-term goal | LS-GATE depends only on current working path; LS-04/08 continue by coverage | CLOSED-IN-PLAN |
 | AR-08 one branch/PR held the whole program | review and rollback scope would become unbounded | documentation PR first, then short task-batch PRs per repository | CLOSED-IN-PLAN |
+| AR-09 durable log append was not cross-process compare-and-append | two daemons could both observe no lease and persist competing decisions | OS-atomic append coordination plus a real two-process lease race in LS-01.3 | CLOSED-IN-PLAN |
 
 ### Repository rules before implementation
 
@@ -344,6 +345,8 @@ git commit -m "feat: add durable Shepherd work units"
 - Create: `plugins/livewire-shepherd/src/scheduler.test.ts`
 - Create: `plugins/livewire-shepherd/src/coordinator.ts`
 - Create: `plugins/livewire-shepherd/src/coordinator.test.ts`
+- Create: `plugins/livewire-shepherd/src/append-coordination.ts`
+- Create: `plugins/livewire-shepherd/src/append-coordination.test.ts`
 - Create: `plugins/livewire-shepherd/src/coverage-ledger.ts`
 - Create: `plugins/livewire-shepherd/src/coverage-ledger.test.ts`
 
@@ -402,6 +405,12 @@ mutation intent is handed to LS-06 recovery and is never blindly retried.
 Do not use the in-memory `LeaseStore` as durable truth. It may be used only as a
 process-local capacity primitive after the event-backed lease wins.
 
+The compare-and-append section is serialized across processes with an
+OS-atomic, owner-receipted lock using boot identity plus PID liveness; elapsed
+time alone never reclaims it. A second process reloads after losing the lock
+and cannot append a competing lease. Add a real two-process test plus a
+SIGKILL/stale-holder recovery test; an in-process mutex is not sufficient.
+
 **Step 5: Implement the multidimensional coverage ledger**
 
 Record `universe`, `identity`, `bars`, `corporate-actions`, `pit`, `lineage`,
@@ -412,7 +421,7 @@ the existence of data.
 **Step 6: Run tests and commit**
 
 ```bash
-pnpm exec vitest run --project unit plugins/livewire-shepherd/src/scheduler.test.ts plugins/livewire-shepherd/src/coordinator.test.ts plugins/livewire-shepherd/src/coverage-ledger.test.ts
+pnpm exec vitest run --project unit plugins/livewire-shepherd/src/scheduler.test.ts plugins/livewire-shepherd/src/coordinator.test.ts plugins/livewire-shepherd/src/append-coordination.test.ts plugins/livewire-shepherd/src/coverage-ledger.test.ts
 git add plugins/livewire-shepherd/src
 git commit -m "feat: schedule Shepherd work without global blockers"
 ```

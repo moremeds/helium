@@ -12,6 +12,28 @@ const Revision = z.strictObject({
   revision: z.number().int().positive(),
 });
 const Evidence = z.array(HashedArtifactRefSchema).min(1);
+export const CoverageDimensionSchema = z.enum([
+  "universe",
+  "identity",
+  "bars",
+  "corporate-actions",
+  "pit",
+  "lineage",
+  "duckdb-parity",
+  "repair",
+  "rollback",
+]);
+export type CoverageDimension = z.infer<typeof CoverageDimensionSchema>;
+export const CoverageStateSchema = z.enum([
+  "seeded",
+  "evidenced",
+  "adjudicated",
+  "published",
+  "verified",
+  "quarantined",
+  "unresolved",
+]);
+export type CoverageState = z.infer<typeof CoverageStateSchema>;
 const Base = {
   version: z.literal(1),
   eventId: Id,
@@ -39,6 +61,7 @@ const WorkUnitRetryScheduled = z.strictObject({
     wakeAt: z.iso.datetime(),
     trigger: z.enum(["time", "provider-availability", "user", "resource-pressure"]),
     reason: z.string().min(1).max(2_000),
+    domain: Id.optional(),
   }),
 });
 const AttemptLeaseAcquired = z.strictObject({
@@ -71,8 +94,20 @@ const AttemptOutcomeRecorded = z.strictObject({
   payload: Revision.extend({
     attemptId: Id,
     leaseId: Id,
-    outcome: z.enum(["completed", "no-op", "quota-exhausted", "temporary-unavailable", "failed", "uncertain"]),
+    outcome: z.enum(["completed", "no-op", "quota-exhausted", "temporary-unavailable", "awaiting-user", "failed", "uncertain"]),
     evidence: z.array(HashedArtifactRefSchema).optional(),
+    availabilityDomain: Id.optional(),
+    retryAt: z.iso.datetime().optional(),
+    nextState: ShepherdStateSchema.optional(),
+  }),
+});
+const CoverageRecorded = z.strictObject({
+  ...Base,
+  type: z.literal("coverage/recorded"),
+  payload: Revision.extend({
+    dimension: CoverageDimensionSchema,
+    state: CoverageStateSchema,
+    evidence: Evidence,
   }),
 });
 const EvidenceAttached = z.strictObject({
@@ -143,6 +178,7 @@ export const ShepherdEventSchema = z.discriminatedUnion("type", [
   AttemptLeaseExpired,
   AttemptExecutionIntent,
   AttemptOutcomeRecorded,
+  CoverageRecorded,
   EvidenceAttached,
   ClaimRecorded,
   ClaimVerified,

@@ -1,5 +1,10 @@
 import { canonicalJson } from "@helium/core";
-import { ShepherdEventSchema, type ShepherdEvent } from "./events.js";
+import {
+  ShepherdEventSchema,
+  type CoverageDimension,
+  type CoverageState,
+  type ShepherdEvent,
+} from "./events.js";
 import type { HashedArtifactRef, ShepherdState, ShepherdWorkUnit } from "./work-unit.js";
 
 export interface AttemptProjection {
@@ -7,12 +12,13 @@ export interface AttemptProjection {
   leaseId: string;
   ownerId: string;
   expiresAt: string;
-  state: "leased" | "intent-recorded" | "completed" | "no-op" | "quota-exhausted" | "temporary-unavailable" | "failed" | "uncertain" | "expired";
+  state: "leased" | "intent-recorded" | "completed" | "no-op" | "quota-exhausted" | "temporary-unavailable" | "awaiting-user" | "failed" | "uncertain" | "expired";
   operation?: "probe" | "analysis" | "stage" | "publish" | "verify" | "rollback";
 }
 
 export interface WorkUnitProjection {
   unit: ShepherdWorkUnit;
+  discoveredAt: string;
   state: ShepherdState;
   revision: number;
   evidence: Record<string, HashedArtifactRef>;
@@ -21,7 +27,12 @@ export interface WorkUnitProjection {
   activeLease?: AttemptProjection;
   verificationPassed: boolean;
   repairVerificationPassed: boolean;
-  retry?: { wakeAt: string; trigger: string; reason: string };
+  retry?: { wakeAt: string; trigger: string; reason: string; domain?: string };
+  coverage: Partial<Record<CoverageDimension, {
+    state: CoverageState;
+    evidence: HashedArtifactRef[];
+    at: string;
+  }>>;
 }
 
 export interface ShepherdProjection {
@@ -82,6 +93,7 @@ export function reduceShepherd(events: ShepherdEvent[]): ShepherdProjection {
       }
       state.workUnits[event.payload.unit.workUnitId] = {
         unit: event.payload.unit,
+        discoveredAt: event.at,
         state: "DISCOVERED",
         revision: event.payload.unit.revision,
         evidence: {},
@@ -89,6 +101,7 @@ export function reduceShepherd(events: ShepherdEvent[]): ShepherdProjection {
         attempts: {},
         verificationPassed: false,
         repairVerificationPassed: false,
+        coverage: {},
       };
       continue;
     }
@@ -101,18 +114,19 @@ export function reduceShepherd(events: ShepherdEvent[]): ShepherdProjection {
         if (unit.state !== event.payload.from) {
           throw new Error(`state mismatch: expected ${unit.state}, got ${event.payload.from}`);
         }
-        if (!ALLOWED[unit.state]?.has(event.payload.to)) {
-          throw new Error(`illegal transition: ${unit.state} -> ${event.payload.to}`);
-        }
-        if (event.payload.to === "VERIFIED" && !unit.verificationPassed) {
-          throw new Error("VERIFIED requires every recorded claim or repair to pass independent verification");
-        }
-        unit.state = event.payload.to;
+        moveState(unit, event.payload.to);
         break;
       }
       case "work-unit/retry-scheduled":
-        unit.state = "RETRY_SCHEDULED";
-        unit.retry = { wakeAt: event.payload.wakeAt, trigger: event.payload.trigger, reason: event.payload.reason };
+        if (event.payload.trigger === "provider-availability" && event.payload.domain === undefined) {
+          throw new Error("provider-availability retry requires a domain");
+        }
+        unit.retry = {
+          wakeAt: event.payload.wakeAt,
+          trigger: event.payload.trigger,
+          reason: event.payload.reason,
+          ...(event.payload.domain === undefined ? {} : { domain: event.payload.domain }),
+        };
         break;
       case "attempt/lease-acquired": {
         if (unit.activeLease !== undefined) throw new Error(`active lease exists: ${unit.activeLease.leaseId}`);
@@ -139,11 +153,46 @@ export function reduceShepherd(events: ShepherdEvent[]): ShepherdProjection {
       case "attempt/outcome-recorded": {
         const attempt = matchingAttempt(unit, event.payload.attemptId, event.payload.leaseId);
         if (attempt.state !== "intent-recorded") throw new Error(`attempt has no execution intent: ${attempt.attemptId}`);
+        if ((event.payload.outcome === "quota-exhausted" ||
+             event.payload.outcome === "temporary-unavailable") &&
+            (event.payload.availabilityDomain === undefined || event.payload.retryAt === undefined)) {
+          throw new Error("provider wait requires availability domain and retry time");
+        }
+        const terminalNeedsNext = ["completed", "no-op", "failed", "uncertain"]
+          .includes(event.payload.outcome);
+        if (terminalNeedsNext && event.payload.nextState === undefined) {
+          throw new Error(`${event.payload.outcome} outcome requires next state`);
+        }
+        if (!terminalNeedsNext && event.payload.nextState !== undefined) {
+          throw new Error(`${event.payload.outcome} outcome cannot carry next state`);
+        }
         attempt.state = event.payload.outcome;
         delete unit.activeLease;
+        if (event.payload.outcome === "quota-exhausted" ||
+            event.payload.outcome === "temporary-unavailable") {
+          unit.state = "AWAITING_PROVIDER";
+          unit.retry = {
+            wakeAt: event.payload.retryAt!,
+            trigger: "provider-availability",
+            reason: "provider quota exhausted",
+            domain: event.payload.availabilityDomain!,
+          };
+        } else if (event.payload.outcome === "awaiting-user") {
+          unit.state = "AWAITING_USER";
+        } else {
+          moveState(unit, event.payload.nextState!);
+        }
         for (const evidence of event.payload.evidence ?? []) attachEvidence(unit, evidence);
         break;
       }
+      case "coverage/recorded":
+        for (const evidence of event.payload.evidence) attachEvidence(unit, evidence);
+        unit.coverage[event.payload.dimension] = {
+          state: event.payload.state,
+          evidence: event.payload.evidence,
+          at: event.at,
+        };
+        break;
       case "attempt/lease-expired": {
         const attempt = matchingAttempt(unit, event.payload.attemptId, event.payload.leaseId);
         if (Date.parse(event.at) < Date.parse(attempt.expiresAt)) throw new Error(`lease is not expired: ${attempt.leaseId}`);
@@ -223,4 +272,14 @@ function refreshVerification(unit: WorkUnitProjection): void {
   const claims = Object.values(unit.claims);
   const claimsPassed = claims.length > 0 && claims.every((claim) => claim.decision === "pass");
   unit.verificationPassed = unit.repairVerificationPassed || claimsPassed;
+}
+
+function moveState(unit: WorkUnitProjection, to: ShepherdState): void {
+  if (!ALLOWED[unit.state]?.has(to)) {
+    throw new Error(`illegal transition: ${unit.state} -> ${to}`);
+  }
+  if (to === "VERIFIED" && !unit.verificationPassed) {
+    throw new Error("VERIFIED requires every recorded claim or repair to pass independent verification");
+  }
+  unit.state = to;
 }
