@@ -46,3 +46,5 @@ export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";
 export * from "./evidence/manifest.js";
+export * from "./team/events.js";
+export * from "./team/reducer.js";
