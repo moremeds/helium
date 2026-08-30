@@ -140,20 +140,12 @@ export class CapabilityCatalog {
   }
 
   /**
-   * Whether a target can be given work now.
-   *
-   * A `quota-exhausted` target is unavailable only until its `retryAfter`; the
-   * same call after that instant admits it again, with no state change and no
-   * polling. `unavailable` has no deadline to wait for.
+   * Whether a target can be given work now. Provider reset hints are opaque:
+   * only an explicit provider-owned availability publication can restore it.
    */
-  available(targetId: ExecutionTargetId, now: Date): boolean {
+  available(targetId: ExecutionTargetId, _now: Date): boolean {
     const state = this.#availability.get(targetId) ?? AVAILABLE;
-    if (state.state === "available") return true;
-    if (state.state === "unavailable") return false;
-    return (
-      state.retryAfter !== undefined &&
-      Date.parse(state.retryAfter) <= now.getTime()
-    );
+    return state.state === "available";
   }
 
   /**

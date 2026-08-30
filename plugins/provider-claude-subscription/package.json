@@ -7,6 +7,7 @@
   "exports": {
     ".": "./lib/catalog.js",
     "./catalog": "./lib/catalog.js",
+    "./executor": "./lib/executor.js",
     "./invoke": "./lib/invoke.js"
   },
   "scripts": {
@@ -14,6 +15,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@helium/core": "file:../../packages/core",
     "@helium/provider-sdk": "file:../../packages/provider-sdk"
   },
   "devDependencies": {

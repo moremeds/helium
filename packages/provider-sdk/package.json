@@ -5,13 +5,16 @@
   "type": "module",
   "main": "./lib/catalog.js",
   "exports": {
-    ".": "./lib/catalog.js"
+    ".": "./lib/catalog.js",
+    "./catalog": "./lib/catalog.js",
+    "./registration": "./lib/registration.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@helium/core": "file:../core",
     "zod": "^4.4.3"
   },
   "devDependencies": {

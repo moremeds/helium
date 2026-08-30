@@ -189,6 +189,9 @@ importers:
 
   packages/provider-sdk:
     dependencies:
+      '@helium/core':
+        specifier: file:../core
+        version: link:../core
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -304,6 +307,9 @@ importers:
 
   plugins/provider-claude-subscription:
     dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
       '@helium/provider-sdk':
         specifier: file:../../packages/provider-sdk
         version: link:../../packages/provider-sdk
@@ -317,6 +323,9 @@ importers:
 
   plugins/provider-codex-subscription:
     dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
       '@helium/provider-sdk':
         specifier: file:../../packages/provider-sdk
         version: link:../../packages/provider-sdk
@@ -330,6 +339,9 @@ importers:
 
   plugins/provider-deepseek-dsh:
     dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
       '@helium/provider-sdk':
         specifier: file:../../packages/provider-sdk
         version: link:../../packages/provider-sdk
