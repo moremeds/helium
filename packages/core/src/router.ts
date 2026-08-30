@@ -55,7 +55,10 @@ export interface SelectionDecision {
   candidates: CandidateDecision[];
   /** Index into [preferred, ...fallback]; 0 means the preference won. */
   fallbackPosition?: number;
-  failure?: { class: "capability-shortage"; reasons: string[] };
+  failure?: {
+    class: "capability-shortage" | "unavailable";
+    reasons: string[];
+  };
   policyVersion: string;
   catalogVersion: string;
 }
@@ -169,14 +172,26 @@ export function select(
   const position = ordered.findIndex((id) => eligible.has(id));
 
   if (position === -1) {
+    const byId = new Map(decided.map((entry) => [entry.target.targetId, entry]));
+    const orderedFailures = ordered.map((targetId) => {
+      const entry = byId.get(targetId);
+      return entry === undefined
+        ? { targetId, reasons: ["missing-target"] }
+        : { targetId, reasons: entry.reasons };
+    });
+    const dynamic = new Set(["quota-exhausted", "unavailable"]);
+    const capacityOnly = orderedFailures.every(
+      (entry) =>
+        entry.reasons.length > 0 &&
+        entry.reasons.every((reason) => dynamic.has(reason)),
+    );
     return {
       ...base,
       failure: {
-        class: "capability-shortage",
-        reasons: [...decided]
-          .sort((a, b) => (a.target.targetId < b.target.targetId ? -1 : 1))
-          .filter((d) => !d.eligible)
-          .map((d) => `${d.target.targetId}: ${d.reasons.join(", ")}`),
+        class: capacityOnly ? "unavailable" : "capability-shortage",
+        reasons: orderedFailures.map(
+          (entry) => `${entry.targetId}: ${entry.reasons.join(", ")}`,
+        ),
       },
     };
   }
