@@ -1,11 +1,13 @@
 # Helium P4 Controlled Promotion Execution Record
 
-**Status:** in progress  
+**Status:** working system active; elapsed evidence gate accruing
 **Authority:** execution of Phase 4 in
 `2026-08-25-helium-multi-agent-master-plan.md`; this document does not replace
 or broaden that plan.  
 **Starting production release:** `v0.1.5`  
 **Starting master:** `9604ae0`
+**Current production release:** `v0.1.9`
+**Current release merge:** `b4c43b7`
 
 ## Fixed boundaries
 
@@ -132,3 +134,73 @@ after they actually occur.
   package before replacement, and supports hash-checked restoration. The first
   normal release transition is kept separate from the later normal tagged
   rollback drill because v0.1.5 cannot host `opsd`.
+
+### 2026-08-30 working-system evidence
+
+- PR #38 added the reversible candidate-to-`current` Ops packaging rebind. With
+  both Ops labels unloaded, production moved to v0.1.8, retained the prior
+  package in a hash-backed backup, rebound the collector to the selected release,
+  and then bootstrapped `opsd` and its independent dead-man. A fresh v0.1.8
+  controller cycle and `opsd fresh` dead-man result both passed without changing
+  the retained event or evidence state.
+- A normal deploy from v0.1.8 to v0.1.7 proved that DSH and Ops now move as one
+  release pair. The tagged rollback to v0.1.8 completed in 18 seconds, below the
+  60-second limit, with both daemons healthy. PR #39 recorded v0.1.8.
+- The first review-only request was refused before provider execution while the
+  host-pressure admission window recovered. That refusal was durable and left
+  deterministic collection running. A later request reached Codex but failed
+  because the installed MCP path named the removed core server rather than the
+  v1 compatibility boundary. It produced no review, email, or mutation.
+- PR #40 changed the canary switch to a real launchd unload/reload, migrated the
+  active and rollback MCP paths to `packages/v1-compat/lib/mcp/server.js`, and
+  allowed a bounded infrastructure retry of the same logical case without
+  spending a second daily-budget slot. PR #41 tagged the result as v0.1.9.
+- v0.1.9 passed the live Codex preflight at exact target
+  `gpt-5.6-sol/high`, the DSH and Ops target-release cycle checks, and a direct
+  v1-compat MCP boundary smoke. The loaded DSH environment reports
+  `review-only`, allow-listed `macro-watch`, cap 1 per UTC day, and the current
+  v1-compat MCP, team, and Ops-event paths.
+- Controlled request `canary-1e2a135c377330eb481a9591` completed as team run
+  `canary-2013ed4f1c0656d060ee0426:shadow`. All eight tasks completed on
+  `codex-subscription / gpt-5.6-sol / high`; the durable case contains 61 team
+  events and 18 content-addressed artifacts. Operator `show` resolved every
+  artifact and verified every SHA-256 hash.
+- The controlled input intentionally contained only canary metadata. The team
+  did not invent a Macro view: its accepted ledger and rendered result state
+  that the evidence is insufficient to change the rate-path, dollar, gold, or
+  inflation thesis. This is operational evidence, not a promoted semantic
+  Macro claim.
+- Review `review-51c0b61a9c6581232371b688` was accepted by
+  `codex-p4-operator` at `2026-08-30T11:53:20.567Z` with the explicit boundary
+  “operational acceptance only.” The case has zero `delivery/*` events, no
+  `deliveries-2026-08-30.jsonl`, and every execution intent records
+  `mutations: forbidden`.
+- After the review decision, DSH and `opsd` remained running, the independent
+  dead-man remained loaded and idle, and the next Ops cycle recorded 43
+  observations with zero collection failures from v0.1.9. Provider availability
+  remained `available` and its circuit remained closed.
+- The independent Ops ladder already has one scoped approve-only live drill:
+  action `act-4ced44c86f68f99b1040634b209e16ef` restored the deliberately stopped
+  `trading-cadvisor` container, verified all 20 expected containers, persisted
+  and replayed the signed recovery bundle, restored both legacy mutation owners,
+  and returned `opsd` to observe mode. This proves only that one drill; it does
+  not grant standing approve or automatic authority.
+
+### Current P4 boundary
+
+The working-system portion of P4 is now active: tagged production deployment,
+bounded Macro review-only execution, exact Codex identity, durable artifact
+lineage, attributable review, no team delivery or mutation, continuous Ops
+collection, an independent dead-man, a scoped controlled recovery drill, and an
+18-second rollback have all been observed on the Mac mini.
+
+The following are deliberately still open and must not be rewritten as
+completed merely because the system is running:
+
+- five uninterrupted trading days and at least one real material Macro case;
+- the separate Ops suggest-only observation and operator-decision record;
+- any standing automatic Ops authority, including a controlled automatic drill;
+- Colima restart and Livewire targeted-repair certification beyond the one
+  container-only reconcile drill; and
+- any retirement of the healthy v1 compatibility lane or any automatic team
+  email/delivery.

@@ -7,11 +7,11 @@ DeepSeek Harness supplies the underlying agent runtime. Helium adds ecosystem
 capabilities, triggers, escalation, persistence, delivery, health checks, and
 release operations.
 
-The current production release is `v0.1.5`.
+The current production release is `v0.1.9`.
 
 ## What works today
 
-Helium v1 can:
+The retained Helium v1 compatibility lane can:
 
 - watch files, calendars, and schedules;
 - collect evidence through an explicit tool allow-list;
@@ -29,8 +29,20 @@ exercise the same runtime for service health and harness compatibility.
 Trigger -> triage -> optional senior analysis -> report -> delivery
 ```
 
-Helium v1 is a reliable single-agent compatibility runtime. The next program
-adds durable multi-agent teams without breaking existing jobs.
+Alongside that compatibility lane, the bounded P4 path now runs the Macro
+reference team in production `review-only` mode. One controlled case completed
+all eight capability-routed Codex roles, persisted hash-verified artifacts, and
+stopped at an attributable human-review decision with no team email or
+mutation. The deterministic `helium-opsd` collector also runs independently of
+providers; its first approve-only controlled drill restored one deliberately
+stopped monitoring container, verified the recovery evidence, and returned to
+observe-only ownership.
+
+This is a working multi-agent and Ops system, not unrestricted autonomy. The
+Macro team cannot deliver automatically, the normal v1 path remains the
+immediate fallback, and Ops currently has no standing approve or automatic
+authority. The five-trading-day window, a real material Macro case, and the
+separate Ops suggest-only evidence window are still accruing P4 evidence.
 
 ## Where Helium is going
 
@@ -40,8 +52,8 @@ targets and measured capability profiles. A router selects an eligible target
 from task requirements, safety constraints, budget, latency, evaluations, and
 operator preferences.
 
-The diagram below is the planned v2 topology, not the currently deployed v1
-execution path. The
+The diagram below is the canonical topology now used by the bounded P4 team and
+Ops paths. It does not replace the retained v1 delivery lane. The
 [canonical design](docs/plans/2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology)
 is normative.
 
@@ -80,6 +92,7 @@ See:
 - [Provider effort-selection implementation plan](docs/plans/2026-08-25-provider-effort-selection-implementation.md)
 - [Multi-agent master plan](docs/plans/2026-08-25-helium-multi-agent-master-plan.md)
 - [Multi-agent implementation plan](docs/plans/2026-08-25-helium-multi-agent-implementation.md)
+- [P4 production execution record](docs/plans/2026-08-30-helium-p4-production-execution.md)
 
 ## Design principles
 
