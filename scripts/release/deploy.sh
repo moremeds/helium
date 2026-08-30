@@ -30,7 +30,7 @@ if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # prefixes are listed so this does not silently depend on the CPU architecture.
   # It fails closed if ever dropped again: this runs before any flip, so a missing
   # toolchain aborts the deploy with `current` still pointing at the old release.
-  ssh macmini "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
+  ssh macmini "export PATH=\"/Applications/ChatGPT.app/Contents/Resources:/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
   exit $?
 fi
 # ---- everything below runs ON the mini ----
@@ -99,17 +99,10 @@ if ! node -e '
   exit 75
 fi
 
-say "contract smoke (one live deepseek-v4-flash call)"
-smoke_home="$(mktemp -d -t helium-smoke)"
-if ! (
-  cd "$DEST"
-  set -a
-  # shellcheck disable=SC1091 # mini-only secrets file, never present on the laptop.
-  . /Users/moremeds/.config/helium/helium.env
-  set +a
-  HELIUM_LIVE=1 DSH_HOME="$smoke_home" pnpm -F @helium/contracts test
-); then
-  echo "contract smoke FAILED — aborting before flip" >&2
+say "provider smoke (one live Codex gpt-5.6-sol/high read-only call)"
+if ! CODEX_HOME=/Users/moremeds/.codex \
+  node "$DEST/scripts/release/codex-preflight.mjs"; then
+  echo "Codex provider smoke FAILED — aborting before flip" >&2
   exit 67
 fi
 

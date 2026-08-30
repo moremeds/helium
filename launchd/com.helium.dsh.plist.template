@@ -18,10 +18,16 @@
   <key>StandardErrorPath</key><string>/Users/moremeds/.helium/logs/dsh.err.log</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>__NODE_BIN_DIR__:/Users/moremeds/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>__NODE_BIN_DIR__:/Applications/ChatGPT.app/Contents/Resources:/Users/moremeds/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>CODEX_HOME</key><string>/Users/moremeds/.codex</string>
     <key>HOME</key><string>/Users/moremeds</string>
     <key>DSH_HOME</key><string>/Users/moremeds/.helium/dsh-home</string>
     <key>HELIUM_JOBS_DIR</key><string>/Users/moremeds/projects/helium-releases/current/jobs</string>
+    <key>HELIUM_TEAM_PROMOTION_MODE</key><string>off</string>
+    <key>HELIUM_TEAM_CANARY_JOBS</key><string>macro-watch</string>
+    <key>HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY</key><string>1</string>
+    <key>HELIUM_TEAMS_DIR</key><string>/Users/moremeds/projects/helium-releases/current/teams</string>
+    <key>HELIUM_OPS_EVENT_LOG</key><string>/Users/moremeds/.helium/ops/state/events.jsonl</string>
     <key>HELIUM_STATE_ROOT</key><string>/Users/moremeds/.helium/state</string>
     <key>HELIUM_CONTEXT_FILE</key><string>/Users/moremeds/projects/helium-releases/current/context/ecosystem.md</string>
     <key>HELIUM_CALENDARS_DIR</key><string>/Users/moremeds/projects/helium-releases/current/calendars</string>

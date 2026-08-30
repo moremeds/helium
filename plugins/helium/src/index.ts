@@ -10,7 +10,13 @@ import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { JsonlWriter, parseTeamYaml, type RunOutcome } from "@helium/core";
+import {
+  JsonlWriter,
+  admission,
+  parseTeamYaml,
+  type RunOutcome,
+  type WorkOrder,
+} from "@helium/core";
 import { buildTools, type JobSpec } from "@helium/v1-compat";
 import type { ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
@@ -19,8 +25,9 @@ import { TriageRunner, type SeniorLane } from "./dispatch.js";
 import { readEnvFile } from "./envfile.js";
 import { HeliumRuntime } from "./runtime.js";
 import { ProviderRuntime } from "./provider-runtime.js";
-import { ShadowAdapter } from "./shadow.js";
+import { TeamPromotionAdapter } from "./promotion.js";
 import { TeamController } from "./team-controller.js";
+import { OpsResourcePressureReader } from "./ops-pressure.js";
 import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
@@ -34,6 +41,7 @@ export const inject = [
 ];
 export { type Config } from "./config.js";
 export { ShadowAdapter } from "./shadow.js";
+export { TeamPromotionAdapter, TeamReviewStore } from "./promotion.js";
 export { TeamController } from "./team-controller.js";
 
 /**
@@ -152,6 +160,36 @@ export function writeMcpConfig(config: Config, job: JobSpec, dir: string): strin
   return path;
 }
 
+/** Writes one team attempt's MCP allow-list from its provider-neutral WorkOrder. */
+export function writeTeamMcpConfig(config: Config, work: WorkOrder, dir: string): string {
+  const path = join(dir, "mcp.json");
+  writeFileSync(
+    path,
+    JSON.stringify(
+      {
+        mcpServers: {
+          helium: {
+            command: config.mcpBin,
+            args: [],
+            env: {
+              HELIUM_TOOLS: work.constraints.tools.join(","),
+              HELIUM_ALLOW_MUTATIONS: "0",
+              HELIUM_ARGON_BASE: config.argonBase,
+              HELIUM_APEX_BASE: config.apexBase,
+              ...(config.livewireDb ? { HELIUM_LIVEWIRE_DB: config.livewireDb } : {}),
+              HELIUM_STATE_ROOT: config.stateRoot,
+            },
+          },
+        },
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  return path;
+}
+
 export function apply(ctx: Context, raw: Config): void {
   const cfg = ConfigSchema.parse(raw);
   const paths = statePaths(cfg);
@@ -188,11 +226,19 @@ export function apply(ctx: Context, raw: Config): void {
     proxy: cfg.proxy,
   });
 
-  const shadow = cfg.teamShadowEnabled
+  const promotionMode = cfg.teamPromotionMode !== "off"
+    ? cfg.teamPromotionMode
+    : cfg.teamShadowEnabled
+      ? "shadow"
+      : "off";
+  const shadow = promotionMode !== "off"
     ? (() => {
         const manifest = parseTeamYaml(
           readFileSync(join(cfg.teamsDir ?? "teams", "macro.yaml"), "utf8"),
         );
+        const pressure = cfg.opsEventLog === undefined
+          ? undefined
+          : new OpsResourcePressureReader(cfg.opsEventLog);
         const controller = new TeamController({
           stateRoot: join(paths.state, "teams"),
           manifest,
@@ -208,14 +254,36 @@ export function apply(ctx: Context, raw: Config): void {
           },
           execution: {
             run: (teamRunId, work, lease, signal) =>
-              providers.host.run(teamRunId, work, lease, signal),
+              providers.runTeam(
+                teamRunId,
+                work,
+                lease,
+                signal,
+                (candidate, dir) => writeTeamMcpConfig(cfg, candidate, dir),
+              ),
             closeTeam: (teamRunId) => providers.host.closeTeam(teamRunId),
             drain: () => providers.host.drain(),
           },
+          ...(pressure === undefined
+            ? {}
+            : {
+                admission: {
+                  decide: admission.decide,
+                  pressure: () => pressure.read(),
+                  policy: {
+                    sustainedMemoryPressureMs: 5 * 60_000,
+                    sustainedRecoveryMs: 5 * 60_000,
+                  },
+                },
+              }),
         });
-        return new ShadowAdapter({
-          enabled: true,
+        return new TeamPromotionAdapter({
+          mode: promotionMode,
+          canaryJobs: cfg.teamCanaryJobs ?? [],
+          maxPerUtcDay: cfg.teamCanaryMaxPerUtcDay ?? 1,
+          stateRoot: paths.state,
           run: (input) => controller.run(input),
+          providerHealth: () => providers.healthSnapshot(),
         });
       })()
     : undefined;

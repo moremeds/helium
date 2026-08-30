@@ -8,8 +8,12 @@
  * a plain sync `Cron(...)` callback).
  * @module dsh-plugin-helium/index.test
  */
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { WorkOrderSchema } from "@helium/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runGuarded, seniorOutcome } from "./index.js";
+import { runGuarded, seniorOutcome, writeTeamMcpConfig } from "./index.js";
 
 describe("runGuarded", () => {
   afterEach(() => {
@@ -68,5 +72,44 @@ describe("seniorOutcome", () => {
     expect(
       seniorOutcome({ ok: false, classification: "proxy", text: "tunnel down" }),
     ).toEqual({ outcome: "run_failed", error: "proxy: tunnel down" });
+  });
+});
+
+describe("writeTeamMcpConfig", () => {
+  it("gives a team attempt only its declared read-only MCP tools", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-team-mcp-"));
+    const path = writeTeamMcpConfig({
+      runtimeMode: "legacy-direct",
+      jobsDir: "jobs",
+      stateRoot: "/private/state",
+      contextFile: "context",
+      calendarsDir: "calendars",
+      argonBase: "http://argon",
+      apexBase: "http://apex",
+      envFile: "env",
+      claudeTokenFile: "claude",
+      proxy: "http://proxy",
+      mcpBin: "/bin/helium-mcp",
+      emailTo: "operator@example.invalid",
+    }, WorkOrderSchema.parse({
+      id: "team-mcp-boundary",
+      role: "inflation-researcher",
+      taskClass: "team.inflation-evidence",
+      requires: ["inflation-analysis"],
+      constraints: {
+        tools: ["argon_api"],
+        mutations: "forbidden",
+        minIsolationClass: "process",
+      },
+      inputs: { artifacts: [], prompt: "read" },
+      acceptance: { outputSchema: "ClaimSet.v1" },
+    }), dir);
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    expect(parsed.mcpServers.helium.env).toMatchObject({
+      HELIUM_TOOLS: "argon_api",
+      HELIUM_ALLOW_MUTATIONS: "0",
+      HELIUM_ARGON_BASE: "http://argon",
+      HELIUM_STATE_ROOT: "/private/state",
+    });
   });
 });

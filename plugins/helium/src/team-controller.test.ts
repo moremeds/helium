@@ -285,6 +285,71 @@ describe("TeamController", () => {
     );
   });
 
+  it("turns JSON-only provider drafts into PARTIAL evidence bound to exact execution", async () => {
+    const accepted = claim("Rates remain restrictive.");
+    const execution: TeamExecutionPort = {
+      run: vi.fn(async (_teamRunId, work) => {
+        const task = work.taskClass.replace("team.", "");
+        if (task === "research-a" || task === "research-b") {
+          return {
+            ...result(work, JSON.stringify({
+            claimSet: {
+              claimSetId: task,
+              producerRole: "researcher",
+              claims: [accepted],
+            },
+            })),
+            runtimeMetadata: {
+              provider: {
+                events: [{ type: "item.completed", item: { type: "mcp_tool_call", result: "fixture raw tool output" } }],
+              },
+            },
+          };
+        }
+        if (task === "verifier" || task.startsWith("verify-")) {
+          return result(work, JSON.stringify({ acceptedClaimKeys: [accepted.key] }));
+        }
+        return result(work, JSON.stringify({
+          report: "review-only draft",
+          acceptedClaimKeys: [accepted.key],
+        }));
+      }),
+      closeTeam: vi.fn(async () => {}),
+      drain: vi.fn(async () => {}),
+    };
+    const controller = new TeamController({
+      stateRoot: root(),
+      manifest,
+      routing: routePort(),
+      execution,
+      now: () => new Date("2026-08-30T00:00:00.000Z"),
+    });
+    const state = await controller.run(input);
+    expect(state.state).toBe("completed");
+    const acceptedRef = state.artifactRefs.find((ref) =>
+      ref.startsWith("artifact://accepted-claims/"),
+    );
+    expect(acceptedRef).toBeDefined();
+    const ledger = JSON.parse(
+      readFileSync(join(controller.store(input.caseId).artifactRoot, state.artifacts[acceptedRef!]!.hash.slice(7)), "utf8"),
+    ) as Array<{ evidence: { status: string; executionSnapshot?: { targetId: string } } }>;
+    expect(ledger[0]).toMatchObject({
+      evidence: {
+        status: "PARTIAL",
+        executionSnapshot: { targetId: "fake-target" },
+      },
+    });
+    const executionRef = state.artifactRefs.find((ref) =>
+      ref.startsWith("artifact://team-execution/")
+      && state.artifacts[ref]?.taskId === "research-a",
+    );
+    expect(executionRef).toBeDefined();
+    const executionEnvelope = JSON.parse(
+      readFileSync(join(controller.store(input.caseId).artifactRoot, state.artifacts[executionRef!]!.hash.slice(7)), "utf8"),
+    ) as { runtimeMetadata?: { provider?: { events?: unknown[] } } };
+    expect(executionEnvelope.runtimeMetadata?.provider?.events).toHaveLength(1);
+  });
+
   it("does not advance a provider result that fails schema/evidence validation", async () => {
     const controller = new TeamController({ stateRoot: root(), manifest, routing: routePort(), execution: executionPort({ invalid: true }) });
     const state = await controller.run(input);

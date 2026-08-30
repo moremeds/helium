@@ -6,7 +6,11 @@
       config:
         jobsDir: !!js process.env.HELIUM_JOBS_DIR
         teamShadowEnabled: !!js process.env.HELIUM_TEAM_SHADOW_ENABLED === '1'
+        teamPromotionMode: !!js process.env.HELIUM_TEAM_PROMOTION_MODE || 'off'
+        teamCanaryJobs: !!js (process.env.HELIUM_TEAM_CANARY_JOBS || '').split(',').filter(Boolean)
+        teamCanaryMaxPerUtcDay: !!js Number(process.env.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY || '1')
         teamsDir: !!js process.env.HELIUM_TEAMS_DIR
+        opsEventLog: !!js process.env.HELIUM_OPS_EVENT_LOG
         stateRoot: !!js process.env.HELIUM_STATE_ROOT
         contextFile: !!js process.env.HELIUM_CONTEXT_FILE
         calendarsDir: !!js process.env.HELIUM_CALENDARS_DIR

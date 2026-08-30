@@ -110,6 +110,7 @@ describe("parseTeamYaml", () => {
       externalResearch: false,
       mutations: "forbidden",
       artifactRead: ["accepted-claim-ledger"],
+      tools: [],
     });
   });
 });

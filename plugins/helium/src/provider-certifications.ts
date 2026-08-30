@@ -15,11 +15,11 @@ export interface ProviderCertifications {
  */
 export const productionProviderCertifications: ProviderCertifications = {
   codex: EntitlementCertificationSchema.parse({
-    certificationVersion: "codex-live-2026-08-30-v1",
+    certificationVersion: "codex-macmini-live-2026-08-30-v1",
     catalogSnapshotHash:
       "fa7cd96ef1cd54c0840d92be8ab23917bbb1e435bfe6c588e527c7e0289a7f0d",
-    recordedAt: "2026-08-30T08:39:00.000Z",
-    source: "live-adapter-preflight:codex-cli-0.151.0",
+    recordedAt: "2026-08-30T10:08:32.564Z",
+    source: "macmini-live-preflight:codex-cli-0.148.0-alpha.9:https-fallback",
     targets: [{ targetRef: "gpt-5.6-sol", variants: ["high"] }],
   }),
   deepseek: EntitlementCertificationSchema.parse({
