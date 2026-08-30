@@ -107,7 +107,7 @@ reviewed, the only accepted sequence is:
 1. `preflight` — read-only identity, expiry, label and candidate validation;
 2. `handoff` — fsynced backup, bootout both exact legacy labels, prove absence,
    switch to the exact approve config, restart only `com.helium.opsd`, then
-   prove a fresh zero-action cycle;
+   wait up to 30 seconds for and prove a fresh zero-action cycle;
 3. the separately signed one-incident approval and controlled failure drill;
 4. `rollback` — stop approve-mode opsd, restore the backed-up observe config,
    restore both exact legacy plists/labels, then restart observe-mode opsd.
