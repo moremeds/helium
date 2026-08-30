@@ -134,7 +134,9 @@ async function validatePreflight(context, command) {
     throw new Error("promotion timestamps are invalid");
   }
   if (issuedAt > current) throw new Error("promotion package is future-dated");
-  if (expiresAt <= current) throw new Error("promotion package is expired");
+  if (expiresAt <= current && command !== "rollback") {
+    throw new Error("promotion package is expired");
+  }
 
   const promotion = loadCanonicalPromotionInput(layout.promotionInput);
   if (envelope.payload.promotionInputSha256 !== promotion.inputSha256 ||
@@ -164,7 +166,7 @@ async function validatePreflight(context, command) {
     const artifact = artifacts[key];
     if (artifact?.path !== expectedPath) throw new Error(`arbitrary artifact path refused: ${key}`);
     if (key === "activeConfig" && command !== "preflight") {
-      assertLiveConfigIdentity(layout, artifacts);
+      assertLiveConfigIdentity(layout, artifacts, promotion);
       continue;
     }
     assertArtifact(artifact, key);
@@ -278,23 +280,70 @@ async function rollback(context, packageState) {
   validateBackup(context.layout, packageState);
   await step(context, `rollback-bootout:${OPSD_LABEL}`, async () =>
     bootoutIfLoaded(context, OPSD_LABEL));
-  await step(context, "rollback-restore-observe-config", async () =>
-    atomicReplace(context.layout.backupActiveConfig, context.layout.activeConfig, 0o600));
+  await step(context, "rollback-write-safe-observe-config", async () =>
+    writeRollbackObserveConfig(context.layout, packageState.promotion));
+  await step(context, "rollback-validate-safe-observe", async () =>
+    context.validateCandidate({
+      executable: packageState.artifacts.opsdBinary.path,
+      configPath: context.layout.activeConfig,
+      activeConfigPath: context.layout.activeConfig,
+      releaseDir: packageState.promotion.release.dir,
+      releaseCommit: packageState.promotion.release.commit,
+      plistPath: context.layout.candidateOpsdPlist,
+    }));
   await step(context, `rollback-bootstrap:${LEGACY_RUNTIME_LABEL}`, async () =>
     bootstrapIfAbsent(context, LEGACY_RUNTIME_LABEL, context.layout.legacyRuntimePlist));
   await step(context, `rollback-bootstrap:${LEGACY_AFTER_DATALAKE_LABEL}`, async () =>
     bootstrapIfAbsent(context, LEGACY_AFTER_DATALAKE_LABEL, context.layout.legacyAfterDataLakePlist));
   await step(context, `rollback-bootstrap:${OPSD_LABEL}`, async () =>
-    bootstrapIfAbsent(context, OPSD_LABEL, context.layout.opsdPlist));
+    bootstrapIfAbsent(context, OPSD_LABEL, context.layout.candidateOpsdPlist));
   await step(context, "rollback-verify", async () => {
     const active = JSON.parse(readFileSync(context.layout.activeConfig, "utf8"));
     if (active.mode !== "observe") throw new Error("rollback left residual approve authority");
+    if (active.releaseDir !== packageState.promotion.release.dir) {
+      throw new Error("rollback observe runtime is not forward-compatible candidate");
+    }
     const labels = await relevantLabels(context);
     for (const required of [OPSD_LABEL, LEGACY_RUNTIME_LABEL, LEGACY_AFTER_DATALAKE_LABEL]) {
       if (!labels.includes(required)) throw new Error(`rollback did not restore label: ${required}`);
     }
   });
   return { state: "observe-restored", promotionId: PROMOTION_ID };
+}
+
+function rollbackObserveConfig(layout, promotion) {
+  const prior = JSON.parse(readFileSync(layout.backupActiveConfig, "utf8"));
+  if (prior?.version !== 1 || prior.mode !== "observe") {
+    throw new Error("backup active config is not observe mode");
+  }
+  const releaseDir = promotion.release.dir;
+  const observe = {
+    ...prior,
+    mode: "observe",
+    releaseDir,
+    componentsDir: "ops/components",
+    dependenciesDir: "ops/dependencies",
+    checksDir: "ops/checks",
+    sopsDir: "ops/sops",
+    executorsDir: "ops/executors",
+    authorityManifestPath: join(releaseDir, "ops", "authority-manifest.json"),
+    trustedKeyPath: join(releaseDir, "ops", "authority-manifest.pub.pem"),
+    ...(Object.hasOwn(prior, "observationTargetsPath")
+      ? { observationTargetsPath: join(releaseDir, "ops", "observation-targets.yaml") }
+      : {}),
+  };
+  for (const key of ["promotionBundleDir", "promotionId", "promotionInputSha256", "attempt"]) {
+    delete observe[key];
+  }
+  return observe;
+}
+
+function writeRollbackObserveConfig(layout, promotion) {
+  atomicWrite(
+    `${JSON.stringify(rollbackObserveConfig(layout, promotion), null, 2)}\n`,
+    layout.activeConfig,
+    0o600,
+  );
 }
 
 async function step(context, name, operation) {
@@ -352,9 +401,17 @@ function validateBackup(layout, packageState) {
   }
 }
 
-function assertLiveConfigIdentity(layout, artifacts) {
+function assertLiveConfigIdentity(layout, artifacts, promotion) {
   const actual = sha256(layout.activeConfig);
-  if (actual !== artifacts.activeConfig.sha256 && actual !== artifacts.candidateConfig.sha256) {
+  const allowed = new Set([
+    artifacts.activeConfig.sha256,
+    artifacts.candidateConfig.sha256,
+  ]);
+  if (existsSync(layout.backupActiveConfig)) {
+    const safeObserve = `${JSON.stringify(rollbackObserveConfig(layout, promotion), null, 2)}\n`;
+    allowed.add(createHash("sha256").update(safeObserve).digest("hex"));
+  }
+  if (!allowed.has(actual)) {
     throw new Error("active config identity drift");
   }
   const stat = safeRegularStat(layout.activeConfig, "active config");
@@ -471,7 +528,10 @@ function hasFreshZeroActionCycle(snapshot, startedAt, now) {
 }
 
 function atomicReplace(source, target, mode) {
-  const bytes = readFileSync(source);
+  atomicWrite(readFileSync(source), target, mode);
+}
+
+function atomicWrite(bytes, target, mode) {
   const staging = join(dirname(target), `.${PROMOTION_ID}.${process.pid}.tmp`);
   writeFileSync(staging, bytes, { mode, flag: "wx", flush: true });
   renameSync(staging, target);

@@ -171,24 +171,6 @@ claims:
     limitation: "Proves the schema refuses incomplete bundles. No bundle has yet been produced from a real recovery, because no recovery has been performed."
     nextGate: "Ops Phase C: collector, probes and adapters."
 
-  - id: P2.5A-LIVE-DRILL
-    assertion: "A certified SOP restores a real component's integrity, freshness and coverage under a controlled drill."
-    acceptanceBound: "The corrupt fixture and a controlled drill both pass integrity, freshness and coverage, against a real component on a real host."
-    assertionClass: deterministic
-    evidencePolicyVersion: p0-1
-    verification:
-      verifier: command
-      command: "not yet runnable: no drill harness and no certified production SOP exist"
-      toolVersion: "n/a"
-      decision: inconclusive
-    artifacts: []
-    baseline: "Design section 3.6, which already records this assertion as BLOCKED."
-    reproduction: "Blocked. Requires a certified SOP, a drill harness, and a host the AC#1 observation window permits touching."
-    failures: "Not attempted. Recording this as anything other than BLOCKED would imply a drill happened."
-    status: BLOCKED
-    limitation: "Nothing about targeted repair is proven. The design recorded this as BLOCKED before any code existed and it remains BLOCKED: no drill has run, no production SOP is certified, and no mutation has been performed on any host."
-    nextGate: "Ops Task 16 and 17, then the post-AC#1 drill gate."
-
   - id: P2.5A-OPS-CONFIG-TOPOLOGY
     assertion: "Ops configuration loads into an atomic, dependency-aware, effect-scoped registry, and the collector remains structurally isolated from executors and leases."
     acceptanceBound: "Bounded tenant-scoped YAML loading includes components, checks, SOPs and dependency edges; a bad or cross-bundle reference installs nothing and cannot leave a dangling graph or certified SOP; and the topology contract resolves every workspace package import before refusing any collector path to an executor or the core lease target."
@@ -533,3 +515,24 @@ claims:
     status: PROVEN
     limitation: "This proves offline mutation readiness at PR commit ffadf92 under the pinned Node 22 CI gate. No live mutation, signed production package, final host preflight, or drill has occurred; the production trust key remains UNCOMMISSIONED and P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
     nextGate: "Re-verify this artifact hash in PR CI, merge readiness by PR, then commission the independent key/package and run the final read-only live preflight before any controlled mutation."
+
+  - id: P2.5A-LIVE-DRILL
+    assertion: "The signed one-attempt trading-stack container reconcile can take exclusive mutation ownership, restore one stopped expected container, produce a policy-complete durable terminal bundle, and return to observe ownership without changing any unrelated container."
+    acceptanceBound: "One fresh approval for the exact public incident and signed promotion produces exactly one authorization, intent, receipt and terminal event; the baseline is failed before execution; the receipt is exit zero; the postcondition passes; terminal evidence is PROVEN/pass with every raw artifact hash verified; trading-cadvisor is healthy; the other 19 container identity/start/restart rows match their baseline hash; observe mode, both exact legacy labels and a fresh deadman cycle are restored; and no second mutation occurs."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "On the registered mini, replay action act-4ced44c86f68f99b1040634b209e16ef through FileRecoveryEvidenceStore.verifyEvent; inspect the 20 running containers; hash the sorted name|id|startedAt|restartCount rows excluding trading-cadvisor; and run the standalone opsd deadman check."
+      toolVersion: "mini macOS 26.5.1; node 25.9.0; Docker Server 29.2.1; mutation commit 7062803; reconciliation commit 71f7a23"
+      outputHash: "sha256:17f513bf9e12163e3cf9f55b164dd64b9db14164d66286add3073b232affbead"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-controlled-mutation-2026-08-30.log"
+        sha256: "17f513bf9e12163e3cf9f55b164dd64b9db14164d66286add3073b232affbead"
+    baseline: "P2.5A-MUTATION-READINESS-OFFLINE plus the weekend waiver, before any production intent, receipt or terminal recovery evidence existed."
+    reproduction: "Use only a newly signed one-attempt approval for a public action-proposed event under the exact promotion input. The committed evidence records the live replay command boundary and immutable identifiers; do not repeat the mutation because maxAttempts=1 and the claim is already decided."
+    failures: "Four pre-intent live discoveries failed closed and were rolled back without an action. The final executor ran once and returned exit zero. Its first terminal write exposed a derived-provenance classification defect; PR 29 fixed that defect, and startup reconciliation appended only the missing action-verified event without re-executing."
+    status: PROVEN
+    limitation: "This decision is scoped to trading-stack-container-reconcile v1 and one stopped trading-cadvisor. It earns no seven-day observation credit, does not authorize suggest or auto, and does not certify the remaining Livewire or Colima executors."
+    nextGate: "Keep P2.5A-LIVE-SCRIPT-CERTIFICATION open for the remaining executors and complete the seven-day observe gate before suggest mode."

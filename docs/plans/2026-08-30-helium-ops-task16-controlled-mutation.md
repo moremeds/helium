@@ -270,7 +270,10 @@ The tool exposes only `preflight`, `handoff`, and `rollback`. Test against a fak
 3. exact bootout of both legacy labels, then proof both are absent;
 4. atomic config switch and exact opsd restart only after absence proof;
 5. proof approve-mode opsd completed a fresh zero-action cycle before a failure may be introduced;
-6. rollback stops approve-mode opsd, restores prior config/candidate, restores both exact legacy plists/labels, and only then restarts observe-mode opsd;
+6. rollback stops approve-mode opsd, derives and validates observe mode on the
+   signed candidate parser, restores both exact legacy plists/labels, and only
+   then restarts observe-mode opsd; the prior bytes remain in the durable
+   backup but are not executed against a forward-only newer event ledger;
 7. interruption after every step converges through `rollback` without leaving two mutation owners.
 
 Reject symlinks, wrong UID/mode/hash, future timestamps, missing backups, extra labels, unknown subcommands, arbitrary paths, and rollback after identity drift.
@@ -394,7 +397,12 @@ Require `trading-cadvisor` running, full expected container set present, Docker 
 
 **Step 7: Roll back ownership immediately**
 
-Run `controlled-mutation.mjs rollback`: restore observe-only opsd and both legacy owners in reverse order. Verify exactly one effective mutation owner, current observe cycle, deadman freshness, and no residual approve authority.
+Run `controlled-mutation.mjs rollback`: retain the signed candidate parser in
+observe mode and restore both legacy owners in reverse order. Do not restart an
+older strict event parser after newer action events exist. Verify exactly one
+effective mutation owner, current observe cycle, deadman freshness, no residual
+approve authority, and rollback availability after the signed mutation window
+expires.
 
 **Step 8: Publish evidence without overclaiming**
 
