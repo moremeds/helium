@@ -1,0 +1,51 @@
+manifestVersion: team-v1
+name: livewire-shepherd-repair
+
+roles:
+  incident-lead:
+    responsibility: synthesis
+    requires: [shepherd-incident-lead]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: []
+  repair-planner:
+    responsibility: analysis
+    requires: [shepherd-bounded-repair-planning]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: [livewire.evidence.read, livewire.repair.eligible]
+  independent-verifier:
+    responsibility: verification
+    requires: [shepherd-independent-verification, fresh-evidence]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [source-artifacts]
+      tools: [livewire.evidence.read, livewire.probe.request]
+  reporter:
+    responsibility: rendering
+    requires: [shepherd-reporting]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: []
+
+tasks:
+  - { id: independent-verification, role: independent-verifier, dependsOn: [], requires: [shepherd-independent-verification, fresh-evidence], inputs: [source-artifacts], outputSchema: EvidenceDecisionSet.v1 }
+  - { id: repair-proposal, role: repair-planner, dependsOn: [independent-verification], requires: [shepherd-bounded-repair-planning], inputs: [accepted-claim-ledger], outputSchema: ShepherdRepairProposal.v1 }
+  - { id: incident-decision, role: incident-lead, dependsOn: [independent-verification], requires: [shepherd-incident-lead], inputs: [accepted-claim-ledger], outputSchema: AdjudicatedSynthesis.v1 }
+  - { id: incident-report, role: reporter, dependsOn: [incident-decision], requires: [shepherd-reporting], inputs: [accepted-claim-ledger], outputSchema: ShadowReport.v1 }
+
+crossReference:
+  compareClaims: true
+  materialContradictions: fresh-evidence-work-order
+  requireIndependentEvidence: true
+budgets: { maxAttempts: 12, maxTokens: 60000 }
+acceptance:
+  allowPartialClaims: false
+  terminalTasks: [repair-proposal, incident-report]

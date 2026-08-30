@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@helium/core": "file:../../packages/core",
+    "dsh-plugin-helium": "file:../helium",
     "dsh-plugin-ops-agent": "file:../ops-agent",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

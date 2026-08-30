@@ -7,7 +7,8 @@
   "exports": {
     ".": "./lib/index.js",
     "./dsh-team-host": "./lib/dsh-team-host.js",
-    "./executor-registry": "./lib/executor-registry.js"
+    "./executor-registry": "./lib/executor-registry.js",
+    "./output-contract-registry": "./lib/output-contract-registry.js"
   },
   "files": [
     "lib",

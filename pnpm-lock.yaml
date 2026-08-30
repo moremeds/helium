@@ -362,6 +362,9 @@ importers:
       '@helium/core':
         specifier: file:../../packages/core
         version: link:../../packages/core
+      dsh-plugin-helium:
+        specifier: file:../helium
+        version: link:../helium
       dsh-plugin-ops-agent:
         specifier: file:../ops-agent
         version: link:../ops-agent
