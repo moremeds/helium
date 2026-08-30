@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { writeProviderProcessReceipt } from "@helium/provider-sdk/process-receipt";
 import type { ClaudeEffort } from "./catalog.js";
 
 export type ClaudeClassification =
@@ -109,10 +110,53 @@ export async function invokeClaude(
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+    if (child.pid === undefined) {
+      resolve({
+        ok: false,
+        classification: "error",
+        raw: { spawnError: "Claude child has no pid" },
+        runtimeSnapshot: {
+          requestedModel: input.model,
+          ...(input.effort === undefined ? {} : { requestedEffort: input.effort, effectiveEffort: input.effort }),
+          modelUsage: {},
+        },
+      });
+      return;
+    }
+    let receipt;
+    try {
+      receipt = writeProviderProcessReceipt({
+        workspace: input.cwd,
+        pid: child.pid,
+        provider: "claude-subscription",
+      });
+    } catch (error) {
+      child.on("error", () => {});
+      killTree(child, "SIGKILL");
+      resolve({
+        ok: false,
+        classification: "error",
+        raw: { receiptError: error instanceof Error ? error.message : String(error) },
+        runtimeSnapshot: {
+          requestedModel: input.model,
+          ...(input.effort === undefined ? {} : { requestedEffort: input.effort, effectiveEffort: input.effort }),
+          modelUsage: {},
+        },
+      });
+      return;
+    }
     let stdout = "";
     let stderr = "";
     let terminal: "timeout" | "cancelled" | undefined;
     let settled = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const stopChild = () => {
+      killTree(child, "SIGTERM");
+      if (killTimer === undefined) {
+        killTimer = setTimeout(() => killTree(child, "SIGKILL"), 1_000);
+        killTimer.unref();
+      }
+    };
     const runtime = (envelope?: unknown): ClaudeRuntimeSnapshot => {
       const body = envelope as
         | { modelUsage?: unknown; model_usage?: unknown; effort?: unknown }
@@ -139,19 +183,20 @@ export async function invokeClaude(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
       input.signal?.removeEventListener("abort", abort);
+      try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
       resolve(result);
     };
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     const timer = setTimeout(() => {
       terminal = "timeout";
-      killTree(child, "SIGTERM");
-      setTimeout(() => killTree(child, "SIGKILL"), 10_000).unref();
+      stopChild();
     }, input.timeoutMs);
     const abort = () => {
       terminal = "cancelled";
-      killTree(child, "SIGTERM");
+      stopChild();
     };
     if (input.signal?.aborted) abort();
     else input.signal?.addEventListener("abort", abort, { once: true });

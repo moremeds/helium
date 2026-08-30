@@ -9,6 +9,7 @@
  * @module dsh-plugin-helium/executor-registry
  */
 import { randomUUID } from "node:crypto";
+import { reapOrphanProviderProcesses } from "@helium/provider-sdk/process-receipt";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -205,5 +206,9 @@ export class ExecutorRegistry {
 
   async drain(): Promise<void> {
     await Promise.all(this.list().map((e) => e.drain()));
+  }
+
+  async reconcileOrphanProcesses(workspacesDir: string) {
+    return await reapOrphanProviderProcesses(workspacesDir);
   }
 }

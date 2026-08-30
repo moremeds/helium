@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { writeProviderProcessReceipt } from "@helium/provider-sdk/process-receipt";
 import type { CodexEffort } from "./catalog.js";
 
 export type CodexClassification =
@@ -247,27 +248,73 @@ export async function invokeCodex(input: {
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
+    if (child.pid === undefined) {
+      resolve({
+        ok: false,
+        classification: "error",
+        runtimeSnapshot: {
+          requestedModel: input.model,
+          requestedEffort: input.effort,
+          effectiveEffort: input.effort,
+          usage: {},
+          events: [{ spawnError: "Codex child has no pid" }],
+        },
+      });
+      return;
+    }
+    let receipt;
+    try {
+      receipt = writeProviderProcessReceipt({
+        workspace: input.cwd,
+        pid: child.pid,
+        provider: "codex-subscription",
+      });
+    } catch (error) {
+      child.on("error", () => {});
+      killTree(child, "SIGKILL");
+      resolve({
+        ok: false,
+        classification: "error",
+        runtimeSnapshot: {
+          requestedModel: input.model,
+          requestedEffort: input.effort,
+          effectiveEffort: input.effort,
+          usage: {},
+          events: [{ receiptError: error instanceof Error ? error.message : String(error) }],
+        },
+      });
+      return;
+    }
     let stdout = "";
     let stderr = "";
     let terminal: CodexClassification | undefined;
     let settled = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const stopChild = () => {
+      killTree(child, "SIGTERM");
+      if (killTimer === undefined) {
+        killTimer = setTimeout(() => killTree(child, "SIGKILL"), 1_000);
+        killTimer.unref();
+      }
+    };
     const finish = (result: CodexInvocationResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (killTimer !== undefined) clearTimeout(killTimer);
       input.signal?.removeEventListener("abort", abort);
+      try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
       resolve(result);
     };
     child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
     const timer = setTimeout(() => {
       terminal = "timeout";
-      killTree(child, "SIGTERM");
-      setTimeout(() => killTree(child, "SIGKILL"), 1_000).unref();
+      stopChild();
     }, input.timeoutMs);
     const abort = () => {
       terminal = "cancelled";
-      killTree(child, "SIGTERM");
+      stopChild();
     };
     if (input.signal?.aborted) abort();
     else input.signal?.addEventListener("abort", abort, { once: true });

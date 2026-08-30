@@ -276,6 +276,9 @@ importers:
       '@helium/provider-claude-subscription':
         specifier: file:../provider-claude-subscription
         version: link:../provider-claude-subscription
+      '@helium/provider-sdk':
+        specifier: file:../../packages/provider-sdk
+        version: link:../../packages/provider-sdk
       '@helium/v1-compat':
         specifier: file:../../packages/v1-compat
         version: link:../../packages/v1-compat

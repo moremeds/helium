@@ -1,0 +1,62 @@
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  PROCESS_RECEIPT_FILE,
+  reapOrphanProviderProcesses,
+  writeProviderProcessReceipt,
+} from "../src/process-receipt.js";
+
+const children = new Set<number>();
+afterEach(() => {
+  for (const pid of children) {
+    try { process.kill(-pid, "SIGKILL"); } catch { /* already dead */ }
+  }
+  children.clear();
+});
+
+function stubbornChild() {
+  const child = spawn(
+    process.execPath,
+    ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],
+    { detached: true, stdio: "ignore" },
+  );
+  if (child.pid === undefined) throw new Error("missing child pid");
+  children.add(child.pid);
+  return child;
+}
+
+describe("provider process receipts", () => {
+  it("reaps a matching orphan process group and removes its owned workspace", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-process-reaper-"));
+    const workspace = join(root, "work", "attempt-1");
+    const child = stubbornChild();
+    writeProviderProcessReceipt({ workspace, pid: child.pid!, provider: "fixture" });
+    expect(existsSync(join(workspace, PROCESS_RECEIPT_FILE))).toBe(true);
+
+    const outcomes = await reapOrphanProviderProcesses(root, { graceMs: 50 });
+    expect(outcomes).toEqual([
+      expect.objectContaining({ pid: child.pid, outcome: "reaped" }),
+    ]);
+    expect(existsSync(workspace)).toBe(false);
+    children.delete(child.pid!);
+  });
+
+  it("refuses to kill a reused or otherwise mismatched PID identity", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-process-reaper-"));
+    const workspace = join(root, "work", "attempt-2");
+    const child = stubbornChild();
+    writeProviderProcessReceipt({ workspace, pid: child.pid!, provider: "fixture" });
+    const path = join(workspace, PROCESS_RECEIPT_FILE);
+    const receipt = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...receipt, identityHash: "sha256:" + "0".repeat(64) }));
+
+    const outcomes = await reapOrphanProviderProcesses(root, { graceMs: 50 });
+    expect(outcomes).toEqual([
+      expect.objectContaining({ pid: child.pid, outcome: "identity-mismatch" }),
+    ]);
+    expect(() => process.kill(child.pid!, 0)).not.toThrow();
+  });
+});

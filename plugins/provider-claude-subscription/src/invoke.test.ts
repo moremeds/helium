@@ -1,7 +1,8 @@
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { PROCESS_RECEIPT_FILE } from "@helium/provider-sdk/process-receipt";
 import { invokeClaude } from "./invoke.js";
 
 function fakeClaude(envelope: object): { dir: string; capture: string } {
@@ -18,6 +19,31 @@ function fakeClaude(envelope: object): { dir: string; capture: string } {
   );
   chmodSync(bin, 0o755);
   return { dir, capture };
+}
+
+function stubbornClaude(): { dir: string; ready: string } {
+  const dir = mkdtempSync(join(tmpdir(), "helium-claude-stubborn-"));
+  const ready = join(dir, "ready");
+  const bin = join(dir, "claude");
+  writeFileSync(
+    bin,
+    [
+      "#!/bin/sh",
+      "trap '' TERM",
+      'printf ready > "$HELIUM_PROVIDER_READY"',
+      "while true; do /bin/sleep 1; done",
+    ].join("\n"),
+  );
+  chmodSync(bin, 0o755);
+  return { dir, ready };
+}
+
+async function waitFor(path: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!existsSync(path) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  expect(existsSync(path)).toBe(true);
 }
 
 describe("invokeClaude", () => {
@@ -77,4 +103,28 @@ describe("invokeClaude", () => {
     expect(argv).toContain("--model");
     expect(argv).not.toContain("--effort");
   });
+
+  it("escalates cancellation when the provider ignores TERM and clears its receipt", async () => {
+    const { dir, ready } = stubbornClaude();
+    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
+    const controller = new AbortController();
+    const pending = invokeClaude({
+      model: "claude-sonnet-5",
+      effort: "high",
+      prompt: "WAIT",
+      cwd: workspace,
+      maxTurns: 2,
+      timeoutMs: 30_000,
+      allowedTools: [],
+      env: { PATH: dir, HELIUM_PROVIDER_READY: ready },
+      signal: controller.signal,
+    });
+    await waitFor(ready);
+    controller.abort();
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      classification: "cancelled",
+    });
+    expect(existsSync(join(workspace, PROCESS_RECEIPT_FILE))).toBe(false);
+  }, 10_000);
 });

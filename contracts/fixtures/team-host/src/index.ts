@@ -181,6 +181,7 @@ export function apply(ctx: Context, config: Config): void {
     void (async () => {
       await ctx.get("loader")?.await();
       const registry = new ExecutorRegistry({ onResult: () => {} });
+      await registry.reconcileOrphanProcesses(config.workspacesDir);
       const leases = new LeaseStore();
       const dshTarget = ExecutionTargetId("fixture-dsh-target");
       const processTarget = ExecutionTargetId("fixture-process-target");
