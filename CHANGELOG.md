@@ -1,3 +1,8 @@
+## v0.1.9 — 2026-08-30
+
+- fix(release): reload canary launchd environment
+- fix(p4): preserve bounded canary retries
+
 ## v0.1.8 — 2026-08-30
 
 - fix(ops): rebind observe-only package to current
