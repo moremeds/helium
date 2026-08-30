@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { runSuggestConfig } from "./configure-suggest-only.mjs";
 
@@ -118,6 +120,27 @@ test("rejects unknown commands and non-absolute paths", () => {
       () => runSuggestConfig("preflight", { ...f.input, config: "relative.json" }, f.deps),
       /absolute/,
     );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("runs its CLI when reached through a release-directory symlink", () => {
+  const f = fixture();
+  const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+  const linkedRelease = join(f.root, "current");
+  symlinkSync(repo, linkedRelease, "dir");
+  try {
+    const result = spawnSync(process.execPath, [
+      join(linkedRelease, "scripts", "ops", "configure-suggest-only.mjs"),
+      "status",
+      "--config",
+      f.input.config,
+      "--release",
+      f.input.release,
+    ], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).mode, "observe");
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

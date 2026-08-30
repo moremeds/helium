@@ -135,6 +135,35 @@ describe("decideAuthority", () => {
     expect(decision.reasons).toContain("max-attempts");
   });
 
+  it("starts a fresh attempt budget after the incident recovered", () => {
+    const oldAttempt = {
+      sopId: "repair-coverage",
+      incidentId: incident.key,
+      at: "2026-08-25T02:00:00.000Z",
+      outcome: "failed" as const,
+    };
+    const decision = decideAuthority(input({
+      history: [oldAttempt, { ...oldAttempt, at: "2026-08-25T02:30:00.000Z" }],
+      attemptWindowStartedAt: "2026-08-25T03:00:00.000Z",
+    }));
+    expect(decision.reasons).not.toContain("max-attempts");
+    expect(decision.eligible).toBe(true);
+  });
+
+  it("keeps the cooldown across recovered incident occurrences", () => {
+    const decision = decideAuthority(input({
+      history: [{
+        sopId: "repair-coverage",
+        incidentId: incident.key,
+        at: "2026-08-25T03:55:00.000Z",
+        outcome: "failed",
+      }],
+      attemptWindowStartedAt: "2026-08-25T03:56:00.000Z",
+    }));
+    expect(decision.reasons).not.toContain("max-attempts");
+    expect(decision.reasons).toContain("cooldown");
+  });
+
   it("refuses inside the cooldown window and admits after it", () => {
     const recent = {
       sopId: "repair-coverage",

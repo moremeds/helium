@@ -262,6 +262,9 @@ export class OpsController {
         this.options.mode === "approve" && sop.authority === "auto"
           ? { ...sop, authority: "approve" }
           : sop;
+      const episodeBoundary = this.#incidentEpisodeBoundary(
+        persistedIncidentId(incident.key),
+      );
       const action = this.#actionIdentity({
         loaded,
         sop,
@@ -276,6 +279,9 @@ export class OpsController {
         incident,
         checkResults: await this.options.runChecks(sop.preconditions),
         history: this.#history(),
+        ...(episodeBoundary === undefined
+          ? {}
+          : { attemptWindowStartedAt: episodeBoundary.at }),
         now: this.options.now(),
         ...(policyApproval === undefined ? {} : { approval: policyApproval }),
         ...(this.options.promotionId === undefined ||
@@ -916,9 +922,19 @@ export class OpsController {
     attempt: number;
     inFlight: boolean;
   } {
+    const incidentId = persistedIncidentId(candidate.incident.key);
+    const boundary = this.#incidentEpisodeBoundary(incidentId);
+    const currentActionIds = new Set(
+      this.options.store.replay()
+        .slice((boundary?.index ?? -1) + 1)
+        .filter((event) =>
+          event.type === "action-proposed" && event.incidentId === incidentId)
+        .map((event) => event.type === "action-proposed" ? event.actionId : ""),
+    );
     const matching = Object.values(this.options.store.state().actions).filter(
       (action) =>
-        action.incidentId === persistedIncidentId(candidate.incident.key) &&
+        currentActionIds.has(action.actionId) &&
+        action.incidentId === incidentId &&
         action.sopId === candidate.sop.id,
     );
     const inFlight = matching.find((action) =>
@@ -938,7 +954,9 @@ export class OpsController {
         proposed?.actionId ??
         stableId(
           "act",
-          `${candidate.incident.key}|${candidate.sop.id}|${candidate.sop.digest}|${attempt}`,
+          boundary === undefined
+            ? `${candidate.incident.key}|${candidate.sop.id}|${candidate.sop.digest}|${attempt}`
+            : `${candidate.incident.key}|${candidate.sop.id}|${candidate.sop.digest}|episode:${boundary.eventId}|${attempt}`,
         ),
       attempt,
       inFlight: false,
@@ -962,6 +980,20 @@ export class OpsController {
             };
       })
       .filter((record): record is AttemptRecord => record !== undefined);
+  }
+
+  #incidentEpisodeBoundary(
+    incidentId: string,
+  ): { index: number; at: string; eventId: string } | undefined {
+    const events = this.options.store.replay();
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index];
+      if (event?.type === "incident-updated" &&
+          event.incidentId === incidentId && event.state === "recovered") {
+        return { index, at: event.at, eventId: event.id };
+      }
+    }
+    return undefined;
   }
 }
 
