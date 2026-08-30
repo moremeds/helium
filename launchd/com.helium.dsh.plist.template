@@ -44,7 +44,7 @@
          file carries a `#!/usr/bin/env node` shebang and `pnpm build` chmod +x's
          it, and PATH above puts node first, so spawning it directly works and
          has one less moving part. -->
-    <key>HELIUM_MCP_BIN</key><string>/Users/moremeds/projects/helium-releases/current/packages/core/lib/mcp/server.js</string>
+    <key>HELIUM_MCP_BIN</key><string>/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js</string>
     <key>HELIUM_EMAIL_TO</key><string>lcxxcllcx@gmail.com</string>
   </dict>
 </dict>

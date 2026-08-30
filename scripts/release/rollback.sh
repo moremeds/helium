@@ -50,6 +50,10 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 target="$(readlink "$RELEASES/previous")" || { echo "no previous release" >&2; exit 65; }
 current="$(readlink "$RELEASES/current")"
 [ -d "$target" ] || { echo "previous release $target missing" >&2; exit 65; }
+[ -x "$target/packages/v1-compat/lib/mcp/server.js" ] || {
+  echo "previous release cannot restore the DSH MCP boundary: $target/packages/v1-compat/lib/mcp/server.js" >&2
+  exit 71
+}
 opsd_loaded=0
 if [ -f "$OPSD_PLIST" ]; then
   if launchctl print "gui/$(id -u)/com.helium.opsd" >/dev/null 2>&1; then

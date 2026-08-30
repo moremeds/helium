@@ -180,6 +180,9 @@ echo "case 5b: review-only canary switch is exact and reversible"
 canary_plist="$tmp/com.helium.dsh.plist"
 cp "$repo/launchd/com.helium.dsh.plist.template" "$canary_plist"
 sed -i '' 's|__NODE_BIN_DIR__|/opt/homebrew/bin|' "$canary_plist"
+grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$canary_plist"
+grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/deploy.sh"
+grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/rollback.sh"
 bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist" --no-restart
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "review-only" ]
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ]
@@ -218,12 +221,14 @@ PATH="$fake_bin:$PATH" \
 grep -q '^bootout gui/.*/com.helium.dsh$' "$fake_calls"
 grep -Fq "bootstrap gui/$(id -u) $canary_plist" "$fake_calls"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "review-only" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
 HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
 HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
 HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
 PATH="$fake_bin:$PATH" \
   bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "off" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
 [ ! -e "${canary_plist}.pre-p4-review-canary" ]
 
 echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"

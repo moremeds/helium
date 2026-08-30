@@ -75,6 +75,22 @@ if [ "$command" = "enable" ] && [ ! -f "$backup" ]; then
   cp -p "$plist" "$backup"
 fi
 
+mcp_bin="/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js"
+if [ "$command" = "enable" ]; then
+  # P2 moved the v1 MCP boundary out of core. Migrate the retained baseline as
+  # well as the active canary plist so a later restore cannot resurrect the
+  # removed core/lib/mcp/server.js path.
+  backup_tmp="${backup}.mcp.$$"
+  cp -p "$backup" "$backup_tmp"
+  if plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$backup_tmp" >/dev/null 2>&1; then
+    plutil -replace EnvironmentVariables.HELIUM_MCP_BIN -string "$mcp_bin" "$backup_tmp"
+  else
+    plutil -insert EnvironmentVariables.HELIUM_MCP_BIN -string "$mcp_bin" "$backup_tmp"
+  fi
+  plutil -lint "$backup_tmp" >/dev/null
+  mv "$backup_tmp" "$backup"
+fi
+
 temporary="$(mktemp "${plist}.tmp.XXXXXX")"
 transaction="${plist}.transaction.$$"
 cp -p "$plist" "$temporary"
@@ -104,6 +120,7 @@ if [ "$command" = "enable" ]; then
   set_string HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY "1"
   set_string HELIUM_TEAMS_DIR "/Users/moremeds/projects/helium-releases/current/teams"
   set_string HELIUM_OPS_EVENT_LOG "/Users/moremeds/.helium/ops/state/events.jsonl"
+  set_string HELIUM_MCP_BIN "$mcp_bin"
 else
   set_string HELIUM_TEAM_PROMOTION_MODE "off"
 fi
