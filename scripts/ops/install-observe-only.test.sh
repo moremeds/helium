@@ -152,7 +152,9 @@ grep -q -- '--check-config' "$repo/scripts/release/deploy.sh"
 grep -q -- '--check-config' "$repo/scripts/release/rollback.sh"
 grep -q 'controller-cycle-recorded' "$repo/scripts/release/opsd-cycle-after.mjs"
 grep -q 'opsd-cycle-after.mjs' "$repo/scripts/release/deploy.sh"
+# shellcheck disable=SC2016 # These are literal source guards, not shell expressions.
 grep -Fq 'node "$current/scripts/release/opsd-cycle-after.mjs"' "$repo/scripts/release/rollback.sh"
+# shellcheck disable=SC2016 # These are literal source guards, not shell expressions.
 if grep -Fq 'node "$target/scripts/release/opsd-cycle-after.mjs"' "$repo/scripts/release/rollback.sh"; then
   echo "FAIL: rollback depends on a helper the preceding target release may not contain"
   exit 1
@@ -183,6 +185,45 @@ bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ]
 bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist" --no-restart
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "off" ]
+[ ! -e "${canary_plist}.pre-p4-review-canary" ]
+
+echo "case 5c: canary switch reloads launchd so the new environment is active"
+fake_bin="$tmp/fake-launchctl-bin"
+fake_state="$tmp/fake-launchctl-state"
+fake_loaded="$tmp/fake-loaded-dsh.plist"
+fake_calls="$tmp/fake-launchctl-calls"
+mkdir -p "$fake_bin"
+touch "$fake_state"
+cat >"$fake_bin/launchctl" <<'LAUNCHCTL'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"$HELIUM_FAKE_LAUNCHCTL_CALLS"
+case "$1" in
+  print) [ -f "$HELIUM_FAKE_LAUNCHCTL_STATE" ] ;;
+  bootout) rm -f "$HELIUM_FAKE_LAUNCHCTL_STATE" ;;
+  bootstrap)
+    cp -p "$3" "$HELIUM_FAKE_LAUNCHCTL_LOADED"
+    touch "$HELIUM_FAKE_LAUNCHCTL_STATE"
+    ;;
+  kickstart) echo "kickstart must not be used to reload a changed plist" >&2; exit 99 ;;
+  *) exit 64 ;;
+esac
+LAUNCHCTL
+chmod 700 "$fake_bin/launchctl"
+HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
+HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
+HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
+PATH="$fake_bin:$PATH" \
+  bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist"
+grep -q '^bootout gui/.*/com.helium.dsh$' "$fake_calls"
+grep -Fq "bootstrap gui/$(id -u) $canary_plist" "$fake_calls"
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "review-only" ]
+HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
+HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
+HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
+PATH="$fake_bin:$PATH" \
+  bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist"
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "off" ]
 [ ! -e "${canary_plist}.pre-p4-review-canary" ]
 
 echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"

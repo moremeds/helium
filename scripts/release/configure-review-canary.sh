@@ -28,6 +28,22 @@ value() {
   plutil -extract "EnvironmentVariables.$1" raw -o - "$plist" 2>/dev/null || true
 }
 
+domain="gui/$(id -u)"
+reload_dsh() {
+  if launchctl print "$domain/$label" >/dev/null 2>&1; then
+    launchctl bootout "$domain/$label" || return 1
+    local end=$((SECONDS + 15))
+    while launchctl print "$domain/$label" >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || {
+        echo "DSH did not unload before plist reload" >&2
+        return 1
+      }
+      sleep 1
+    done
+  fi
+  launchctl bootstrap "$domain" "$plist"
+}
+
 if [ "$command" = "status" ]; then
   printf '{"mode":"%s","jobs":"%s","dailyCap":"%s","backup":%s}\n' \
     "$(value HELIUM_TEAM_PROMOTION_MODE)" \
@@ -41,14 +57,15 @@ if [ "$command" = "restore" ]; then
   [ -f "$backup" ] || { echo "no canary backup to restore: $backup" >&2; exit 65; }
   transaction="${plist}.transaction.$$"
   cp -p "$plist" "$transaction"
-  mv "$backup" "$plist"
+  cp -p "$backup" "$plist"
   plutil -lint "$plist" >/dev/null
-  if [ "$restart" = "1" ] && ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+  if [ "$restart" = "1" ] && ! reload_dsh; then
     mv "$transaction" "$plist"
-    launchctl kickstart -k "gui/$(id -u)/com.helium.dsh" || true
-    echo "DSH restart failed; restored the pre-command plist" >&2
+    reload_dsh || true
+    echo "DSH plist reload failed; restored the pre-command plist" >&2
     exit 66
   fi
+  rm -f "$backup"
   rm -f "$transaction"
   echo "restored exact pre-canary DSH plist"
   exit 0
@@ -93,10 +110,10 @@ fi
 
 plutil -lint "$temporary" >/dev/null
 mv "$temporary" "$plist"
-if [ "$restart" = "1" ] && ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+if [ "$restart" = "1" ] && ! reload_dsh; then
   mv "$transaction" "$plist"
-  launchctl kickstart -k "gui/$(id -u)/com.helium.dsh" || true
-  echo "DSH restart failed; restored the pre-command plist" >&2
+  reload_dsh || true
+  echo "DSH plist reload failed; restored the pre-command plist" >&2
   exit 66
 fi
 rm -f "$transaction"
