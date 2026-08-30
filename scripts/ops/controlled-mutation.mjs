@@ -434,7 +434,8 @@ export async function waitForFreshZeroActionCycle(layout, startedAt, now, option
     new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)));
   const deadline = monotonicNow() + timeoutMs;
   while (true) {
-    if (hasFreshZeroActionCycle(layout, startedAt, now())) return;
+    const snapshot = completeEventSnapshot(layout.eventsPath);
+    if (hasFreshZeroActionCycle(snapshot, startedAt, now())) return;
     if (monotonicNow() >= deadline) {
       throw new Error(`approve opsd produced no fresh zero-action cycle within ${timeoutMs}ms`);
     }
@@ -442,11 +443,18 @@ export async function waitForFreshZeroActionCycle(layout, startedAt, now, option
   }
 }
 
-function hasFreshZeroActionCycle(layout, startedAt, now) {
+function completeEventSnapshot(path) {
+  const text = readFileSync(path, "utf8");
+  if (text === "" || text.endsWith("\n")) return text;
+  const lastNewline = text.lastIndexOf("\n");
+  return lastNewline === -1 ? "" : text.slice(0, lastNewline + 1);
+}
+
+function hasFreshZeroActionCycle(snapshot, startedAt, now) {
   const lower = startedAt.getTime();
   const upper = now.getTime();
   let cycle = false;
-  for (const line of readFileSync(layout.eventsPath, "utf8").split("\n").filter(Boolean)) {
+  for (const line of snapshot.split("\n").filter(Boolean)) {
     const value = JSON.parse(line);
     const record = value.record ?? value;
     const at = Date.parse(record.at);
