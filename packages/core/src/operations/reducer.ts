@@ -13,7 +13,12 @@ import type { ActionOutcome } from "./action.js";
 import type { Attribution, OperationsEvent } from "./events.js";
 import type { IncidentState } from "./incident.js";
 import type { MutationOwnership } from "./component.js";
+import type { AuthorityManifestEntry } from "./authority-manifest.js";
 import type { Observation } from "./observation.js";
+import type { PostconditionSample } from "./action.js";
+import type { ControllerProbeOutcome } from "./mutation-owner.js";
+import type { EvidenceRef } from "../evidence/bundle.js";
+import type { CheckDefinition } from "./check.js";
 
 /** Non-terminal action states, plus the six terminal outcomes. */
 export const ACTION_PROGRESS = [
@@ -30,14 +35,33 @@ export interface ActionProjection {
   incidentId: string;
   componentId: string;
   sopId: string;
+  sopVersion: number;
   sopDigest: string;
   state: ActionState;
   attribution?: Attribution;
   authority?: string;
+  authorityManifestEntry?: AuthorityManifestEntry;
   leaseId?: string;
+  operationId?: string;
   argv?: string[];
+  baseline?: { capturedAt: string; samples: PostconditionSample[]; allPassing: boolean };
+  controllerProbe?: ControllerProbeOutcome;
+  eligibility?: { eligible: boolean; reasons: string[] };
+  mutationOwner?: MutationOwnership;
+  dependencyIds?: string[];
+  verificationPolicy?: { postconditions: CheckDefinition[]; graceMs: number };
   exitCode?: number | null;
   timedOut?: boolean;
+  outputDigest?: string;
+  outputTail?: string;
+  outputBytes?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  postconditionSamples?: PostconditionSample[];
+  recoveryEvidence?: EvidenceRef & {
+    schema: "helium.ops.recovery-evidence/v1";
+    assertionId: string;
+  };
   /** Set when an operator intervened while this action was still in flight. */
   supersededAt?: string;
 }
@@ -65,6 +89,21 @@ export interface OperationsState {
   actions: Record<string, ActionProjection>;
   alerts: AlertProjection[];
   interventions: { componentId: string; kind: string; at: string; confirmed: boolean }[];
+  analysis: {
+    analysisId: string;
+    status: "available" | "unavailable";
+    consecutiveFailures: number;
+    reason?: string;
+    retryAt?: string;
+    at: string;
+  }[];
+  controllerCycles: {
+    controllerId: string;
+    releaseRef: string;
+    observationCount: number;
+    collectionFailureCount: number;
+    at: string;
+  }[];
 }
 
 const TERMINAL = new Set<ActionState>([
@@ -91,6 +130,8 @@ export function emptyOperationsState(): OperationsState {
     actions: {},
     alerts: [],
     interventions: [],
+    analysis: [],
+    controllerCycles: [],
   };
 }
 
@@ -112,6 +153,8 @@ export function reduceOperations(
     actions: { ...initial.actions },
     alerts: [...initial.alerts],
     interventions: [...initial.interventions],
+    analysis: [...initial.analysis],
+    controllerCycles: [...initial.controllerCycles],
   };
   const seen = new Set<string>();
 
@@ -168,6 +211,7 @@ export function reduceOperations(
           incidentId: event.incidentId,
           componentId: event.componentId,
           sopId: event.sopId,
+          sopVersion: event.sopVersion,
           sopDigest: event.sopDigest,
           state: "proposed",
         };
@@ -177,6 +221,9 @@ export function reduceOperations(
         const action = state.actions[event.actionId];
         action.state = "authorized";
         action.authority = event.authority;
+        if (event.authorityManifestEntry !== undefined) {
+          action.authorityManifestEntry = { ...event.authorityManifestEntry };
+        }
         break;
       }
 
@@ -184,7 +231,37 @@ export function reduceOperations(
         const action = state.actions[event.actionId];
         action.state = "intent-recorded";
         action.leaseId = event.leaseId;
+        action.operationId = event.operationId;
         action.argv = [...event.argv];
+        action.baseline = {
+          capturedAt: event.baseline.capturedAt,
+          samples: event.baseline.samples.map((sample) => ({
+            ...sample,
+            evidenceRefs: [...sample.evidenceRefs],
+          })),
+          allPassing: event.baseline.allPassing,
+        };
+        action.controllerProbe = {
+          ...event.controllerProbe,
+          observedLabels: [...event.controllerProbe.observedLabels],
+        };
+        action.eligibility = {
+          eligible: event.eligibility.eligible,
+          reasons: [...event.eligibility.reasons],
+        };
+        action.mutationOwner = {
+          ...event.mutationOwner,
+          competingLabels: [...event.mutationOwner.competingLabels],
+        };
+        action.dependencyIds = [...event.dependencyIds];
+        action.verificationPolicy = {
+          postconditions: event.verificationPolicy.postconditions.map((check) => ({
+            ...check,
+            probe: { ...check.probe, args: { ...check.probe.args } },
+            expect: { ...check.expect },
+          })),
+          graceMs: event.verificationPolicy.graceMs,
+        };
         break;
       }
 
@@ -195,6 +272,11 @@ export function reduceOperations(
         action.state = "executed";
         action.exitCode = event.exitCode;
         action.timedOut = event.timedOut;
+        action.outputDigest = event.outputDigest;
+        action.outputTail = event.outputTail;
+        action.outputBytes = event.outputBytes;
+        action.startedAt = event.startedAt;
+        action.finishedAt = event.finishedAt;
         break;
       }
 
@@ -231,15 +313,28 @@ export function reduceOperations(
           // in flight, so the automation gets no credit for the outcome.
           action.state = "superseded-by-operator";
           action.attribution = "operator";
+          action.postconditionSamples = event.postconditionSamples.map((sample) => ({
+            ...sample,
+            evidenceRefs: [...sample.evidenceRefs],
+          }));
+          action.recoveryEvidence = { ...event.recoveryEvidence };
           break;
         }
         action.state = event.outcome;
-        action.attribution =
+        action.attribution = event.attribution ?? (
           event.outcome === "external-recovery"
             ? "external"
             : event.outcome === "uncertain"
               ? "unknown"
-              : "automatic";
+              : event.outcome === "not-needed"
+                ? undefined
+                : "automatic"
+        );
+        action.postconditionSamples = event.postconditionSamples.map((sample) => ({
+          ...sample,
+          evidenceRefs: [...sample.evidenceRefs],
+        }));
+        action.recoveryEvidence = { ...event.recoveryEvidence };
         break;
       }
 
@@ -252,6 +347,27 @@ export function reduceOperations(
           incidentId: event.incidentId,
           severity: event.severity,
           summary: event.summary,
+          at: event.at,
+        });
+        break;
+
+      case "analysis-status-recorded":
+        state.analysis.push({
+          analysisId: event.analysisId,
+          status: event.status,
+          consecutiveFailures: event.consecutiveFailures,
+          ...(event.reason === undefined ? {} : { reason: event.reason }),
+          ...(event.retryAt === undefined ? {} : { retryAt: event.retryAt }),
+          at: event.at,
+        });
+        break;
+
+      case "controller-cycle-recorded":
+        state.controllerCycles.push({
+          controllerId: event.controllerId,
+          releaseRef: event.releaseRef,
+          observationCount: event.observationCount,
+          collectionFailureCount: event.collectionFailureCount,
           at: event.at,
         });
         break;

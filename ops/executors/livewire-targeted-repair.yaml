@@ -1,0 +1,20 @@
+executorId: livewire-targeted-repair
+path: /__HELIUM_UNCERTIFIED__/livewire-targeted-repair
+identity:
+  kind: sha256
+  value: "0000000000000000000000000000000000000000000000000000000000000000"
+argvSchema:
+  id: livewire-targeted-repair-argv-v1
+  params:
+    - flag: --target-date
+      valuePattern: "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+      required: true
+    - flag: --partition
+      valuePattern: "[A-Za-z0-9._-]{1,64}"
+      required: true
+cwd: /__HELIUM_UNCERTIFIED__/livewire
+environmentProfile:
+  PATH: /usr/bin:/bin:/usr/sbin:/sbin
+timeoutMs: 900000
+maxOutputBytes: 65536
+expectedOwnerUid: 0

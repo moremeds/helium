@@ -2,19 +2,21 @@
 
 **Date:** 2026-08-25
 
-**Last revised:** 2026-08-28 — signed authority manifest, single mutation
-ownership, and pre-action baselines (review blockers OPS-1, OPS-2, OPS-3), per
-`docs/reviews/2026-08-28-plan-review-adjudication.md`; attribution names an
-actor rather than an action outcome (R3) and the observe boundary is stated as
-two windows in section 13.4 (R8), per
-`docs/reviews/2026-08-28-adjudication-round-2.md`
+**Last revised:** 2026-08-30 — the operator clarified that AC#1 is the v1
+workload-observation criterion. Section 13.4 now permits bounded read-only host
+identity/configuration inspection while retaining the install, deploy, service
+and mutation freeze. Earlier signed-authority and single-owner adjudications
+remain unchanged.
 
 **Status:** Approved design direction
 
 **Production constraint:** design and implementation work may proceed, but no
-Mac mini deployment or recovery drill may occur during the active AC#1
-observation window, which closes 2026-08-31. In that window the test is
-presence, not mutation — see section 13.4.
+Mac mini deployment, installation, managed-service lifecycle operation,
+configuration/state write, or recovery drill may occur during the active AC#1
+observation window, which closes 2026-08-31. Bounded read-only inspection is
+permitted under section 13.4. A second operator decision on 2026-08-30 decouples
+the reversible, empty-authority Ops Phase D commissioning from AC#1; AC#1 is not
+credited as passed when that commissioning begins.
 
 ## 1. Decision
 
@@ -898,11 +900,12 @@ rendering a plist is a mutation are both arguable. A named verb is not, and a
 named verb is checkable at registration time.
 
 **Window 1 — pre-install.** P2.5a: Ops Tasks 9-12 and 18, for the duration of
-the AC#1 freeze, which closes **2026-08-31**. The boundary is the **host** and
-the test is **presence**: if it puts a byte on the mini or starts a process
-there, it is forbidden. That date is the value the installer's configured
-freeze window must read; a freeze guard with no configured value to read is not
-a guard.
+the AC#1 freeze, which closes **2026-08-31**. AC#1 is the v1 workload-observation
+criterion, not a zero-process host-presence test. By operator amendment on
+2026-08-30, the boundary is **production state**: bounded read-only inspection
+is permitted, while durable host changes and managed-workload lifecycle changes
+remain forbidden. The date above remains the value the installer's configured
+freeze window must read; the amendment does not authorize installation.
 
 Permitted:
 
@@ -912,26 +915,50 @@ Permitted:
   `HOME` and the launchd root redirected into a process-local temporary
   directory that is removed on exit;
 - read, add and sanitize fixtures; and
-- read the mini's already-published health artifacts through channels that
-  existed before this program — read-only, starting no new process there.
+- read the mini's already-published health artifacts through pre-existing
+  channels; and
+- use bounded SSH sessions to read host identity, clocks, process/service
+  metadata, plist/configuration contents, file ownership/modes, release targets
+  and executable hashes. Inspection commands must not invoke Helium, opsd, a
+  repair script, a package manager, or a service lifecycle operation. Incidental
+  SSH/audit accounting performed by the operating system is not an application
+  or configuration mutation and does not fail AC#1.
 
-Forbidden without exception until 2026-08-31 has passed and the AC#1 evidence is
-recorded:
+Forbidden until 2026-08-31 has passed and the AC#1 evidence is recorded:
 
-- writing, copying or rendering any file anywhere on the mini's filesystem:
-  plist, script, binary, configuration, log, or state directory;
+- writing, copying or rendering any application, release, plist, script,
+  binary, configuration, log, or state file on the mini;
 - `launchctl load`, `launchctl bootstrap`, or `launchctl enable` of any
   `com.helium.opsd*` label;
-- starting `helium-opsd`, `opsctl`, or any probe process on the mini,
-  **including a single manual one-shot run "just to see the output"**;
+- starting `helium-opsd`, `opsctl`, a Helium/DSH workload, any repair command,
+  or any production probe executable on the mini;
 - installing or upgrading any package on the mini;
-- executing any probe command against the mini from another host; and
+- stopping, restarting, enabling, disabling or reconfiguring any managed
+  service; and
 - deploying any Helium release to the mini, including one whose only change is
   that it contains the ops-agent plugin.
 
-"No production component or host mutation" is **not** the test in this window.
-Installing a LaunchAgent mutates no production component, and on a literal
-reading mutates nothing at all; it is still forbidden. Presence is the test.
+The amendment supersedes only the earlier zero-process presence rule. It does
+not weaken the five-trading-day v1 acceptance conditions, the installer freeze,
+or the prohibition on deployment, installation, repair and service mutation.
+
+**2026-08-30 weekend commissioning waiver.** The operator subsequently chose
+not to let the low-coverage v1 AC#1 window consume the weekend commissioning
+window. AC#1 therefore remains uncredited rather than being reported as a pass.
+The exact waiver `ops-phase-d-weekend-2026-08-30` may install and load only an
+isolated `com.helium.opsd` in `observe` mode with the committed empty authority
+manifest. It may create only the installer-owned private ops directory, config,
+plist, socket, event/log files and LaunchAgent process. It may not flip the
+Helium release, restart DSH or any legacy controller, grant an SOP, run a
+repair, or perform the ownership handoff/drill. Bootout plus the scoped
+uninstaller is the required rollback.
+
+Once a valid opsd event path is observed, the waiver also permits a separate
+`com.helium.opsd-deadman` scheduled label that reads only that path. Live
+commissioning proved that reusing `com.helium.deadman` couples opsd liveness to
+version-skewed tenant policy; the attempted edit was rolled back byte-for-byte
+and the legacy label is excluded from this integration. The independent label
+adds liveness coverage but grants no recovery authority.
 
 **Window 2 — installed and observing.** P4: rollout Stage 1's observe-only days
 and Stage 2's suggest-only days, at least seven of each. Here `opsd` **is**

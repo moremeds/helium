@@ -18,12 +18,15 @@ import { readFileSync } from "node:fs";
 import {
   resolveAuthority,
   type SopAuthority,
+  type AuthorityManifestEntry,
   type SopDefinition,
   type SignedAuthorityManifest,
 } from "@helium/core";
 
 export interface ResolvedSopAuthority {
   authority: SopAuthority;
+  /** Exact signed entry that granted approve/auto, for action evidence. */
+  authorityManifestEntry?: AuthorityManifestEntry;
   /** Present exactly when the file's claim was not granted. */
   authorityDowngradeReason?: string;
 }
@@ -91,7 +94,10 @@ export function resolveSopAuthority(
     source.trustedKey,
   );
   if ("manifestEntry" in resolution) {
-    return { authority: resolution.authority };
+    return {
+      authority: resolution.authority,
+      authorityManifestEntry: { ...resolution.manifestEntry },
+    };
   }
   return {
     authority: "observe",

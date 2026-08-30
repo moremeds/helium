@@ -31,6 +31,7 @@ const scriptFor = (path: string, overrides: Partial<RegisteredScript> = {}) =>
     environmentProfile: { PATH: "/usr/bin:/bin" },
     timeoutMs: 30_000,
     maxOutputBytes: 4096,
+    expectedOwnerUid: process.getuid?.() ?? 0,
     ...overrides,
   }) as RegisteredScript;
 
@@ -105,6 +106,17 @@ describe("identity verification", () => {
     expect(registry.verifyIdentity(registry.get("script-v1")!)).toMatchObject({
       ok: false,
       reason: "script-owner-mismatch",
+    });
+  });
+
+  it("refuses an unverifiable release assertion instead of treating it as identity", () => {
+    const d = dir();
+    const registry = ScriptRegistry.load([
+      scriptFor(writeFakeScript(d), { identity: { kind: "release", value: "release-42" } }),
+    ]);
+    expect(registry.verifyIdentity(registry.get("script-v1")!)).toMatchObject({
+      ok: false,
+      reason: "release-identity-unverifiable",
     });
   });
 });

@@ -58,4 +58,32 @@ describe("adaptHelium", () => {
     expect(observations.find((row) => row.probeId === "helium.collector-freshness.v1")?.state).toBe("failed");
     expect(observations.find((row) => row.probeId === "helium.dead-man.v1")?.state).toBe("failed");
   });
+
+  it("uses each tenant's declared heartbeat cadence", () => {
+    const observations = adaptHelium({
+      ...snapshot(),
+      expectedTenants: ["macro", "canary"],
+      tenantHeartbeats: {
+        macro: "2026-08-29T11:59:40.000Z",
+        canary: "2026-08-29T06:00:00.000Z",
+      },
+      tenantMaxAgeMs: 60_000,
+      tenantMaxAgeMsByTenant: { macro: 60_000, canary: 13 * 3_600_000 },
+    });
+
+    expect(observations.find((row) => row.probeId === "helium.tenant.macro.v1")?.state)
+      .toBe("ok");
+    expect(observations.find((row) => row.probeId === "helium.tenant.canary.v1")?.state)
+      .toBe("ok");
+  });
+
+  it("does not accept a future tenant heartbeat as fresh", () => {
+    const observations = adaptHelium({
+      ...snapshot(),
+      expectedTenants: ["macro"],
+      tenantHeartbeats: { macro: "2026-08-29T12:05:00.000Z" },
+    });
+    expect(observations.find((row) => row.probeId === "helium.tenant.macro.v1")?.state)
+      .toBe("unknown");
+  });
 });

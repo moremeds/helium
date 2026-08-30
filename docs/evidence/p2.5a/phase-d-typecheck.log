@@ -1,0 +1,19 @@
+Helium Ops Phase D CI typecheck evidence
+Source: https://github.com/moremeds/helium/actions/runs/33270118932
+Job: check (99146986945)
+Commit: 1ca81e4b79e57283b8f2a69e680923aaa5fbeed2
+Recorded: 2026-08-29T19:09:52Z through 2026-08-29T19:10:09Z
+Normalization: exact significant CI step lines; timestamps, ANSI colour, and runner setup omitted.
+
+$ pnpm -r --if-present run typecheck
+Scope: 12 of 13 workspace projects
+packages/core typecheck: Done
+packages/fake-metered typecheck: Done
+packages/fake-flat-rate typecheck: Done
+packages/v1-compat typecheck: Done
+plugins/ops-agent typecheck: Done
+contracts/fixtures/ops-controller typecheck: Done
+plugins/helium typecheck: Done
+contracts typecheck: Done
+
+RESULT: PASS

@@ -131,4 +131,12 @@ describe("processProbe", () => {
     await probe.observe(runner, NOW);
     expect(runner.calls[0]?.timeoutMs).toBe(2_000);
   });
+
+  it("allows the configured component dimension to match its catalog", async () => {
+    const observation = await processProbe({
+      ...options,
+      dimension: "process-liveness",
+    }).observe(recordingRunner(result({ stdout: "helium-opsd" })), NOW);
+    expect(observation.dimension).toBe("process-liveness");
+  });
 });

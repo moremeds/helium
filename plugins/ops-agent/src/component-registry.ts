@@ -21,6 +21,7 @@ import {
   SopDefinitionSchema,
   certifySop,
   type CheckDefinition,
+  type AuthorityManifestEntry,
   type ComponentSpec,
   type DependencyEdge,
   type Observation,
@@ -45,6 +46,7 @@ export interface LoadedSop {
   definition: SopDefinition;
   /** The authority actually granted -- never above the file's own claim. */
   authority: SopAuthority;
+  authorityManifestEntry?: AuthorityManifestEntry;
   authorityDowngradeReason?: string;
   certified: boolean;
   certificationReasons: string[];
@@ -172,10 +174,14 @@ export class ComponentRegistry {
 
     const loaded = sops.map((definition) => {
       const resolved = resolveSopAuthority(definition, this.deps.authority);
-      const certification = certifySop(definition, checkRegistry);
+      const component = components.find((candidate) => candidate.id === definition.componentId);
+      const certification = certifySop(definition, checkRegistry, component);
       return {
         definition,
         authority: resolved.authority,
+        ...(resolved.authorityManifestEntry === undefined
+          ? {}
+          : { authorityManifestEntry: resolved.authorityManifestEntry }),
         ...(resolved.authorityDowngradeReason === undefined
           ? {}
           : { authorityDowngradeReason: resolved.authorityDowngradeReason }),
@@ -242,6 +248,15 @@ export class ComponentRegistry {
 
   sops(): LoadedSop[] {
     return [...this.#sops.values()];
+  }
+
+  /** Resolve the exact immutable check definitions used by an action decision. */
+  checks(ids: readonly string[]): CheckDefinition[] {
+    const missing = ids.filter((id) => !this.#checks.has(id));
+    if (missing.length > 0) {
+      throw new Error(`unknown check reference: ${missing.join(", ")}`);
+    }
+    return ids.map((id) => this.#checks.get(id) as CheckDefinition);
   }
 
   graph(): DependencyGraph {

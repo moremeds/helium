@@ -1,0 +1,26 @@
+Helium Ops Phase D CI contract evidence
+Source: https://github.com/moremeds/helium/actions/runs/33270118932
+Job: contracts (99146986854)
+Commit: 1ca81e4b79e57283b8f2a69e680923aaa5fbeed2
+Recorded: 2026-08-29T19:09:55Z through 2026-08-29T19:10:34Z
+Normalization: exact significant CI step lines; timestamps, ANSI colour, durations, and runner setup omitted.
+
+$ vitest run --project contracts
+PASS contracts/tests/ops-action-boundary.contract.spec.ts (16 tests)
+PASS contracts/tests/topology-structure.contract.spec.ts (10 tests)
+PASS contracts/tests/ops-controller.contract.spec.ts (14 tests)
+PASS contracts/tests/executor-conformance.contract.spec.ts (16 tests)
+PASS contracts/tests/claims-register.contract.spec.ts (11 tests)
+PASS contracts/tests/effect-timer.contract.spec.ts (1 test)
+PASS contracts/tests/tool-restriction.contract.spec.ts (1 test)
+PASS contracts/tests/core-neutrality.contract.spec.ts (3 tests)
+SKIP contracts/tests/agent-dispatch.live.contract.spec.ts (1 live-provider test)
+PASS contracts/tests/senior-isolation.contract.spec.ts (10 tests)
+PASS contracts/tests/plugin-add.contract.spec.ts (1 test)
+PASS contracts/tests/profile-mount.contract.spec.ts (1 test)
+PASS contracts/tests/version.contract.spec.ts (1 test)
+
+Test Files  12 passed | 1 skipped (13)
+Tests       85 passed | 1 skipped (86)
+
+RESULT: PASS

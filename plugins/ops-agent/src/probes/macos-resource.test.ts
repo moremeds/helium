@@ -63,6 +63,15 @@ CPU usage: 70.00% user, 20.00% sys, 10.00% idle
 PID COMMAND %CPU
 200 helium-opsd 62.5
 300 postgres 20.0`;
+const TOP_MACOS_26 = `Processes: 547 total, 2 running, 2 stuck, 543 sleeping, 3374 threads
+2026/08/30 06:25:12
+Load Avg: 3.63, 3.02, 2.78
+CPU usage: 6.82% user, 11.70% sys, 81.46% idle
+
+PID    COMMAND          %CPU
+98202  taskgated        0.0
+94990  Google Chrome He 0.0
+94419  ChatGPT for Chro 0.0`;
 const NOW = "2026-08-29T12:00:00.000Z";
 
 const GIB = 1024 ** 3;
@@ -168,6 +177,18 @@ describe("parseCpuTop", () => {
       processes: [
         { pid: 200, command: "helium-opsd", cpuPercent: 12.5 },
         { pid: 300, command: "postgres", cpuPercent: 4 },
+      ],
+    });
+  });
+
+  it("reads the live macOS 26 fixed-width command column with spaces", () => {
+    expect(parseCpuTop(TOP_MACOS_26)).toEqual({
+      busyPercent: 18.52,
+      idlePercent: 81.46,
+      processes: [
+        { pid: 98202, command: "taskgated", cpuPercent: 0 },
+        { pid: 94990, command: "Google Chrome He", cpuPercent: 0 },
+        { pid: 94419, command: "ChatGPT for Chro", cpuPercent: 0 },
       ],
     });
   });

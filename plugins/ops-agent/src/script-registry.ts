@@ -50,8 +50,8 @@ export const RegisteredScriptSchema = z.strictObject({
   environmentProfile: z.record(z.string().max(128), z.string().max(4096)),
   timeoutMs: z.number().int().positive().max(3_600_000),
   maxOutputBytes: z.number().int().positive().max(10_000_000),
-  /** When set, the file must be owned by this uid. */
-  expectedOwnerUid: z.number().int().nonnegative().optional(),
+  /** The file must be owned by this exact uid. Ownership is never inferred. */
+  expectedOwnerUid: z.number().int().nonnegative(),
 });
 export type RegisteredScript = z.infer<typeof RegisteredScriptSchema>;
 
@@ -102,17 +102,15 @@ export class ScriptRegistry {
     if ((stat.mode & 0o022) !== 0) {
       return { ok: false, reason: "script-writable-by-others" };
     }
-    if (
-      script.expectedOwnerUid !== undefined &&
-      stat.uid !== script.expectedOwnerUid
-    ) {
+    if (stat.uid !== script.expectedOwnerUid) {
       return { ok: false, reason: "script-owner-mismatch" };
     }
 
     if (script.identity.kind === "release") {
-      // A release identity is asserted by the deployment, not recomputable
-      // here. Say so rather than implying a hash was checked.
-      return { ok: true };
+      // No trusted release-identity resolver exists at this boundary. Treat a
+      // declaration that cannot be recomputed as unverifiable, never as a
+      // successful identity check.
+      return { ok: false, reason: "release-identity-unverifiable" };
     }
     const actual = createHash("sha256")
       .update(readFileSync(script.path))

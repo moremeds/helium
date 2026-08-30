@@ -107,6 +107,12 @@ test("a tenant that has never heartbeat at all is reported, not skipped", () => 
   assert.match(r.out, /never-ran/);
 });
 
+test("a future heartbeat cannot mask a dead tenant", () => {
+  const r = run(fixture({ "future-watch": -3600 }));
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /future-watch/);
+});
+
 test("keeps a malformed tenant visible as invalid instead of dropping it", () => {
   const r = run(
     fixture({ "macro-watch": 60 }, { "b-broken.yaml": "this: [is not a job" }),

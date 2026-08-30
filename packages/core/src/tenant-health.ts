@@ -93,20 +93,23 @@ export function inventoryTenants(
  *
  * @param expected - the inventory from {@link inventoryTenants}.
  * @param rows - recent heartbeat rows; malformed ones are ignored, not fatal.
- * @param deadline - epoch ms (or a Date); a row at or after it counts as live.
+ * @param deadline - epoch ms (or a Date); a row at or after it may count as live.
+ * @param now - upper bound for freshness; future rows never count as live.
  * @returns one row per expected tenant, in inventory order.
  */
 export function tenantHealth(
   expected: ExpectedTenant[],
   rows: HeartbeatRow[],
   deadline: number | Date,
+  now: number | Date = Date.now(),
 ): TenantHealthRow[] {
   const cutoff = typeof deadline === "number" ? deadline : deadline.getTime();
+  const upperBound = typeof now === "number" ? now : now.getTime();
   const live = new Set<string>();
   for (const row of rows) {
     if (typeof row.job !== "string" || typeof row.ts !== "string") continue;
     const at = Date.parse(row.ts);
-    if (Number.isNaN(at) || at < cutoff) continue;
+    if (Number.isNaN(at) || at < cutoff || at > upperBound) continue;
     live.add(row.job);
   }
   return expected.map(({ tenant, load }) => ({

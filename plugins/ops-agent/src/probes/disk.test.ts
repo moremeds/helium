@@ -34,6 +34,14 @@ const DF_SHORT = [
   "/dev/disk3s1s1   482797652   10485760  120586240    8%   /",
 ].join("\n");
 
+/** Live macOS 26 includes a synthetic filesystem whose device name has a space. */
+const DF_MACOS_26 = [
+  "Filesystem 1024-blocks Used Available Capacity Mounted on",
+  "/dev/disk3s5 239362496 105123848 89200796 55% /System/Volumes/Data",
+  "map auto_home 0 0 0 100% /System/Volumes/Data/home",
+  "/dev/disk4s2 13671946368 6594352384 7077593984 49% /Volumes/DATA_LAKE",
+].join("\n");
+
 describe("parseDf", () => {
   it("reads every volume from the long macOS form", () => {
     const volumes = parseDf(DF_MACOS);
@@ -46,6 +54,14 @@ describe("parseDf", () => {
 
   it("reads the short form too", () => {
     expect(parseDf(DF_SHORT)?.[0]?.device).toBe("/dev/disk3s1s1");
+  });
+
+  it("reads the live macOS 26 table when a synthetic device name contains a space", () => {
+    expect(parseDf(DF_MACOS_26)?.map((volume) => [volume.device, volume.mount])).toEqual([
+      ["/dev/disk3s5", "/System/Volumes/Data"],
+      ["map auto_home", "/System/Volumes/Data/home"],
+      ["/dev/disk4s2", "/Volumes/DATA_LAKE"],
+    ]);
   });
 
   it("converts 1k blocks to bytes", () => {

@@ -113,6 +113,9 @@ describe("ActionLeaseTable", () => {
     const b = controller(table, "a").acquire(key());
     if (!b.ok) throw new Error("expected re-acquire to win");
     expect(b.lease.operationId).toBe(a.lease.operationId);
+    expect(a.lease.leaseId).toMatch(/^lease-[0-9a-f]{64}$/);
+    expect(a.lease.operationId).toMatch(/^op-[0-9a-f]{64}$/);
+    expect(a.lease.leaseId.length).toBeLessThanOrEqual(128);
   });
 
   it("treats a replayed reservation as a no-op and a conflicting one as corruption", () => {

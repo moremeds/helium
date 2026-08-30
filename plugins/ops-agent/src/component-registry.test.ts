@@ -19,7 +19,7 @@ const component = (id: string, kind = "service") => ({
   id,
   kind,
   mutationOwner: {
-    owner: "none",
+    owner: "opsd",
     competingLabels: [],
     changedAt: "2026-08-25T00:00:00.000Z",
     changeRef: "fixture",

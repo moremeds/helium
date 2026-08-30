@@ -22,9 +22,24 @@ import type { ComponentSpec } from "../src/operations/component.js";
 import type { OperationsEvent } from "../src/operations/events.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
+const evidence = {
+  ref: "artifact://ops/evidence/recovery.json",
+  sha256: "b".repeat(64),
+  schema: "helium.ops.recovery-evidence/v1" as const,
+  assertionId: "recovery-act-1",
+};
 const noSync = () => {};
 const at = (n: number) =>
   `2026-08-25T04:${String(n).padStart(2, "0")}:00.000Z`;
+const verificationCheck = {
+  id: "runtime-up",
+  kind: "business" as const,
+  probe: { probeId: "runtime.probe.v1", args: {} },
+  expect: { dimension: "readiness", operator: "eq" as const, value: true },
+  onUnavailable: "unknown" as const,
+  timeoutMs: 5_000,
+  owner: "ops",
+};
 
 /** One complete attempt, in the order a real run would append it. */
 const SEQUENCE: OperationsEvent[] = [
@@ -40,11 +55,19 @@ const SEQUENCE: OperationsEvent[] = [
     incidentId: "inc-1", componentId: "runtime", sopId: "restart", sopVersion: 1, sopDigest: digest },
   { v: 1, id: "e5", at: at(4), type: "action-authorized", actionId: "act-1", authority: "auto" },
   { v: 1, id: "e6", at: at(5), type: "action-intent-recorded", actionId: "act-1",
-    leaseId: "lease-1", argv: ["--restart"], baselineAllPassing: false },
+    leaseId: "lease-1", operationId: "op-1", argv: ["--restart"],
+    baseline: { capturedAt: at(5), samples: [{ checkId: "runtime-up", state: "fail", observedAt: at(5), evidenceRefs: ["artifact://check/baseline"] }], allPassing: false },
+    controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/1" },
+    eligibility: { eligible: true, reasons: [] },
+    mutationOwner: { owner: "opsd", competingLabels: [], changedAt: at(5), changeRef: "artifact://own/intent" },
+    dependencyIds: [], verificationPolicy: { postconditions: [verificationCheck], graceMs: 0 } },
   { v: 1, id: "e7", at: at(6), type: "action-receipt-recorded", actionId: "act-1",
-    exitCode: 0, timedOut: false },
+    exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2,
+    startedAt: at(6), finishedAt: at(6) },
   { v: 1, id: "e8", at: at(7), type: "action-verified", actionId: "act-1",
-    outcome: "succeeded", postconditionRefs: ["runtime-up"] },
+    outcome: "succeeded", postconditionRefs: ["runtime-up"],
+    postconditionSamples: [{ checkId: "runtime-up", state: "pass", observedAt: at(7), evidenceRefs: ["artifact://check/post"] }],
+    recoveryEvidence: evidence },
 ];
 
 const component = (

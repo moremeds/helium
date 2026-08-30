@@ -109,6 +109,9 @@ describe("contract: agentCtx.tools.restrict() denies a tool in the agent's own s
     });
     const stderr: string[] = [];
     child.stderr.on("data", (chunk) => stderr.push(String(chunk)));
+    const exited = new Promise<void>((resolve) =>
+      child.once("exit", () => resolve()),
+    );
     const deadline = Date.now() + 120_000;
     try {
       while (
@@ -120,6 +123,7 @@ describe("contract: agentCtx.tools.restrict() denies a tool in the agent's own s
       }
     } finally {
       child.kill("SIGTERM");
+      await exited;
     }
     expect(
       existsSync(`${outFile}.error`),

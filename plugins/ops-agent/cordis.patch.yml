@@ -1,0 +1,7 @@
+# Optional DSH-side adapter. The deterministic daemon is a separate process;
+# this row grants no provider, model, tool, event-log, or execution authority.
+- insert:
+    - id: ops-agent
+      name: "dsh-plugin-ops-agent"
+      config:
+        socketPath: !!js process.env.HELIUM_OPSD_SOCKET

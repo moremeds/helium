@@ -50,7 +50,9 @@ export function ageState(
   const sampleMs = Date.parse(timestamp);
   const atMs = Date.parse(at);
   if (!Number.isFinite(sampleMs) || !Number.isFinite(atMs)) return "unknown";
-  const ageMs = Math.max(0, atMs - sampleMs);
+  const ageMs = atMs - sampleMs;
+  // A future timestamp is clock-skew evidence, not a fresh observation.
+  if (ageMs < 0) return "unknown";
   if (ageMs > thresholds.failedAfterMs) return "failed";
   if (
     thresholds.degradedAfterMs !== undefined &&

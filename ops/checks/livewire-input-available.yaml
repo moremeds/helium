@@ -1,0 +1,12 @@
+id: livewire-input-available
+kind: business
+probe:
+  probeId: livewire.input-source.v1
+  args: {}
+expect:
+  dimension: source-available
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 30000
+owner: ops

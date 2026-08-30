@@ -14,6 +14,7 @@ export interface HeliumSnapshot extends AdapterContext {
   expectedTenants: readonly string[];
   tenantHeartbeats: Readonly<Record<string, string>>;
   tenantMaxAgeMs: number;
+  tenantMaxAgeMsByTenant?: Readonly<Record<string, number>>;
   collectorHeartbeat: TimedHeartbeat;
   deadMan: TimedHeartbeat & { armed: boolean };
 }
@@ -47,7 +48,10 @@ export function adaptHelium(snapshot: HeliumSnapshot): Observation[] {
         state:
           at === undefined
             ? "failed"
-            : ageState(at, snapshot.observedAt, { failedAfterMs: snapshot.tenantMaxAgeMs }),
+            : ageState(at, snapshot.observedAt, {
+                failedAfterMs:
+                  snapshot.tenantMaxAgeMsByTenant?.[tenant] ?? snapshot.tenantMaxAgeMs,
+              }),
         dimension: "freshness",
         value: { tenant, at, manifestRef: snapshot.expectedTenantManifestRef },
       }),

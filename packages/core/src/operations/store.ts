@@ -24,19 +24,30 @@ export class OperationsStore {
   #state: OperationsState;
   #ids: Set<string>;
 
-  private constructor(log: EventStore<OperationsEvent>) {
+  private constructor(
+    log: EventStore<OperationsEvent>,
+    private readonly validateEvent?: (event: OperationsEvent) => void,
+  ) {
     this.#log = log;
     const replayed = log.replay();
+    for (const event of replayed) this.validateEvent?.(event);
     this.#state = reduceOperations(replayed);
     this.#ids = new Set(replayed.map((e) => e.id));
   }
 
-  static open(dir: string, options: { sync?: (fd: number) => void } = {}): OperationsStore {
+  static open(
+    dir: string,
+    options: {
+      sync?: (fd: number) => void;
+      validateEvent?: (event: OperationsEvent) => void;
+    } = {},
+  ): OperationsStore {
     return new OperationsStore(
       openEventStore<OperationsEvent>(dir, {
         schema: OperationsEventSchema,
         ...(options.sync === undefined ? {} : { sync: options.sync }),
       }),
+      options.validateEvent,
     );
   }
 
@@ -49,6 +60,7 @@ export class OperationsStore {
    */
   append(raw: unknown): OperationsEvent {
     const event = OperationsEventSchema.parse(raw);
+    this.validateEvent?.(event);
     if (this.#ids.has(event.id)) {
       throw new Error(`duplicate operations event id: ${event.id}`);
     }

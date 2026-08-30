@@ -1,0 +1,12 @@
+id: colima-vm-healthy
+kind: business
+probe:
+  probeId: colima.vm-status.v1
+  args: {}
+expect:
+  dimension: readiness
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 10000
+owner: ops

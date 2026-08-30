@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -56,7 +56,23 @@ describe("event store", () => {
     expect(sync).toHaveBeenCalledTimes(2);
   });
 
-  it("drops a truncated final line and recovers, never repairing the record", () => {
+  it("creates owner-only directories, logs, and snapshots and refuses permissive state", () => {
+    const base = mkdtempSync(join(tmpdir(), "helium-private-events-"));
+    const privateDir = join(base, "private");
+    const store = openEventStore(privateDir, { schema: RecordSchema, sync: noSync });
+    store.append(first);
+    store.snapshot();
+    expect(statSync(privateDir).mode & 0o777).toBe(0o700);
+    expect(statSync(store.logPath).mode & 0o777).toBe(0o600);
+    expect(statSync(store.snapshotPath).mode & 0o777).toBe(0o600);
+
+    chmodSync(privateDir, 0o755);
+    expect(() => openEventStore(privateDir, { schema: RecordSchema })).toThrow(
+      /owner-only/,
+    );
+  });
+
+  it("drops a truncated final line and remains append-safe after recovery", () => {
     const d = dir();
     const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
     store.append(first);
@@ -69,6 +85,12 @@ describe("event store", () => {
 
     const reopened = openEventStore(d, { schema: RecordSchema, sync: noSync });
     expect(reopened.replay()).toEqual([first, second]);
+    reopened.append(third);
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([
+      first,
+      second,
+      third,
+    ]);
   });
 
   it("replays through a snapshot plus its tail", () => {
@@ -103,6 +125,22 @@ describe("event store", () => {
     ]);
   });
 
+  it("discards a snapshot whose earlier record was changed behind a valid anchor", () => {
+    const d = dir();
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
+    store.append(first);
+    store.append(second);
+    store.snapshot();
+    const tampered = JSON.parse(readFileSync(store.snapshotPath, "utf8"));
+    tampered.records[0].n = 999;
+    writeFileSync(store.snapshotPath, JSON.stringify(tampered));
+
+    expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([
+      first,
+      second,
+    ]);
+  });
+
   it("discards a snapshot at an unsupported version — the log is authoritative", () => {
     const d = dir();
     const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
@@ -113,6 +151,28 @@ describe("event store", () => {
     writeFileSync(store.snapshotPath, JSON.stringify(bumped));
 
     expect(openEventStore(d, { schema: RecordSchema, sync: noSync }).replay()).toEqual([first]);
+  });
+
+  it("refuses a log whose record content no longer matches its persisted hash", () => {
+    const d = dir();
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
+    store.append(first);
+    const envelope = JSON.parse(readFileSync(store.logPath, "utf8"));
+    envelope.record.n = 999;
+    writeFileSync(store.logPath, `${JSON.stringify(envelope)}\n`);
+    expect(() => openEventStore(d, { schema: RecordSchema, sync: noSync }))
+      .toThrow(/content hash mismatch/);
+  });
+
+  it("refuses a reordered or deleted log prefix by checking contiguous sequence numbers", () => {
+    const d = dir();
+    const store = openEventStore(d, { schema: RecordSchema, sync: noSync });
+    store.append(first);
+    store.append(second);
+    const lines = readFileSync(store.logPath, "utf8").trim().split("\n");
+    writeFileSync(store.logPath, `${lines[1]}\n`);
+    expect(() => openEventStore(d, { schema: RecordSchema, sync: noSync }))
+      .toThrow(/sequence mismatch/);
   });
 
   it("refuses a record the caller's schema rejects", () => {

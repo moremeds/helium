@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.helium.opsd-deadman</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__RELEASE__/scripts/deadman/check-opsd-heartbeat.sh</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>120</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>Umask</key><integer>63</integer>
+  <key>StandardOutPath</key><string>__LOG_ROOT__/opsd-deadman.out.log</string>
+  <key>StandardErrorPath</key><string>__LOG_ROOT__/opsd-deadman.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__NODE_BIN_DIR__:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME__</string>
+    <key>HELIUM_NODE_BIN</key><string>__NODE_BIN__</string>
+    <key>HELIUM_OPSD_EVENT_LOG</key><string>__STATE_ROOT__/events.jsonl</string>
+    <key>HELIUM_OPSD_DEADMAN_STATE_DIR</key><string>__STATE_ROOT__/deadman</string>
+    <key>HELIUM_OPSD_STALE_S</key><string>180</string>
+    <key>HELIUM_OPSD_REALERT_S</key><string>3600</string>
+    <key>HELIUM_OPSD_ALERT_CMD</key><string>__RELEASE__/scripts/deadman/send-alert.mjs</string>
+    <key>HELIUM_ENV_FILE</key><string>__HOME__/.config/helium/helium.env</string>
+  </dict>
+</dict>
+</plist>

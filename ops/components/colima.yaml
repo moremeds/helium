@@ -5,7 +5,9 @@ displayName: Colima
 dimensions: [liveness, readiness, stability, capacity, controller]
 mutationOwner:
   owner: external
-  externalOwnerLabel: existing-colima-watchdog
-  competingLabels: [existing-colima-watchdog]
-  changedAt: "2026-08-29T00:00:00.000Z"
-  changeRef: "ops/components/colima.yaml"
+  externalOwnerLabel: com.moremeds.colima-runtime-watchdog
+  competingLabels:
+    - com.moremeds.colima-runtime-watchdog
+    - com.moremeds.colima-after-datalake
+  changedAt: "2026-08-29T22:19:59.000Z"
+  changeRef: "docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log"

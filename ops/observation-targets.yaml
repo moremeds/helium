@@ -1,0 +1,101 @@
+# Non-secret, read-only Mini observation sources captured during the bounded
+# 2026-08-30 commissioning window. Commands are executed as literal argv by
+# opsd's persisted runner; no environment file is sourced.
+version: 1
+sampleIntervalMs: 300000
+ttlMs: 600000
+
+host:
+  volumes:
+    - { id: internal-data, mount: /System/Volumes/Data, device: /dev/disk3s5 }
+    - { id: data-lake, mount: /Volumes/DATA_LAKE, device: /dev/disk4s2 }
+    - { id: colima, mount: /System/Volumes/Data, device: /dev/disk3s5 }
+    - { id: backup, mount: /Volumes/DATA_LAKE, device: /dev/disk4s2 }
+    - { id: helium-state, mount: /System/Volumes/Data, device: /dev/disk3s5 }
+  processArgv: [/bin/ps, -Ao, "pid=,command="]
+  processMatch: plugins/ops-agent/lib/bin/opsd.js
+
+livewire:
+  statusArgv:
+    - /Users/moremeds/market-warehouse/current/.venv/bin/python
+    - /Users/moremeds/market-warehouse/current/scripts/livewire_ops.py
+    - status
+  integrityFiles:
+    - /Users/moremeds/market-warehouse/data-lake/bronze/asset_class=equity/symbol=NULG/1m.parquet
+  degradedAfterMs: 259200000
+  failedAfterMs: 432000000
+
+argon:
+  healthUrl: http://127.0.0.1:8400/api/health
+  workerMaxAgeMs: 180000
+  productMaxAgeMs: 345600000
+  backupDir: /Volumes/DATA_LAKE/argon/postgres-backups
+  backupNamePattern: option_wizard-*.dump.gz
+  backupMaxAgeMs: 172800000
+
+apex:
+  healthUrl: http://127.0.0.1:8322/health
+  pgIsReadyPath: /opt/homebrew/opt/postgresql@17/bin/pg_isready
+  postgresHost: 127.0.0.1
+  postgresPort: 5432
+  postgresDatabase: option_wizard
+  postgresUser: argon_app
+  silverRevisionPath: /Users/moremeds/market-warehouse/data-lake/silver/revisions/current.json
+  dataLakeMount: /Volumes/DATA_LAKE
+  dataLakeDevice: /dev/disk4s2
+  maxLivewireLagDays: 1
+
+colima:
+  dockerPath: /opt/homebrew/bin/docker
+  socketPath: /Users/moremeds/.colima/default/docker.sock
+  expectedContainers:
+    - apex-deploy-api-1
+    - argon-api-1
+    - argon-web-1
+    - argon-worker-ai-deepseek-0-1
+    - argon-worker-ai-deepseek-1-1
+    - argon-worker-massive-0-1
+    - argon-worker-massive-1-1
+    - argon-worker-uw-0-1
+    - argon-worker-uw-1-1
+    - argon-ws-consumer-1
+    - trading-alloy
+    - trading-cadvisor
+    - trading-grafana
+    - trading-loki
+    - trading-prometheus
+    - trading-xenon-uw-exporter
+    - xenon-api-1
+    - xenon-realtime-1
+    - xenon-watchtower-1
+    - xenon-web-1
+
+postgres:
+  pgIsReadyPath: /opt/homebrew/opt/postgresql@17/bin/pg_isready
+  psqlPath: /opt/homebrew/opt/postgresql@17/bin/psql
+  host: 127.0.0.1
+  port: 5432
+  database: option_wizard
+  user: argon_app
+  selectOneFailedAfterMs: 1000
+  connectionDegradedRatio: 0.8
+  connectionFailedRatio: 0.95
+  lockFailedAfterMs: 60000
+  backupDir: /Volumes/DATA_LAKE/argon/postgres-backups
+  backupNamePattern: option_wizard-*.dump.gz
+  backupMaxAgeMs: 172800000
+  launchOwnerLabel: com.moremeds.postgresql17-external
+
+helium:
+  dshLabel: com.helium.dsh
+  deadManLabel: com.helium.deadman
+  heartbeatDir: /Users/moremeds/.helium/state/jsonl
+  deadManLogPath: /Users/moremeds/.helium/logs/deadman.out.log
+  globalMaxAgeMs: 180000
+  collectorMaxAgeMs: 180000
+  deadManMaxAgeMs: 2400000
+  expectedTenantManifestRef: /Users/moremeds/projects/helium-releases/v0.1.5/jobs
+  expectedTenants:
+    - { id: macro-watch, maxAgeMs: 180000 }
+    - { id: apex-health, maxAgeMs: 180000 }
+    - { id: dsh-canary, maxAgeMs: 46800000 }

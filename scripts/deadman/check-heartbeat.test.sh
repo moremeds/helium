@@ -54,7 +54,7 @@ write_job macro-watch
 iso_ago() {
   "${HELIUM_NODE_BIN:-node}" -e \
     'process.stdout.write(new Date(Date.now() - Number(process.argv[1]) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"))' \
-    "$1"
+    -- "$1"
 }
 
 run() {
@@ -86,6 +86,15 @@ printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
   echo FAIL-3b
   exit 1
 }
+echo "case 3c: a future global heartbeat is not accepted as fresh"
+printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
+  "$(iso_ago -3600)" \
+  >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
+[ "$(run)" = 10 ] || {
+  echo FAIL-3c
+  exit 1
+}
+rm -f "$tmp/state/deadman/alerted-at"
 echo "case 4: 20-minute-old heartbeat -> 10"
 printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
   "$(iso_ago 1200)" \
@@ -184,6 +193,52 @@ printf '%s\n' "$out8" | grep -qi 'b-broken.*invalid' || {
   printf '%s\n' "$out8"
   exit 1
 }
+
+echo "case 9: fresh DSH and tenant heartbeats do not hide stale opsd -> 16"
+rm -f "$HELIUM_JOBS_DIR/b-broken.yaml" "$tmp/state/deadman/opsd-alerted-at"
+mkdir -p "$tmp/state/opsd"
+stale_opsd="$(iso_ago 3600)"
+printf '{"v":1,"seq":1,"hash":"fixture","record":{"v":1,"id":"event-1","at":"%s","type":"observation-recorded","observation":{"observedAt":"%s"}}}\n' \
+  "$stale_opsd" "$stale_opsd" >"$tmp/state/opsd/events.jsonl"
+printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n{"ts":"%s","job":"apex-health","status":"ok"}\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
+out9=$(
+  set +e
+  HELIUM_OPSD_EXPECTED=1 bash "$here/check-heartbeat.sh" 2>&1
+  echo "rc=$?"
+)
+case "$out9" in
+*"rc=16"*) : ;;
+*)
+  echo "FAIL-9 (expected rc=16)"
+  printf '%s\n' "$out9"
+  exit 1
+  ;;
+esac
+printf '%s\n' "$out9" | grep -qi 'opsd.*stale' || {
+  echo FAIL-9b-opsd-not-named
+  exit 1
+}
+
+echo "case 10: a future opsd observation is not accepted as fresh"
+rm -f "$tmp/state/deadman/opsd-alerted-at"
+future_opsd="$(iso_ago -3600)"
+printf '{"v":1,"seq":1,"hash":"fixture","record":{"v":1,"id":"event-1","at":"%s","type":"observation-recorded","observation":{"observedAt":"%s"}}}\n' \
+  "$future_opsd" "$future_opsd" >"$tmp/state/opsd/events.jsonl"
+out10=$(
+  set +e
+  HELIUM_OPSD_EXPECTED=1 bash "$here/check-heartbeat.sh" 2>&1
+  echo "rc=$?"
+)
+case "$out10" in
+*"rc=16"*) : ;;
+*)
+  echo "FAIL-10 (expected rc=16)"
+  printf '%s\n' "$out10"
+  exit 1
+  ;;
+esac
 
 echo "mail log:"
 cat "$FAKE_MAIL_LOG"

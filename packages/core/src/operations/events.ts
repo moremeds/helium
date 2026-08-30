@@ -9,7 +9,10 @@
  * @module @helium/core/operations/events
  */
 import { z } from "zod";
-import { ACTION_OUTCOMES } from "./action.js";
+import { ACTION_OUTCOMES, PostconditionSampleSchema } from "./action.js";
+import { CheckDefinitionSchema } from "./check.js";
+import { EvidenceRefSchema } from "../evidence/bundle.js";
+import { CONTROLLER_PROBE_RESULTS } from "./mutation-owner.js";
 import { MutationOwnershipSchema, OpsIdSchema } from "./component.js";
 import { INCIDENT_STATES } from "./incident.js";
 import { IsoTimestampSchema, ObservationSchema } from "./observation.js";
@@ -68,6 +71,15 @@ export const ActionAuthorizedSchema = z.strictObject({
   type: z.literal("action-authorized"),
   actionId: OpsIdSchema,
   authority: z.enum(SOP_AUTHORITIES),
+  /** The exact signed entry that granted this effective authority. */
+  authorityManifestEntry: z
+    .strictObject({
+      sopId: OpsIdSchema,
+      version: z.number().int().positive(),
+      digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      authority: z.enum(SOP_AUTHORITIES),
+    })
+    .optional(),
   approvedBy: z.string().min(1).max(200).optional(),
 });
 
@@ -76,9 +88,32 @@ export const ActionIntentRecordedSchema = z.strictObject({
   type: z.literal("action-intent-recorded"),
   actionId: OpsIdSchema,
   leaseId: OpsIdSchema,
+  operationId: OpsIdSchema,
   /** Structured argv. A command string is not representable. */
   argv: z.array(z.string().max(4096)),
-  baselineAllPassing: z.boolean(),
+  baseline: z.strictObject({
+    capturedAt: IsoTimestampSchema,
+    samples: z.array(PostconditionSampleSchema).min(1),
+    allPassing: z.boolean(),
+  }),
+  controllerProbe: z.strictObject({
+    result: z.enum(CONTROLLER_PROBE_RESULTS),
+    observedLabels: z.array(z.string().max(256)),
+    evidenceRef: z.string().min(1).max(512),
+  }),
+  /** Exact admission-time policy result; never reconstructed from later config. */
+  eligibility: z.strictObject({
+    eligible: z.boolean(),
+    reasons: z.array(z.string().max(200)),
+  }),
+  /** Exact admission-time ownership; never reconstructed from later config. */
+  mutationOwner: MutationOwnershipSchema,
+  /** Decision-time dependency and verification policy, immutable across releases. */
+  dependencyIds: z.array(OpsIdSchema).max(500),
+  verificationPolicy: z.strictObject({
+    postconditions: z.array(CheckDefinitionSchema).min(1).max(500),
+    graceMs: z.number().int().nonnegative().max(86_400_000),
+  }),
 });
 
 export const ActionReceiptRecordedSchema = z.strictObject({
@@ -92,6 +127,11 @@ export const ActionReceiptRecordedSchema = z.strictObject({
    */
   exitCode: z.number().int().nullable(),
   timedOut: z.boolean(),
+  outputDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  outputTail: z.string().max(262_144),
+  outputBytes: z.number().int().nonnegative(),
+  startedAt: IsoTimestampSchema,
+  finishedAt: IsoTimestampSchema,
   stdoutRef: z.string().min(1).max(512).optional(),
   stderrRef: z.string().min(1).max(512).optional(),
 });
@@ -101,7 +141,13 @@ export const ActionVerifiedSchema = z.strictObject({
   type: z.literal("action-verified"),
   actionId: OpsIdSchema,
   outcome: z.enum(ACTION_OUTCOMES),
+  attribution: z.enum(ATTRIBUTIONS).optional(),
   postconditionRefs: z.array(OpsIdSchema),
+  postconditionSamples: z.array(PostconditionSampleSchema),
+  recoveryEvidence: EvidenceRefSchema.extend({
+    schema: z.literal("helium.ops.recovery-evidence/v1"),
+    assertionId: OpsIdSchema,
+  }).strict(),
 });
 
 export const OperatorIntervenedSchema = z.strictObject({
@@ -133,6 +179,25 @@ export const AlertRaisedSchema = z.strictObject({
   summary: z.string().min(1).max(1000),
 });
 
+export const AnalysisStatusRecordedSchema = z.strictObject({
+  ...base,
+  type: z.literal("analysis-status-recorded"),
+  analysisId: OpsIdSchema,
+  status: z.enum(["available", "unavailable"]),
+  consecutiveFailures: z.number().int().nonnegative(),
+  reason: z.string().min(1).max(1000).optional(),
+  retryAt: IsoTimestampSchema.optional(),
+});
+
+export const ControllerCycleRecordedSchema = z.strictObject({
+  ...base,
+  type: z.literal("controller-cycle-recorded"),
+  controllerId: OpsIdSchema,
+  releaseRef: z.string().min(1).max(1024),
+  observationCount: z.number().int().nonnegative(),
+  collectionFailureCount: z.number().int().nonnegative(),
+});
+
 export const OperationsEventSchema = z.discriminatedUnion("type", [
   ObservationRecordedSchema,
   IncidentOpenedSchema,
@@ -145,5 +210,7 @@ export const OperationsEventSchema = z.discriminatedUnion("type", [
   OperatorIntervenedSchema,
   MutationOwnershipChangedSchema,
   AlertRaisedSchema,
+  AnalysisStatusRecordedSchema,
+  ControllerCycleRecordedSchema,
 ]);
 export type OperationsEvent = z.infer<typeof OperationsEventSchema>;

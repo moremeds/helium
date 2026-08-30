@@ -6,6 +6,9 @@
 set -euo pipefail
 RELEASES=/Users/moremeds/projects/helium-releases
 DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
+OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
+OPSD_CONFIG=/Users/moremeds/.helium/ops/config/opsd.json
+OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
@@ -47,7 +50,37 @@ trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 target="$(readlink "$RELEASES/previous")" || { echo "no previous release" >&2; exit 65; }
 current="$(readlink "$RELEASES/current")"
 [ -d "$target" ] || { echo "previous release $target missing" >&2; exit 65; }
+opsd_loaded=0
+if [ -f "$OPSD_PLIST" ]; then
+  if launchctl print "gui/$(id -u)/com.helium.opsd" >/dev/null 2>&1; then
+    opsd_loaded=1
+  fi
+  for required in \
+    "$target/plugins/ops-agent/lib/bin/opsd.js" \
+    "$target/scripts/ops/run-opsd.sh" \
+    "$target/ops/authority-manifest.json" \
+    "$target/ops/authority-manifest.pub.pem" \
+    "$current/scripts/release/opsd-cycle-after.mjs" \
+    "$OPSD_CONFIG"; do
+    [ -f "$required" ] || {
+      echo "previous release cannot restore installed opsd: required asset missing: $required" >&2
+      exit 71
+    }
+  done
+  for required_dir in "$target/ops/components" "$target/ops/dependencies" "$target/ops/checks" "$target/ops/sops" "$target/ops/executors"; do
+    [ -d "$required_dir" ] || {
+      echo "previous release cannot restore installed opsd: required bundle directory missing: $required_dir" >&2
+      exit 71
+    }
+  done
+  node "$target/plugins/ops-agent/lib/bin/opsd.js" \
+    --check-config "$OPSD_CONFIG" --release "$target" || {
+      echo "previous release opsd configuration is invalid" >&2
+      exit 71
+    }
+fi
 echo "[rollback] $current -> $target"
+flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 
 tmp="$RELEASES/.current.$$"
 ln -sfn "$target" "$tmp"
@@ -79,13 +112,28 @@ if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
     exit 70
   fi
 fi
+if [ "$opsd_loaded" = "1" ]; then
+  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
+    echo "[rollback] opsd kickstart failed once — retrying after 3s"
+    sleep 3
+    if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
+      echo "FATAL: current=$target and DSH restarted, but com.helium.opsd did not restart on the compatible collector/plugin pair. MANUAL INTERVENTION REQUIRED." >&2
+      exit 71
+    fi
+  fi
+fi
 
 end=$((SECONDS + 90)); ok=0
 pid=""
 while [ $SECONDS -lt $end ]; do
   sleep 10
   pid=$(launchctl print "gui/$(id -u)/com.helium.dsh" 2>/dev/null | awk '/pid =/{print $3}')
-  if [ -n "$pid" ]; then
+  opsd_fresh=1
+  if [ "$opsd_loaded" = "1" ]; then
+    opsd_fresh=$(node "$current/scripts/release/opsd-cycle-after.mjs" \
+      "$OPSD_EVENT_LOG" "$flip_start_ms" "$target")
+  fi
+  if [ -n "$pid" ] && [ "$opsd_fresh" = "1" ]; then
     ok=1
     break
   fi

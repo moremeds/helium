@@ -424,7 +424,7 @@ evidence and recovery verification.
 **Step 4: Repeat correlation tests for determinism**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-dependency.spec.ts packages/core/tests/operations-correlate.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-dependency.spec.ts packages/core/tests/operations-correlate.spec.ts
 ```
 
 Expected: byte-identical incident and inhibition snapshots across repeats.
@@ -871,7 +871,7 @@ ID with different values is corruption.
 **Step 4: Run the concurrency suite repeatedly**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-lease.spec.ts packages/core/tests/operations-recovery-budget.spec.ts packages/core/tests/operations-component-lock.spec.ts --repeat=50
+bash scripts/test-repeat.sh 50 pnpm exec vitest run --project unit packages/core/tests/operations-lease.spec.ts packages/core/tests/operations-recovery-budget.spec.ts packages/core/tests/operations-component-lock.spec.ts
 ```
 
 Expected: at most one controller wins each attempt, and never two; no duplicate
@@ -1072,7 +1072,7 @@ that component.
 **Step 4: Run ownership, probe, and lease suites**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts packages/core/tests/operations-lease.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-mutation-owner.spec.ts packages/core/tests/operations-lease.spec.ts plugins/ops-agent/src/probes/launchd-controller.test.ts
 pnpm typecheck
 rg -n -i "launchctl|com\.helium|com\.local" packages/core/src/operations && exit 1 || true
 ```
@@ -1185,7 +1185,7 @@ or `not-needed` outcome; never fabricate action evidence.
 **Step 4: Run the crash and attribution suite repeatedly**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit packages/core/tests/operations-verify.spec.ts packages/core/tests/operations-reconcile.spec.ts packages/core/tests/recovery-evidence-bundle.spec.ts
 ```
 
 Expected: PASS; the production-derived Colima fixture is attributed only to the
@@ -1578,11 +1578,11 @@ yet. Run it once with provider packages disabled as a continuity check. This
 gate does **not** assert that host pressure prevents team fan-out —
 that requires the team controller and is asserted at the Phase E gate. Open and
 merge an observe-only plugin PR. Do not install `opsd` until AC#1 is complete
-and a separate deployment plan is approved. "Do not install" here is design
-section 13.4's Window 1, where the boundary is the **host** and the test is
-**presence**, not mutation: merging this code is permitted, and putting a byte
-on the mini or starting any process there — including one manual one-shot probe
-run — is not, until 2026-08-31 has passed and the AC#1 evidence is recorded.
+and a separate deployment plan is approved. Under the 2026-08-30 operator
+amendment to design section 13.4, bounded read-only SSH inspection may capture
+identity/configuration evidence during Window 1. It may not install or start
+`opsd`, invoke a production probe or repair, write application/configuration/
+state files, deploy a release, or change a managed service before AC#1 closes.
 
 ## Phase D: true multi-agent analysis and SOP certification
 
@@ -1844,7 +1844,7 @@ event log across controller process restarts and assert terminal convergence.
 **Step 4: Run the contracts repeatedly**
 
 ```bash
-pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts --repeat=20
+bash scripts/test-repeat.sh 20 pnpm exec vitest run --project contracts contracts/tests/ops-controller.contract.spec.ts contracts/tests/ops-action-boundary.contract.spec.ts
 ```
 
 Expected: PASS with one or zero authorized side effects per case, truthful
@@ -1985,7 +1985,7 @@ pnpm test
 pnpm test:contracts
 pnpm test:e2e-local
 pnpm exec vitest run --project contracts contracts/tests/core-neutrality.contract.spec.ts
-rg -n "shell:\s*true|sh -c|bash -c" plugins/ops-agent/src && exit 1 || true
+pnpm exec vitest run --project unit plugins/ops-agent/src/script-executor.test.ts
 git diff --check
 ```
 
@@ -2002,11 +2002,13 @@ ordinary output. `contracts/tests/core-neutrality.contract.spec.ts` is now the
 single definition of the banned-token set for this plan and the multi-agent
 plan both; a token argument belongs in that test, never in a new inline scan.
 
-The `shell:` scan directly below it carried the identical suffix defect and is
-fixed in the same pass. That one guards the exact-argv invariant this plan sets
-in Task 7 — `spawn(executablePath, argv, { shell: false, … })` — so a scan that
-printed and passed was giving false assurance on a shell-injection boundary, not
-on a style rule. Every scan in this fence is now a gate.
+The former `shell:` text scan carried the identical suffix defect and also
+matched its own explanatory comment plus the negative test fixtures that must
+name `shell: true`, `sh -c`, and `bash -c` in order to reject them. It has been
+replaced by the focused executor suite, which inspects the production source,
+asserts `shell: false`, excludes shell-process APIs, and passes metacharacters
+through a real child process as literal argv. That guards the exact-argv
+invariant this plan sets in Task 7 without treating safety tests as violations.
 
 Expected:
 

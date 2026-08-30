@@ -12,6 +12,12 @@ const bundle = () => ({
   componentId: "runtime",
   incidentId: "inc-1",
   observations: [{ ref: "artifact://obs/1", sha256: hash }],
+  rawArtifacts: [
+    { ref: "artifact://raw-command/controller-1", sha256: hash },
+    { ref: "artifact://baseline/1", sha256: hash },
+    { ref: "artifact://baseline/2", sha256: hash },
+    { ref: "artifact://postcondition/1", sha256: hash },
+  ],
   incidentSnapshot: { ref: "artifact://incident/1", sha256: hash },
   sopId: "restart",
   sopVersion: 1,
@@ -36,18 +42,31 @@ const bundle = () => ({
     evidenceRef: "artifact://raw-command/controller-1",
   },
   lease: { leaseId: "lease-1", operationId: "op-1" },
+  baseline: {
+    capturedAt: "2026-08-25T04:00:00.000Z",
+    allPassing: false,
+    samples: [
+      { checkId: "runtime-up", state: "fail" as const, observedAt: "2026-08-25T04:00:00.000Z", evidenceRefs: ["artifact://baseline/1"] },
+      { checkId: "runtime-ready", state: "fail" as const, observedAt: "2026-08-25T04:00:00.000Z", evidenceRefs: ["artifact://baseline/2"] },
+    ],
+  },
   intent: {
     actionId: "act-1",
     argv: ["--restart"],
-    baseline: {
-      capturedAt: "2026-08-25T04:00:00.000Z",
-      allPassing: false,
-      sampleCount: 2,
-    },
   },
-  receipt: { exitCode: 0, timedOut: false, outputDigest: digest },
+  receipt: {
+    exitCode: 0,
+    timedOut: false,
+    outputDigest: digest,
+    evidence: { ref: "artifact://receipt/1", sha256: hash },
+  },
   postconditionSamples: [
-    { checkId: "runtime-up", state: "pass" as const, observedAt: "2026-08-25T04:05:00.000Z" },
+    {
+      checkId: "runtime-up",
+      state: "pass" as const,
+      observedAt: "2026-08-25T04:05:00.000Z",
+      evidenceRefs: ["artifact://postcondition/1"],
+    },
   ],
   outcome: "succeeded" as const,
   attribution: "automatic" as const,
@@ -101,6 +120,11 @@ describe("RecoveryEvidenceSchema", () => {
       ...base,
       outcome: "not-needed",
       attribution: undefined,
+      baseline: {
+        ...base.baseline,
+        allPassing: true,
+        samples: base.baseline.samples.map((sample) => ({ ...sample, state: "pass" as const })),
+      },
       notApplicable: {
         intent: "baseline already satisfied every postcondition; nothing was spawned",
         receipt: "no script ran",
@@ -126,7 +150,7 @@ describe("RecoveryEvidenceSchema", () => {
     expect(() =>
       RecoveryEvidenceSchema.parse({
         ...b,
-        intent: { ...b.intent, baseline: { ...b.intent.baseline, allPassing: true } },
+        baseline: { ...b.baseline, allPassing: true },
       }),
     ).toThrow(/at least one failing postcondition/);
   });
@@ -143,22 +167,77 @@ describe("RecoveryEvidenceSchema", () => {
     ).toThrow(/automatic attribution requires a recorded intent/);
   });
 
-  it("reuses the canonical status vocabulary rather than defining one", () => {
-    for (const status of ["PLANNED", "PARTIAL", "PROVEN", "FAILED", "BLOCKED"]) {
-      expect(() =>
-        RecoveryEvidenceSchema.parse({ ...bundle(), status }),
-      ).not.toThrow();
-    }
+  it("refuses authority evidence that does not match the exact SOP grant", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      authorityManifestEntry: { ...bundle().authorityManifestEntry, sopId: "other" },
+    })).toThrow(/authority manifest entry does not match/);
+  });
+
+  it("refuses an intent admitted under unsafe ownership or controller evidence", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      mutationOwner: { ...bundle().mutationOwner, owner: "external" },
+    })).toThrow(/intent requires opsd mutation ownership/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      controllerProbe: { ...bundle().controllerProbe, result: "competing" },
+    })).toThrow(/intent requires a clear controller probe/);
+  });
+
+  it("refuses a succeeded assertion whose process or postconditions did not pass", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      postconditionSamples: [{ ...bundle().postconditionSamples[0], state: "fail" }],
+    })).toThrow(/passing postcondition/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      receipt: { ...bundle().receipt, exitCode: 1 },
+    })).toThrow(/successful process receipt/);
+  });
+
+  it("binds a terminal outcome to its canonical status and verifier decision", () => {
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      outcome: "failed",
+      status: "PROVEN",
+      verifier: { ...bundle().verifier, decision: "pass" },
+    })).toThrow(/failed outcome requires FAILED status and a failing verifier/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      outcome: "uncertain",
+      status: "PROVEN",
+      verifier: { ...bundle().verifier, decision: "pass" },
+    })).toThrow(/uncertain outcome requires PARTIAL status and an inconclusive verifier/);
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...bundle(),
+      status: "FAILED",
+      verifier: { ...bundle().verifier, decision: "fail" },
+    })).toThrow(/proven recovery outcome requires PROVEN status and a passing verifier/);
     expect(() =>
       RecoveryEvidenceSchema.parse({ ...bundle(), status: "RECOVERED" }),
     ).toThrow();
   });
 
   it("carries the controller probe result, so an ownership refusal is auditable", () => {
+    const { intent: _intent, receipt: _receipt, lease: _lease, ...withoutAction } = bundle();
     const parsed = RecoveryEvidenceSchema.parse({
-      ...bundle(),
+      ...withoutAction,
       outcome: "not-needed",
       attribution: undefined,
+      baseline: {
+        ...withoutAction.baseline,
+        allPassing: true,
+        samples: withoutAction.baseline.samples.map((sample) => ({
+          ...sample,
+          state: "pass" as const,
+        })),
+      },
+      notApplicable: {
+        intent: "controller admission refused before intent",
+        receipt: "no process was started",
+        lease: "no mutation lease was retained",
+      },
       controllerProbe: {
         result: "competing",
         observedLabels: ["a", "b"],
