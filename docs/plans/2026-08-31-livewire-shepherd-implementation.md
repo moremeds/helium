@@ -783,6 +783,7 @@ git commit -m "feat: plan verified current-member daily coverage"
 
 - Modify: `livewire_scripts/shepherd_daily.py`
 - Modify: `livewire_scripts/run_ib_fetch_robust.py`
+- Modify: `scripts/livewire_ingest.py`
 - Create: `tests/test_shepherd_daily_execution.py`
 - Modify: `tests/test_run_ib_fetch_robust.py`
 
@@ -790,6 +791,18 @@ git commit -m "feat: plan verified current-member daily coverage"
 
 - Create: `plugins/livewire-shepherd/src/livewire-cycle.test.ts`
 - Modify: `plugins/livewire-shepherd/src/daemon.ts`
+- Modify: `plugins/livewire-shepherd/src/bridge.ts`
+- Modify: `plugins/livewire-shepherd/src/bridge.test.ts`
+
+**Verified boundary correction:** the existing `LivewireBridge` is read-only and
+rejects every non-empty `changedPaths` list. Daily retrieval writes Bronze and
+therefore must not be routed through that bridge. `fetch` emits a mutation
+receipt for the later LS-06 certified action boundary. This task proves the
+typed waiting path and same-cycle isolation in Helium; it does not weaken the
+read-only bridge or grant the daemon direct write authority. The LS-07.3
+scanner adapter must also project Livewire's richer manifest identity into a
+Helium work unit and persist both hashes; it must not pretend the two current
+schemas are byte-identical.
 
 **Step 1: Freeze source-selection behavior in tests**
 
@@ -803,14 +816,19 @@ git commit -m "feat: plan verified current-member daily coverage"
 **Step 2: Add manifest-bound execution**
 
 `shepherd_daily.py fetch --manifest ABS` validates the work-unit scope hash and
-invokes the canonical robust path. It emits one JSON receipt and never restarts
-IB. Existing `clientId` collision retry remains inside `IBClient`; 2FA/session
-failure returns exit 75.
+invokes the canonical robust path once. It emits one JSON **mutation** receipt
+and never restarts IB. Existing `clientId` collision retry remains inside
+`IBClient`; gateway preflight failure or a later typed `IBConnectionError`
+returns exit 75. No production caller may execute this mutating command until
+LS-06 binds it to staged publication, rollback, and the certified action
+transaction.
 
 **Step 3: Import receipts in Helium**
 
-Map exit 75 plus the typed state hint to local waiting state. Do not parse human
-stderr or infer provider state from text.
+For read-only IB observations, map exit 75 plus the typed state hint to local
+waiting state and continue other ready work units in the same cycle. Do not
+parse human stderr or infer provider state from text. Mutation receipts remain
+handoffs until LS-06.
 
 **Step 4: Verify both repositories and commit separately**
 
@@ -826,11 +844,11 @@ Commit one PR-ready change in each repository:
 
 ```bash
 # Livewire
-git add livewire_scripts/shepherd_daily.py livewire_scripts/run_ib_fetch_robust.py tests/test_shepherd_daily_execution.py tests/test_run_ib_fetch_robust.py
+git add livewire_scripts/shepherd_daily.py livewire_scripts/run_ib_fetch_robust.py scripts/livewire_ingest.py tests/test_shepherd_daily_execution.py tests/test_run_ib_fetch_robust.py tests/test_livewire_entrypoints.py
 git commit -m "feat: expose resumable Shepherd daily retrieval"
 
 # Helium
-git add plugins/livewire-shepherd/src/daemon.ts plugins/livewire-shepherd/src/livewire-cycle.test.ts
+git add plugins/livewire-shepherd/src/daemon.ts plugins/livewire-shepherd/src/livewire-cycle.test.ts plugins/livewire-shepherd/src/bridge.ts plugins/livewire-shepherd/src/bridge.test.ts
 git commit -m "feat: isolate unavailable Livewire sources"
 ```
 

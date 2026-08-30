@@ -94,7 +94,9 @@ export class LivewireBridge {
     const saved = this.options.artifacts.put(stdoutBody);
     if (stderrBytes > 0) throw new Error(`Livewire probe wrote to stderr: ${Buffer.concat(stderr).toString("utf8")}`);
     if (execution.outputDigest !== saved.hash) throw new Error("Livewire stdout digest mismatch");
-    if (execution.exit.code !== 0 || execution.timedOut) throw new Error("Livewire probe process failed");
+    if (execution.timedOut || (execution.exit.code !== 0 && execution.exit.code !== 75)) {
+      throw new Error("Livewire probe process failed");
+    }
 
     const receipt = LivewireBridge.validateReceipt(
       stdoutBody.toString("utf8"),
@@ -102,6 +104,13 @@ export class LivewireBridge {
       input.operationId,
       this.options.changedPathRoots,
     );
+    if (execution.exit.code === 75 &&
+        (receipt.outcome !== "temporary-unavailable" || receipt.stateHint !== "AWAITING_USER")) {
+      throw new Error("Livewire exit 75 requires temporary-unavailable/AWAITING_USER");
+    }
+    if (execution.exit.code === 0 && receipt.stateHint === "AWAITING_USER") {
+      throw new Error("Livewire AWAITING_USER requires exit 75");
+    }
     const evidence = LivewireBridge.verifyEvidence(receipt, this.options.artifacts);
     return {
       outcome: receipt.outcome,
