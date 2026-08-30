@@ -56,6 +56,31 @@ Helium `current` release. After the Phase D PR is merged and a normal release is
 selected, reinstall the observe-only package against `current`; deploy and
 rollback then validate and move the collector/plugin pair together.
 
+The first transition is intentionally a one-time two-stage release because the
+currently selected v0.1.5 predates `opsd` and cannot run the current-bound
+package. Keep the event/evidence state in place throughout:
+
+1. unload only `com.helium.opsd-deadman` and `com.helium.opsd`;
+2. deploy the first normal release while those labels are absent;
+3. run `scripts/ops/rebind-observe-only.sh apply` from that release with
+   `--release /Users/moremeds/projects/helium-releases/current`, the existing
+   ops and LaunchAgents roots, and a new private backup directory below
+   `~/.helium/ops/rebind-backups`;
+4. inspect and bootstrap `com.helium.opsd`, prove a fresh cycle whose
+   `releaseRef` is the real current release, then bootstrap and prove the
+   independent deadman label;
+5. retain the hashed backup until a later compatible release rollback has been
+   drilled.
+
+The rebind tool refuses to run while either label is loaded, changes only the
+active config and the two installer-owned plists, and never changes state or
+calls launchctl. `restore` verifies the backup hashes before replacing those
+three files. If the first normal release must be abandoned, keep both labels
+unloaded, remove the active packaging with `uninstall-observe-only.sh`, roll DSH
+back to v0.1.5, restore the candidate binding from the backup, and explicitly
+bootstrap the two labels again. Do not ask v0.1.5 to start a current-bound
+`opsd`; it contains no Ops Agent binary or bundle.
+
 The command only creates private ops directories, one `0600` configuration,
 `com.helium.opsd.plist`, and `com.helium.opsd-deadman.plist`. It does not write
 the authority manifest, call `launchctl`, or start a process. Before continuing,
