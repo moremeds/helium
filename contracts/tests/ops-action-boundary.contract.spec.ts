@@ -209,7 +209,7 @@ describe("signed authority and evidence boundary", () => {
     const unsigned = {
       kind: "approval" as const, operatorId: "operator-1", nonce: "nonce-contract-1",
       issuedAt: "2026-08-29T23:59:00.000Z",
-      approval: { incidentId: "inc-1", sopId: "repair", sopVersion: 1, sopDigest: digest, expiresAt: "2026-08-30T00:10:00.000Z" },
+      approval: { incidentId: "inc-1", sopId: "repair", sopVersion: 1, sopDigest: digest, promotionId: "fixture-promotion", promotionInputSha256: "b".repeat(64), attempt: 1 as const, expiresAt: "2026-08-30T00:10:00.000Z" },
     };
     expect(() => ledger.accept({ ...unsigned, signature: "same-uid" })).toThrow(/signature/);
     const envelope = { ...unsigned, signature: sign(null, approvalSigningPayload(unsigned), privateKey).toString("base64") };

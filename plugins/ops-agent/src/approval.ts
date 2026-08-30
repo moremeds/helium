@@ -34,6 +34,9 @@ const ApprovalPayloadSchema = z.strictObject({
   sopId: OpsIdSchema,
   sopVersion: z.number().int().positive(),
   sopDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  promotionId: OpsIdSchema,
+  promotionInputSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  attempt: z.literal(1),
   expiresAt: IsoTimestampSchema,
 });
 

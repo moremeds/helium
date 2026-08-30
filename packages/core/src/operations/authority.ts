@@ -32,6 +32,9 @@ export interface OperatorApproval {
   sopId: string;
   sopVersion: number;
   sopDigest: string;
+  promotionId: string;
+  promotionInputSha256: string;
+  attempt: number;
   expiresAt: string;
 }
 
@@ -48,6 +51,8 @@ export interface AuthorityInput {
   history: AttemptRecord[];
   now: Date;
   approval?: OperatorApproval;
+  /** Required promotion binding for controlled approve-mode execution. */
+  promotion?: { id: string; inputSha256: string; attempt: number };
   maintenanceWindows?: MaintenanceWindow[];
 }
 
@@ -118,6 +123,17 @@ export function decideAuthority(input: AuthorityInput): AuthorityDecision {
 
   if (sop.authority === "approve") {
     reasons.push(...approvalReasons(sop, incident, input.approval, at));
+    if (input.approval !== undefined && input.promotion !== undefined) {
+      if (input.approval.promotionId !== input.promotion.id) {
+        reasons.push("approval-promotion-mismatch");
+      }
+      if (input.approval.promotionInputSha256 !== input.promotion.inputSha256) {
+        reasons.push("approval-promotion-input-mismatch");
+      }
+      if (input.approval.attempt !== input.promotion.attempt) {
+        reasons.push("approval-attempt-mismatch");
+      }
+    }
   }
 
   return { eligible: reasons.length === 0, authority: sop.authority, reasons };

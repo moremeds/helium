@@ -116,6 +116,20 @@ plist. Every state-changing step is journaled and fsynced before and after, and
 the fake-host suite injects a crash after every handoff prefix and requires
 rollback convergence.
 
+Before commissioning that key, generate the canonical logical promotion input
+off-mini with `scripts/ops/export-promotion-input.mjs`. The exporter refuses a
+release-commit mismatch, a changed bundle hash, probe-inventory drift,
+non-`opsd` ownership, a stale SOP digest, or an executor/wrapper mismatch. Its
+`0600` output binds the exact release, all promotion files, registered probes,
+owner decision, executor, one-attempt SOP, expiry, and rollback reference.
+
+`sign-authority-manifest.mjs --promotion-input ...` signs the SOP grant together
+with that promotion id and canonical input hash. `sign-approval.mjs` requires
+the same input and refuses any approval whose incident/SOP/digest/promotion/hash
+or attempt differs. Private keys remain on the commissioned operator signing
+host; deployment receives only the public key, signed manifest, signed approval
+and reviewed promotion material.
+
 ## Rollback and uninstall
 
 Release rollback validates that the target contains both the ops-agent plugin

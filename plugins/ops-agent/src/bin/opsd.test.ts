@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { canonicalJson } from "@helium/core";
+import { canonicalJson, manifestSigningPayload } from "@helium/core";
 import { parse, stringify } from "yaml";
 import type { CommandRunner } from "../probes/process.js";
 import {
@@ -83,9 +83,14 @@ function approveFixture() {
     authority: sop.authority,
   }];
   const authorityManifestPath = join(root, "authority-manifest.json");
+  const promotion = {
+    promotionId: "trading-stack-reconcile",
+    inputSha256: "b".repeat(64),
+  };
   writeFileSync(authorityManifestPath, JSON.stringify({
     entries,
-    signature: sign(null, Buffer.from(canonicalJson(entries)), privateKey).toString("base64"),
+    promotion,
+    signature: sign(null, manifestSigningPayload(entries, promotion), privateKey).toString("base64"),
   }));
 
   const config = {

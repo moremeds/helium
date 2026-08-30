@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, verify } from "node:crypto";
+import { createHash, generateKeyPairSync, verify } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,20 @@ const signingHost = {
 };
 
 const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+const unsignedPromotion = {
+  version: 1,
+  promotionId: "fixture-promotion",
+  sop: {
+    id: "repair-fixture",
+    version: 1,
+    digest: `sha256:${"a".repeat(64)}`,
+    maxAttempts: 1,
+  },
+};
+const promotion = {
+  ...unsignedPromotion,
+  inputSha256: createHash("sha256").update(canonicalJson(unsignedPromotion)).digest("hex"),
+};
 const unsigned = {
   kind: "approval",
   operatorId: "operator-1",
@@ -32,6 +46,9 @@ const unsigned = {
     sopId: "repair-fixture",
     sopVersion: 1,
     sopDigest: `sha256:${"a".repeat(64)}`,
+    promotionId: "fixture-promotion",
+    promotionInputSha256: promotion.inputSha256,
+    attempt: 1,
     expiresAt: "2026-08-30T00:10:00.000Z",
   },
 };
@@ -66,13 +83,22 @@ test("refuses an already signed or non-approval document", () => {
     () => signApprovalEnvelope({ ...unsigned, kind: "intervention" }, key),
     /kind must be approval/,
   );
+  assert.throws(
+    () => signApprovalEnvelope({
+      ...unsigned,
+      approval: { ...unsigned.approval, attempt: 2 },
+    }, key),
+    /attempt must be exactly one/,
+  );
 });
 
 test("CLI writes a new artifact and refuses to overwrite one", async () => {
   const input = join(dir, "approval.json");
   const key = join(dir, "operator.pem");
   const output = join(dir, "signed.json");
+  const promotionInput = join(dir, "promotion-input.json");
   writeFileSync(input, JSON.stringify(unsigned));
+  writeFileSync(promotionInput, JSON.stringify(promotion));
   writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), {
     mode: 0o600,
   });
@@ -81,6 +107,8 @@ test("CLI writes a new artifact and refuses to overwrite one", async () => {
   await runSigner([
     "--input",
     input,
+    "--promotion-input",
+    promotionInput,
     "--private-key",
     key,
     "--output",
@@ -91,6 +119,8 @@ test("CLI writes a new artifact and refuses to overwrite one", async () => {
     runSigner([
       "--input",
       input,
+      "--promotion-input",
+      promotionInput,
       "--private-key",
       key,
       "--output",
@@ -103,10 +133,12 @@ test("CLI writes a new artifact and refuses to overwrite one", async () => {
 test("CLI refuses a registered mini and an uncommissioned signing policy", async () => {
   const input = join(dir, "approval.json");
   const key = join(dir, "operator.pem");
+  const promotionInput = join(dir, "promotion-host-policy.json");
   writeFileSync(input, JSON.stringify(unsigned));
+  writeFileSync(promotionInput, JSON.stringify(promotion));
   writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
   const { runSigner } = await import("./sign-approval.mjs");
-  const args = ["--input", input, "--private-key", key, "--output", join(dir, "host-refused.json")];
+  const args = ["--input", input, "--promotion-input", promotionInput, "--private-key", key, "--output", join(dir, "host-refused.json")];
   await assert.rejects(
     runSigner(args, { signingHost: { ...signingHost, hardwareIdentity: miniIdentity } }),
     /registered mini/,

@@ -208,12 +208,44 @@ describe("approval", () => {
           sopId: approveSop.id,
           sopVersion: approveSop.version,
           sopDigest: approveSop.digest,
+          promotionId: "fixture-promotion",
+          promotionInputSha256: "b".repeat(64),
+          attempt: 1,
           expiresAt: "2026-08-25T05:00:00.000Z",
         },
       }),
     );
     expect(decision).toEqual({ eligible: true, authority: "approve", reasons: [] });
     expect(disposition(decision)).toBe("approval-required");
+  });
+
+  it.each([
+    ["promotion id", { promotionId: "other" }, "approval-promotion-mismatch"],
+    ["promotion input", { promotionInputSha256: "c".repeat(64) }, "approval-promotion-input-mismatch"],
+    ["attempt", { attempt: 2 }, "approval-attempt-mismatch"],
+  ])("refuses a signed approval bound to a different %s", (_label, patch, reason) => {
+    const approval = {
+      incidentId: incident.key,
+      sopId: approveSop.id,
+      sopVersion: approveSop.version,
+      sopDigest: approveSop.digest,
+      promotionId: "fixture-promotion",
+      promotionInputSha256: "b".repeat(64),
+      attempt: 1,
+      expiresAt: "2026-08-25T05:00:00.000Z",
+      ...patch,
+    };
+    const decision = decideAuthority(input({
+      sop: approveSop,
+      approval,
+      promotion: {
+        id: "fixture-promotion",
+        inputSha256: "b".repeat(64),
+        attempt: 1,
+      },
+    }));
+    expect(decision.eligible).toBe(false);
+    expect(decision.reasons).toContain(reason);
   });
 
   it.each([
@@ -231,6 +263,9 @@ describe("approval", () => {
           sopId: approveSop.id,
           sopVersion: approveSop.version,
           sopDigest: approveSop.digest,
+          promotionId: "fixture-promotion",
+          promotionInputSha256: "b".repeat(64),
+          attempt: 1,
           expiresAt: "2026-08-25T05:00:00.000Z",
           ...patch,
         },

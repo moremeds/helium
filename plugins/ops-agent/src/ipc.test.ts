@@ -65,6 +65,9 @@ function approval(nonce: string) {
       sopId: "repair-fixture",
       sopVersion: 1,
       sopDigest: `sha256:${"a".repeat(64)}`,
+      promotionId: "fixture-promotion",
+      promotionInputSha256: "b".repeat(64),
+      attempt: 1 as const,
       expiresAt: "2026-08-30T00:10:00.000Z",
     },
   };

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /** Sign exact above-observe SOP grants on an operator workstation. */
 import { createHash, createPrivateKey, sign } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { constants, closeSync, openSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { extname, join } from "node:path";
+import { dirname, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import {
@@ -12,6 +13,7 @@ import {
   SopDefinitionSchema,
   canonicalJson,
   certifySop,
+  manifestSigningPayload,
 } from "../../packages/core/lib/index.js";
 import { ScriptRegistry } from "../../plugins/ops-agent/lib/index.js";
 import { assertTrustedSigningHost } from "./signing-host-policy.mjs";
@@ -29,7 +31,9 @@ const flags = new Set([
   "--registered-probes",
   "--private-key",
   "--output",
+  "--promotion-input",
 ]);
+const requiredFlags = new Set([...flags].filter((flag) => flag !== "--promotion-input"));
 
 function parseArgs(argv) {
   const values = new Map();
@@ -41,7 +45,7 @@ function parseArgs(argv) {
     if (values.has(flag)) throw new Error(`duplicate manifest signer flag: ${flag}`);
     values.set(flag, value);
   }
-  for (const flag of flags) {
+  for (const flag of requiredFlags) {
     if (!values.has(flag)) throw new Error(`sign-authority-manifest requires ${flag}`);
   }
   return {
@@ -52,6 +56,7 @@ function parseArgs(argv) {
     registeredProbes: values.get("--registered-probes"),
     privateKey: values.get("--private-key"),
     output: values.get("--output"),
+    promotionInput: values.get("--promotion-input"),
   };
 }
 
@@ -168,9 +173,21 @@ export async function runManifestSigner(argv, testOptions = undefined) {
         authority: sop.authority,
       };
     });
+  const promotion = parsed.promotionInput === undefined
+    ? undefined
+    : validatePromotionInput(
+        loadDocument(parsed.promotionInput),
+        parsed,
+        entries,
+        componentValues,
+        parsedChecks,
+        scripts,
+        testOptions?.resolveReleaseCommit,
+      );
   const manifest = {
     entries,
-    signature: sign(null, Buffer.from(canonicalJson(entries)), privateKey).toString("base64"),
+    ...(promotion === undefined ? {} : { promotion }),
+    signature: sign(null, manifestSigningPayload(entries, promotion), privateKey).toString("base64"),
   };
 
   let fd;
@@ -187,6 +204,71 @@ export async function runManifestSigner(argv, testOptions = undefined) {
     if (fd !== undefined) closeSync(fd);
   }
   return manifest;
+}
+
+function validatePromotionInput(
+  value,
+  parsed,
+  entries,
+  componentValues,
+  parsedChecks,
+  scripts,
+  resolveReleaseCommit,
+) {
+  const { inputSha256, ...unsigned } = value;
+  const actualInputHash = createHash("sha256").update(canonicalJson(unsigned)).digest("hex");
+  if (inputSha256 !== actualInputHash) throw new Error("promotion input hash mismatch");
+  const actualCommit = resolveReleaseCommit === undefined
+    ? execFileSync("git", ["-C", value.release?.dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim()
+    : resolveReleaseCommit(value.release?.dir);
+  if (actualCommit !== value.release?.commit) throw new Error("promotion release differs from signing checkout");
+  const registeredBytes = readFileSync(parsed.registeredProbes);
+  if (value.registeredProbes?.sha256 !== createHash("sha256").update(registeredBytes).digest("hex") ||
+      JSON.stringify(value.registeredProbes?.probeIds) !==
+        JSON.stringify(loadRegisteredProbeIds(parsed.registeredProbes))) {
+    throw new Error("promotion registered probes differ from signing input");
+  }
+  if (componentValues.length !== 1 || value.componentOwner?.componentId !== componentValues[0].id ||
+      value.componentOwner?.owner !== componentValues[0].mutationOwner?.owner ||
+      value.componentOwner?.owner !== "opsd") {
+    throw new Error("promotion owner differs from signing input");
+  }
+  if (entries.length !== 1 || value.sop?.id !== entries[0].sopId ||
+      value.sop?.version !== entries[0].version || value.sop?.digest !== entries[0].digest ||
+      value.sop?.authority !== entries[0].authority || value.sop?.maxAttempts !== 1) {
+    throw new Error("promotion SOP differs from signing input");
+  }
+  const script = scripts.get(value.executor?.executorId);
+  if (script === undefined || script.path !== value.executor.path ||
+      script.identity.kind !== value.executor.identity?.kind ||
+      script.identity.value !== value.executor.identity?.value ||
+      script.expectedOwnerUid !== value.executor.expectedOwnerUid ||
+      JSON.stringify(script.argvSchema) !== JSON.stringify(value.executor.argvSchema)) {
+    throw new Error("promotion executor differs from signing input");
+  }
+  const promotionRoot = dirname(parsed.componentsDir);
+  const actualBundleFiles = [
+    ["components", parsed.componentsDir],
+    ["checks", parsed.checksDir],
+    ["executors", parsed.executorsDir],
+    ["sops", parsed.sopsDir],
+  ].flatMap(([section, dir]) => readdirSync(dir)
+    .filter((name) => [".yaml", ".yml", ".json"].includes(extname(name)))
+    .sort()
+    .map((name) => {
+      const path = join(dir, name);
+      return {
+        path: relative(promotionRoot, path),
+        sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+      };
+    }));
+  if (JSON.stringify(value.bundleFiles) !== JSON.stringify(actualBundleFiles)) {
+    throw new Error("promotion bundle hashes differ from signing input");
+  }
+  // Check definitions were parsed and registered above; retaining the read
+  // prevents a future refactor from validating only the hash list.
+  if (parsedChecks.length === 0) throw new Error("promotion has no checks");
+  return { promotionId: value.promotionId, inputSha256 };
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

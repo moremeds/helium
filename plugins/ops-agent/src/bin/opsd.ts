@@ -401,7 +401,7 @@ export function composeOpsDaemon(
     parsed.executorsDir,
     "executor",
   ));
-  assertRuntimeAuthority(parsed, loader, scripts);
+  const promotion = assertRuntimeAuthority(parsed, loader, scripts);
 
   const trustedKey = createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
   const evidence = new FileRecoveryEvidenceStore(resolve(parsed.stateDir, "evidence"));
@@ -500,6 +500,12 @@ export function composeOpsDaemon(
           },
         },
     argvFor: (sop) => compiledActionArgv(sop.id),
+    ...(promotion === undefined
+      ? {}
+      : {
+          promotionId: promotion.promotionId,
+          promotionInputSha256: promotion.inputSha256,
+        }),
     probes,
     runner,
     control,
@@ -581,8 +587,8 @@ function assertRuntimeAuthority(
   config: OpsdRuntimeConfig,
   loader: OpsBundleLoader,
   scripts: ScriptRegistry,
-): void {
-  if (config.mode !== "approve") return;
+): { promotionId: string; inputSha256: string } | undefined {
+  if (config.mode !== "approve") return undefined;
   const sops = loader.registry.sops();
   if (sops.length === 0) throw new Error("approve promotion bundle contains no SOP");
   const manifest = z.object({
@@ -592,6 +598,10 @@ function assertRuntimeAuthority(
       digest: z.string(),
       authority: z.string(),
     }).passthrough()),
+    promotion: z.object({
+      promotionId: z.string().min(1),
+      inputSha256: z.string().regex(/^[0-9a-f]{64}$/),
+    }).strict(),
   }).passthrough().parse(JSON.parse(readFileSync(config.authorityManifestPath, "utf8")));
   const expectedEntries = sops.map(({ definition }) => ({
     sopId: definition.id,
@@ -629,6 +639,7 @@ function assertRuntimeAuthority(
       );
     }
   }
+  return manifest.promotion;
 }
 
 function compiledActionArgv(sopId: string): string[] {

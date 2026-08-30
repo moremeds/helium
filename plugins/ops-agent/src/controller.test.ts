@@ -238,6 +238,7 @@ interface HarnessOptions {
   emptyRegistry?: boolean;
   checkExpectedValue?: boolean;
   sampledChecks?: CheckDefinition[][];
+  promotionBinding?: boolean;
   postconditionStateFor?: (
     checks: readonly CheckDefinition[],
   ) => "pass" | "fail" | "unknown";
@@ -340,6 +341,9 @@ function harness(options: HarnessOptions) {
       return executor;
     },
     argvFor: () => [],
+    ...(options.promotionBinding === true
+      ? { promotionId: "fixture-promotion", promotionInputSha256: "b".repeat(64) }
+      : {}),
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     ...(options.graceIntervalMs === undefined
       ? {}
@@ -370,6 +374,9 @@ function signApproval(nonce: string) {
       sopId: "repair-fixture",
       sopVersion: 1,
       sopDigest: digest,
+      promotionId: "fixture-promotion",
+      promotionInputSha256: "b".repeat(64),
+      attempt: 1 as const,
       expiresAt: "2026-08-30T00:10:00.000Z",
     },
   };
@@ -404,7 +411,7 @@ describe("OpsController modes", () => {
   });
 
   it("approve holds a proposal until a matching signed approval arrives", async () => {
-    const h = harness({ mode: "approve", authority: "approve" });
+    const h = harness({ mode: "approve", authority: "approve", promotionBinding: true });
     expect((await h.controller.tick()).actions[0]).toMatchObject({
       disposition: "propose",
       reason: "approval-required",
