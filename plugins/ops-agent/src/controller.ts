@@ -251,7 +251,13 @@ export class OpsController {
         continue;
       }
       const sop: SopDefinition = { ...definition, authority: loaded.authority };
-      const approval = this.options.approvals.find(incident.key, sop.id);
+      const approval = this.options.approvals.find(persistedIncidentId(incident.key), sop.id);
+      // Signed operator envelopes bind the public incident id emitted in the
+      // proposal. Core policy uses the internal correlation key, so adapt only
+      // after the durable ledger lookup has matched that public id exactly.
+      const policyApproval = approval === undefined
+        ? undefined
+        : { ...approval, incidentId: incident.key };
       const policySop: SopDefinition =
         this.options.mode === "approve" && sop.authority === "auto"
           ? { ...sop, authority: "approve" }
@@ -271,7 +277,7 @@ export class OpsController {
         checkResults: await this.options.runChecks(sop.preconditions),
         history: this.#history(),
         now: this.options.now(),
-        ...(approval === undefined ? {} : { approval }),
+        ...(policyApproval === undefined ? {} : { approval: policyApproval }),
         ...(this.options.promotionId === undefined ||
             this.options.promotionInputSha256 === undefined
           ? {}

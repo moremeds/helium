@@ -363,14 +363,14 @@ function harness(options: HarnessOptions) {
   };
 }
 
-function signApproval(nonce: string) {
+function signApproval(nonce: string, incidentId: string) {
   const unsigned = {
     kind: "approval" as const,
     operatorId: "operator-1",
     nonce,
     issuedAt: "2026-08-29T23:59:00.000Z",
     approval: {
-      incidentId: "fixture-service|integrity|failed|fixture-service",
+      incidentId,
       sopId: "repair-fixture",
       sopVersion: 1,
       sopDigest: digest,
@@ -418,7 +418,9 @@ describe("OpsController modes", () => {
     });
     expect(h.factoryCalls()).toBe(0);
 
-    h.approvals.accept(signApproval("approval-controller-1"));
+    const proposal = h.store.events.find((event) => event.type === "action-proposed");
+    if (proposal?.type !== "action-proposed") throw new Error("missing proposal");
+    h.approvals.accept(signApproval("approval-controller-1", proposal.incidentId));
     const second = await h.controller.tick();
     expect(second.actions[0]).toMatchObject({
       disposition: "execute",
@@ -510,7 +512,9 @@ describe("OpsController modes", () => {
       baselineState: "unknown",
     });
     await h.controller.tick();
-    h.approvals.accept(signApproval("approval-unknown-baseline-1"));
+    const proposal = h.store.events.find((event) => event.type === "action-proposed");
+    if (proposal?.type !== "action-proposed") throw new Error("missing proposal");
+    h.approvals.accept(signApproval("approval-unknown-baseline-1", proposal.incidentId));
 
     const result = await h.controller.tick();
 
