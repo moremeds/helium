@@ -28,6 +28,22 @@ value() {
   plutil -extract "EnvironmentVariables.$1" raw -o - "$plist" 2>/dev/null || true
 }
 
+domain="gui/$(id -u)"
+reload_dsh() {
+  if launchctl print "$domain/$label" >/dev/null 2>&1; then
+    launchctl bootout "$domain/$label" || return 1
+    local end=$((SECONDS + 15))
+    while launchctl print "$domain/$label" >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || {
+        echo "DSH did not unload before plist reload" >&2
+        return 1
+      }
+      sleep 1
+    done
+  fi
+  launchctl bootstrap "$domain" "$plist"
+}
+
 if [ "$command" = "status" ]; then
   printf '{"mode":"%s","jobs":"%s","dailyCap":"%s","backup":%s}\n' \
     "$(value HELIUM_TEAM_PROMOTION_MODE)" \
@@ -41,14 +57,15 @@ if [ "$command" = "restore" ]; then
   [ -f "$backup" ] || { echo "no canary backup to restore: $backup" >&2; exit 65; }
   transaction="${plist}.transaction.$$"
   cp -p "$plist" "$transaction"
-  mv "$backup" "$plist"
+  cp -p "$backup" "$plist"
   plutil -lint "$plist" >/dev/null
-  if [ "$restart" = "1" ] && ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+  if [ "$restart" = "1" ] && ! reload_dsh; then
     mv "$transaction" "$plist"
-    launchctl kickstart -k "gui/$(id -u)/com.helium.dsh" || true
-    echo "DSH restart failed; restored the pre-command plist" >&2
+    reload_dsh || true
+    echo "DSH plist reload failed; restored the pre-command plist" >&2
     exit 66
   fi
+  rm -f "$backup"
   rm -f "$transaction"
   echo "restored exact pre-canary DSH plist"
   exit 0
@@ -56,6 +73,22 @@ fi
 
 if [ "$command" = "enable" ] && [ ! -f "$backup" ]; then
   cp -p "$plist" "$backup"
+fi
+
+mcp_bin="/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js"
+if [ "$command" = "enable" ]; then
+  # P2 moved the v1 MCP boundary out of core. Migrate the retained baseline as
+  # well as the active canary plist so a later restore cannot resurrect the
+  # removed core/lib/mcp/server.js path.
+  backup_tmp="${backup}.mcp.$$"
+  cp -p "$backup" "$backup_tmp"
+  if plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$backup_tmp" >/dev/null 2>&1; then
+    plutil -replace EnvironmentVariables.HELIUM_MCP_BIN -string "$mcp_bin" "$backup_tmp"
+  else
+    plutil -insert EnvironmentVariables.HELIUM_MCP_BIN -string "$mcp_bin" "$backup_tmp"
+  fi
+  plutil -lint "$backup_tmp" >/dev/null
+  mv "$backup_tmp" "$backup"
 fi
 
 temporary="$(mktemp "${plist}.tmp.XXXXXX")"
@@ -87,16 +120,17 @@ if [ "$command" = "enable" ]; then
   set_string HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY "1"
   set_string HELIUM_TEAMS_DIR "/Users/moremeds/projects/helium-releases/current/teams"
   set_string HELIUM_OPS_EVENT_LOG "/Users/moremeds/.helium/ops/state/events.jsonl"
+  set_string HELIUM_MCP_BIN "$mcp_bin"
 else
   set_string HELIUM_TEAM_PROMOTION_MODE "off"
 fi
 
 plutil -lint "$temporary" >/dev/null
 mv "$temporary" "$plist"
-if [ "$restart" = "1" ] && ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
+if [ "$restart" = "1" ] && ! reload_dsh; then
   mv "$transaction" "$plist"
-  launchctl kickstart -k "gui/$(id -u)/com.helium.dsh" || true
-  echo "DSH restart failed; restored the pre-command plist" >&2
+  reload_dsh || true
+  echo "DSH plist reload failed; restored the pre-command plist" >&2
   exit 66
 fi
 rm -f "$transaction"

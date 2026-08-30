@@ -348,10 +348,20 @@ export class TeamPromotionAdapter {
     if (request.job !== job.name || !this.options.canaryJobs.includes(job.name)) {
       throw new Error(`job is not allow-listed for canary: ${request.job}`);
     }
-    const caseId = `canary-${hash(canonicalJson({ job: job.name, caseKey: request.caseKey })).slice(0, 24)}`;
-    if (!this.#budget.claim(job.name, caseId, this.options.maxPerUtcDay)) {
+    const budgetCaseId = `canary-${hash(canonicalJson({ job: job.name, caseKey: request.caseKey })).slice(0, 24)}`;
+    if (!this.#budget.claim(job.name, budgetCaseId, this.options.maxPerUtcDay)) {
       throw new Error("team canary daily cap exhausted");
     }
+    // A request is one execution attempt of the logical, daily-bounded case.
+    // Pressure or provider-infrastructure failures are immutable terminal team
+    // runs, so a retry needs its own partition instead of replaying that
+    // terminal projection. The stable caseKey above still owns exactly one
+    // daily slot; a different logical case remains refused by the cap.
+    const caseId = `canary-${hash(canonicalJson({
+      job: job.name,
+      caseKey: request.caseKey,
+      requestId: request.requestId,
+    })).slice(0, 24)}`;
     const content = canonicalJson(request);
     const digest = hash(content);
     const team = await this.options.run({

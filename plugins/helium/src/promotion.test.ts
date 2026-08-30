@@ -161,6 +161,48 @@ describe("P4 team promotion", () => {
     expect(new TeamReviewStore(root, now).pending()).toHaveLength(1);
   });
 
+  it("retries one logical canary in a fresh execution without spending a second daily slot", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-promotion-"));
+    const run = vi.fn(async (input) =>
+      run.mock.calls.length === 1
+        ? { ...projection(input.caseId), state: "failed" as const }
+        : projection(input.caseId));
+    const adapter = new TeamPromotionAdapter({
+      mode: "review-only",
+      canaryJobs: ["macro-watch"],
+      maxPerUtcDay: 1,
+      stateRoot: root,
+      run,
+      now,
+      providerHealth: () => ({ version: "providers-1", domains: [] }),
+    });
+    const request = {
+      version: 1 as const,
+      requestId: `canary-${"b".repeat(24)}`,
+      caseKey: "weekend-smoke-retry",
+      job: "macro-watch",
+      requestedBy: "weekend-operator",
+      reason: "retry one infrastructure case",
+      createdAt: "2026-08-30T00:55:00.000Z",
+      expiresAt: "2026-08-30T02:00:00.000Z",
+    };
+
+    await expect(adapter.handleCanary(job, request)).rejects.toThrow(/did not complete/);
+    await adapter.handleCanary(job, {
+      ...request,
+      requestId: `canary-${"c".repeat(24)}`,
+    });
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[0]?.[0].caseId).not.toBe(run.mock.calls[1]?.[0].caseId);
+
+    await expect(adapter.handleCanary(job, {
+      ...request,
+      requestId: `canary-${"d".repeat(24)}`,
+      caseKey: "a-different-daily-case",
+    })).rejects.toThrow(/daily cap exhausted/);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
   it("accepts one attributable human decision for a pending review", async () => {
     const root = mkdtempSync(join(tmpdir(), "helium-promotion-"));
     const reviews = new TeamReviewStore(root, now);

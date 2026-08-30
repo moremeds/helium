@@ -54,6 +54,11 @@ say "installing"
 installed=$(node -p "require('$DEST/node_modules/@deepseek-ai/dsh/package.json').version")
 [ "$installed" = "$DSH_PIN" ] || { echo "dsh pin drift: $installed" >&2; exit 66; }
 say "dsh pin ok: $installed"
+mcp_bin="$DEST/packages/v1-compat/lib/mcp/server.js"
+[ -x "$mcp_bin" ] || {
+  echo "release MCP boundary missing or not executable: $mcp_bin" >&2
+  exit 76
+}
 
 # An already-installed opsd follows the same immutable `current` release as
 # the collector/plugin. Refuse the flip if the new release cannot provide the
