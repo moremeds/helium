@@ -113,8 +113,9 @@ example rather than delaying it.
 3. **Evidence before mutation.** A claim must identify the bytes and times that
    support it. A repair must identify the claim it resolves.
 4. **Independent verification.** The planner cannot certify its own output.
-5. **Exact scope.** Every write is bounded by security identity, symbol interval,
-   date range, timeframe, layer, and revision.
+5. **Exact scope.** Every write is bounded by a typed scope. Identified-security
+   writes name security identity and symbol interval; whole-market writes name
+   provider/asset/date partition; unresolved candidates cannot mutate Silver.
 6. **Append, do not rewrite history.** Corrections create revisions with lineage.
 7. **Query convenience is not authority.** DuckDB is the sole Shepherd query
    interface, while immutable Parquet and manifests remain canonical evidence.
@@ -123,19 +124,24 @@ example rather than delaying it.
 
 ## 5. Unit of work and local state
 
-A work unit is the smallest independently schedulable and recoverable scope:
+A work unit is the smallest independently schedulable and recoverable typed
+scope. It is one of:
 
 ```text
-security_id
-+ symbol_interval
-+ date_range
-+ timeframe
-+ layer
-+ revision
+security interval: stable security_id + symbol interval + date/timeframe/layer
+candidate identity: candidate_id + observed symbol + index/source revision
+index revision: index_id + exact source revision refs
+market partition: provider + asset class + date + timeframe/layer
 ```
 
 Examples include one symbol-day Bronze bar partition, one security's Silver
-revision interval, or one membership event and its effective-time boundary.
+revision interval, one whole-market Massive date, or one unresolved membership
+candidate. A ticker string alone is never a stable work-unit identity.
+
+Each execution attempt has a durable lease, write-ahead intent, and typed
+outcome in the event log. Process-local capacity leases are secondary. Startup
+expires safe read-only leases exactly once and sends any persisted mutation
+intent through recovery instead of blindly retrying it.
 
 The canonical work-unit states are:
 
@@ -230,6 +236,13 @@ verifier evidence refs
 status and limitations
 ```
 
+Every evidence reference is stored as a logical reference plus an immutable
+SHA-256 content identity; neither field substitutes for the other. PIT-capable
+claim contracts require event/effective/publication/retrieval/revision clocks
+as structured fields, not prose. Provider-neutral team execution gains an
+injectable output-contract registry so these Shepherd schemas remain domain
+owned while unknown schema IDs stay fail-closed.
+
 Typical claim types include `index-membership-added`,
 `index-membership-removed`, `security-identity-mapped`, `split-declared`,
 `dividend-observed`, `bar-partition-complete`, `silver-adjustment-valid`, and
@@ -291,6 +304,10 @@ membership and ticker reuse may need the full research and PIT team.
 - Provider quota exhaustion persists the work unit, releases capacity, enters
   `AWAITING_PROVIDER`, and resumes after a provider availability event. It
   never busy-loops or changes a settled data claim.
+- Each configured provider owns one bounded, persisted-backoff availability
+  probe using its cheapest certified target and no tools. Tests inject fakes;
+  a quota-domain probe is single-flight and cannot create an independent retry
+  loop per sub-model.
 - Model output is a proposal or extraction, never primary evidence.
 
 ## 9. Data-source authority matrix

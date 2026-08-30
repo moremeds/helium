@@ -16,10 +16,13 @@ This plan implements the approved
 [Livewire Shepherd design](2026-08-31-livewire-shepherd-design.md). The old
 P3/P4 names are historical only; implementation uses `LS-*` task IDs.
 
-Core work spans two repositories and therefore two independently reviewed PRs:
+The design/plan lands first through Helium PR #48. Implementation then uses a
+short reviewed branch per executable batch; do not turn the documentation PR
+into a multi-repository mega-PR. The first branches are:
 
-- Helium: `/Users/chenxi/projects/helium/.worktrees/livewire-shepherd`, branch
-  `feat/livewire-shepherd`.
+- Helium LS-01.1–LS-01.3: create
+  `/Users/chenxi/projects/helium/.worktrees/livewire-shepherd-kernel`, branch
+  `feat/livewire-shepherd-kernel`, from the merged documentation commit.
 - Livewire: create `/Users/chenxi/projects/livewire/.worktrees/shepherd-contracts`,
   branch `feat/shepherd-contracts`, before the first Livewire edit.
 
@@ -89,6 +92,22 @@ parallel after `LS-02.3`. None may stop the deterministic queue.
 | Cost-aware agents and provider quota recovery | LS-01.3, LS-07.2 | cheap/senior routing, checkpoint, no-busy-loop tests |
 | AnySearch/OpenCLI/Massive/IB/UW source tools | LS-03.2, LS-05.1, LS-07.2 | allowlist, raw-evidence, and provider-state tests |
 
+### Pre-execution adversarial review record
+
+`CLOSED-IN-PLAN` means the implementation and test gate is now explicit; it is
+not a claim that code already exists.
+
+| Finding | Failure if uncorrected | Resolution | Status |
+| --- | --- | --- | --- |
+| AR-01 work units required `securityId` | unresolved members and whole-market partitions were unrepresentable | discriminated candidate/security/index/partition scopes in LS-01.2 | CLOSED-IN-PLAN |
+| AR-02 evidence required CAS-shaped refs | existing team logical refs could never attach despite verified hashes | strict logical ref + SHA-256 pair with byte verification | CLOSED-IN-PLAN |
+| AR-03 scheduler had decisions but no durable attempt lease | cold restart could duplicate or strand execution | event-backed lease, intent, outcome, and reconciliation in LS-01.2–01.3 | CLOSED-IN-PLAN |
+| AR-04 existing claim schema carried no enforced PIT clocks | future leakage could hide in prose | injectable output-contract registry plus Shepherd PIT/proposal schemas in LS-07.1 | CLOSED-IN-PLAN |
+| AR-05 only Codex had a default availability refresher | Claude/DeepSeek quota recovery could remain stranded | provider-owned single-flight bounded refreshers in LS-07.2 | CLOSED-IN-PLAN |
+| AR-06 receipt outcome/state combinations were unconstrained | failed work could claim `VERIFIED` | read-only receipt semantic refinement and separate mutation receipt | CLOSED-IN-PLAN |
+| AR-07 first gate depended on continuous historical expansion | no working system could be promoted until the full long-term goal | LS-GATE depends only on current working path; LS-04/08 continue by coverage | CLOSED-IN-PLAN |
+| AR-08 one branch/PR held the whole program | review and rollback scope would become unbounded | documentation PR first, then short task-batch PRs per repository | CLOSED-IN-PLAN |
+
 ### Repository rules before implementation
 
 1. In Livewire, read `AGENTS.md`, `CLAUDE.md`, `README.md`,
@@ -110,6 +129,8 @@ parallel after `LS-02.3`. None may stop the deterministic queue.
 ### Task LS-01.1: Extract a generic immutable artifact store
 
 **depends_on:** `[]`
+
+**Repository:** Helium
 
 The team artifact registry already stores bytes by SHA-256. Extract that byte
 store so Shepherd can use it without creating a fake team task.
@@ -136,6 +157,7 @@ it("persists bytes by their declared sha256 and reopens them", () => {
 it("rejects a declared hash mismatch and detects later tampering", () => { /* exact assertions */ });
 it("uses owner-only directories and files", () => { /* 0700 and 0600 */ });
 it("is idempotent for identical bytes and immutable for a reused ref", () => { /* exact assertions */ });
+it("refuses a symlink, non-regular destination, or foreign-owned root", () => { /* exact assertions */ });
 ```
 
 **Step 2: Run the test and confirm failure**
@@ -189,9 +211,12 @@ git commit -m "refactor: share immutable artifact storage"
 
 **depends_on:** `[LS-01.1]`
 
+**Repository:** Helium
+
 **Files:**
 
 - Create: `plugins/livewire-shepherd/package.json`
+- Create: `plugins/livewire-shepherd/cordis.patch.yml`
 - Create: `plugins/livewire-shepherd/tsconfig.json`
 - Create: `plugins/livewire-shepherd/tsconfig.typecheck.json`
 - Create: `plugins/livewire-shepherd/src/work-unit.ts`
@@ -201,26 +226,27 @@ git commit -m "refactor: share immutable artifact storage"
 - Create: `plugins/livewire-shepherd/src/index.ts`
 - Create: `plugins/livewire-shepherd/src/reducer.test.ts`
 - Create: `plugins/livewire-shepherd/src/store.test.ts`
+- Modify: `pnpm-lock.yaml`
 
 **Step 1: Scaffold the package and write schema tests**
 
 The package is named `dsh-plugin-livewire-shepherd` and depends only on
 `@helium/core`, `dsh-plugin-ops-agent`, `zod`, and `yaml` initially.
 
-Use this closed work-unit identity and state model:
+Use a closed discriminated scope. A flat list of required `securityId`/symbol
+fields is forbidden because unresolved membership candidates and whole-market
+Massive partitions do not yet have one stable security identity:
 
 ```ts
 export const ShepherdWorkUnitSchema = z.strictObject({
   version: z.literal(1),
   workUnitId: z.string().regex(/^lws-[0-9a-f]{32}$/),
-  securityId: z.string().min(1).max(200),
-  symbol: z.string().min(1).max(64),
-  symbolValidFrom: IsoTimestampSchema,
-  symbolValidTo: IsoTimestampSchema.optional(),
-  dateFrom: z.iso.date(),
-  dateTo: z.iso.date(),
-  timeframe: z.enum(["1d", "1m", "5m", "30m", "1h", "membership", "corporate-action"]),
-  layer: z.enum(["raw", "bronze", "silver", "query"]),
+  scope: z.discriminatedUnion("kind", [
+    SecurityIntervalScopeSchema,    // stable securityId + versioned symbol interval
+    CandidateIdentityScopeSchema,   // candidateId + observed symbol, no invented identity
+    IndexRevisionScopeSchema,       // indexId + exact source/revision refs
+    MarketPartitionScopeSchema,     // provider + asset class + date/timeframe
+  ]),
   revision: z.number().int().nonnegative(),
   scopeHash: z.string().regex(/^sha256:[0-9a-f]{64}$/),
 });
@@ -233,8 +259,10 @@ export const SHEPHERD_STATES = [
 ] as const;
 ```
 
-Tests must reject end-before-start, an unbound symbol interval, unknown states,
-a changed scope under the same ID, and a state named `BLOCKED`.
+Tests must reject end-before-start, an unbound identified-symbol interval,
+`securityId` on an unresolved candidate, symbol-only stable identity, unknown
+states, a changed scope under the same ID, and a state named `BLOCKED`. Prove a
+whole-market date partition and an unresolved candidate are representable.
 
 **Step 2: Run the schema tests**
 
@@ -254,6 +282,10 @@ Define only these event families for v1:
 work-unit/discovered
 work-unit/transitioned
 work-unit/retry-scheduled
+attempt/lease-acquired
+attempt/lease-expired
+attempt/execution-intent
+attempt/outcome-recorded
 evidence/attached
 claim/recorded
 claim/verified
@@ -265,22 +297,28 @@ issue/linked
 cycle/recorded
 ```
 
-Every transition carries `expectedRevision` and `revision`. The reducer rejects
-duplicate event IDs, stale revisions, illegal transitions, evidence refs that
-are not content-addressed, and terminal `VERIFIED` without a successful
-independent-verification event.
+Every transition carries `expectedRevision` and `revision`. Evidence uses a
+strict `{ ref, hash: sha256:* }` pair: the ref may be a team logical ref, while
+the hash must resolve to verified CAS bytes. The reducer rejects duplicate
+event IDs, stale revisions, illegal transitions, reused refs with different
+hashes, and terminal `VERIFIED` without a successful independent-verification
+event. The store/attachment boundary verifies the bytes; the pure reducer never
+pretends a string ref proves content.
 
 Use `openEventStore()` in `store.ts`; do not invent another JSONL format.
 
 **Step 4: Add restart and torn-tail tests**
 
-Test discovery, every legal local-wait transition, stale revision rejection,
-reopen/replay, snapshot, torn-tail append, and the absence of a global status.
+Test discovery, every legal local-wait transition, durable lease expiry,
+execution intent/outcome, stale revision rejection, reopen/replay, snapshot,
+torn-tail append, and the absence of a global status.
 
 Run:
 
 ```bash
 pnpm exec vitest run --project unit plugins/livewire-shepherd/src/reducer.test.ts plugins/livewire-shepherd/src/store.test.ts
+pnpm install --lockfile-only
+pnpm install --frozen-lockfile
 pnpm build
 pnpm typecheck
 ```
@@ -298,10 +336,14 @@ git commit -m "feat: add durable Shepherd work units"
 
 **depends_on:** `[LS-01.2]`
 
+**Repository:** Helium
+
 **Files:**
 
 - Create: `plugins/livewire-shepherd/src/scheduler.ts`
 - Create: `plugins/livewire-shepherd/src/scheduler.test.ts`
+- Create: `plugins/livewire-shepherd/src/coordinator.ts`
+- Create: `plugins/livewire-shepherd/src/coordinator.test.ts`
 - Create: `plugins/livewire-shepherd/src/coverage-ledger.ts`
 - Create: `plugins/livewire-shepherd/src/coverage-ledger.test.ts`
 
@@ -329,7 +371,7 @@ pnpm exec vitest run --project unit plugins/livewire-shepherd/src/scheduler.test
 
 Expected: FAIL because `ShepherdScheduler` is missing.
 
-**Step 3: Implement a deterministic scheduler**
+**Step 3: Implement a deterministic planner**
 
 The scheduler consumes a frozen state snapshot and returns decisions; it does
 not sleep or call tools:
@@ -348,17 +390,29 @@ decide(state, availability, pressure, now): ShepherdDecision[]
 Sort by explicit priority, discovery time, then work-unit ID. A decision for one
 unit never changes another unit's eligibility.
 
-**Step 4: Implement the multidimensional coverage ledger**
+**Step 4: Persist leases and attempts before side effects**
+
+`ShepherdCoordinator` applies a decision with compare-and-append revision
+checks. It records `attempt/lease-acquired`, then `attempt/execution-intent`
+before calling any bridge. Completion, quota, local wait, and failure each
+append one typed outcome that closes the attempt and releases capacity. Startup
+reconciliation expires read-only attempts safely; any attempt with a persisted
+mutation intent is handed to LS-06 recovery and is never blindly retried.
+
+Do not use the in-memory `LeaseStore` as durable truth. It may be used only as a
+process-local capacity primitive after the event-backed lease wins.
+
+**Step 5: Implement the multidimensional coverage ledger**
 
 Record `universe`, `identity`, `bars`, `corporate-actions`, `pit`, `lineage`,
 `duckdb-parity`, `repair`, and `rollback` independently. Compute numerators and
 denominators only from explicit scope manifests. Never infer `verified` from
 the existence of data.
 
-**Step 5: Run tests and commit**
+**Step 6: Run tests and commit**
 
 ```bash
-pnpm exec vitest run --project unit plugins/livewire-shepherd/src/scheduler.test.ts plugins/livewire-shepherd/src/coverage-ledger.test.ts
+pnpm exec vitest run --project unit plugins/livewire-shepherd/src/scheduler.test.ts plugins/livewire-shepherd/src/coordinator.test.ts plugins/livewire-shepherd/src/coverage-ledger.test.ts
 git add plugins/livewire-shepherd/src
 git commit -m "feat: schedule Shepherd work without global blockers"
 ```
@@ -366,6 +420,8 @@ git commit -m "feat: schedule Shepherd work without global blockers"
 ### Task LS-01.4: Define the strict Livewire bridge and daemon shell
 
 **depends_on:** `[LS-01.3]`
+
+**Repository:** Helium
 
 **Files:**
 
@@ -382,6 +438,7 @@ git commit -m "feat: schedule Shepherd work without global blockers"
 ```ts
 const LivewireReceiptSchema = z.strictObject({
   version: z.literal(1),
+  operationKind: z.literal("probe"),
   operationId: z.string().min(1),
   workUnitId: z.string().min(1),
   outcome: z.enum(["completed", "no-op", "temporary-unavailable", "unsafe", "failed"]),
@@ -395,13 +452,20 @@ const LivewireReceiptSchema = z.strictObject({
 
 Reject extra fields, a changed work-unit ID, non-absolute changed paths, paths
 outside configured roots, and a receipt whose stdout contains additional text.
+For this read-only bridge, `changedPaths` must be empty. Add a semantic
+`superRefine`: `temporary-unavailable` may map only to `AWAITING_PROVIDER` or
+`AWAITING_USER`; `unsafe`/`failed` may map only to `QUARANTINED` or
+`UNRESOLVED`; and `VERIFIED` requires `completed`/`no-op` plus at least one
+verified evidence object. Mutation receipts are a separate LS-06 schema, not a
+widening of this one.
 
 **Step 2: Implement the bridge using existing command safety**
 
 Load executable, cwd, environment, timeout, and argv schema through
 `ScriptRegistry`. Run it through `ScriptExecutor`, capture the raw receipt, and
-parse exactly one JSON object. Do not source `.env`, use a shell, or copy secrets
-into argv.
+persist stdout bytes in `ContentAddressedArtifactStore` before parsing exactly
+one JSON object. Bind the output digest, CAS ref, scope hash, and typed evidence
+hashes. Do not source `.env`, use a shell, or copy secrets into argv.
 
 **Step 3: Implement the daemon shell**
 
@@ -527,7 +591,7 @@ changes retrospectively. At this checkpoint the test validates fixture hashes,
 required evidence fields, and the expected disposition table; LS-02.2b imports
 the same table as implementation acceptance tests.
 
-**Step 4: Review and commit the frozen policy before storage code**
+**Step 4: Verify and commit the frozen policy before storage code**
 
 ```bash
 uv run pytest tests/test_security_identity_contract.py -q
@@ -749,7 +813,17 @@ uv run pytest tests/test_shepherd_daily.py tests/test_shepherd_daily_execution.p
 pnpm exec vitest run --project unit plugins/livewire-shepherd/src/livewire-cycle.test.ts
 ```
 
-Commit one PR-ready change in each repository.
+Commit one PR-ready change in each repository:
+
+```bash
+# Livewire
+git add livewire_scripts/shepherd_daily.py livewire_scripts/run_ib_fetch_robust.py tests/test_shepherd_daily_execution.py tests/test_run_ib_fetch_robust.py
+git commit -m "feat: expose resumable Shepherd daily retrieval"
+
+# Helium
+git add plugins/livewire-shepherd/src/daemon.ts plugins/livewire-shepherd/src/livewire-cycle.test.ts
+git commit -m "feat: isolate unavailable Livewire sources"
+```
 
 ## LS-04 Current-Member Intraday
 
@@ -1228,23 +1302,57 @@ git commit -m "feat: package automatic Livewire Shepherd recovery"
 - Create: `packages/core/tests/livewire-shepherd-team-manifest.spec.ts`
 - Create: `plugins/livewire-shepherd/src/analysis.ts`
 - Create: `plugins/livewire-shepherd/src/analysis.test.ts`
+- Create: `plugins/livewire-shepherd/src/output-contracts.ts`
+- Create: `plugins/livewire-shepherd/src/output-contracts.test.ts`
+- Create: `plugins/helium/src/output-contract-registry.ts`
+- Create: `plugins/helium/src/output-contract-registry.test.ts`
+- Modify: `plugins/helium/src/team-controller.ts`
+- Modify: `plugins/helium/src/team-controller.test.ts`
 
-**Step 1: Write manifest tests**
+**Step 1: Extract an injectable output-contract registry**
+
+`TeamController` currently hard-codes four macro-era schema IDs. Characterize
+all four first, then inject an `OutputContractRegistry` whose built-in entries
+produce byte-for-byte identical validation and prompts. Unknown IDs remain
+fail-closed. This is a provider/runtime extension point, not Livewire logic in
+the generic controller.
+
+Register two Shepherd-owned contracts:
+
+```text
+ShepherdClaimSet.v1:
+  ClaimSet.v1 fields plus scopeHash and, for PIT/material facts,
+  eventTime/publicationTime/retrievalTime/revisionTime and source authority
+
+ShepherdRepairProposal.v1:
+  workUnitId, scopeHash, eligibleOperation, acceptedClaimKeys,
+  sourceEvidence[{ref,hash}], maxRows/maxBytes, expiresAt
+```
+
+Reject future leakage (`publicationTime > asOf`), missing clocks on PIT facts,
+unhashed evidence, scope mismatch, an operation outside the deterministic
+eligible set, or a proposal citing an unaccepted claim. These schemas describe
+and verify; neither exposes execution.
+
+**Step 2: Write manifest tests**
 
 The repair variant rosters Lead, Repair Planner, Independent Verifier, and
 Reporter. The source-conflict variant adds only relevant provider investigators.
 The PIT variant contains all eight approved roles. Every factual/judgment claim
 must flow through `EvidenceDecisionSet.v1` before Lead/Reporter may cite it.
+PIT-producing roles use `ShepherdClaimSet.v1`; Repair Planner uses
+`ShepherdRepairProposal.v1` only after accepted evidence exists.
 
-**Step 2: Use existing output contracts**
+**Step 3: Reuse existing generic contracts where they are sufficient**
 
-Investigators and the PIT Adjudicator return `ClaimSet.v1`; Independent Verifier
-returns `EvidenceDecisionSet.v1`; Lead returns `AdjudicatedSynthesis.v1`; Reporter
-returns `ShadowReport.v1`. The Repair Planner proposes a typed claim such as
-`eligible-sop=...`; deterministic policy turns accepted claims into a manifest.
-No model receives a mutation tool.
+Basic diagnostic investigators may return `ClaimSet.v1`; PIT Adjudicator and
+any role making a claim with PIT consequences return `ShepherdClaimSet.v1`.
+Independent Verifier returns `EvidenceDecisionSet.v1`; Lead returns
+`AdjudicatedSynthesis.v1`; Reporter returns `ShadowReport.v1`. The Repair Planner returns
+`ShepherdRepairProposal.v1`. Deterministic policy revalidates that proposal and
+builds the manifest. No model receives a mutation tool.
 
-**Step 3: Add role tool allowlists**
+**Step 4: Add role tool allowlists**
 
 ```text
 IB Investigator: livewire.evidence.read, livewire.ib.observe
@@ -1256,11 +1364,11 @@ Independent Verifier: livewire.evidence.read, livewire.probe.request
 Lead/Reporter: accepted ledger only
 ```
 
-**Step 4: Verify and commit**
+**Step 5: Verify and commit**
 
 ```bash
-pnpm exec vitest run --project unit packages/core/tests/livewire-shepherd-team-manifest.spec.ts plugins/livewire-shepherd/src/analysis.test.ts
-git add teams packages/core/tests/livewire-shepherd-team-manifest.spec.ts plugins/livewire-shepherd/src/analysis.ts plugins/livewire-shepherd/src/analysis.test.ts
+pnpm exec vitest run --project unit packages/core/tests/livewire-shepherd-team-manifest.spec.ts plugins/livewire-shepherd/src/output-contracts.test.ts plugins/livewire-shepherd/src/analysis.test.ts plugins/helium/src/output-contract-registry.test.ts plugins/helium/src/team-controller.test.ts
+git add teams packages/core/tests/livewire-shepherd-team-manifest.spec.ts plugins/livewire-shepherd/src/output-contracts.ts plugins/livewire-shepherd/src/output-contracts.test.ts plugins/livewire-shepherd/src/analysis.ts plugins/livewire-shepherd/src/analysis.test.ts plugins/helium/src/output-contract-registry.ts plugins/helium/src/output-contract-registry.test.ts plugins/helium/src/team-controller.ts plugins/helium/src/team-controller.test.ts
 git commit -m "feat: define Livewire Shepherd team variants"
 ```
 
@@ -1295,6 +1403,13 @@ read-only fallback for authenticated or source-specific adapters. Massive, IB,
 and corporate-action reads call the strict Livewire bridge rather than duplicating
 vendor clients in TypeScript. Secrets stay in tool configuration.
 
+Discover OpenCLI commands and adapter strategy from `opencli list -f json`; do
+not hard-code a remembered command registry. Its current daemon is reachable
+but the Browser Bridge reports an unstable extension, so a browser-backed
+adapter must return a local typed wait/fallback and let AnySearch or another
+unit proceed. Never run OpenCLI write commands or trigger its setup/update from
+the daemon.
+
 **Step 3: Add edge-owned cheap/senior routing**
 
 In `ProviderRuntime`, create two ordered target groups from currently certified
@@ -1315,6 +1430,15 @@ intentionally consumes Claude quota, and live model smoke tests focus on Codex.
 Use fakes to exhaust one model, one shared provider quota domain, and all
 providers. Assert checkpoint, no busy-loop, no tool expansion, deterministic
 continuity, and exactly one resume after availability changes.
+
+Also close the current production asymmetry: `ProviderRuntime` has a built-in
+Codex availability refresher but no production-owned Claude or DeepSeek
+refresher, while Claude starts as quota-exhausted. Add provider-owned bounded
+refreshers for every configured provider using its cheapest certified target,
+no tools, a minimal exact response, persisted `retryAfter`/backoff, and one
+in-flight probe per quota domain. Unit/contract tests inject fake invokers; they
+must not consume live Claude quota. A failed probe stays local and schedules one
+later retry rather than a timer loop.
 
 **Step 5: Run and commit**
 
@@ -1457,13 +1581,25 @@ history, and later knowledge does not leak backward.
 
 **Step 4: Commit separately in both repositories**
 
-Run the focused Livewire and Helium tests before each commit.
+```bash
+# Livewire
+uv run pytest tests/test_shepherd_delisted_history.py tests/test_shepherd_daily.py tests/test_duckdb_catalog.py -q
+git add livewire_scripts/shepherd_daily.py clients/duckdb_catalog.py tests/test_shepherd_delisted_history.py
+git commit -m "feat: expand identity-bound historical coverage"
+
+# Helium
+pnpm exec vitest run --project unit plugins/livewire-shepherd/src/historical-expansion.test.ts plugins/livewire-shepherd/src/scheduler.test.ts
+git add plugins/livewire-shepherd/src/scheduler.ts plugins/livewire-shepherd/src/historical-expansion.test.ts
+git commit -m "feat: schedule incremental PIT history expansion"
+```
 
 ## LS-GATE Working-System Proof
 
 ### Task LS-GATE: Prove and promote the first working Shepherd
 
 **depends_on:** `[LS-01.4, LS-02.3, LS-03.2, LS-05.2, LS-06.3b, LS-07.3]`
+
+**Repositories:** Helium and Livewire; Argon only when the optional UW adapter landed
 
 This is evidence collection, not another coding phase. No seven-day duration is
 required.
@@ -1474,6 +1610,8 @@ required.
 - Create: `docs/evidence/livewire-shepherd/verification.log`
 - Create: `docs/evidence/livewire-shepherd/coverage.json`
 - Create: `docs/evidence/livewire-shepherd/drills.json`
+- Create: `scripts/evidence/verify-livewire-shepherd.mjs`
+- Create: `scripts/evidence/verify-livewire-shepherd.test.mjs`
 - Modify: `docs/evidence/claims.yaml`
 - Modify: `docs/plans/2026-08-31-livewire-shepherd-design.md`
 
@@ -1524,6 +1662,17 @@ In a disposable lake first, then one reviewed real partition:
 Mark each of design section 20's twelve gates `PROVEN`, `PARTIAL`, or `FAILED`
 from replayable evidence. There is no `BLOCKED` program verdict; incomplete
 coverage names the affected work units and next actions.
+
+The deterministic verifier rejects a missing artifact, hash mismatch,
+uncommitted repo SHA, contradictory gate verdict, terminal repair without its
+raw/source/postcondition hashes, or a denominator that silently omits
+unresolved work. Run it twice from a clean checkout and require identical
+output:
+
+```bash
+node --test scripts/evidence/verify-livewire-shepherd.test.mjs
+node scripts/evidence/verify-livewire-shepherd.mjs docs/evidence/livewire-shepherd/manifest.yaml
+```
 
 **Step 5: PR and merge**
 
