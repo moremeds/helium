@@ -6,8 +6,8 @@
 or broaden that plan.  
 **Starting production release:** `v0.1.5`  
 **Starting master:** `9604ae0`
-**Current production release:** `v0.1.9`
-**Current release merge:** `b4c43b7`
+**Current production release:** `v0.1.11`
+**Current release merge:** `70d35ab`
 
 ## Fixed boundaries
 
@@ -21,7 +21,9 @@ or broaden that plan.
   fallback while its selected target is healthy.
 - Ops analysis remains optional. Deterministic `opsd`, dead-man, and operator
   takeover do not depend on any provider or team admission decision.
-- No Ops authority change or component mutation is part of this canary.
+- No standing Ops authority change or component mutation is part of this
+  canary. Suggest-only certification metadata does not transfer the live
+  mutation owner or create an executor.
 
 ## Execution sequence
 
@@ -186,6 +188,93 @@ after they actually occur.
   and returned `opsd` to observe mode. This proves only that one drill; it does
   not grant standing approve or automatic authority.
 
+### 2026-08-30 suggest-only evidence
+
+- PR #43 added a reversible production `suggest` mode and an independent signed
+  operator-decision ledger. Suggest mode requires the same exact signed
+  promotion identity and certified SOP as approve mode, but constructs no
+  executor and therefore cannot mutate the component. PR #44 released it as
+  v0.1.10.
+- The first v0.1.10 controlled stop was observed and projected as an
+  action-eligible incident, but produced no new proposal. The incident had the
+  same stable identity as the earlier successful approve-only drill, and the
+  SOP's one-attempt limit was incorrectly being treated as exhausted forever
+  rather than exhausted only for that recovered occurrence. The stopped
+  `trading-cadvisor` container was restored by the test harness; all 20 expected
+  containers were running and Ops had emitted no mutation event.
+- PR #45 made the attempt budget reset after a durable recovered transition,
+  while preserving cooldown across occurrences, and made the reversible mode
+  switch work through the production `current` symlink. PR #46 released those
+  fixes as v0.1.11. Its release gate passed 1,049 unit tests, 113 contract tests
+  with one credentialed live test skipped, two local E2E tests, and 20 repeated
+  action-boundary runs. A fresh post-merge build plus 124 unit files / 1,050
+  tests also passed. The live deployment passed exact Codex
+  `gpt-5.6-sol/high`, DSH, and Ops target-release checks.
+- A signed v0.1.11 promotion bundle, valid until
+  `2026-09-07T12:59:19.871Z`, enabled suggest-only for the exact release commit
+  `70d35ab7a29ea9fdd7971eac9a69fecad44ca16b`. The existing Colima watchdogs
+  remained loaded as the real mutation owners; `opsd` received no executor.
+  The signed manifest SHA-256 is
+  `28bb3b132c7634f1b72bf857647fa86c77ca1bb77cb2a09d50cad378f20c0222`.
+- A second controlled stop of `trading-cadvisor` produced proposal
+  `act-6268a7d73a56dc378c168473b600337c` for incident
+  `inc-3a28fb3419d81886e732aec7d6b79689` at
+  `2026-08-30T13:00:39.642Z`. The cycle recorded 43 observations, two incident
+  updates, one proposal, and zero authorization, intent, receipt, or verified
+  action events. The same container identity was restored with restart count
+  zero, and all 20 expected containers were running.
+- Operator `chenxi` recorded a signed `alternate` decision: retain the existing
+  Colima watchdog as recovery owner and do not authorize an `opsd` mutation.
+  The signed decision SHA-256 is
+  `d912cbbc3463fe5bf5b2cb806b42f1b610457ef233b220b3b10d4c0f44dc39d0`.
+  The decision is stored in the separate hash-chained
+  `suggestion-decisions/events.jsonl` ledger, so it does not rewrite the main
+  operations log; its first record hash is
+  `50c2d4c87c8a4e94498b90473bec7f365ef1bc2bf53317a0adb065a4b6f74d6b`.
+  A cold `opsd` restart replayed the decision and rejected a duplicate
+  submission. Fresh v0.1.11 cycles then completed with zero collection
+  failures.
+
+### Ops coverage definition and first production baseline
+
+Ops coverage is measured as a ladder, not one blended percentage. A component
+may be observed without having a certified suggestion or recovery, and a
+successful collection may report an unhealthy state.
+
+- **Observation inventory coverage:** the denominator is every
+  component/dimension pair in the committed standard component bundle. The
+  numerator includes only pairs with at least one fresh production observation
+  in the measured full cycle; registration alone does not count. The first
+  v0.1.11 baseline contains 7 components and 34 declared dimensions. The full
+  cycle ending at event sequence 13883 covered 7/7 components and 31/34
+  dimensions (91.2%) through 43 observations with zero collection failures.
+  The uncovered dimensions were Colima `controller` plus Livewire `liveness`
+  and `readiness`.
+- **Health is reported separately:** the same cycle contained 37 `ok`, two
+  `degraded`, three `failed`, and one `unknown` samples. Coverage therefore
+  says that Ops saw the target, not that the target was healthy.
+- **Detection coverage:** credit only a controlled or naturally occurring
+  failure that becomes a durable incident with the correct component,
+  dimension, and failure class. The controlled Colima container stop meets
+  this level.
+- **Suggestion coverage:** credit only an eligible incident that maps to an
+  exact certified SOP, creates a proposal without execution, and receives an
+  attributable signed operator decision. The v0.1.11 Colima recurrence meets
+  this level with an `alternate` decision.
+- **Recovery coverage:** credit only an authorized execution with a durable
+  baseline, write-ahead intent, receipt, postconditions, and replayable signed
+  evidence. The earlier approve-only Colima container reconcile meets this
+  level for that one drill only; suggest-only does not.
+- **Authority coverage:** report the live mutation owner for each component
+  independently of suggestion certification. In the standard bundle Colima is
+  externally owned and the other six components have no Ops mutation owner.
+  The signed suggestion bundle's proposed `opsd` ownership is certification
+  metadata only while suggest mode has no executor and the legacy Colima
+  watchdogs remain loaded.
+- **Canonical coverage states:** report `observed`, `detected`, `suggested`,
+  `approved-drill`, and `automatic-proven` separately. Never promote one state
+  into another merely because the later capability exists in code.
+
 ### Current P4 boundary
 
 The working-system portion of P4 is now active: tagged production deployment,
@@ -198,7 +287,6 @@ The following are deliberately still open and must not be rewritten as
 completed merely because the system is running:
 
 - five uninterrupted trading days and at least one real material Macro case;
-- the separate Ops suggest-only observation and operator-decision record;
 - any standing automatic Ops authority, including a controlled automatic drill;
 - Colima restart and Livewire targeted-repair certification beyond the one
   container-only reconcile drill; and
