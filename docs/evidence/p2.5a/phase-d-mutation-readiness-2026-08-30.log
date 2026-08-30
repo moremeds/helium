@@ -58,3 +58,41 @@ The production trust key is still UNCOMMISSIONED. The signed deployment
 package, final live preflight, controlled drill, and seven-day observation gate
 remain outstanding. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain
 BLOCKED.
+
+Pinned Node 22 PR CI gate
+-------------------------
+Source: GitHub Actions run 33291015130
+URL: https://github.com/moremeds/helium/actions/runs/33291015130
+Event: pull_request
+Branch: feat/ops-task16-controlled-mutation
+Commit: ffadf921c5f24f21c43b035aef4fe2a10abeb07a
+Created: 2026-08-30T03:46:05Z
+Completed: 2026-08-30T03:48:39Z
+Conclusion: success
+
+Job 99202524895 — check — success
+  - install, build, typecheck: success
+  - unit: 87 files / 859 tests passed
+  - local E2E: 1 file / 2 tests passed
+  - tenant dead-man: 6 tests passed
+  - global dead-man: ALL PASS
+  - offline ops signing and release-boundary tests: 30 passed
+  - adversarial ops boundary repetition: 20 complete repetitions of
+    30 contract tests; zero failures
+  - fake executor package neutrality: PASS
+
+Job 99202524681 — contracts — success
+  - install and build: success
+  - contracts: 12 files / 85 tests passed
+  - one credentialed live-provider contract explicitly skipped
+
+Job 99202524806 — ops-macos-offline — success
+  - install and build: success
+  - observe-only installer/freeze/waiver, release-cycle, dead-man and rollback
+    packaging gate: ALL PASS
+
+The GitHub run metadata and job logs were read after completion. This committed
+artifact is the immutable evidence byte sequence used by the claim register;
+its sha256 is recorded in both the P2.5a manifest and the closed claims
+register. A second PR CI run must re-hash this file and pass those contracts
+before merge.

@@ -522,11 +522,14 @@ claims:
       verifier: command
       command: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && bash scripts/ops/install-observe-only.test.sh && node --test scripts/ops/controlled-mutation.test.mjs scripts/ops/export-promotion-input.test.mjs scripts/ops/promotion-package.test.mjs && git diff --check"
       toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml); pnpm 11.24.0; vitest 3.2.7"
-      decision: inconclusive
-    artifacts: []
+      outputHash: "sha256:753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-mutation-readiness-2026-08-30.log"
+        sha256: "753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2"
     baseline: "Phase D merge a7879cd5b8150ce806ed90ddccaa7ed107cd324d and the Task 16/post-AC#1 execution attachment in docs/plans/2026-08-30-helium-ops-task16-controlled-mutation.md."
     reproduction: "Run the focused adversarial sampler/controller/lock/evidence and handoff/rollback suites 20 times, then run the complete command gate recorded above."
-    failures: "No local failures. The local pre-PR record is docs/evidence/p2.5a/phase-d-mutation-readiness-2026-08-30.log, but it is deliberately not cited as decided evidence because it ran under Node 26 rather than the pinned Node 22 CI runtime."
-    status: PLANNED
-    limitation: "Local pre-PR verification passed under Node 26, but repository evidence policy requires the decided claim to be pinned to the Node 22 CI run. No live mutation, signed production package, final host preflight, or drill has occurred; the production trust key remains UNCOMMISSIONED and P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
-    nextGate: "Pass the PR CI gate, commit its immutable output artifact, and promote only this offline claim to PROVEN before merging."
+    failures: "None in GitHub Actions run 33291015130 at commit ffadf921c5f24f21c43b035aef4fe2a10abeb07a. The credentialed live-provider contract remained explicitly skipped."
+    status: PROVEN
+    limitation: "This proves offline mutation readiness at PR commit ffadf92 under the pinned Node 22 CI gate. No live mutation, signed production package, final host preflight, or drill has occurred; the production trust key remains UNCOMMISSIONED and P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
+    nextGate: "Re-verify this artifact hash in PR CI, merge readiness by PR, then commission the independent key/package and run the final read-only live preflight before any controlled mutation."
