@@ -113,6 +113,11 @@ grep -q '"mode": "observe"' "$config"
 grep -q 'authority-manifest.pub.pem' "$config"
 grep -q 'authority-manifest.json' "$config"
 grep -q 'observation-targets.yaml' "$config"
+grep -q 'registered-probes.json' "$repo/scripts/ops/install-observe-only.sh"
+if grep -q '"mode": "auto"' "$config"; then
+  echo "FAIL: installer rendered forbidden auto mode"
+  exit 1
+fi
 grep -Fq "$release" "$config"
 grep -Fq "$release/scripts/ops/run-opsd.sh" "$plist"
 if grep -Eqi 'private.?key|password|secret|token' "$config"; then

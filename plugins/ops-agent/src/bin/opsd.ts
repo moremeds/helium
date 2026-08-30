@@ -53,6 +53,7 @@ import {
 import type { OpsControlServer } from "../ipc.js";
 import { OpsControlServer as UnixOpsControlServer } from "../ipc.js";
 import { macosResourceProbe } from "../probes/macos-resource.js";
+import { launchdControllerProbe } from "../probes/launchd-controller.js";
 import {
   createConfiguredHostProbes,
   createProductionObservationProbes,
@@ -64,6 +65,7 @@ import {
 } from "../production-checks.js";
 import { FileRecoveryEvidenceStore } from "../recovery-evidence-store.js";
 import { ScriptRegistry } from "../script-registry.js";
+import { ScriptExecutor } from "../script-executor.js";
 import type { CommandResult, CommandRunner } from "../probes/process.js";
 
 export interface OpsDaemonController<T> {
@@ -247,17 +249,26 @@ const UnixSocketPathSchema = AbsolutePathSchema.refine(
   { message: "Unix socket path exceeds the macOS 103-byte limit" },
 );
 
-/** The packaged executable is deliberately observe-only. */
+/** The packaged executable caps authority at approve; auto is not representable. */
 export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
   version: z.literal(1),
-  mode: z.literal("observe"),
+  mode: z.enum(["observe", "suggest", "approve"]),
   releaseDir: AbsolutePathSchema,
+  promotionBundleDir: AbsolutePathSchema.optional(),
   executorsDir: z.string().min(1),
   stateDir: AbsolutePathSchema,
   socketPath: UnixSocketPathSchema,
   observationTargetsPath: AbsolutePathSchema.optional(),
   intervalMs: z.number().int().positive().max(86_400_000),
-}).strict();
+}).strict().superRefine((config, ctx) => {
+  if (config.mode === "approve" && config.promotionBundleDir === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["promotionBundleDir"],
+      message: "approve mode requires an explicit promotion bundle",
+    });
+  }
+});
 export type OpsdRuntimeConfig = z.infer<typeof OpsdRuntimeConfigSchema>;
 
 export function parseOpsdArgs(argv: readonly string[]): { configPath: string } {
@@ -308,6 +319,9 @@ export function validateOpsdRelease(
     ...(config.observationTargetsPath === undefined
       ? {}
       : { observationTargetsPath: rebase(config.observationTargetsPath) }),
+    ...(config.promotionBundleDir === undefined
+      ? {}
+      : { promotionBundleDir: rebase(config.promotionBundleDir) }),
   });
   const checkRuntime = configuredCheckRuntime(parsed);
   const registeredProbeIds = checkRuntime?.probeIds() ?? [];
@@ -315,16 +329,22 @@ export function validateOpsdRelease(
     validateRegisteredProbeExport(parsed.releaseDir, registeredProbeIds);
   }
   const loader = new OpsBundleLoader({
-    baseDir: parsed.releaseDir,
+    baseDir: activeBundleBase(parsed),
     config: loaderConfig(parsed),
     registeredProbeIds,
     now: () => new Date(),
   });
-  const installed = loader.installTenant("standalone-host", parsed.releaseDir);
+  const installed = loader.installTenant("standalone-host", activeBundleBase(parsed));
   if (installed.health.state !== "loaded") {
     throw new Error(`ops bundle invalid: ${installed.health.detail ?? "unknown error"}`);
   }
-  ScriptRegistry.load(loadConfiguredDocuments(parsed, parsed.executorsDir, "executor"));
+  const scripts = ScriptRegistry.load(loadConfiguredDocuments(
+    parsed,
+    activeBundleBase(parsed),
+    parsed.executorsDir,
+    "executor",
+  ));
+  assertRuntimeAuthority(parsed, loader, scripts);
   createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
   if (checkRuntime !== undefined) {
     statSync(resolve(parsed.releaseDir, "scripts/ops/read-latest-heartbeats.mjs"));
@@ -332,20 +352,20 @@ export function validateOpsdRelease(
   }
 }
 
-interface ObserveCompositionOverrides {
+interface OpsCompositionOverrides {
   runner?: CommandRunner;
   probes?: readonly ObservationProbe[];
   now?: () => Date;
 }
 
 /**
- * Concrete provider-free observe-only composition used by the launchd binary.
- * Unsupported business checks are registered as unavailable and therefore
- * evaluate to `unknown`; they can never manufacture a passing precondition.
+ * Concrete provider-free composition used by the launchd binary. Approve mode
+ * is admitted only through a separately signed, identity-checked promotion
+ * bundle; observe and suggest cannot reach a real executor.
  */
-export function composeObserveOnlyOpsDaemon(
+export function composeOpsDaemon(
   config: OpsdRuntimeConfig,
-  overrides: ObserveCompositionOverrides = {},
+  overrides: OpsCompositionOverrides = {},
 ): OpsDaemon {
   const parsed = OpsdRuntimeConfigSchema.parse(config);
   const now = overrides.now ?? (() => new Date());
@@ -366,15 +386,22 @@ export function composeObserveOnlyOpsDaemon(
     validateRegisteredProbeExport(parsed.releaseDir, registeredProbeIds);
   }
   const loader = new OpsBundleLoader({
-    baseDir: parsed.releaseDir,
+    baseDir: activeBundleBase(parsed),
     config: loaderConfig(parsed),
     registeredProbeIds,
     now,
   });
-  const installed = loader.installTenant("standalone-host", parsed.releaseDir);
+  const installed = loader.installTenant("standalone-host", activeBundleBase(parsed));
   if (installed.health.state !== "loaded") {
     throw new Error(`ops bundle invalid: ${installed.health.detail ?? "unknown error"}`);
   }
+  const scripts = ScriptRegistry.load(loadConfiguredDocuments(
+    parsed,
+    activeBundleBase(parsed),
+    parsed.executorsDir,
+    "executor",
+  ));
+  assertRuntimeAuthority(parsed, loader, scripts);
 
   const trustedKey = createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
   const evidence = new FileRecoveryEvidenceStore(resolve(parsed.stateDir, "evidence"));
@@ -420,7 +447,7 @@ export function composeObserveOnlyOpsDaemon(
   });
 
   return createStandaloneOpsDaemon({
-    mode: "observe",
+    mode: parsed.mode,
     registry: loader.registry,
     store,
     now,
@@ -439,16 +466,25 @@ export function composeObserveOnlyOpsDaemon(
     sampleChecks: async (checks, phase) => checkRuntime === undefined
       ? unavailableSamples(checks, phase, now())
       : checkRuntime.sample(checks, phase, runner, now()),
-    controllerProbe: {
-      async check() {
-        return {
-          result: "unknown",
-          observedLabels: [],
-          evidenceRef: "artifact://ops/controller/not-enumerated-in-observe-mode",
-          detail: "observe-only-runtime",
-        };
-      },
-    },
+    controllerProbe: parsed.mode === "approve"
+      ? launchdControllerProbe({
+          launchctl: {
+            async list(argv) {
+              const result = await runner.run(["/bin/launchctl", ...argv], 10_000);
+              return { ...result, truncated: false };
+            },
+          },
+        })
+      : {
+          async check() {
+            return {
+              result: "unknown",
+              observedLabels: [],
+              evidenceRef: "artifact://ops/controller/not-enumerated-in-non-mutating-mode",
+              detail: "non-mutating-runtime",
+            };
+          },
+        },
     leases,
     componentLocks: new FileComponentActionLocks({
       dir: resolve(parsed.stateDir, "component-locks"),
@@ -456,12 +492,14 @@ export function composeObserveOnlyOpsDaemon(
     }),
     approvals,
     evidence,
-    createExecutor: () => ({
-      async run() {
-        throw new Error("observe-only runtime has no executor");
-      },
-    }),
-    argvFor: () => [],
+    createExecutor: () => parsed.mode === "approve"
+      ? new ScriptExecutor(scripts, { now })
+      : {
+          async run() {
+            throw new Error("non-mutating runtime has no executor");
+          },
+        },
+    argvFor: (sop) => compiledActionArgv(sop.id),
     probes,
     runner,
     control,
@@ -469,6 +507,17 @@ export function composeObserveOnlyOpsDaemon(
     onError: (error) => writeBoundedOpsLog("err", error.message),
     runtimeReleaseRef: realpathSync(parsed.releaseDir),
   });
+}
+
+/** Compatibility entrypoint retained for the installed observe-only service. */
+export function composeObserveOnlyOpsDaemon(
+  config: OpsdRuntimeConfig,
+  overrides: OpsCompositionOverrides = {},
+): OpsDaemon {
+  if (config.mode !== "observe") {
+    throw new Error("observe-only composition requires mode observe");
+  }
+  return composeOpsDaemon(config, overrides);
 }
 
 function loaderConfig(config: OpsdRuntimeConfig): z.input<typeof OpsConfigSchema> {
@@ -493,10 +542,11 @@ function configuredDir(releaseDir: string, configured: string): string {
 
 function loadConfiguredDocuments(
   config: OpsdRuntimeConfig,
+  baseDir: string,
   configured: string,
   label: string,
 ): unknown[] {
-  const dir = configuredDir(config.releaseDir, configured);
+  const dir = configuredDir(baseDir, configured);
   const names = readdirSync(dir)
     .filter((name) => /\.(?:ya?ml|json)$/i.test(name))
     .sort();
@@ -519,6 +569,73 @@ function loadConfiguredDocuments(
       .filter((document) => document.contents !== null)
       .map((document) => document.toJS() as unknown);
   });
+}
+
+function activeBundleBase(config: OpsdRuntimeConfig): string {
+  return config.mode === "approve"
+    ? config.promotionBundleDir as string
+    : config.releaseDir;
+}
+
+function assertRuntimeAuthority(
+  config: OpsdRuntimeConfig,
+  loader: OpsBundleLoader,
+  scripts: ScriptRegistry,
+): void {
+  if (config.mode !== "approve") return;
+  const sops = loader.registry.sops();
+  if (sops.length === 0) throw new Error("approve promotion bundle contains no SOP");
+  const manifest = z.object({
+    entries: z.array(z.object({
+      sopId: z.string(),
+      version: z.number(),
+      digest: z.string(),
+      authority: z.string(),
+    }).passthrough()),
+  }).passthrough().parse(JSON.parse(readFileSync(config.authorityManifestPath, "utf8")));
+  const expectedEntries = sops.map(({ definition }) => ({
+    sopId: definition.id,
+    version: definition.version,
+    digest: definition.digest,
+    authority: definition.authority,
+  }));
+  if (JSON.stringify(manifest.entries) !== JSON.stringify(expectedEntries)) {
+    throw new Error("approve authority manifest does not exactly match the promotion SOP set");
+  }
+  for (const loaded of sops) {
+    if (loaded.definition.authority !== "approve" || loaded.authority !== "approve" ||
+        loaded.authorityManifestEntry === undefined) {
+      throw new Error(`approve SOP lacks an exact signed authority grant: ${loaded.definition.id}`);
+    }
+    if (!loaded.certified) {
+      throw new Error(
+        `approve SOP is not certified: ${loaded.definition.id}: ${loaded.certificationReasons.join(", ")}`,
+      );
+    }
+    const script = scripts.get(loaded.definition.action.executorId);
+    if (script === undefined || script.path !== loaded.definition.action.executable.path ||
+        script.identity.kind !== loaded.definition.action.executable.identity?.kind ||
+        script.identity.value !== loaded.definition.action.executable.identity?.value ||
+        script.argvSchema.id !== loaded.definition.action.argvSchemaId ||
+        script.timeoutMs < loaded.definition.action.timeoutMs) {
+      throw new Error(`approve SOP action does not match its registered executor: ${loaded.definition.id}`);
+    }
+    const argv = compiledActionArgv(loaded.definition.id);
+    scripts.validateArgv(script, argv);
+    const identity = scripts.verifyIdentity(script);
+    if (!identity.ok) {
+      throw new Error(
+        `approve executor identity is not certified: ${loaded.definition.id}: ${identity.reason}`,
+      );
+    }
+  }
+}
+
+function compiledActionArgv(sopId: string): string[] {
+  if (sopId === "trading-stack-container-reconcile") {
+    return ["--scope", "containers", "--pull", "false"];
+  }
+  throw new Error(`no compiled argv for SOP: ${sopId}`);
 }
 
 function configuredCheckRuntime(config: OpsdRuntimeConfig): ProductionCheckRuntime | undefined {
@@ -651,7 +768,7 @@ async function runBounded(
 
 export async function runOpsd(argv: readonly string[]): Promise<void> {
   const { configPath } = parseOpsdArgs(argv);
-  const daemon = composeObserveOnlyOpsDaemon(loadOpsdRuntimeConfig(configPath));
+  const daemon = composeOpsDaemon(loadOpsdRuntimeConfig(configPath));
   let stop!: () => void;
   const stopping = new Promise<void>((resolveStop) => {
     stop = resolveStop;

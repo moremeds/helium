@@ -400,6 +400,16 @@ export class OpsController {
         samples,
         allPassing: samples.every((sample) => sample.state === "pass"),
       };
+      if (samples.some((sample) => sample.state === "unknown")) {
+        return {
+          incidentId: candidate.incident.key,
+          sopId: candidate.sop.id,
+          disposition: "observe",
+          reason: "baseline-unavailable",
+          actionId: action.actionId,
+          controllerEvidenceRef: boundaryRef,
+        };
+      }
       if (baseline.allPassing) {
         // This is a terminal policy result, not an intent to mutate. Recording
         // an intent here would make a crash replay look as if a spawn may have

@@ -36,13 +36,18 @@ export function apply(ctx: EffectContext, raw: OpsPluginConfig): void {
 
 export {
   OpsDaemon,
+  composeOpsDaemon,
+  composeObserveOnlyOpsDaemon,
   createStandaloneOpsDaemon,
+  loadOpsdRuntimeConfig,
+  OpsdRuntimeConfigSchema,
   validateOpsdRelease,
   runOpsdReleaseCheck,
   type OpsAnalysisClient,
   type OpsDaemonControl,
   type OpsDaemonController,
   type OpsDaemonOptions,
+  type OpsdRuntimeConfig,
   type StandaloneOpsDaemonOptions,
 } from "./bin/opsd.js";
 export { OpsControlClient, OpsControlServer } from "./ipc.js";

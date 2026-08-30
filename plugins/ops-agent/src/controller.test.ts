@@ -223,6 +223,7 @@ interface HarnessOptions {
   authority?: SopAuthority;
   manifest?: boolean;
   baselinePassing?: boolean;
+  baselineState?: "pass" | "fail" | "unknown";
   controllerResults?: Array<"clear" | "competing" | "unknown">;
   rivalAppearsDuringBaseline?: boolean;
   graceMs?: number;
@@ -295,7 +296,10 @@ function harness(options: HarnessOptions) {
       const checkId = checks[0]?.id ?? check.id;
       if (phase === "baseline") {
         rivalAppeared = options.rivalAppearsDuringBaseline === true;
-        return sample(options.baselinePassing === true ? "pass" : "fail", checkId);
+        return sample(
+          options.baselineState ?? (options.baselinePassing === true ? "pass" : "fail"),
+          checkId,
+        );
       }
       return sample(
         options.postconditionStateFor?.(checks) ??
@@ -489,6 +493,28 @@ describe("OpsController modes", () => {
     );
     expect(h.store.state().actions[result.actions[0]!.actionId!]?.state).toBe(
       "not-needed",
+    );
+  });
+
+  it("refuses an approved mutation when any fresh baseline result is unknown", async () => {
+    const h = harness({
+      mode: "approve",
+      authority: "approve",
+      baselineState: "unknown",
+    });
+    await h.controller.tick();
+    h.approvals.accept(signApproval("approval-unknown-baseline-1"));
+
+    const result = await h.controller.tick();
+
+    expect(result.actions[0]).toMatchObject({
+      disposition: "observe",
+      reason: "baseline-unavailable",
+    });
+    expect(h.factoryCalls()).toBe(0);
+    expect(h.executor.runs).toBe(0);
+    expect(h.store.events.map((event) => event.type)).not.toContain(
+      "action-intent-recorded",
     );
   });
 
