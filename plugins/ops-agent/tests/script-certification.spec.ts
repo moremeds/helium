@@ -64,6 +64,17 @@ function computedSopDigest(sop: SopDefinition): string {
 }
 
 describe("initial operations script inventory", () => {
+  it("keeps fixture registrations out of the production ops bundle", () => {
+    const ids = [
+      ...documents(componentDir),
+      ...documents(checkDir),
+      ...documents(sopDir),
+    ].map((raw) => (raw as { id?: unknown }).id);
+
+    expect(ids.filter((id) => typeof id === "string" && id.startsWith("fixture")))
+      .toEqual([]);
+  });
+
   it("records every required certification field and explicit blocker", () => {
     const inventory = readFileSync(inventoryPath, "utf8");
     for (const id of [...executorIds, ...sopIds]) {
