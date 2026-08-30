@@ -40,6 +40,8 @@ export const CONTROLLED_MUTATION_ARTIFACT_KEYS = [
   "wrapper",
   "delegate",
   "opsdBinary",
+  "opsdRunner",
+  "controlledMutation",
   "opsdPlist",
   "candidateOpsdPlist",
   "legacyRuntimePlist",
@@ -71,6 +73,8 @@ export function createControlledMutationLayout(home = "/Users/moremeds", uid = 5
     ),
     delegate: join(home, "trading-stack", "scripts", "reconcile.sh"),
     opsdBinary: join(promotionRoot, "opsd.js"),
+    opsdRunner: join(promotionRoot, "run-opsd.sh"),
+    controlledMutation: join(promotionRoot, "controlled-mutation.mjs"),
     opsdPlist: join(launchdRoot, `${OPSD_LABEL}.plist`),
     candidateOpsdPlist: join(promotionRoot, `${OPSD_LABEL}.approve.plist`),
     legacyRuntimePlist: join(launchdRoot, `${LEGACY_RUNTIME_LABEL}.plist`),
@@ -140,11 +144,14 @@ async function validatePreflight(context, command) {
       envelope.payload.expiresAt !== promotion.expiresAt) {
     throw new Error("promotion package does not match the canonical promotion input");
   }
+  const releasePaths = {
+    opsdBinary: join(promotion.release.dir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
+    opsdRunner: join(promotion.release.dir, "scripts", "ops", "run-opsd.sh"),
+    controlledMutation: join(promotion.release.dir, "scripts", "ops", "controlled-mutation.mjs"),
+  };
   const expectedPaths = Object.fromEntries(CONTROLLED_MUTATION_ARTIFACT_KEYS.map((key) => [
     key,
-    key === "opsdBinary"
-      ? join(promotion.release.dir, "plugins", "ops-agent", "lib", "bin", "opsd.js")
-      : layout[key],
+    releasePaths[key] ?? layout[key],
   ]));
   const artifacts = envelope.payload.artifacts;
   if (artifacts === null || typeof artifacts !== "object" ||
@@ -213,7 +220,9 @@ async function validatePreflight(context, command) {
   await context.validateCandidate({
     executable: expectedPaths.opsdBinary,
     configPath: layout.candidateConfig,
+    activeConfigPath: layout.activeConfig,
     releaseDir: promotion.release.dir,
+    releaseCommit: promotion.release.commit,
     plistPath: layout.candidateOpsdPlist,
   });
   const relevant = await relevantLabels(context);
@@ -306,7 +315,7 @@ function ensureBackup(layout, packageState) {
   mkdirPrivate(layout.backupRoot);
   const files = {};
   for (const key of CONTROLLED_MUTATION_ARTIFACT_KEYS) {
-    const source = layout[key];
+    const source = packageState.artifacts[key].path;
     const target = join(layout.backupRoot, `${key}.bin`);
     copyFileSync(source, target, constants.COPYFILE_EXCL);
     // copyFile preserves contents; make the backup private regardless of the
@@ -539,10 +548,10 @@ function productionLaunchctlRunner() {
   };
 }
 
-function productionCandidateValidator() {
-  return async ({ executable, configPath, releaseDir, plistPath }) => {
+export function productionCandidateValidator(options = {}) {
+  const defaultRun = async (program, argv) => {
     const { execFile } = await import("node:child_process");
-    const run = (program, argv) => new Promise((resolvePromise, rejectPromise) => {
+    return new Promise((resolvePromise, rejectPromise) => {
       execFile(program, argv, {
         env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
         timeout: 30_000,
@@ -558,6 +567,16 @@ function productionCandidateValidator() {
         }
       });
     });
+  };
+  const run = options.run ?? defaultRun;
+  return async ({
+    executable,
+    configPath,
+    activeConfigPath,
+    releaseDir,
+    releaseCommit,
+    plistPath,
+  }) => {
     await run(process.execPath, [
       executable,
       "--check-config",
@@ -565,11 +584,22 @@ function productionCandidateValidator() {
       "--release",
       releaseDir,
     ]);
+    const actualCommit = await run("/usr/bin/git", ["-C", releaseDir, "rev-parse", "HEAD"]);
+    const status = await run("/usr/bin/git", ["-C", releaseDir, "status", "--porcelain"]);
+    assertCandidateRelease({ expectedCommit: releaseCommit, actualCommit, status });
     const plist = JSON.parse(await run("/usr/bin/plutil", [
       "-convert", "json", "-o", "-", plistPath,
     ]));
-    assertCandidateOpsdPlist(plist, { configPath, releaseDir });
+    assertCandidateOpsdPlist(plist, { configPath: activeConfigPath, releaseDir });
   };
+}
+
+export function assertCandidateRelease({ expectedCommit, actualCommit, status }) {
+  if (typeof expectedCommit !== "string" || expectedCommit === "" ||
+      actualCommit.trim() !== expectedCommit) {
+    throw new Error("candidate release commit mismatch");
+  }
+  if (status !== "") throw new Error("candidate release checkout is not clean");
 }
 
 export function assertCandidateOpsdPlist(plist, { configPath, releaseDir }) {
