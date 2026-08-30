@@ -20,12 +20,110 @@ import { invokeDeepSeek, type DeepSeekDshBoundary } from "./invoke.js";
 class DeepSeekExecutor implements Executor {
   readonly isolationClass = "in-process" as const;
   readonly #active = new Set<Promise<unknown>>();
+  readonly dsh: {
+    providerName: string;
+    agentOptions: Record<string, unknown>;
+    persona: string;
+  };
 
   constructor(
     readonly targetId: ExecutionTargetId,
     private readonly native: ProviderNativeVariant,
     private readonly boundary: DeepSeekDshBoundary,
-  ) {}
+    subagentProviderName: string,
+  ) {
+    this.dsh = {
+      providerName: subagentProviderName,
+      agentOptions: {
+        provider: "deepseek-official",
+        model: native.model,
+        reasoningEffort: native.effort,
+        maxTokens: 8_192,
+      },
+      persona:
+        "Complete only the assigned work order. Obey the tool allow-list and return the requested structured output without scheduling other work.",
+    };
+  }
+
+  fromSubagentResult(
+    work: WorkOrder,
+    result: {
+      output: Array<{ type: string; text?: string; [key: string]: unknown }>;
+      structured?: unknown;
+      diagnostic?: string;
+      stopReason: string;
+      failureClass?: "quota-exhausted";
+      retryAfter?: string;
+    },
+    elapsedMs: number,
+  ): AgentResult {
+    if (result.stopReason === "completed") {
+      const text = result.output
+        .filter((block) => block.type === "text" && typeof block.text === "string")
+        .map((block) => block.text)
+        .join("\n");
+      return {
+        workId: work.id,
+        outcome: "completed",
+        structured: result.structured ?? text,
+        artifacts: [],
+        usage: { ms: elapsedMs },
+        executionSnapshot: this.#snapshot(),
+        runtimeMetadata: { stopReason: result.stopReason },
+      };
+    }
+    const failureClass =
+      result.failureClass === "quota-exhausted"
+        ? "quota-exhausted"
+        : result.stopReason === "aborted"
+          ? "cancelled"
+          : "provider-error";
+    return {
+      workId: work.id,
+      outcome: "failed",
+      failure: {
+        class: failureClass,
+        ...(result.diagnostic === undefined
+          ? {}
+          : { safeDetail: result.diagnostic }),
+        ...(failureClass === "quota-exhausted" && result.retryAfter !== undefined
+          ? { retryAfter: result.retryAfter }
+          : {}),
+      },
+      artifacts: [],
+      usage: { ms: elapsedMs },
+      executionSnapshot: this.#snapshot(),
+      runtimeMetadata: { stopReason: result.stopReason },
+    };
+  }
+
+  failureResult(
+    work: WorkOrder,
+    failureClass: "tool-boundary-violation" | "provider-error" | "cancelled",
+    detail: string,
+  ): AgentResult {
+    return {
+      workId: work.id,
+      outcome: "failed",
+      failure: { class: failureClass, safeDetail: detail },
+      artifacts: [],
+      usage: { ms: 0 },
+      executionSnapshot: this.#snapshot(),
+      runtimeMetadata: {},
+    };
+  }
+
+  #snapshot(): AgentResult["executionSnapshot"] {
+    return {
+      targetId: this.targetId,
+      providerId: "deepseek-dsh",
+      model: this.native.model,
+      effort: this.native.effort,
+      providerVersion: deepseekDshCatalog.catalogVersion,
+      isolationClass: this.isolationClass,
+      recordedAt: new Date().toISOString(),
+    };
+  }
 
   async run(
     work: WorkOrder,
@@ -64,15 +162,7 @@ class DeepSeekExecutor implements Executor {
         structured: result.text,
         artifacts: [],
         usage: { ...result.usage, ms: Date.now() - started },
-        executionSnapshot: {
-          targetId: this.targetId,
-          providerId: "deepseek-dsh",
-          model: this.native.model,
-          effort: this.native.effort,
-          providerVersion: deepseekDshCatalog.catalogVersion,
-          isolationClass: this.isolationClass,
-          recordedAt: new Date().toISOString(),
-        },
+        executionSnapshot: this.#snapshot(),
         runtimeMetadata: { provider: result.runtimeSnapshot },
       };
     } catch (error) {
@@ -91,15 +181,7 @@ class DeepSeekExecutor implements Executor {
         },
         artifacts: [],
         usage: { ms: Date.now() - started },
-        executionSnapshot: {
-          targetId: this.targetId,
-          providerId: "deepseek-dsh",
-          model: this.native.model,
-          effort: this.native.effort,
-          providerVersion: deepseekDshCatalog.catalogVersion,
-          isolationClass: this.isolationClass,
-          recordedAt: new Date().toISOString(),
-        },
+        executionSnapshot: this.#snapshot(),
         runtimeMetadata: {},
       };
     }
@@ -117,6 +199,7 @@ export function registerCertifiedDeepSeekTargets(input: {
   conformanceFor(targetId: ExecutionTargetId): ConformanceRecord;
   targetProfile: ProviderTargetProfile;
   boundary: DeepSeekDshBoundary;
+  subagentProviderName: string;
 }): RegisteredProviderTargets {
   return registerCertifiedTargets({
     pluginNamespace: "@helium/provider-deepseek-dsh@0.0.0",
@@ -128,6 +211,11 @@ export function registerCertifiedDeepSeekTargets(input: {
     executorRegistry: input.executorRegistry,
     conformanceFor: input.conformanceFor,
     createExecutor: (targetId, native) =>
-      new DeepSeekExecutor(targetId, native, input.boundary),
+      new DeepSeekExecutor(
+        targetId,
+        native,
+        input.boundary,
+        input.subagentProviderName,
+      ),
   });
 }

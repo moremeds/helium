@@ -37,6 +37,7 @@ describe("registerCertifiedDeepSeekTargets", () => {
         operations: {},
         supports: { structuredOutput: true, toolIsolation: true, mutations: false },
       },
+      subagentProviderName: "deepseek-in-process",
       boundary: {
         run: async () => ({ text: "ok", usage: {}, providerMetadata: {} }),
       },
@@ -46,6 +47,49 @@ describe("registerCertifiedDeepSeekTargets", () => {
       model: "deepseek-v4-flash",
       effort: "high",
       quotaDomain: "deepseek-api-key",
+    });
+    const executor = executors.values.values().next().value as Executor & {
+      dsh: { providerName: string; agentOptions: Record<string, unknown> };
+      fromSubagentResult(
+        work: Parameters<Executor["run"]>[0],
+        result: { output: Array<{ type: string; text?: string }>; structured?: unknown; stopReason: string; diagnostic?: string },
+        elapsedMs: number,
+      ): Awaited<ReturnType<Executor["run"]>>;
+    };
+    expect(executor.dsh).toMatchObject({
+      providerName: "deepseek-in-process",
+      agentOptions: {
+        provider: "deepseek-official",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "high",
+        maxTokens: 8192,
+      },
+    });
+    const mapped = executor.fromSubagentResult(
+      {
+        id: "work-1",
+        role: "researcher",
+        taskClass: "analysis",
+        requires: [],
+        constraints: {
+          tools: [],
+          mutations: "forbidden",
+          minIsolationClass: "in-process",
+        },
+        inputs: { artifacts: [], prompt: "analyze" },
+        acceptance: { outputSchema: "claim-v1" },
+      },
+      {
+        output: [{ type: "text", text: "partial" }],
+        stopReason: "error",
+        diagnostic: "provider unavailable",
+      },
+      7,
+    );
+    expect(mapped).toMatchObject({
+      outcome: "failed",
+      failure: { class: "provider-error", safeDetail: "provider unavailable" },
+      usage: { ms: 7 },
     });
   });
 });

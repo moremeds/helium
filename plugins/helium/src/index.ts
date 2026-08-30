@@ -22,7 +22,14 @@ import { HeliumRuntime } from "./runtime.js";
 import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
-export const inject = ["agentDefaultModel", "agents", "sessions", "tools"];
+export const inject = [
+  "agentDefaultModel",
+  "agents",
+  "sessions",
+  "sessionPersistence",
+  "subagents",
+  "tools",
+];
 export { type Config } from "./config.js";
 
 /**
