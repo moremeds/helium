@@ -167,6 +167,57 @@ describe("ScriptExecutor", () => {
     expect(existsSync(marker), "descendant survived the deadline").toBe(false);
   }, 20_000);
 
+  it("escalates an abort to SIGKILL when the process group ignores TERM", async () => {
+    const marker = join(dir(), "abort-descendant-alive");
+    const rigged = rig(
+      { spawnDescendant: true, ignoreTerm: true, sleepMs: 30_000 },
+      { timeoutMs: 2_000 },
+      marker,
+    );
+    const executor = new ScriptExecutor(
+      ScriptRegistry.load([rigged.script]),
+      { killGraceMs: 100 },
+    );
+    const abort = new AbortController();
+    const started = Date.now();
+    const running = executor.run(
+      { actionId: "abort", executorId: "script-v1", argv: [] },
+      abort.signal,
+    );
+    for (let attempt = 0; attempt < 60 && !existsSync(marker); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(existsSync(marker)).toBe(true);
+    abort.abort();
+    const receipt = await running;
+    expect(receipt.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_700);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    rmSync(marker, { force: true });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(existsSync(marker), "descendant survived abort escalation").toBe(false);
+  }, 5_000);
+
+  it("does not miss an AbortSignal that was already aborted before spawn", async () => {
+    const rigged = rig(
+      { ignoreTerm: true, sleepMs: 30_000 },
+      { timeoutMs: 2_000 },
+    );
+    const executor = new ScriptExecutor(
+      ScriptRegistry.load([rigged.script]),
+      { killGraceMs: 100 },
+    );
+    const abort = new AbortController();
+    abort.abort();
+    const started = Date.now();
+    const receipt = await executor.run(
+      { actionId: "pre-aborted", executorId: "script-v1", argv: [] },
+      abort.signal,
+    );
+    expect(receipt.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(500);
+  }, 5_000);
+
   it("refuses an unknown executor", async () => {
     const { executor } = rig();
     await expect(

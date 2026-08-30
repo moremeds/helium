@@ -42,6 +42,11 @@ export type ExecutionGate = () => Promise<
   { admitted: true } | { admitted: false; reason: string }
 >;
 
+export type ExecutionOutputSink = (
+  stream: "stdout" | "stderr",
+  chunk: Buffer,
+) => void;
+
 /** A pre-spawn guard refused. No child process was created. */
 export class ExecutionSuppressedError extends Error {
   constructor(readonly reason: string) {
@@ -62,6 +67,7 @@ export class ScriptExecutor {
     request: ExecutionRequest,
     signal: AbortSignal,
     gate?: ExecutionGate,
+    outputSink?: ExecutionOutputSink,
   ): Promise<ExecutionReceipt> {
     const now = this.opts.now ?? (() => new Date());
     const script = this.registry.get(request.executorId);
@@ -108,13 +114,14 @@ export class ScriptExecutor {
       let tail = "";
       let timedOut = false;
 
-      const absorb = (chunk: Buffer) => {
+      const absorb = (stream: "stdout" | "stderr", chunk: Buffer) => {
+        outputSink?.(stream, chunk);
         digest.update(chunk);
         bytes += chunk.length;
         tail = (tail + chunk.toString()).slice(-script.maxOutputBytes);
       };
-      child.stdout.on("data", absorb);
-      child.stderr.on("data", absorb);
+      child.stdout.on("data", (chunk: Buffer) => absorb("stdout", chunk));
+      child.stderr.on("data", (chunk: Buffer) => absorb("stderr", chunk));
 
       /**
        * Signal the whole process GROUP. A repair script that spawned helpers
@@ -132,17 +139,18 @@ export class ScriptExecutor {
       };
 
       let killTimer: NodeJS.Timeout | undefined;
-      const deadline = setTimeout(() => {
+      const beginTermination = () => {
         timedOut = true;
         killTree("SIGTERM");
-        killTimer = setTimeout(() => killTree("SIGKILL"), killGraceMs);
-      }, script.timeoutMs);
-
-      const onAbort = () => {
-        timedOut = true;
-        killTree("SIGTERM");
+        if (killTimer === undefined) {
+          killTimer = setTimeout(() => killTree("SIGKILL"), killGraceMs);
+        }
       };
+      const deadline = setTimeout(beginTermination, script.timeoutMs);
+
+      const onAbort = beginTermination;
       signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
 
       const finish = () => {
         clearTimeout(deadline);

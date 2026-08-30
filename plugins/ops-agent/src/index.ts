@@ -143,6 +143,7 @@ export {
   type ExecutionGate,
   type ExecutionReceipt,
   type ExecutionRequest,
+  type ExecutionOutputSink,
 } from "./script-executor.js";
 export {
   DEFAULT_DISK_THRESHOLDS,

@@ -2,7 +2,11 @@ import { randomUUID } from "node:crypto";
 import type { AppendCoordination } from "./append-coordination.js";
 import type { ShepherdEvent } from "./events.js";
 import type { ShepherdStore } from "./store.js";
-import type { ShepherdState } from "./work-unit.js";
+import type {
+  HashedArtifactRef,
+  ShepherdState,
+  ShepherdWorkUnit,
+} from "./work-unit.js";
 
 export interface ShepherdAttemptLease {
   workUnitId: string;
@@ -21,6 +25,7 @@ export interface AttemptOutcome {
   availabilityDomain?: string;
   retryAt?: string;
   nextState?: ShepherdState;
+  evidence?: HashedArtifactRef[];
 }
 
 export interface ReconciliationResult {
@@ -81,6 +86,34 @@ export class ShepherdCoordinator {
     return result.acquired ? result.value : { acquired: false, reason: "append-lock-held" };
   }
 
+  discover(workUnit: ShepherdWorkUnit): void {
+    const coordinated = this.coordination.run(() => {
+      const existing = this.store.load().workUnits[workUnit.workUnitId];
+      if (existing !== undefined) return;
+      this.store.append({
+        version: 1,
+        eventId: this.#id("event"),
+        at: this.#now(),
+        type: "work-unit/discovered",
+        payload: { unit: workUnit },
+      });
+    });
+    if (!coordinated.acquired) throw new Error("append coordination lock held");
+  }
+
+  recordCycle(cycleId: string, considered: number, decided: number): void {
+    const coordinated = this.coordination.run(() => {
+      this.store.append({
+        version: 1,
+        eventId: this.#id("event"),
+        at: this.#now(),
+        type: "cycle/recorded",
+        payload: { cycleId, considered, decided },
+      });
+    });
+    if (!coordinated.acquired) throw new Error("append coordination lock held");
+  }
+
   recordIntent(
     lease: ShepherdAttemptLease,
     operation: "probe" | "analysis" | "stage" | "publish" | "verify" | "rollback",
@@ -119,6 +152,7 @@ export class ShepherdCoordinator {
           ...(outcome.availabilityDomain === undefined ? {} : { availabilityDomain: outcome.availabilityDomain }),
           ...(outcome.retryAt === undefined ? {} : { retryAt: outcome.retryAt }),
           ...(outcome.nextState === undefined ? {} : { nextState: outcome.nextState }),
+          ...(outcome.evidence === undefined ? {} : { evidence: outcome.evidence }),
         },
       });
       if (outcome.outcome !== "quota-exhausted" && outcome.outcome !== "temporary-unavailable") return;
