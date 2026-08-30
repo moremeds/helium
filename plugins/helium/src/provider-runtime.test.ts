@@ -2,13 +2,20 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { WorkOrderSchema } from "@helium/core";
+import {
+  JsonlWriter,
+  RunLedger,
+  StateStore,
+  WorkOrderSchema,
+} from "@helium/core";
 import type { JobSpec } from "@helium/v1-compat";
+import { Dispatcher } from "./dispatch.js";
 import { productionProviderCertifications } from "./provider-certifications.js";
 import {
   ProviderRuntime,
   type ProviderRuntimeOptions,
 } from "./provider-runtime.js";
+import { ev } from "./testing/fixtures.js";
 
 const work = WorkOrderSchema.parse({
   id: "production-plane-work",
@@ -202,20 +209,41 @@ describe("production ProviderRuntime", () => {
     await plane.dispose();
   });
 
-  it("does not release a timed-out senior slot until the DeepSeek child is interrupted and disposed", async () => {
+  it("does not release the Dispatcher senior slot until a timed-out DeepSeek child is disposed", async () => {
     const interrupted = vi.fn();
-    const disposed = vi.fn(async () => {});
+    const order: string[] = [];
+    let starts = 0;
+    const disposed = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 70));
+      order.push("first-disposed");
+    });
     const plane = runtime({
       availabilityRefreshers: {
         codex: async () => ({ state: "unavailable" }),
         deepseek: async () => ({ state: "available" }),
       },
       subagents: {
-        start: vi.fn(async () => ({
-          id: "hung-deepseek-child",
-          result: new Promise<never>(() => {}),
-          dispose: disposed,
-        })),
+        start: vi.fn(async () => {
+          starts += 1;
+          if (starts === 1) {
+            return {
+              id: "hung-deepseek-child",
+              result: new Promise<never>(() => {}),
+              dispose: disposed,
+            };
+          }
+          order.push("second-started");
+          return {
+            id: "second-deepseek-child",
+            result: Promise.resolve({
+              output: [{ type: "text", text: "done" }],
+              structured: { analysis: "done" },
+              stopReason: "completed",
+              effectiveReasoningEffort: "high",
+            }),
+            dispose: async () => {},
+          };
+        }),
         drainDescendants: vi.fn(async () => {}),
         followup: vi.fn(async () => "unused"),
         interrupt: interrupted,
@@ -231,16 +259,54 @@ describe("production ProviderRuntime", () => {
       },
     });
     await plane.refreshProviderAvailability("codex");
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-provider-timeout-"));
+    const outcomes: Array<{ job: string; tier: string; outcome: string }> = [];
+    const dispatcher = new Dispatcher({
+      store: new StateStore(stateRoot),
+      ledger: new RunLedger(new JsonlWriter(join(stateRoot, "jsonl"))),
+      contextText: "timeout integration",
+      triage: {
+        dispatch: async () => ({
+          outcome: "run_completed",
+          verdict: {
+            escalate: true,
+            severity: "material",
+            reason: "exercise senior capacity",
+          },
+        }),
+      },
+      senior: plane.seniorLane((_job, dir) => join(dir, "mcp.json")),
+      onResult: (job, _event, result) => {
+        outcomes.push({ job: job.name, tier: result.tier, outcome: result.outcome });
+      },
+      onSuppressed: () => {},
+      maxConcurrentSenior: 1,
+    });
+    const firstJob = { ...timeoutJob, name: "provider-timeout-first" };
+    const secondJob = { ...timeoutJob, name: "provider-timeout-second" };
+    dispatcher.enqueue(firstJob, {
+      ...ev,
+      job: firstJob.name,
+      dedupKey: firstJob.name,
+    });
+    dispatcher.enqueue(secondJob, {
+      ...ev,
+      job: secondJob.name,
+      dedupKey: secondJob.name,
+    });
+    await dispatcher.drain();
 
-    const out = await plane
-      .seniorLane((_job, dir) => join(dir, "mcp.json"))
-      .dispatch(timeoutJob, {} as never, "hang until cancelled");
-
-    expect(out).toMatchObject({ outcome: "timed_out" });
+    expect(outcomes).toEqual(
+      expect.arrayContaining([
+        { job: firstJob.name, tier: "senior", outcome: "timed_out" },
+        { job: secondJob.name, tier: "senior", outcome: "run_completed" },
+      ]),
+    );
     expect(interrupted).toHaveBeenCalledWith("hung-deepseek-child", {
       id: "timeout-parent",
     });
     expect(disposed).toHaveBeenCalledOnce();
+    expect(order).toEqual(["first-disposed", "second-started"]);
     await plane.dispose();
   });
 });

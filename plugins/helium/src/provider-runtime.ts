@@ -354,10 +354,15 @@ export class ProviderRuntime {
 
   seniorLane(mcpConfigFor: (job: JobSpec, dir: string) => string): SeniorLane {
     return {
-      dispatch: async (job, _event, prompt) => {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), job.timeoutMs);
-        timeout.unref();
+      dispatch: async (job, _event, prompt, deadlineSignal) => {
+        const ownedController =
+          deadlineSignal === undefined ? new AbortController() : undefined;
+        const signal = deadlineSignal ?? ownedController!.signal;
+        const timeout =
+          ownedController === undefined
+            ? undefined
+            : setTimeout(() => ownedController.abort(), job.timeoutMs);
+        timeout?.unref();
         const configDir = join(
           this.#cfg.workspacesDir,
           "routing-config",
@@ -383,10 +388,10 @@ export class ProviderRuntime {
             work,
             job,
             mcpConfigFor(job, configDir),
-            controller.signal,
+            signal,
           );
         } finally {
-          clearTimeout(timeout);
+          if (timeout !== undefined) clearTimeout(timeout);
           rmSync(configDir, { recursive: true, force: true });
         }
       },

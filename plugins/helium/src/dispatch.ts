@@ -360,10 +360,15 @@ async function withTimeout<T>(
 }
 
 export interface SeniorLane {
+  /**
+   * The dispatcher owns the deadline. Implementations must abort their work,
+   * await child quiescence, and only then resolve after `signal` is aborted.
+   */
   dispatch(
     job: JobSpec,
     ev: TriggerEvent,
     prompt: string,
+    signal?: AbortSignal,
   ): Promise<{ outcome: RunOutcome; analysis?: string; error?: string }>;
 }
 
@@ -592,15 +597,26 @@ export class Dispatcher {
           verdict,
           thesis,
         );
-        const senior = await withTimeout(
-          this.opts.senior.dispatch(job, ev, seniorPrompt),
-          job.timeoutMs,
-          () => ({
-            outcome: "timed_out" as const,
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), job.timeoutMs);
+        timer.unref();
+        let senior: Awaited<ReturnType<SeniorLane["dispatch"]>>;
+        try {
+          senior = await this.opts.senior.dispatch(
+            job,
+            ev,
+            seniorPrompt,
+            controller.signal,
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+        if (controller.signal.aborted) {
+          senior = {
+            outcome: "timed_out",
             error: "senior exceeded job timeout",
-          }),
-          `helium.dispatch(${job.name})/senior`,
-        );
+          };
+        }
         this.opts.ledger.finish(seniorId, job.name, "senior", senior.outcome, {
           error: senior.error,
         });
