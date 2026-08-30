@@ -263,7 +263,7 @@ async function handoff(context, packageState) {
         labels.includes(LEGACY_AFTER_DATALAKE_LABEL)) {
       throw new Error("approve handoff did not establish one controller");
     }
-    verifyFreshZeroActionCycle(context.layout, startedAt, context.now());
+    await waitForFreshZeroActionCycle(context.layout, startedAt, context.now);
   });
   return { state: "approve-ready", promotionId: PROMOTION_ID };
 }
@@ -426,7 +426,23 @@ function domain(layout) {
   return `gui/${layout.uid}`;
 }
 
-function verifyFreshZeroActionCycle(layout, startedAt, now) {
+export async function waitForFreshZeroActionCycle(layout, startedAt, now, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 30_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 250;
+  const monotonicNow = options.monotonicNow ?? Date.now;
+  const sleep = options.sleep ?? ((delayMs) =>
+    new Promise((resolvePromise) => setTimeout(resolvePromise, delayMs)));
+  const deadline = monotonicNow() + timeoutMs;
+  while (true) {
+    if (hasFreshZeroActionCycle(layout, startedAt, now())) return;
+    if (monotonicNow() >= deadline) {
+      throw new Error(`approve opsd produced no fresh zero-action cycle within ${timeoutMs}ms`);
+    }
+    await sleep(pollIntervalMs);
+  }
+}
+
+function hasFreshZeroActionCycle(layout, startedAt, now) {
   const lower = startedAt.getTime();
   const upper = now.getTime();
   let cycle = false;
@@ -443,7 +459,7 @@ function verifyFreshZeroActionCycle(layout, startedAt, now) {
       cycle = true;
     }
   }
-  if (!cycle) throw new Error("approve opsd produced no fresh zero-action cycle");
+  return cycle;
 }
 
 function atomicReplace(source, target, mode) {

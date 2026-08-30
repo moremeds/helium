@@ -19,6 +19,7 @@ import {
   createControlledMutationLayout,
   productionCandidateValidator,
   runControlledMutation,
+  waitForFreshZeroActionCycle,
 } from "./controlled-mutation.mjs";
 
 const NOW = new Date("2026-08-30T04:00:00.000Z");
@@ -380,6 +381,53 @@ test("handoff releases both legacy labels before switching and proves a zero-act
     calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
   assert.ok(calls.findIndex((line) => line.includes("bootout") && line.includes("after-datalake")) <
     calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
+});
+
+test("approve-cycle proof waits for the fresh zero-action condition", async () => {
+  const f = fixture();
+  writeFileSync(f.layout.eventsPath, "");
+  let polls = 0;
+  await waitForFreshZeroActionCycle(f.layout, NOW, () => NOW, {
+    timeoutMs: 100,
+    pollIntervalMs: 1,
+    monotonicNow: () => polls,
+    sleep: async () => {
+      polls += 1;
+      if (polls === 3) {
+        writeFileSync(f.layout.eventsPath, `${JSON.stringify({ record: {
+          at: NOW.toISOString(),
+          type: "controller-cycle-recorded",
+          controllerId: "com.helium.opsd",
+          releaseRef: f.promotion.release.dir,
+          observationCount: 1,
+          collectionFailureCount: 0,
+        } })}\n`, { flag: "a" });
+      }
+    },
+  });
+  assert.equal(polls, 3);
+});
+
+test("approve-cycle proof remains bounded and refuses any action", async () => {
+  const timeout = fixture();
+  writeFileSync(timeout.layout.eventsPath, "");
+  let clock = 0;
+  await assert.rejects(waitForFreshZeroActionCycle(timeout.layout, NOW, () => NOW, {
+    timeoutMs: 3,
+    pollIntervalMs: 1,
+    monotonicNow: () => clock,
+    sleep: async () => { clock += 1; },
+  }), /within 3ms/);
+
+  const action = fixture();
+  writeFileSync(action.layout.eventsPath, `${JSON.stringify({ record: {
+    at: NOW.toISOString(),
+    type: "action-intent-recorded",
+  } })}\n`);
+  await assert.rejects(
+    waitForFreshZeroActionCycle(action.layout, NOW, () => NOW),
+    /was not zero-action/,
+  );
 });
 
 test("handoff backs up the signed release paths instead of layout placeholders", async () => {
