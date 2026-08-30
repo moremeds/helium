@@ -202,6 +202,10 @@ function options(f, overrides = {}) {
 test("exposes only preflight, handoff, and rollback", async () => {
   const f = fixture();
   await assert.rejects(runControlledMutation("execute", options(f)), /unknown subcommand/);
+  assert.match(
+    createControlledMutationLayout().expectedPromotionKeySha256,
+    /^[0-9a-f]{64}$/,
+  );
 });
 
 test("preflight is read-only and rejects identity or path ambiguity", async () => {

@@ -26,10 +26,11 @@ const LEGACY_HASHES = {
   [LEGACY_RUNTIME_LABEL]: "ee3116091b5a1713597e6c76ca6e4276a16356cf47dad1443ecf30ce25268907",
   [LEGACY_AFTER_DATALAKE_LABEL]: "53e7a6a37c8f6c1ecb64bc58f683b2afb93e87bd16e548baefe8c97dc4d80b90",
 };
-// Task 7 replaces this sentinel with the commissioned Ed25519 public-key
-// fingerprint. Production preflight refuses until that independent trust root
-// exists; a package cannot establish trust by signing itself with a bundled key.
-const TRUSTED_PROMOTION_PUBLIC_KEY_SHA256 = "UNCOMMISSIONED";
+// Fingerprint of the Ed25519 public key commissioned on the registered
+// operator workstation. The private key remains off-mini and outside Git; a
+// package cannot establish trust by signing itself with a bundled key.
+const TRUSTED_PROMOTION_PUBLIC_KEY_SHA256 =
+  "acb7e8c3bfa7c485b98ce216e35be7ee0a333b66803ed203997b1fb07c84ec43";
 export const CONTROLLED_MUTATION_ARTIFACT_KEYS = [
   "activeConfig",
   "candidateConfig",
