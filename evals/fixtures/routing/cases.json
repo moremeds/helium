@@ -1,0 +1,6 @@
+[
+  {"id":"eligible-preferred","requires":["analysis.general"],"availability":"available","expected":"preferred"},
+  {"id":"quota-fallback","requires":["analysis.general"],"availability":"quota-exhausted","expected":"fallback"},
+  {"id":"capability-shortage","requires":["unavailable.capability"],"availability":"available","expected":"capability-shortage"},
+  {"id":"exact-target-refusal","requires":["analysis.general"],"availability":"quota-exhausted","exactTarget":true,"expected":"unavailable"}
+]

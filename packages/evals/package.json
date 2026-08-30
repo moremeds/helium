@@ -1,0 +1,27 @@
+{
+  "name": "@helium/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/run.js",
+  "exports": {
+    ".": "./lib/run.js",
+    "./score": "./lib/score.js",
+    "./autonomy": "./lib/autonomy.js",
+    "./paired-gate": "./lib/paired-gate.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "evaluate": "node lib/run.js",
+    "fixture-hash": "node lib/run.js --fixture-hash"
+  },
+  "dependencies": {
+    "@helium/core": "file:../core",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

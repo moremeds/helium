@@ -201,6 +201,22 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/evals:
+    dependencies:
+      '@helium/core':
+        specifier: file:../core
+        version: link:../core
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   packages/fake-flat-rate:
     dependencies:
       '@helium/core':
