@@ -8,7 +8,9 @@ import {
   type Claim,
   type ClaimDecision,
   type ExecutionLease,
+  type ResourcePressure,
   type WorkOrder,
+  admission,
 } from "@helium/core";
 import { describe, expect, it, vi } from "vitest";
 import { parseTeamYaml } from "@helium/core";
@@ -170,6 +172,102 @@ const input = {
 };
 
 describe("TeamController", () => {
+  it("durably refuses optional team start and fan-out under sustained host pressure", async () => {
+    const stateRoot = root();
+    const execution = executionPort();
+    let pressure: ResourcePressure = {
+      memoryState: "degraded",
+      observedForMs: 300_000,
+    };
+    const controller = new TeamController({
+      stateRoot,
+      manifest,
+      routing: routePort(),
+      execution,
+      admission: {
+        decide: admission.decide,
+        pressure: () => pressure,
+        policy: { sustainedMemoryPressureMs: 300_000, sustainedRecoveryMs: 300_000 },
+      },
+    });
+    await expect(controller.run(input)).rejects.toMatchObject({
+      reason: "host-memory-pressure",
+    });
+    expect(execution.run).not.toHaveBeenCalled();
+    expect(controller.store(input.caseId).events()).toEqual([
+      expect.objectContaining({
+        type: "team/admission-refused",
+        payload: expect.objectContaining({ workClass: "optional-team", reason: "host-memory-pressure" }),
+      }),
+    ]);
+
+    pressure = {
+      memoryState: "ok",
+      observedForMs: 1,
+      recoveringFromPressure: true,
+      recoveredForMs: 1,
+    };
+    await expect(controller.run(input)).rejects.toMatchObject({
+      reason: "host-memory-pressure-recovery",
+    });
+    pressure = {
+      memoryState: "ok",
+      observedForMs: 300_000,
+      recoveringFromPressure: true,
+      recoveredForMs: 300_000,
+    };
+    const admitted = await controller.run({ ...input, maxTasks: 1 });
+    expect(admitted.state).toBe("running");
+    expect(execution.run).toHaveBeenCalledOnce();
+  });
+
+  it("stops additional fan-out when pressure arrives after a team has started", async () => {
+    const execution = executionPort();
+    let pressure: ResourcePressure = {
+      memoryState: "ok",
+      observedForMs: 300_000,
+    };
+    const controller = new TeamController({
+      stateRoot: root(),
+      manifest,
+      routing: routePort(),
+      execution,
+      admission: {
+        decide: admission.decide,
+        pressure: () => pressure,
+        policy: { sustainedMemoryPressureMs: 300_000, sustainedRecoveryMs: 300_000 },
+      },
+    });
+
+    await controller.run({ ...input, maxTasks: 1 });
+    expect(execution.run).toHaveBeenCalledOnce();
+
+    pressure = { memoryState: "failed", observedForMs: 300_000 };
+    const inhibited = await controller.run(input);
+    expect(inhibited.state).toBe("running");
+    expect(execution.run).toHaveBeenCalledOnce();
+    expect(controller.store(input.caseId).events()).toContainEqual(
+      expect.objectContaining({
+        type: "team/admission-refused",
+        payload: expect.objectContaining({
+          workClass: "subagent-fanout",
+          reason: "host-memory-pressure",
+          taskId: "research-b",
+        }),
+      }),
+    );
+
+    pressure = {
+      memoryState: "ok",
+      observedForMs: 300_000,
+      recoveringFromPressure: true,
+      recoveredForMs: 300_000,
+    };
+    const recovered = await controller.run(input);
+    expect(recovered.state).toBe("completed");
+    expect(execution.run).toHaveBeenCalledTimes(5);
+  });
+
   it("runs the durable DAG and lets renderer read only an accepted ledger", async () => {
     const execution = executionPort();
     const controller = new TeamController({

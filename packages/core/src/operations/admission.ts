@@ -27,15 +27,21 @@ export interface WorkAdmissionRequest {
 export interface ResourcePressure {
   memoryState: ObservationState;
   observedForMs: number;
+  recoveringFromPressure?: boolean;
+  recoveredForMs?: number;
 }
 
 export interface AdmissionPolicy {
   sustainedMemoryPressureMs: number;
+  sustainedRecoveryMs: number;
 }
 
 export type AdmissionDecision =
   | { admitted: true }
-  | { admitted: false; reason: "host-memory-pressure" };
+  | {
+      admitted: false;
+      reason: "host-memory-pressure" | "host-memory-pressure-recovery";
+    };
 
 const OPTIONAL_CLASSES = new Set<WorkAdmissionClass>([
   "optional-team",
@@ -52,6 +58,13 @@ function decide(
     pressure.observedForMs >= policy.sustainedMemoryPressureMs;
   if (sustained && OPTIONAL_CLASSES.has(work.workClass)) {
     return { admitted: false, reason: "host-memory-pressure" };
+  }
+  if (
+    OPTIONAL_CLASSES.has(work.workClass)
+    && pressure.recoveringFromPressure === true
+    && (pressure.recoveredForMs ?? 0) < policy.sustainedRecoveryMs
+  ) {
+    return { admitted: false, reason: "host-memory-pressure-recovery" };
   }
   return { admitted: true };
 }

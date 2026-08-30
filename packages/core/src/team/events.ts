@@ -50,6 +50,22 @@ export const CaseClosedEventSchema = z.strictObject({
   payload: z.strictObject({ reason: z.string().min(1).max(1_000).optional() }),
 });
 
+export const TeamAdmissionRefusedEventSchema = z.strictObject({
+  ...caseBase,
+  type: z.literal("team/admission-refused"),
+  payload: z.strictObject({
+    workId: TeamIdSchema,
+    workClass: z.enum(["optional-team", "subagent-fanout"]),
+    reason: z.enum(["host-memory-pressure", "host-memory-pressure-recovery"]),
+    memoryState: z.enum(["ok", "degraded", "failed", "unknown"]),
+    observedForMs: z.number().int().nonnegative(),
+    recoveringFromPressure: z.boolean().optional(),
+    recoveredForMs: z.number().int().nonnegative().optional(),
+    teamRunId: TeamIdSchema.optional(),
+    taskId: TeamIdSchema.optional(),
+  }),
+});
+
 export const TeamStartedEventSchema = z.strictObject({
   ...teamBase,
   type: z.literal("team/started"),
@@ -305,6 +321,7 @@ export const DeliveryOutcomeRecordedEventSchema = z.strictObject({
 export const TeamEventSchema = z.discriminatedUnion("type", [
   CaseOpenedEventSchema,
   CaseClosedEventSchema,
+  TeamAdmissionRefusedEventSchema,
   TeamStartedEventSchema,
   AgentRosteredEventSchema,
   TeamCompletedEventSchema,

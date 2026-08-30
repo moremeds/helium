@@ -6,7 +6,10 @@ import {
   type WorkAdmissionRequest,
 } from "../src/operations/admission.js";
 
-const policy: AdmissionPolicy = { sustainedMemoryPressureMs: 300_000 };
+const policy: AdmissionPolicy = {
+  sustainedMemoryPressureMs: 300_000,
+  sustainedRecoveryMs: 300_000,
+};
 const pressure = (over: Partial<ResourcePressure> = {}): ResourcePressure => ({
   memoryState: "degraded",
   observedForMs: 300_000,
@@ -53,6 +56,31 @@ describe("operations admission decision", () => {
   it("does not treat an unknown pressure reading as proof of memory pressure", () => {
     expect(
       admission.decide(work("optional-team"), pressure({ memoryState: "unknown" }), policy),
+    ).toEqual({ admitted: true });
+  });
+
+  it("restores optional concurrency only after a sustained recovery window", () => {
+    expect(
+      admission.decide(
+        work("optional-team"),
+        pressure({
+          memoryState: "ok",
+          recoveringFromPressure: true,
+          recoveredForMs: 1,
+        }),
+        policy,
+      ),
+    ).toEqual({ admitted: false, reason: "host-memory-pressure-recovery" });
+    expect(
+      admission.decide(
+        work("optional-team"),
+        pressure({
+          memoryState: "ok",
+          recoveringFromPressure: true,
+          recoveredForMs: policy.sustainedRecoveryMs,
+        }),
+        policy,
+      ),
     ).toEqual({ admitted: true });
   });
 });

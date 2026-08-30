@@ -191,6 +191,11 @@ export function reduceTeam(
     seen.add(event.eventId);
 
     switch (event.type) {
+      case "team/admission-refused":
+        // Audit-only case event. It deliberately does not create a team run:
+        // admission was refused before optional work could start.
+        break;
+
       case "case/opened":
         if (state.cases[event.caseId] !== undefined) throw new Error(`case already opened: ${event.caseId}`);
         state.cases[event.caseId] = {
