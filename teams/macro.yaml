@@ -9,6 +9,7 @@ roles:
       externalResearch: true
       mutations: forbidden
       artifactRead: [source-artifacts]
+      tools: [argon_api]
   policy-researcher:
     responsibility: evidence
     requires: [macro-source-research, policy-analysis]
@@ -16,6 +17,7 @@ roles:
       externalResearch: true
       mutations: forbidden
       artifactRead: [source-artifacts]
+      tools: [argon_api]
   rates-analyst:
     responsibility: analysis
     requires: [rates-path-analysis]
@@ -23,6 +25,7 @@ roles:
       externalResearch: false
       mutations: forbidden
       artifactRead: [dependency-artifacts]
+      tools: []
   usd-analyst:
     responsibility: analysis
     requires: [usd-transmission-analysis]
@@ -30,6 +33,7 @@ roles:
       externalResearch: false
       mutations: forbidden
       artifactRead: [dependency-artifacts]
+      tools: []
   gold-analyst:
     responsibility: analysis
     requires: [gold-impact-analysis]
@@ -37,6 +41,7 @@ roles:
       externalResearch: false
       mutations: forbidden
       artifactRead: [dependency-artifacts]
+      tools: []
   verifier:
     responsibility: verification
     requires: [claim-verification, fresh-evidence, independent-source]
@@ -44,6 +49,7 @@ roles:
       externalResearch: true
       mutations: forbidden
       artifactRead: [source-artifacts, dependency-artifacts]
+      tools: [argon_api]
   lead:
     responsibility: synthesis
     requires: [macro-causal-synthesis]
@@ -51,6 +57,7 @@ roles:
       externalResearch: false
       mutations: forbidden
       artifactRead: [accepted-claim-ledger]
+      tools: []
   renderer:
     responsibility: rendering
     requires: [render-adjudicated-claims]
@@ -58,6 +65,7 @@ roles:
       externalResearch: false
       mutations: forbidden
       artifactRead: [accepted-claim-ledger]
+      tools: []
 
 tasks:
   - id: inflation-evidence

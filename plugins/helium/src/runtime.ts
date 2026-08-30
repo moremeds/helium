@@ -38,7 +38,6 @@ import {
 } from "@helium/v1-compat";
 import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
 import type { Config } from "./config.js";
-import type { ShadowAdapter } from "./shadow.js";
 import { CronTrigger } from "./cron.js";
 import {
   Dispatcher,
@@ -53,6 +52,8 @@ import {
   scheduleLoop,
   type TriggerEvent,
 } from "./sensor.js";
+import { processCanaryInbox } from "./canary-inbox.js";
+import type { ControlledCanaryRequest } from "./promotion.js";
 
 export type { Config as RuntimeConfig } from "./config.js";
 
@@ -91,7 +92,10 @@ export interface RuntimeDeps {
   config: Config;
   engines: EnginePorts;
   delivery: DeliveryPorts;
-  shadow?: ShadowAdapter;
+  shadow?: {
+    handle(job: JobSpec, event: TriggerEvent, continueV1: () => void): Promise<void>;
+    handleCanary?(job: JobSpec, request: ControlledCanaryRequest): Promise<void>;
+  };
   /** Overridable for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Overridable for tests; defaults to `() => new Date()`. */
@@ -240,6 +244,24 @@ export class HeliumRuntime {
       tenants: inventory.length,
     });
     for (const job of this.jobs) this.startJob(job);
+    if (this.deps.shadow?.handleCanary !== undefined) {
+      const byName = new Map(this.jobs.map((job) => [job.name, job]));
+      const directory = join(this.deps.config.stateRoot, "team-canary", "requests");
+      const poll = async (): Promise<void> => {
+        const results = await processCanaryInbox({
+          directory,
+          knownJobs: new Set(byName.keys()),
+          ...(this.deps.now === undefined ? {} : { now: this.deps.now }),
+          handle: async (request) => {
+            const job = byName.get(request.job);
+            if (job === undefined) throw new Error(`unknown canary job: ${request.job}`);
+            await this.deps.shadow!.handleCanary!(job, request);
+          },
+        });
+        for (const result of results) this.log("controlled canary processed", { ...result });
+      };
+      this.disposers.push(scheduleLoop(() => 5_000, poll));
+    }
   }
 
   stop(): void {

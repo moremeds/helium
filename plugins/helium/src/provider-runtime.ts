@@ -58,8 +58,12 @@ import {
 } from "./provider-certifications.js";
 import { RoutingService } from "./routing-service.js";
 import type { SeniorLane } from "./dispatch.js";
+import {
+  ProviderCircuitBreaker,
+  type CircuitProvider,
+} from "./provider-circuit-breaker.js";
 
-type ProviderId = "codex" | "deepseek" | "claude";
+type ProviderId = CircuitProvider;
 type AvailabilityRefresher = () => Promise<Availability>;
 
 function conformance(
@@ -80,7 +84,24 @@ function conformance(
 
 function targetProfile() {
   return {
-    capabilities: ["analysis.general"],
+    capabilities: [
+      "analysis.general",
+      "macro-source-research",
+      "inflation-analysis",
+      "policy-analysis",
+      "rates-path-analysis",
+      "usd-transmission-analysis",
+      "gold-impact-analysis",
+      "claim-verification",
+      "fresh-evidence",
+      "independent-source",
+      "macro-causal-synthesis",
+      "render-adjudicated-claims",
+      "ops-diagnosis",
+      "ops-independent-verification",
+      "ops-incident-lead",
+      "ops-incident-reporting",
+    ],
     operations: {},
     supports: {
       structuredOutput: true,
@@ -130,6 +151,7 @@ export interface ProviderRuntimeOptions {
   certifications?: ProviderCertifications;
   availabilityRefreshers?: Partial<Record<ProviderId, AvailabilityRefresher>>;
   availabilityRefreshDelayMs?: number;
+  circuitFailureThreshold?: number;
   subagents?: TeamSubagentRuntime;
   parents?: TeamParentFactory;
 }
@@ -160,6 +182,8 @@ export class ProviderRuntime {
   readonly #refreshers = new Map<ProviderId, AvailabilityRefresher>();
   readonly #refreshTimers = new Map<ProviderId, NodeJS.Timeout>();
   readonly #refreshDelayMs: number;
+  readonly #circuits: ProviderCircuitBreaker;
+  readonly #observedResults = new Set<string>();
 
   constructor(
     ctx: Pick<Context, "agents" | "sessions" | "sessionPersistence" | "subagents">,
@@ -244,6 +268,23 @@ export class ProviderRuntime {
       );
     }
 
+    const circuitAudit = new DurableNdjsonAudit(
+      join(cfg.stateRoot, "audit", "provider-circuits.ndjson"),
+    );
+    this.#circuits = new ProviderCircuitBreaker({
+      statePath: join(cfg.stateRoot, "providers", "circuits.json"),
+      failureThreshold: options.circuitFailureThreshold ?? 3,
+      onOpen: (provider) => {
+        this.availability.publish(this.#domain(provider), { state: "unavailable" });
+        this.#scheduleRefresh(provider);
+      },
+      onChange: (circuits) => circuitAudit.append({
+        at: new Date().toISOString(),
+        type: "provider-circuits-changed",
+        circuits,
+      }),
+    });
+
     const ordered = [
       optionalTarget(this.registered.codex, "gpt-5.6-sol", "high"),
       optionalTarget(this.registered.deepseek, "deepseek-v4-flash", "high"),
@@ -253,13 +294,25 @@ export class ProviderRuntime {
       throw new Error("production provider policy has no certified target");
     }
     const policy: SelectionPolicy = {
-      policyVersion: "phase-2-production-v1",
-      roles: {
-        "v1-senior": {
-          preferred: ordered[0]!,
-          fallback: ordered.slice(1),
-        },
-      },
+      policyVersion: "phase-4-production-v1",
+      roles: Object.fromEntries([
+        "v1-senior",
+        "inflation-researcher",
+        "policy-researcher",
+        "rates-analyst",
+        "usd-analyst",
+        "gold-analyst",
+        "verifier",
+        "lead",
+        "renderer",
+        "diagnostician",
+        "independent-verifier",
+        "incident-lead",
+        "reporter",
+      ].map((role) => [
+        role,
+        { preferred: ordered[0]!, fallback: ordered.slice(1) },
+      ])),
     };
     const audit = new DurableNdjsonAudit(
       join(cfg.stateRoot, "audit", "routing.ndjson"),
@@ -327,14 +380,19 @@ export class ProviderRuntime {
 
   async start(): Promise<void> {
     await this.registry.reconcileOrphanProcesses(this.#cfg.workspacesDir);
-    const exhausted = new Set(
+    for (const circuit of this.#circuits.snapshot()) {
+      if (circuit.state === "open") {
+        this.availability.publish(this.#domain(circuit.provider), { state: "unavailable" });
+      }
+    }
+    const unavailable = new Set(
       this.availability
         .snapshot()
-        .domains.filter((entry) => entry.availability.state === "quota-exhausted")
+        .domains.filter((entry) => entry.availability.state !== "available")
         .map((entry) => entry.quotaDomain),
     );
     for (const provider of this.#refreshers.keys()) {
-      if (exhausted.has(this.#domain(provider))) {
+      if (unavailable.has(this.#domain(provider))) {
         await this.refreshProviderAvailability(provider);
       }
     }
@@ -347,9 +405,40 @@ export class ProviderRuntime {
       throw new Error(`provider has no availability refresher: ${provider}`);
     }
     const availability = await refresher();
+    if (availability.state === "available") this.#circuits.reset(provider);
     const published = this.availability.publish(this.#domain(provider), availability);
-    if (availability.state === "quota-exhausted") this.#scheduleRefresh(provider);
+    if (availability.state !== "available") this.#scheduleRefresh(provider);
     return published;
+  }
+
+  healthSnapshot() {
+    return {
+      ...this.availability.snapshot(),
+      circuits: this.#circuits.snapshot(),
+    };
+  }
+
+  async runTeam(
+    teamRunId: string,
+    work: WorkOrder,
+    lease: import("@helium/core").ExecutionLease,
+    signal: AbortSignal,
+    mcpConfigFor: (work: WorkOrder, dir: string) => string,
+  ): Promise<AgentResult> {
+    const configDir = join(
+      this.#cfg.workspacesDir,
+      "team-routing-config",
+      randomUUID(),
+    );
+    mkdirSync(configDir, { recursive: true, mode: 0o700 });
+    try {
+      return await this.host.run(teamRunId, work, lease, signal, {
+        env: this.#childEnv(),
+        mcpConfigPath: mcpConfigFor(work, configDir),
+      });
+    } finally {
+      rmSync(configDir, { recursive: true, force: true });
+    }
   }
 
   seniorLane(mcpConfigFor: (job: JobSpec, dir: string) => string): SeniorLane {
@@ -440,9 +529,22 @@ export class ProviderRuntime {
   }
 
   #observeResult(result: AgentResult): void {
+    const observationKey = [
+      result.workId,
+      result.executionSnapshot.targetId,
+      result.executionSnapshot.recordedAt,
+      result.outcome,
+    ].join(":");
+    if (this.#observedResults.has(observationKey)) return;
+    this.#observedResults.add(observationKey);
+    if (this.#observedResults.size > 1_000) {
+      const oldest = this.#observedResults.values().next().value;
+      if (oldest !== undefined) this.#observedResults.delete(oldest);
+    }
     this.availability.observe(result);
-    if (result.failure?.class !== "quota-exhausted") return;
     const provider = this.#providerFor(result.executionSnapshot.targetId);
+    if (provider !== undefined) this.#circuits.observe(provider, result);
+    if (result.failure?.class !== "quota-exhausted") return;
     if (provider !== undefined) this.#scheduleRefresh(provider);
   }
 

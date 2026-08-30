@@ -159,6 +159,23 @@ node --test "$repo/scripts/release/opsd-cycle-after.test.mjs"
 grep -q 'ops/executors' "$repo/scripts/release/deploy.sh"
 grep -q 'ops/executors' "$repo/scripts/release/rollback.sh"
 grep -q 'restored opsd produced no target-release observation cycle' "$repo/scripts/release/deploy.sh"
+grep -Fq 'scripts/release/codex-preflight.mjs' "$repo/scripts/release/deploy.sh"
+if grep -Fq 'HELIUM_LIVE=1' "$repo/scripts/release/deploy.sh"; then
+  echo "FAIL: deploy still uses the DeepSeek live contract smoke"
+  exit 1
+fi
+node --check "$repo/scripts/release/codex-preflight.mjs"
+
+echo "case 5b: review-only canary switch is exact and reversible"
+canary_plist="$tmp/com.helium.dsh.plist"
+cp "$repo/launchd/com.helium.dsh.plist.template" "$canary_plist"
+sed -i '' 's|__NODE_BIN_DIR__|/opt/homebrew/bin|' "$canary_plist"
+bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist" --no-restart
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "review-only" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ]
+bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist" --no-restart
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "off" ]
+[ ! -e "${canary_plist}.pre-p4-review-canary" ]
 
 echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"
 state="$tmp/deadman-state"

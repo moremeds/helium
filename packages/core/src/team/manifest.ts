@@ -27,6 +27,7 @@ export const TeamRoleSchema = z.strictObject({
     externalResearch: z.boolean(),
     mutations: z.enum(["forbidden", "permitted"]),
     artifactRead: z.array(z.enum(TEAM_ARTIFACT_INPUTS)).min(1),
+    tools: z.array(z.string().min(1).max(200)).default([]),
   }),
 });
 

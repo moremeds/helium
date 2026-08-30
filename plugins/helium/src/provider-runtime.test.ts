@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import {
   RunLedger,
   StateStore,
   WorkOrderSchema,
+  parseTeamYaml,
 } from "@helium/core";
 import type { JobSpec } from "@helium/v1-compat";
 import { Dispatcher } from "./dispatch.js";
@@ -31,8 +33,10 @@ const work = WorkOrderSchema.parse({
   acceptance: { outputSchema: "v1-senior-analysis" },
 });
 
-function runtime(overrides: ProviderRuntimeOptions = {}) {
-  const root = mkdtempSync(join(tmpdir(), "helium-provider-runtime-"));
+function runtime(
+  overrides: ProviderRuntimeOptions = {},
+  root = mkdtempSync(join(tmpdir(), "helium-provider-runtime-")),
+) {
   return new ProviderRuntime(
     {
       agents: {} as never,
@@ -118,6 +122,142 @@ const timeoutJob: JobSpec = {
 };
 
 describe("production ProviderRuntime", () => {
+  it("routes every committed Macro role through the certified Codex target", async () => {
+    const plane = runtime({ certifications: productionProviderCertifications });
+    const manifest = parseTeamYaml(
+      readFileSync(join(import.meta.dirname, "../../../teams/macro.yaml"), "utf8"),
+    );
+    for (const task of manifest.tasks) {
+      const candidate = WorkOrderSchema.parse({
+        id: `macro-${task.id}`,
+        role: task.role,
+        taskClass: `team.${task.id}`,
+        requires: task.requires,
+        constraints: {
+          tools: [],
+          mutations: "forbidden",
+          minIsolationClass: "process",
+        },
+        inputs: { artifacts: [], prompt: task.id },
+        acceptance: { outputSchema: task.outputSchema },
+      });
+      const routed = await plane.routing.route({
+        work: candidate,
+        reservedCost: 0,
+        leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      expect(routed.lease, task.id).toBeDefined();
+      expect(plane.registered.codex.some(
+        (entry) => entry.profile.targetId === routed.lease?.targetId,
+      )).toBe(true);
+      plane.leases.consume(routed.lease!.id, candidate.id);
+    }
+    await plane.dispose();
+  });
+
+  it("opens a provider-specific circuit after repeated failures and restores only by probe", async () => {
+    const plane = runtime({
+      certifications: productionProviderCertifications,
+      circuitFailureThreshold: 2,
+      availabilityRefreshers: { codex: async () => ({ state: "available" }) },
+      codexInvoke: async () => ({
+        ok: false,
+        classification: "error",
+        runtimeSnapshot: {
+          requestedModel: "gpt-5.6-sol",
+          requestedEffort: "high",
+          effectiveEffort: "high",
+          usage: {},
+          events: [],
+        },
+      }),
+    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const routed = await plane.routing.route({
+        work,
+        reservedCost: 0,
+        leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+      });
+      await plane.registry.run({
+        work,
+        lease: routed.lease!,
+        leases: plane.leases,
+        workspacesDir: join(tmpdir(), `helium-breaker-${attempt}`),
+        env: { PATH: process.env.PATH ?? "" },
+      });
+    }
+    expect(plane.healthSnapshot()).toMatchObject({
+      circuits: [{ provider: "codex", state: "open", consecutiveFailures: 2 }],
+    });
+    expect((await plane.routing.route({
+      work,
+      reservedCost: 0,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    })).lease).toBeUndefined();
+
+    await plane.refreshProviderAvailability("codex");
+    expect(plane.healthSnapshot()).toMatchObject({
+      circuits: [{ provider: "codex", state: "closed", consecutiveFailures: 0 }],
+    });
+    expect((await plane.routing.route({
+      work,
+      reservedCost: 0,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    })).lease).toBeDefined();
+    await plane.dispose();
+  });
+
+  it("reapplies an open provider circuit before routing after restart", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-provider-circuit-restart-"));
+    const failing: ProviderRuntimeOptions = {
+      certifications: productionProviderCertifications,
+      circuitFailureThreshold: 1,
+      codexInvoke: async () => ({
+        ok: false,
+        classification: "error",
+        runtimeSnapshot: {
+          requestedModel: "gpt-5.6-sol",
+          requestedEffort: "high",
+          effectiveEffort: "high",
+          usage: {},
+          events: [],
+        },
+      }),
+    };
+    const first = runtime(failing, root);
+    const routed = await first.routing.route({
+      work,
+      reservedCost: 0,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    });
+    await first.registry.run({
+      work,
+      lease: routed.lease!,
+      leases: first.leases,
+      workspacesDir: join(root, "first-run"),
+      env: { PATH: process.env.PATH ?? "" },
+    });
+    await first.dispose();
+
+    // Prove the circuit itself is authoritative, rather than accidentally
+    // relying on the availability file written by the first process.
+    rmSync(join(root, "state", "providers", "availability.json"));
+    const second = runtime({
+      ...failing,
+      availabilityRefreshers: { codex: async () => ({ state: "unavailable" }) },
+    }, root);
+    await second.start();
+    expect((await second.routing.route({
+      work,
+      reservedCost: 0,
+      leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    })).lease).toBeUndefined();
+    expect(second.healthSnapshot()).toMatchObject({
+      circuits: [{ provider: "codex", state: "open" }],
+    });
+    await second.dispose();
+  });
+
   it("publishes only variants present in the durable production certification", async () => {
     const plane = runtime({ certifications: productionProviderCertifications });
     expect(plane.registered.codex.map((entry) => entry.native)).toMatchObject([

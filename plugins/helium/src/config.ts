@@ -12,7 +12,11 @@ export type RuntimeMode = "legacy-direct" | "work-order-adapter";
 export interface Config {
   runtimeMode: RuntimeMode;
   teamShadowEnabled?: boolean;
+  teamPromotionMode?: "off" | "shadow" | "review-only";
+  teamCanaryJobs?: string[];
+  teamCanaryMaxPerUtcDay?: number;
   teamsDir?: string;
+  opsEventLog?: string;
   jobsDir: string;
   stateRoot: string;
   contextFile: string;
@@ -32,7 +36,11 @@ export const ConfigSchema = z.object({
     .enum(["legacy-direct", "work-order-adapter"])
     .default("legacy-direct"),
   teamShadowEnabled: z.boolean().default(false),
+  teamPromotionMode: z.enum(["off", "shadow", "review-only"]).default("off"),
+  teamCanaryJobs: z.array(z.string().min(1)).default([]),
+  teamCanaryMaxPerUtcDay: z.number().int().positive().default(1),
   teamsDir: z.string().min(1).default("teams"),
+  opsEventLog: z.string().min(1).optional(),
   jobsDir: z.string().min(1),
   stateRoot: z.string().min(1),
   contextFile: z.string().min(1),

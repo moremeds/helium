@@ -46,6 +46,7 @@ jobs:
           scripts/ops/controlled-mutation.test.mjs
           scripts/ops/export-promotion-input.test.mjs
           scripts/ops/promotion-package.test.mjs
+          scripts/review/team-canary.test.mjs
           scripts/release/opsd-cycle-after.test.mjs
       - name: repeat adversarial ops boundaries 20 times
         run: >-
