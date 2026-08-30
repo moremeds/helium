@@ -299,6 +299,45 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  plugins/provider-claude-subscription:
+    dependencies:
+      '@helium/provider-sdk':
+        specifier: file:../../packages/provider-sdk
+        version: link:../../packages/provider-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/provider-codex-subscription:
+    dependencies:
+      '@helium/provider-sdk':
+        specifier: file:../../packages/provider-sdk
+        version: link:../../packages/provider-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/provider-deepseek-dsh:
+    dependencies:
+      '@helium/provider-sdk':
+        specifier: file:../../packages/provider-sdk
+        version: link:../../packages/provider-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
 packages:
 
   '@anthropic-ai/sdk@0.91.1':

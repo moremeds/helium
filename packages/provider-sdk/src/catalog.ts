@@ -1,5 +1,6 @@
 /** Provider-native target contracts. This package is an edge SDK, not core. */
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
 const UnsupportedEffortSchema = z
   .object({ supported: z.literal(false) })
@@ -66,4 +67,16 @@ export type ProviderCatalog = z.infer<typeof ProviderCatalogSchema>;
 
 export function parseProviderCatalog(input: unknown): ProviderCatalog {
   return ProviderCatalogSchema.parse(input);
+}
+
+/** Stable over registration order so a reload produces the same audit key. */
+export function providerCatalogSnapshotHash(input: unknown): string {
+  const catalog = parseProviderCatalog(input);
+  const canonical = {
+    catalogVersion: catalog.catalogVersion,
+    targets: [...catalog.targets].sort((a, b) =>
+      a.targetRef.localeCompare(b.targetRef),
+    ),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
 }
