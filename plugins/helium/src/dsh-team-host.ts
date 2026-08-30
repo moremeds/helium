@@ -35,6 +35,12 @@ export interface TeamSubagentTerminal {
   structured?: unknown;
   diagnostic?: string;
   stopReason: string;
+  effectiveReasoningEffort?: string;
+  providerFailure?: {
+    code: string;
+    status?: number;
+    retryAfterMs?: number;
+  };
 }
 
 export interface TeamSubagentRun {
@@ -358,9 +364,49 @@ export class CordisTeamSubagentRuntime implements TeamSubagentRuntime {
     request: Parameters<TeamSubagentRuntime["start"]>[1],
   ): Promise<TeamSubagentRun> {
     const run = await this.runtime.start(providerName, request as never);
+    const result = run.result.then((terminal) => {
+      const events = run.localAgent?.session.events as
+        | Array<{
+            type: string;
+            data?: {
+              header?: { config?: { reasoningEffort?: unknown } };
+              reason?: {
+                kind?: unknown;
+                error?: {
+                  code?: unknown;
+                  status?: unknown;
+                  providerRetryAfterMs?: unknown;
+                };
+              };
+            };
+          }>
+        | undefined;
+      const request = events?.findLast((event) => event.type === "request/header");
+      const ended = events?.findLast((event) => event.type === "turn/end");
+      const effort = request?.data?.header?.config?.reasoningEffort;
+      const failure = ended?.data?.reason?.error;
+      return {
+        output: terminal.output as TeamSubagentTerminal["output"],
+        ...(terminal.structured === undefined ? {} : { structured: terminal.structured }),
+        ...(terminal.diagnostic === undefined ? {} : { diagnostic: terminal.diagnostic }),
+        stopReason: terminal.stopReason,
+        ...(typeof effort === "string" ? { effectiveReasoningEffort: effort } : {}),
+        ...(typeof failure?.code !== "string"
+          ? {}
+          : {
+              providerFailure: {
+                code: failure.code,
+                ...(typeof failure.status === "number" ? { status: failure.status } : {}),
+                ...(typeof failure.providerRetryAfterMs === "number"
+                  ? { retryAfterMs: failure.providerRetryAfterMs }
+                  : {}),
+              },
+            }),
+      };
+    });
     return {
       id: run.id,
-      result: run.result as Promise<TeamSubagentTerminal>,
+      result,
       dispose: () => run.dispose(),
     };
   }

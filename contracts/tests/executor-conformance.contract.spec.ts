@@ -119,7 +119,7 @@ const run = async (
 
 describe("billing models stay distinct", () => {
   it("reports no cost and no tokens for a flat-rate run — absent, not zero", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(flatRate, conformanceAtFloor(FLAT_RATE));
     const result = await run(registry, FLAT_RATE, work());
 
@@ -132,7 +132,7 @@ describe("billing models stay distinct", () => {
   });
 
   it("charges a flat-rate run without recording a zero it never observed", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(flatRate, conformanceAtFloor(FLAT_RATE));
     const result = await run(registry, FLAT_RATE, work());
 
@@ -145,7 +145,7 @@ describe("billing models stay distinct", () => {
   });
 
   it("reports tokens and cost for a metered run", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(metered, provenProcess);
     const result = await run(
       registry,
@@ -167,7 +167,7 @@ describe("billing models stay distinct", () => {
       budgetExhausted: true,
     });
 
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(exhaustedQuota, conformanceAtFloor(ExecutionTargetId("flat-exhausted")));
     registry.register(exhaustedBudget, {
       targetId: ExecutionTargetId("metered-exhausted"),

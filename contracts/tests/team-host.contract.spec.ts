@@ -30,6 +30,10 @@ describe("contract: Helium dispatches team siblings through the real DSH lifecyc
       cwd: repoRoot,
       stdio: "pipe",
     });
+    execFileSync("pnpm", ["--filter", "@helium/provider-deepseek-dsh", "build"], {
+      cwd: repoRoot,
+      stdio: "pipe",
+    });
     execFileSync("pnpm", ["-C", fixtureDir, "install"], { stdio: "pipe" });
     execFileSync("pnpm", ["-C", fixtureDir, "build"], { stdio: "pipe" });
 
@@ -130,6 +134,12 @@ describe("contract: Helium dispatches team siblings through the real DSH lifecyc
       cancelledClass: "cancelled",
       processOutcome: "completed",
       processCalls: 1,
+      deepSeekOutcome: "failed",
+      observedDeepSeekRequest: {
+        provider: "deepseek-official",
+        model: "deepseek-v4-flash",
+        reasoningEffort: "max",
+      },
       resumedOutcome: "completed",
       parentStates: [false, true],
       activeChildren: 0,

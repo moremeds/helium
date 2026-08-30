@@ -52,7 +52,14 @@ describe("registerCertifiedDeepSeekTargets", () => {
       dsh: { providerName: string; agentOptions: Record<string, unknown> };
       fromSubagentResult(
         work: Parameters<Executor["run"]>[0],
-        result: { output: Array<{ type: string; text?: string }>; structured?: unknown; stopReason: string; diagnostic?: string },
+        result: {
+          output: Array<{ type: string; text?: string }>;
+          structured?: unknown;
+          stopReason: string;
+          diagnostic?: string;
+          effectiveReasoningEffort?: string;
+          providerFailure?: { code: string; status?: number; retryAfterMs?: number };
+        },
         elapsedMs: number,
       ): Awaited<ReturnType<Executor["run"]>>;
     };
@@ -90,6 +97,58 @@ describe("registerCertifiedDeepSeekTargets", () => {
       outcome: "failed",
       failure: { class: "provider-error", safeDetail: "provider unavailable" },
       usage: { ms: 7 },
+    });
+
+    const completed = executor.fromSubagentResult(
+      {
+        id: "work-2",
+        role: "researcher",
+        taskClass: "analysis",
+        requires: [],
+        constraints: { tools: [], mutations: "forbidden", minIsolationClass: "in-process" },
+        inputs: { artifacts: [], prompt: "analyze" },
+        acceptance: { outputSchema: "claim-v1" },
+      },
+      {
+        output: [{ type: "text", text: "done" }],
+        stopReason: "completed",
+        effectiveReasoningEffort: "high",
+      },
+      8,
+    );
+    expect(completed).toMatchObject({
+      outcome: "completed",
+      runtimeMetadata: {
+        provider: { requestedEffort: "high", effectiveEffort: "high" },
+      },
+    });
+
+    const mismatch = executor.fromSubagentResult(
+      { ...({} as Parameters<Executor["run"]>[0]), id: "work-3" },
+      {
+        output: [{ type: "text", text: "done" }],
+        stopReason: "completed",
+        effectiveReasoningEffort: "low",
+      },
+      9,
+    );
+    expect(mismatch).toMatchObject({
+      outcome: "failed",
+      failure: { class: "provider-error", safeDetail: expect.stringMatching(/effort mismatch/i) },
+    });
+
+    const quota = executor.fromSubagentResult(
+      { ...({} as Parameters<Executor["run"]>[0]), id: "work-4" },
+      {
+        output: [],
+        stopReason: "error",
+        providerFailure: { code: "RATE_LIMIT", status: 429, retryAfterMs: 5000 },
+      },
+      10,
+    );
+    expect(quota).toMatchObject({
+      outcome: "failed",
+      failure: { class: "quota-exhausted", retryAfter: "provider-ms:5000" },
     });
   });
 });

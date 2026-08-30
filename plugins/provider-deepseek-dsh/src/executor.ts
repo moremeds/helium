@@ -52,12 +52,19 @@ class DeepSeekExecutor implements Executor {
       structured?: unknown;
       diagnostic?: string;
       stopReason: string;
-      failureClass?: "quota-exhausted";
-      retryAfter?: string;
+      effectiveReasoningEffort?: string;
+      providerFailure?: {
+        code: string;
+        status?: number;
+        retryAfterMs?: number;
+      };
     },
     elapsedMs: number,
   ): AgentResult {
-    if (result.stopReason === "completed") {
+    if (
+      result.stopReason === "completed" &&
+      result.effectiveReasoningEffort === this.native.effort
+    ) {
       const text = result.output
         .filter((block) => block.type === "text" && typeof block.text === "string")
         .map((block) => block.text)
@@ -69,11 +76,35 @@ class DeepSeekExecutor implements Executor {
         artifacts: [],
         usage: { ms: elapsedMs },
         executionSnapshot: this.#snapshot(),
+        runtimeMetadata: {
+          stopReason: result.stopReason,
+          provider: {
+            requestedEffort: this.native.effort,
+            effectiveEffort: result.effectiveReasoningEffort,
+          },
+        },
+      };
+    }
+    if (result.stopReason === "completed") {
+      return {
+        workId: work.id,
+        outcome: "failed",
+        failure: {
+          class: "provider-error",
+          safeDetail: `DeepSeek effective effort mismatch: requested ${String(this.native.effort)}, observed ${String(result.effectiveReasoningEffort)}`,
+        },
+        artifacts: [],
+        usage: { ms: elapsedMs },
+        executionSnapshot: this.#snapshot(),
         runtimeMetadata: { stopReason: result.stopReason },
       };
     }
+    const quota =
+      result.providerFailure?.status === 429 ||
+      result.providerFailure?.code === "RATE_LIMIT" ||
+      result.providerFailure?.code === "QUOTA_EXCEEDED";
     const failureClass =
-      result.failureClass === "quota-exhausted"
+      quota
         ? "quota-exhausted"
         : result.stopReason === "aborted"
           ? "cancelled"
@@ -86,8 +117,8 @@ class DeepSeekExecutor implements Executor {
         ...(result.diagnostic === undefined
           ? {}
           : { safeDetail: result.diagnostic }),
-        ...(failureClass === "quota-exhausted" && result.retryAfter !== undefined
-          ? { retryAfter: result.retryAfter }
+        ...(failureClass === "quota-exhausted" && result.providerFailure?.retryAfterMs !== undefined
+          ? { retryAfter: `provider-ms:${result.providerFailure.retryAfterMs}` }
           : {}),
       },
       artifacts: [],

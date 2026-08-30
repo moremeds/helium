@@ -4,11 +4,14 @@ import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import type { AgentResult, Executor, WorkOrder } from "@helium/core";
 import {
+  CapabilityCatalog,
   ExecutionTargetId,
   LeaseStore,
   WorkOrderSchema,
   conformanceAtFloor,
 } from "@helium/core";
+import { deepseekDshCatalog } from "@helium/provider-deepseek-dsh/catalog";
+import { registerCertifiedDeepSeekTargets } from "@helium/provider-deepseek-dsh/executor";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import type {} from "@deepseek-ai/dsh-session-persistence";
 import type {
@@ -159,6 +162,22 @@ export function apply(ctx: Context, config: Config): void {
       localFixtureProvider(ctx, activeChildren),
     );
     let cancelled = false;
+    let observedDeepSeekRequest:
+      | { provider?: string; model?: string; reasoningEffort?: string }
+      | undefined;
+    const removeStreamProbe = ctx.on(
+      "llm/stream",
+      ((options: { provider?: string; model?: string; reasoningEffort?: string }, next: () => AsyncIterable<unknown>) => {
+        if (options.provider !== "deepseek-official") return next();
+        observedDeepSeekRequest = {
+          provider: options.provider,
+          model: options.model,
+          reasoningEffort: options.reasoningEffort,
+        };
+        throw new Error("helium fixture intercepted DeepSeek before network I/O");
+      }) as never,
+      { global: true, prepend: true },
+    );
     void (async () => {
       await ctx.get("loader")?.await();
       const registry = new ExecutorRegistry({ onResult: () => {} });
@@ -201,6 +220,32 @@ export function apply(ctx: Context, config: Config): void {
         async drain() {},
       };
       registry.register(inProcess, conformanceAtFloor(dshTarget));
+
+      const providerCapabilities = new CapabilityCatalog();
+      const registeredDeepSeek = registerCertifiedDeepSeekTargets({
+        certification: {
+          certificationVersion: "deepseek-team-host-contract-v1",
+          catalogSnapshotHash: deepseekDshCatalog.snapshotHash,
+          recordedAt: "2026-08-30T00:00:00.000Z",
+          source: "non-live-contract",
+          targets: [{ targetRef: "deepseek-v4-flash", variants: ["max"] }],
+        },
+        capabilityCatalog: providerCapabilities,
+        executorRegistry: registry,
+        conformanceFor: conformanceAtFloor,
+        targetProfile: {
+          capabilities: ["analysis.general"],
+          operations: {},
+          supports: { structuredOutput: true, toolIsolation: true, mutations: false },
+        },
+        subagentProviderName: "spawn",
+        boundary: {
+          run: async () => {
+            throw new Error("DSH host must own the in-process execution path");
+          },
+        },
+      });
+      const deepSeekTarget = registeredDeepSeek[0]!.profile.targetId;
 
       let processCalls = 0;
       registry.register(
@@ -292,6 +337,19 @@ export function apply(ctx: Context, config: Config): void {
         }),
         new AbortController().signal,
       );
+
+      const deepSeekWork = work("deepseek-effort", "prove effort");
+      const deepSeekResult = await host.run(
+        "fixture-team",
+        deepSeekWork,
+        leases.issue({
+          targetId: deepSeekTarget,
+          workId: deepSeekWork.id,
+          reservedCost: 0,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+        new AbortController().signal,
+      );
       await host.closeTeam("fixture-team");
 
       const resumedWork = work("resumed", "complete again");
@@ -315,6 +373,8 @@ export function apply(ctx: Context, config: Config): void {
           cancelledClass: cancelResult.failure?.class,
           processOutcome: processResult.outcome,
           processCalls,
+          deepSeekOutcome: deepSeekResult.outcome,
+          observedDeepSeekRequest,
           resumedOutcome: resumedResult.outcome,
           parentStates,
           activeChildren: activeChildren.size,
@@ -332,6 +392,7 @@ export function apply(ctx: Context, config: Config): void {
     });
     return async () => {
       cancelled = true;
+      removeStreamProbe();
       removeProvider();
     };
   }, "helium-team-host-fixture.run()");

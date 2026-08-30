@@ -14,6 +14,7 @@ import {
   type WorkOrder,
 } from "@helium/core";
 import {
+  CordisTeamSubagentRuntime,
   DshTeamHost,
   type TeamParentFactory,
   type TeamSubagentRuntime,
@@ -280,5 +281,58 @@ describe("DshTeamHost", () => {
       failure: { class: "cancelled" },
     });
     expect(fx.disposeRun).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CordisTeamSubagentRuntime", () => {
+  it("projects the effective request effort and structured provider failure facts", async () => {
+    const runtime = new CordisTeamSubagentRuntime({
+      start: async () => ({
+        id: "child-1",
+        localAgent: {
+          session: {
+            events: [
+              {
+                type: "request/header",
+                data: { header: { config: { reasoningEffort: "max" } } },
+              },
+              {
+                type: "turn/end",
+                data: {
+                  reason: {
+                    kind: "error",
+                    error: {
+                      code: "RATE_LIMIT",
+                      status: 429,
+                      providerRetryAfterMs: 12_000,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+        result: Promise.resolve({ output: [], stopReason: "error" }),
+        dispose: async () => {},
+      }),
+    } as never);
+    const run = await runtime.start("spawn", {
+      prompt: [{ type: "text", text: "probe" }],
+      parent: {},
+      signal: new AbortController().signal,
+      agentOptions: {},
+      outputSchema: {},
+      maxDepth: 1,
+      toolFilter: { allow: [] },
+      persona: "probe",
+    });
+    await expect(run.result).resolves.toMatchObject({
+      effectiveReasoningEffort: "max",
+      providerFailure: {
+        code: "RATE_LIMIT",
+        status: 429,
+        retryAfterMs: 12_000,
+      },
+    });
   });
 });
