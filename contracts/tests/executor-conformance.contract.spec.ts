@@ -208,7 +208,7 @@ describe("isolation class governs selection", () => {
     ).toEqual(["isolation"]);
   });
 
-  it("falls through a quota-exhausted preference in configured order, and returns after retryAfter", () => {
+  it("falls through a quota-exhausted preference until a provider-owned availability update", () => {
     const catalog = new CapabilityCatalog();
     catalog.register(profile("fake-flat-rate", "in-process"));
     catalog.register(profile("fake-metered", "process"));
@@ -222,6 +222,9 @@ describe("isolation class governs selection", () => {
     expect(during.failure).toBeUndefined();
 
     const after = select(work(), policy, catalog.snapshot(later));
-    expect(after.selected).toBe(FLAT_RATE);
+    expect(after.selected).toBe(METERED);
+    catalog.setAvailability(FLAT_RATE, { state: "available" });
+    const restored = select(work(), policy, catalog.snapshot(later));
+    expect(restored.selected).toBe(FLAT_RATE);
   });
 });
