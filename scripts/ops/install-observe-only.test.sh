@@ -7,7 +7,7 @@ repo="$(cd "$here/../.." && pwd -P)"
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/helium-ops-install-test.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
 
-for script in install-observe-only.sh uninstall-observe-only.sh run-opsd.sh; do
+for script in install-observe-only.sh uninstall-observe-only.sh rebind-observe-only.sh run-opsd.sh; do
   bash -n "$here/$script"
 done
 plutil -lint "$repo/launchd/com.helium.opsd.plist.template" >/dev/null
@@ -144,6 +144,8 @@ bash "$here/uninstall-observe-only.sh" --root "$root" --launchd-root "$launchd_r
 
 echo "case 5: release scripts preserve a compatible opsd/plugin pair"
 grep -q 'install-observe-only.sh' "$repo/scripts/release/deploy.sh"
+[ -x "$repo/scripts/ops/rebind-observe-only.sh" ]
+bash "$repo/scripts/ops/rebind-observe-only.test.sh"
 grep -q 'com.helium.opsd' "$repo/scripts/release/rollback.sh"
 grep -q 'plugins/ops-agent' "$repo/scripts/release/rollback.sh"
 grep -q -- '--check-config' "$repo/scripts/release/deploy.sh"

@@ -109,3 +109,26 @@ after they actually occur.
   tests passed.
 - Still open: tagged deployment, controlled review case, human decision,
   rollback timing, five trading days, and one real material Macro case.
+
+### 2026-08-30 deployment findings and safe recovery
+
+- `v0.1.6` stopped before its release flip because the deployment validator
+  still imported the job loader from the removed core boundary. Production
+  remained on v0.1.5. PR #36 moved validation to `v1-compat`, added a clean
+  archive regression, and released that fix as v0.1.7.
+- `v0.1.7` passed its clean build, job validation, DSH pin, and live Codex
+  preflight, then flipped back automatically because the installed Ops daemon
+  continued to report its separately commissioned immutable candidate rather
+  than v0.1.7. DSH and Ops were both running after the flip-back; no Ops state
+  or evidence was removed and no team canary had started.
+- Read-only inspection confirmed that the selected v0.1.5 release contains no
+  Ops Agent binary or bundle, while the installed launchd/config package is
+  intentionally pinned to `helium-ops-candidates/71f7a23`. The normal release
+  scripts correctly require a same-release collector/plugin pair, but the
+  documented one-time candidate-to-`current` migration had not happened.
+- The corrective path is a reversible packaging rebind with both Ops labels
+  explicitly unloaded. It retains the event/evidence tree, writes a hashed
+  backup of the old config and two plists, validates the new current-bound
+  package before replacement, and supports hash-checked restoration. The first
+  normal release transition is kept separate from the later normal tagged
+  rollback drill because v0.1.5 cannot host `opsd`.
