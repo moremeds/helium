@@ -1,3 +1,151 @@
+## v0.1.6 — 2026-08-30
+
+- feat: add bounded P4 review-only canary
+- feat: add capability-routed ops team
+- feat: inhibit team fan-out under host pressure
+- feat: evaluate routing and team quality
+- feat: run macro team in shadow mode
+- fix: require execution identity for accepted claims
+- feat: define capability-based macro team
+- feat: adjudicate agent claims through evidence
+- fix: hold senior capacity through cancellation
+- test: align Codex boundary proof with current CLI
+- fix: certify and recover provider capacity
+- fix: compose the production provider plane
+- chore: keep branch diff clean
+- fix: tolerate instant provider completion
+- fix: reap orphan provider processes
+- fix: enforce DeepSeek effort and quota facts
+- fix: persist and wire provider availability
+- fix: persist immutable artifact content
+- fix: close routing and task state bypasses
+- fix: enforce process executor boundaries
+- test: require provider-owned quota restoration
+- feat: dispatch team work through provider executors
+- feat: add preference fallback ordering and audited exact target override
+- feat: register certified provider targets
+- feat: invoke exact provider targets
+- feat: add provider-owned model effort catalogs
+- feat: validate provider effort catalogs
+- test: protect provider effort boundary
+- feat: reconcile team budgets and cancellation
+- feat: add durable task DAG and artifact handoff
+- feat: persist restart-safe team state
+- feat: add durable team event model
+- fix(ops): preserve forward-compatible observe rollback
+- fix(ops): distinguish derived provenance from raw evidence
+- fix(ops): verify handoff from an event snapshot
+- fix(ops): match approvals to proposed incident ids
+- fix(ops): treat stopped containers as missing
+- fix(ops): wait for approve cycle proof
+- fix(ops): bind controlled handoff to signed release
+- fix: bind handoff to candidate opsd plist
+- fix: verify remote promotion from local signing checkout
+- chore: commission controlled mutation trust root
+- docs: prove offline mutation readiness
+- docs: record mutation readiness preflight
+- feat: close signed promotion package chain
+- feat: bind signed approvals to promotion inputs
+- feat: add reversible mutation ownership handoff
+- feat: compose approve-only controlled recovery
+- feat: define approved container reconcile promotion
+- fix: bind checks to registered runtime probes
+- feat: run fresh production postcondition checks
+- test: isolate ops bundle fixtures
+- docs: define controlled mutation execution gate
+- feat: pin staged container reconcile identity
+- feat: stage ops wrappers by content hash
+- feat: add bounded container reconcile wrapper
+- test: wait for restriction fixture shutdown
+- docs: record live production observations
+- feat: measure livewire parquet integrity
+- fix: classify live dependency observations
+- feat: compose production ops observations
+- fix: align live ops evidence hashes
+- docs: record repeated opsd deadman run
+- docs: record independent opsd deadman
+- feat: add independent opsd deadman
+- docs: pin candidate opsd deadman check
+- docs: authorize reversible opsd deadman wiring
+- docs: record live ops commissioning
+- fix: parse live macos cpu process names
+- ops: authorize reversible weekend commissioning
+- docs: permit bounded read-only ac1 inspection
+- chore: register ops signing workstation
+- docs: record ops phase d offline evidence
+- fix: persist ops verification policy
+- fix: make ops reconciliation race safe
+- fix: harden ops crash recovery evidence
+- fix: close ops phase d safety gaps
+- feat: package ops observe-only rollout
+- test: adversarially verify ops recovery
+- docs: inventory blocked operations scripts
+- feat: run ops in observe and suggest modes
+- docs: re-record ops phase c ci evidence
+- docs: record ops phase c evidence
+- fix: keep ops bundles and evidence self-contained
+- test: remove runtime watcher timing race
+- fix: make ops observations replayable
+- fix: close ops phase c runtime gaps
+- feat: group ops alerts and decide admission under pressure
+- feat: observe colima postgres and helium
+- feat: observe livewire argon and apex
+- feat: collect host operations observations
+- docs: authorize p4 takeover and separate p5 p6
+- docs: hand Ops Phase C over to codex mid-task
+- feat: probe host memory, volumes and process liveness
+- feat: load pluggable operations components
+- docs: re-record ops phase B evidence from the merging tree
+- docs: record phase 2.5a Ops Phase B evidence from ci
+- test: drive the phase B persisted crash matrix
+- feat: verify and attribute operations recovery
+- feat: enforce single mutation ownership per component
+- feat: execute certified ops scripts
+- feat: lease and bound recovery actions
+- feat: persist operations incidents and actions
+- feat: authorize exact operations SOPs
+- docs: correct an unrunnable reproduction command in the phase one record
+- feat: correlate dependency-aware incidents
+- test: freeze ops incident fixtures
+- feat: define generic operations observations
+- docs: re-record phase one evidence from the merging tree
+- fix: stop the event-store suite contending on fsync in ci
+- docs: record phase one evidence from ci
+- ci: prove the fake executor packages install and remove with no core edit
+- feat: preserve v1 through work-order adapter
+- test: guard the sensor-to-executor topology edge statically
+- feat: add opaque executor leases and isolation classes
+- feat: select execution targets by capability hard filter
+- feat: add opaque target registry with capability tags
+- feat: define model-blind work and evidence contracts
+- refactor: isolate v1 model-specific job contract
+- docs: record phase zero evidence hashes from ci
+- ci: run the phase zero gate commands ci never reached
+- feat: monitor liveness per tenant
+- fix: validate execution tool contracts
+- test: add reusable execution-boundary conformance harness
+- docs: correct the e2e exclusion snippet that dropped vitest defaults
+- fix: isolate senior execution capabilities
+- fix: write delivery intent before side effects
+- docs: regenerate the phase zero handoff for revision three
+- docs: resync phase zero handoff to the revised plan set
+- docs: record claude phase zero dispatch
+- docs: hand off multi-agent phase zero
+- docs: correct task five's claim about the dead-man test
+- docs: close the blockers a pre-execution readiness pass found
+- docs: make the revised plan executable end to end
+- docs: close the review's blockers and adjudicate what round 1 surfaced
+- docs: surface the canonical topology in readme
+- docs: visualize canonical agent topology
+- docs: make agent verification evidence explicit
+- docs: add pluggable ops agent program
+- docs: plan provider effort implementation
+- docs: define provider effort selection
+- docs: record model selection probe
+- docs: add executable multi-agent implementation plan
+- docs: define model-blind multi-agent architecture
+- docs: record phase 3 acceptance results and start the AC#1 window
+
 ## v0.1.5 — 2026-08-24
 
 - fix(script): kill the script's process group, not just the direct child
