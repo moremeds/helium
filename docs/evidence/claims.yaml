@@ -453,20 +453,6 @@ claims:
     artifacts:
       - path: docs/evidence/p2.5a/test.log
         sha256: 67058c15c9845cf61aff25b8c495358c595212bebfa4ddb01f4dfa2dda32aaa6
-  - id: P2.5A-LIVE-DRILL
-    phase: P2.5a
-    assertion: A certified SOP restores a real component's integrity, freshness and
-      coverage under a controlled drill.
-    assertionClass: deterministic
-    command: "not yet runnable: no drill harness and no certified production SOP exist"
-    toolVersion: n/a
-    decision: inconclusive
-    status: BLOCKED
-    limitation: "Nothing about targeted repair is proven. The design recorded this
-      as BLOCKED before any code existed and it remains BLOCKED: no drill has
-      run, no production SOP is certified, and no mutation has been performed on
-      any host."
-    nextGate: Ops Task 16 and 17, then the post-AC#1 drill gate.
   - id: P2.5A-OPS-CONFIG-TOPOLOGY
     phase: P2.5a
     assertion: Ops configuration loads into an atomic, dependency-aware,
@@ -803,3 +789,28 @@ claims:
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-mutation-readiness-2026-08-30.log
         sha256: 753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2
+  - id: P2.5A-LIVE-DRILL
+    phase: P2.5a
+    assertion: The signed one-attempt trading-stack container reconcile can take
+      exclusive mutation ownership, restore one stopped expected container,
+      produce a policy-complete durable terminal bundle, and return to observe
+      ownership without changing any unrelated container.
+    assertionClass: deterministic
+    command: On the registered mini, replay action act-4ced44c86f68f99b1040634b209e16ef
+      through FileRecoveryEvidenceStore.verifyEvent; inspect the 20 running
+      containers; hash the sorted name|id|startedAt|restartCount rows excluding
+      trading-cadvisor; and run the standalone opsd deadman check.
+    toolVersion: mini macOS 26.5.1; node 25.9.0; Docker Server 29.2.1; mutation
+      commit 7062803; reconciliation commit 71f7a23
+    decision: pass
+    status: PROVEN
+    limitation: This decision is scoped to trading-stack-container-reconcile
+      v1 and one stopped trading-cadvisor. It earns no seven-day observation
+      credit, does not authorize suggest or auto, and does not certify the
+      remaining Livewire or Colima executors.
+    nextGate: Keep P2.5A-LIVE-SCRIPT-CERTIFICATION open for the remaining
+      executors and complete the seven-day observe gate before suggest mode.
+    outputHash: sha256:17f513bf9e12163e3cf9f55b164dd64b9db14164d66286add3073b232affbead
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-controlled-mutation-2026-08-30.log
+        sha256: 17f513bf9e12163e3cf9f55b164dd64b9db14164d66286add3073b232affbead

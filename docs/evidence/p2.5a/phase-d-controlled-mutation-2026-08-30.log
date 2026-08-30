@@ -1,0 +1,88 @@
+Helium Ops Task 16 controlled mutation — live production drill
+Recorded: 2026-08-30 HKT
+Scope: one approve-only, one-attempt trading-stack container reconcile
+Decision: PROVEN for this scoped drill
+
+Authority and immutable inputs
+  operator key boundary: private Ed25519 key remained on the operator workstation
+  commissioned public-key sha256: acb7e8c3bfa7c485b98ce216e35be7ee0a333b66803ed203997b1fb07c84ec43
+  mutation release commit: 70628030828778593362da1aacb876ccef88ded3
+  promotion input canonical sha256: c1f39e84cb45d15e9f41ca508ae6fb9c7822cee8320e1f67710e929354bb7c3e
+  signed promotion package file sha256: ae55148556ec0ce6adaafa23efa2b28a6e06a841709555cc65ae17bae0095999
+  signed approval file sha256: cf859af95e41312537dad12109269ebd7318848ce09b7c45745fda98ece20c21
+  SOP: trading-stack-container-reconcile v1
+  SOP digest: sha256:198764bfe3e2ee15140fc86e8ad6f0eca407a91dc32246b3b5bcb175a47d208c
+  approved attempt: 1
+  approval incident: inc-3a28fb3419d81886e732aec7d6b79689
+  approval expiry: 2026-08-30T05:39:24.959Z
+
+Pre-action proof
+  active mode after ownership handoff: approve
+  sole mutation owner: com.helium.opsd
+  competing legacy labels absent during the mutation
+  baseline check: colima-container-set=fail
+  missing running container: trading-cadvisor
+  action counts before execution: proposed=1 authorized=0 intent=0 receipt=0 verified=0
+  all other 19 containers matched the pre-drill identity/start/restart baseline
+  other-19 baseline sha256: 69453844ab741f532f448e790038dbe9b9a457a3ec024be2ad8e520f1fa4cd26
+
+Durable action chain
+  actionId: act-4ced44c86f68f99b1040634b209e16ef
+  2026-08-30T04:57:37.444Z action-proposed
+  2026-08-30T05:25:22.839Z action-authorized
+  2026-08-30T05:25:22.845Z action-intent-recorded
+  2026-08-30T05:25:24.354Z action-receipt-recorded
+  2026-08-30T05:39:39.700Z action-verified outcome=succeeded attribution=automatic
+
+Execution receipt
+  exitCode: 0
+  timedOut: false
+  outputDigest: sha256:e352558870457be0ae71afb17bd41edfa4baba212ee79009e849f476de80e4c7
+  bounded action: docker-compose up -d with pull=false for the registered container scope
+  observed change: trading-cadvisor transitioned from stopped to running
+  unrelated running containers were not restarted
+
+Terminal recovery evidence
+  schema: helium.ops.recovery-evidence/v1
+  assertionId: recovery-act-4ced44c86f68f99b1040634b209e16ef
+  bundle ref: artifact://ops/evidence/recovery-9c76f179b2e447581659ee3c2b37c428519a553d7fd0e21182c92bc32e303489.json
+  bundle sha256: 9c76f179b2e447581659ee3c2b37c428519a553d7fd0e21182c92bc32e303489
+  status: PROVEN
+  verifier: helium-opsd verify/1 decision=pass
+  attribution: automatic
+  postcondition: colima-container-set=pass at 2026-08-30T05:39:39.442Z
+  raw artifacts: 13, all resolved and hash-verified by FileRecoveryEvidenceStore.verifyEvent
+  receipt evidence sha256: d41035be5f3e5d2d70bd6d0fb97864fae9f2ab99cc231a16282f410289d2bc72
+  limitation: empty
+
+Post-action and safe-mode proof
+  action counts: proposed=1 authorized=1 intent=1 receipt=1 verified=1
+  trading-cadvisor: running=true health=healthy restartCount=0
+  expected running containers: 20 of 20
+  other-19 identity/start/restart sha256: 69453844ab741f532f448e790038dbe9b9a457a3ec024be2ad8e520f1fa4cd26
+  current mode: observe
+  current observe release: 71f7a23694e6acab70425219ca4723edd3386ab0
+  current controller cycle: 2026-08-30T05:39:43.863Z, observations=43, failures=0
+  live labels: com.helium.opsd, com.helium.opsd-deadman,
+    com.moremeds.colima-runtime-watchdog, com.moremeds.colima-after-datalake
+  deadman: fresh
+
+Live discovery and fail-safe handling
+  No aborted discovery attempt reached action intent or changed a second container.
+  Each attempt restored trading-cadvisor and observe ownership before code repair.
+  The discoveries were closed through PRs 24-29:
+    - staged-versus-active config binding and exact signed release artifacts;
+    - bounded fresh approve-cycle waiting;
+    - running-only container inventory;
+    - durable public incident-id approval lookup;
+    - complete event-snapshot clock validation;
+    - derived signed-policy provenance separated from raw command artifacts.
+  The final executor ran exactly once. The terminal evidence failure after the
+  exit-0 receipt did not trigger a retry. PR 29 repaired evidence persistence,
+  and release 71f7a23 startup reconciliation appended only action-verified.
+
+Claim boundary
+  This proves the one scoped approve drill named above. It does not earn any
+  seven-day observation credit, authorize suggest or auto mode, certify the
+  remaining Livewire/Colima executors, authorize another attempt, or promote
+  P2.5a as a whole to complete.

@@ -99,6 +99,7 @@ function fixture() {
   roots.push(root);
   const baseLayout = createControlledMutationLayout(root, process.getuid?.() ?? 0);
   const releaseDir = join(root, "release");
+  const priorReleaseDir = join(root, "prior-release");
   const layout = {
     ...baseLayout,
     opsdBinary: join(releaseDir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
@@ -115,7 +116,19 @@ function fixture() {
     writeFileSync(path, value, { mode });
     chmodSync(path, mode);
   };
-  write(layout.activeConfig, JSON.stringify({ version: 1, mode: "observe", releaseDir }), 0o600);
+  write(layout.activeConfig, JSON.stringify({
+    version: 1,
+    mode: "observe",
+    releaseDir: priorReleaseDir,
+    componentsDir: "ops/components",
+    dependenciesDir: "ops/dependencies",
+    checksDir: "ops/checks",
+    sopsDir: "ops/sops",
+    executorsDir: "ops/executors",
+    authorityManifestPath: join(priorReleaseDir, "ops", "authority-manifest.json"),
+    trustedKeyPath: join(priorReleaseDir, "ops", "authority-manifest.pub.pem"),
+    observationTargetsPath: join(priorReleaseDir, "ops", "observation-targets.yaml"),
+  }), 0o600);
   write(layout.candidateConfig, JSON.stringify({
     version: 1,
     mode: "approve",
@@ -211,7 +224,9 @@ function options(f, overrides = {}) {
       plistPath,
     }) => {
       assert.equal(executable, f.layout.opsdBinary);
-      assert.equal(configPath, f.layout.candidateConfig);
+      assert.ok(
+        configPath === f.layout.candidateConfig || configPath === f.layout.activeConfig,
+      );
       assert.equal(activeConfigPath, f.layout.activeConfig);
       assert.equal(releaseDir, f.promotion.release.dir);
       assert.equal(releaseCommit, f.promotion.release.commit);
@@ -494,12 +509,21 @@ test("rollback restores observe config and the exact legacy controller family", 
   await runControlledMutation("handoff", options(f));
   const result = await runControlledMutation("rollback", options(f));
   assert.equal(result.state, "observe-restored");
-  assert.equal(JSON.parse(readFileSync(f.layout.activeConfig, "utf8")).mode, "observe");
+  const active = JSON.parse(readFileSync(f.layout.activeConfig, "utf8"));
+  assert.equal(active.mode, "observe");
+  assert.equal(active.releaseDir, f.promotion.release.dir);
+  assert.equal(
+    active.authorityManifestPath,
+    join(f.promotion.release.dir, "ops", "authority-manifest.json"),
+  );
   assert.deepEqual([...f.runner.labels].sort(), [
     "com.helium.opsd",
     "com.moremeds.colima-after-datalake",
     "com.moremeds.colima-runtime-watchdog",
   ]);
+  const opsdBootstraps = f.runner.calls.filter((call) =>
+    call[1] === "bootstrap" && call[3] === f.layout.candidateOpsdPlist);
+  assert.equal(opsdBootstraps.length, 2);
 });
 
 test("rollback refuses a missing durable backup or post-handoff identity drift", async () => {
@@ -522,6 +546,17 @@ test("rollback refuses a missing durable backup or post-handoff identity drift",
   );
 });
 
+test("rollback remains available after the signed mutation window expires", async () => {
+  const f = fixture();
+  await runControlledMutation("handoff", options(f));
+  const afterExpiry = new Date(Date.parse(f.promotion.expiresAt) + 1);
+  const result = await runControlledMutation("rollback", options(f, {
+    now: () => afterExpiry,
+  }));
+  assert.equal(result.state, "observe-restored");
+  assert.equal(JSON.parse(readFileSync(f.layout.activeConfig, "utf8")).mode, "observe");
+});
+
 test("every interrupted handoff prefix converges through rollback", async () => {
   for (let crashAfterStep = 1; crashAfterStep <= 8; crashAfterStep += 1) {
     const f = fixture();
@@ -540,7 +575,7 @@ test("every interrupted handoff prefix converges through rollback", async () => 
 });
 
 test("every interrupted rollback prefix converges when rollback is repeated", async () => {
-  for (let crashAfterStep = 1; crashAfterStep <= 6; crashAfterStep += 1) {
+  for (let crashAfterStep = 1; crashAfterStep <= 7; crashAfterStep += 1) {
     const f = fixture();
     await runControlledMutation("handoff", options(f));
     await assert.rejects(

@@ -92,7 +92,7 @@ Track observation freshness, collection failures, incident noise, daemon
 restarts, log rotation, and dead-man delivery. Provider/model availability is
 irrelevant to the deterministic collector path.
 
-## Controlled mutation handoff (not yet commissioned)
+## Controlled mutation handoff
 
 `scripts/ops/controlled-mutation.mjs` pins the public-key fingerprint
 commissioned on the registered operator workstation; the private key remains
@@ -109,8 +109,18 @@ reviewed, the only accepted sequence is:
    switch to the exact approve config, restart only `com.helium.opsd`, then
    wait up to 30 seconds for and prove a fresh zero-action cycle;
 3. the separately signed one-incident approval and controlled failure drill;
-4. `rollback` — stop approve-mode opsd, restore the backed-up observe config,
-   restore both exact legacy plists/labels, then restart observe-mode opsd.
+4. `rollback` — stop approve-mode opsd, derive a fail-closed observe config
+   from the signed candidate and backed-up observe settings, validate it with
+   the signed candidate binary, restore both exact legacy plists/labels, then
+   restart that candidate in observe mode.
+
+Rollback deliberately does not restart an older opsd binary after the new
+release has appended action events. The event ledger is forward-only: an old
+strict schema may be unable to replay newer event fields. The prior config and
+plist remain in the fsynced backup, but safe-mode ownership rollback keeps the
+signed candidate parser, removes all promotion/approve fields, restores both
+legacy mutation owners, and remains available even after the mutation package
+expiry. Expiry closes new handoffs; it must never disable rollback.
 
 The controlled container drill stops one expected container. Production
 inventory uses running-only `docker ps`; a stopped container is therefore a
