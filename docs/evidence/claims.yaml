@@ -814,3 +814,28 @@ claims:
     artifacts:
       - path: docs/evidence/p2.5a/phase-d-controlled-mutation-2026-08-30.log
         sha256: 17f513bf9e12163e3cf9f55b164dd64b9db14164d66286add3073b232affbead
+  - id: P3-CODEX-PAIRED-UNSUPPORTED-CLAIM-RATE
+    phase: P3
+    assertion: The Codex multi-agent macro treatment reduces unsupported-claim
+      rate against the byte-identical Codex single-agent control on the frozen
+      paired fixture set.
+    assertionClass: statistical
+    status: PLANNED
+    limitation: No paired evaluation result exists yet. The fixture population,
+      primary metric, pairing contract and anchor snapshot are frozen here
+      before the first real shadow run; the provisional n, lift and significance
+      thresholds still require operator ratification at the Phase 3 gate.
+    nextGate: Run the offline paired evaluation after Task 20 implements the
+      scorer; require n >= 30, at least 20 percent relative reduction in
+      unsupported-claim rate, and p < 0.05 on a two-sided Wilcoxon signed-rank
+      test, with quota-interrupted or input-mismatched pairs excluded together.
+    primaryMetric: unsupported-claim rate
+    direction: lower-is-better
+    pairingContract: Codex single-agent control versus Codex multi-agent
+      treatment with identical anchor target, source event, input artifacts,
+      tools and declared budget.
+    anchorTargetSnapshot: codex-anchor-2026-08-30-v1
+    fixtureSetPath: evals/fixtures/macro
+    fixtureSetSha256: 44d3cc143e6eb423840ba2dcf85ad11feb6730e33ab161a874e8979dfbced268
+    fixtureHashCommand: pnpm --filter @helium/evals run fixture-hash -- --fixtures
+      evals/fixtures/macro

@@ -38,6 +38,7 @@ import {
 } from "@helium/v1-compat";
 import { CalendarWindowWatcher, loadCalendar } from "./calendar.js";
 import type { Config } from "./config.js";
+import type { ShadowAdapter } from "./shadow.js";
 import { CronTrigger } from "./cron.js";
 import {
   Dispatcher,
@@ -90,6 +91,7 @@ export interface RuntimeDeps {
   config: Config;
   engines: EnginePorts;
   delivery: DeliveryPorts;
+  shadow?: ShadowAdapter;
   /** Overridable for tests; defaults to the global `fetch`. */
   fetchImpl?: typeof fetch;
   /** Overridable for tests; defaults to `() => new Date()`. */
@@ -316,11 +318,23 @@ export class HeliumRuntime {
   private startJob(job: JobSpec): void {
     const onTrigger = (ev: TriggerEvent): void => {
       const augmented = augmentCronPayload(ev, this.deps.config.stateRoot);
-      if (job.script) {
-        void this.runScript(job, augmented);
+      const continueV1 = (): void => {
+        if (job.script) {
+          void this.runScript(job, augmented);
+          return;
+        }
+        this.dispatcher.enqueue(job, augmented);
+      };
+      if (this.deps.shadow === undefined) {
+        continueV1();
         return;
       }
-      this.dispatcher.enqueue(job, augmented);
+      void this.deps.shadow.handle(job, augmented, continueV1).catch((error: unknown) => {
+        this.log("shadow team failed", {
+          job: job.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     };
 
     const calendarTriggers = job.triggers.filter(

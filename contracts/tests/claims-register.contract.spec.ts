@@ -97,7 +97,7 @@ describe("closed claims register", () => {
     // uncross-checked. Assert the composition rather than trusting the loop.
     expect(Object.keys(MANIFESTS).sort()).toEqual(["P0", "P1", "P2.5a"]);
     const phases = [...new Set(register.claims.map((c) => c.phase))].sort();
-    expect(phases).toEqual(["P0", "P1", "P2.5a"]);
+    expect(phases).toEqual(["P0", "P1", "P2.5a", "P3"]);
   });
 
   it.each(Object.keys(MANIFESTS))(

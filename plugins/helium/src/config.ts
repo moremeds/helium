@@ -11,6 +11,8 @@ export type RuntimeMode = "legacy-direct" | "work-order-adapter";
 
 export interface Config {
   runtimeMode: RuntimeMode;
+  teamShadowEnabled?: boolean;
+  teamsDir?: string;
   jobsDir: string;
   stateRoot: string;
   contextFile: string;
@@ -29,6 +31,8 @@ export const ConfigSchema = z.object({
   runtimeMode: z
     .enum(["legacy-direct", "work-order-adapter"])
     .default("legacy-direct"),
+  teamShadowEnabled: z.boolean().default(false),
+  teamsDir: z.string().min(1).default("teams"),
   jobsDir: z.string().min(1),
   stateRoot: z.string().min(1),
   contextFile: z.string().min(1),

@@ -5,12 +5,12 @@
  * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { JsonlWriter, type RunOutcome } from "@helium/core";
+import { JsonlWriter, parseTeamYaml, type RunOutcome } from "@helium/core";
 import { buildTools, type JobSpec } from "@helium/v1-compat";
 import type { ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
@@ -19,6 +19,8 @@ import { TriageRunner, type SeniorLane } from "./dispatch.js";
 import { readEnvFile } from "./envfile.js";
 import { HeliumRuntime } from "./runtime.js";
 import { ProviderRuntime } from "./provider-runtime.js";
+import { ShadowAdapter } from "./shadow.js";
+import { TeamController } from "./team-controller.js";
 import { registerEcosystemTools } from "./toolkit.js";
 
 export const name = "helium";
@@ -31,6 +33,8 @@ export const inject = [
   "tools",
 ];
 export { type Config } from "./config.js";
+export { ShadowAdapter } from "./shadow.js";
+export { TeamController } from "./team-controller.js";
 
 /**
  * Runs a synchronous step and swallows (logs) any throw instead of letting it
@@ -184,6 +188,38 @@ export function apply(ctx: Context, raw: Config): void {
     proxy: cfg.proxy,
   });
 
+  const shadow = cfg.teamShadowEnabled
+    ? (() => {
+        const manifest = parseTeamYaml(
+          readFileSync(join(cfg.teamsDir ?? "teams", "macro.yaml"), "utf8"),
+        );
+        const controller = new TeamController({
+          stateRoot: join(paths.state, "teams"),
+          manifest,
+          routing: {
+            route: async (input) => {
+              const routed = await providers.routing.route(input);
+              return {
+                decision: routed.decision,
+                ...(routed.lease === undefined ? {} : { lease: routed.lease }),
+                catalogVersion: routed.audit.catalogVersion,
+              };
+            },
+          },
+          execution: {
+            run: (teamRunId, work, lease, signal) =>
+              providers.host.run(teamRunId, work, lease, signal),
+            closeTeam: (teamRunId) => providers.host.closeTeam(teamRunId),
+            drain: () => providers.host.drain(),
+          },
+        });
+        return new ShadowAdapter({
+          enabled: true,
+          run: (input) => controller.run(input),
+        });
+      })()
+    : undefined;
+
   const runtime = new HeliumRuntime({
     config: cfg,
     engines: {
@@ -197,7 +233,11 @@ export function apply(ctx: Context, raw: Config): void {
       heartbeat: (row) => delivery.heartbeat(row),
       reconcileDeliveries: () => delivery.reconcileDeliveries(),
     },
+    ...(shadow === undefined ? {} : { shadow }),
   });
+
+  // Exported controllers remain model-blind; concrete target selection stays
+  // inside ProviderRuntime's routing boundary.
   ctx.effect(async () => {
     await ctx.get("loader")?.await();
     await providers.start();
