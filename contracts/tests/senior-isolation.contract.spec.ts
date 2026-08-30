@@ -41,6 +41,8 @@ runExecutionBoundaryConformance({
       input.env,
     );
     return await runClaude({
+      model: "claude-sonnet-5",
+      effort: "high",
       prompt: input.prompt,
       cwd: input.expectedWorkspace,
       maxTurns: 1,

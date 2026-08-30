@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "main": "./lib/catalog.js",
-  "exports": { ".": "./lib/catalog.js" },
+  "exports": {
+    ".": "./lib/catalog.js",
+    "./catalog": "./lib/catalog.js",
+    "./invoke": "./lib/invoke.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"

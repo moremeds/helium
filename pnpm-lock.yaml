@@ -230,6 +230,9 @@ importers:
       '@helium/core':
         specifier: file:../../packages/core
         version: link:../../packages/core
+      '@helium/provider-claude-subscription':
+        specifier: file:../provider-claude-subscription
+        version: link:../provider-claude-subscription
       '@helium/v1-compat':
         specifier: file:../../packages/v1-compat
         version: link:../../packages/v1-compat

@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@helium/core": "file:../../packages/core",
+    "@helium/provider-claude-subscription": "file:../provider-claude-subscription",
     "@helium/v1-compat": "file:../../packages/v1-compat",
     "croner": "10.0.1",
     "nodemailer": "9.0.5",

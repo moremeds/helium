@@ -48,7 +48,9 @@ export function runGuarded(label: string, fn: () => void): void {
  * a capability change and not a budget: the target is simply unavailable until
  * `retryAfter`.
  */
-export function seniorOutcome(result: ClaudeResult): {
+export function seniorOutcome(
+  result: Pick<ClaudeResult, "ok" | "text" | "classification" | "retryAfter">,
+): {
   outcome: RunOutcome;
   analysis?: string;
   error?: string;
@@ -96,6 +98,8 @@ function buildSeniorLane(cfg: Config, workspacesDir: string): SeniorLane {
       try {
         return seniorOutcome(
           await runClaude({
+            model: "claude-opus-5",
+            effort: "max",
             prompt,
             cwd: workspace,
             maxTurns: job.maxTurns.senior,
