@@ -52,6 +52,8 @@ function fixture() {
   const layout = {
     ...base,
     opsdBinary: join(releaseDir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
+    opsdRunner: join(releaseDir, "scripts", "ops", "run-opsd.sh"),
+    controlledMutation: join(releaseDir, "scripts", "ops", "controlled-mutation.mjs"),
   };
   const write = (path, value = `${path}\n`, mode = 0o600) => {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -84,6 +86,8 @@ function fixture() {
     layout.wrapper,
     layout.delegate,
     layout.opsdBinary,
+    layout.opsdRunner,
+    layout.controlledMutation,
     layout.opsdPlist,
     layout.candidateOpsdPlist,
     layout.legacyRuntimePlist,
@@ -115,7 +119,9 @@ test("exports exact host identities and signs the same canonical promotion bindi
   assert.equal(payload.promotionInputSha256, f.promotion.inputSha256);
   assert.equal(payload.release.dir, f.promotion.release.dir);
   assert.equal(payload.artifacts.opsdBinary.path, f.layout.opsdBinary);
-  assert.equal(Object.keys(payload.artifacts).length, 12);
+  assert.equal(payload.artifacts.opsdRunner.path, f.layout.opsdRunner);
+  assert.equal(payload.artifacts.controlledMutation.path, f.layout.controlledMutation);
+  assert.equal(Object.keys(payload.artifacts).length, 14);
   assert.equal(lstatSync(f.unsignedPackagePath).mode & 0o777, 0o600);
 
   const envelope = signPromotionPackage({

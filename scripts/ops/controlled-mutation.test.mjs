@@ -15,7 +15,9 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import {
   assertCandidateOpsdPlist,
+  assertCandidateRelease,
   createControlledMutationLayout,
+  productionCandidateValidator,
   runControlledMutation,
 } from "./controlled-mutation.mjs";
 
@@ -99,6 +101,8 @@ function fixture() {
   const layout = {
     ...baseLayout,
     opsdBinary: join(releaseDir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
+    opsdRunner: join(releaseDir, "scripts", "ops", "run-opsd.sh"),
+    controlledMutation: join(releaseDir, "scripts", "ops", "controlled-mutation.mjs"),
   };
   for (const dir of [layout.opsRoot, layout.launchdRoot, layout.promotionRoot]) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -145,6 +149,8 @@ function fixture() {
   write(layout.wrapper, "wrapper\n", 0o500);
   write(layout.delegate, "delegate\n", 0o500);
   write(layout.opsdBinary, "opsd\n", 0o500);
+  write(layout.opsdRunner, "runner\n", 0o500);
+  write(layout.controlledMutation, "controlled mutation\n", 0o500);
   write(layout.opsdPlist, "opsd plist\n", 0o600);
   write(layout.candidateOpsdPlist, "candidate opsd plist\n", 0o600);
   write(layout.legacyRuntimePlist, "runtime plist\n", 0o600);
@@ -160,6 +166,8 @@ function fixture() {
     wrapper: layout.wrapper,
     delegate: layout.delegate,
     opsdBinary: layout.opsdBinary,
+    opsdRunner: layout.opsdRunner,
+    controlledMutation: layout.controlledMutation,
     opsdPlist: layout.opsdPlist,
     candidateOpsdPlist: layout.candidateOpsdPlist,
     legacyRuntimePlist: layout.legacyRuntimePlist,
@@ -193,10 +201,19 @@ function options(f, overrides = {}) {
   return {
     layout: f.layout,
     runner: f.runner,
-    validateCandidate: async ({ executable, configPath, releaseDir, plistPath }) => {
+    validateCandidate: async ({
+      executable,
+      configPath,
+      activeConfigPath,
+      releaseDir,
+      releaseCommit,
+      plistPath,
+    }) => {
       assert.equal(executable, f.layout.opsdBinary);
       assert.equal(configPath, f.layout.candidateConfig);
+      assert.equal(activeConfigPath, f.layout.activeConfig);
       assert.equal(releaseDir, f.promotion.release.dir);
+      assert.equal(releaseCommit, f.promotion.release.commit);
       assert.equal(plistPath, f.layout.candidateOpsdPlist);
     },
     now: () => NOW,
@@ -233,6 +250,65 @@ test("candidate plist is bound to the exact release runner and active config", (
     ...plist,
     ProgramArguments: ["/bin/bash", "/old/release/scripts/ops/run-opsd.sh"],
   }, { configPath, releaseDir }), /exact release and config/);
+});
+
+test("candidate release must be the exact clean signed checkout", async () => {
+  assert.doesNotThrow(() => assertCandidateRelease({
+    expectedCommit: "abc123",
+    actualCommit: "abc123\n",
+    status: "",
+  }));
+  assert.throws(() => assertCandidateRelease({
+    expectedCommit: "abc123",
+    actualCommit: "def456\n",
+    status: "",
+  }), /commit mismatch/);
+  assert.throws(() => assertCandidateRelease({
+    expectedCommit: "abc123",
+    actualCommit: "abc123\n",
+    status: " M scripts\/ops\/run-opsd.sh\n",
+  }), /not clean/);
+
+  const releaseDir = "/Users/moremeds/projects/helium-ops-candidates/candidate";
+  const candidateConfig = "/Users/moremeds/.helium/ops/promotions/trading-stack-reconcile/opsd.approve.json";
+  const activeConfig = "/Users/moremeds/.helium/ops/config/opsd.json";
+  const executable = `${releaseDir}/plugins/ops-agent/lib/bin/opsd.js`;
+  const plistPath = "/Users/moremeds/.helium/ops/promotions/trading-stack-reconcile/com.helium.opsd.approve.plist";
+  const calls = [];
+  const validator = productionCandidateValidator({
+    run: async (program, argv) => {
+      calls.push([program, ...argv]);
+      if (program === "/usr/bin/git" && argv.at(-2) === "rev-parse") return "abc123\n";
+      if (program === "/usr/bin/git" && argv.at(-2) === "status") return "";
+      if (program === "/usr/bin/plutil") return JSON.stringify({
+        Label: "com.helium.opsd",
+        ProgramArguments: ["/bin/bash", `${releaseDir}/scripts/ops/run-opsd.sh`],
+        WorkingDirectory: releaseDir,
+        RunAtLoad: true,
+        KeepAlive: true,
+        EnvironmentVariables: {
+          HELIUM_OPSD_CONFIG: activeConfig,
+          HELIUM_NODE_BIN: "/opt/homebrew/bin/node",
+          HOME: "/Users/moremeds",
+        },
+      });
+      return "";
+    },
+  });
+  await validator({
+    executable,
+    configPath: candidateConfig,
+    activeConfigPath: activeConfig,
+    releaseDir,
+    releaseCommit: "abc123",
+    plistPath,
+  });
+  assert.deepEqual(calls, [
+    [process.execPath, executable, "--check-config", candidateConfig, "--release", releaseDir],
+    ["/usr/bin/git", "-C", releaseDir, "rev-parse", "HEAD"],
+    ["/usr/bin/git", "-C", releaseDir, "status", "--porcelain"],
+    ["/usr/bin/plutil", "-convert", "json", "-o", "-", plistPath],
+  ]);
 });
 
 test("preflight is read-only and rejects identity or path ambiguity", async () => {
@@ -304,6 +380,25 @@ test("handoff releases both legacy labels before switching and proves a zero-act
     calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
   assert.ok(calls.findIndex((line) => line.includes("bootout") && line.includes("after-datalake")) <
     calls.findIndex((line) => line.includes("bootstrap") && line.includes(f.layout.candidateOpsdPlist)));
+});
+
+test("handoff backs up the signed release paths instead of layout placeholders", async () => {
+  const f = fixture();
+  const releaseArtifacts = {
+    opsdBinary: f.layout.opsdBinary,
+    opsdRunner: f.layout.opsdRunner,
+    controlledMutation: f.layout.controlledMutation,
+  };
+  f.layout.opsdBinary = join(f.layout.promotionRoot, "missing-opsd.js");
+  f.layout.opsdRunner = join(f.layout.promotionRoot, "missing-run-opsd.sh");
+  f.layout.controlledMutation = join(f.layout.promotionRoot, "missing-controlled-mutation.mjs");
+  await runControlledMutation("handoff", options(f, { validateCandidate: async () => {} }));
+  for (const [key, source] of Object.entries(releaseArtifacts)) {
+    assert.equal(
+      readFileSync(join(f.layout.backupRoot, `${key}.bin`), "utf8"),
+      readFileSync(source, "utf8"),
+    );
+  }
 });
 
 test("rollback restores observe config and the exact legacy controller family", async () => {

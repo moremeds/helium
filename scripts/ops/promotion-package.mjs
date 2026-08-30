@@ -129,6 +129,13 @@ function resolvedLayout(layout, promotion) {
   return {
     ...layout,
     opsdBinary: join(promotion.release.dir, "plugins", "ops-agent", "lib", "bin", "opsd.js"),
+    opsdRunner: join(promotion.release.dir, "scripts", "ops", "run-opsd.sh"),
+    controlledMutation: join(
+      promotion.release.dir,
+      "scripts",
+      "ops",
+      "controlled-mutation.mjs",
+    ),
   };
 }
 
