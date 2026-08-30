@@ -40,6 +40,7 @@ function fixture() {
       },
     },
     now: () => now,
+    audit: () => {},
   });
   const work = WorkOrderSchema.parse({
     id: "work-1",
@@ -67,6 +68,18 @@ const override = (targetRef: string) => ({
 });
 
 describe("RoutingService", () => {
+  it("requires an audit sink before it can issue any lease", () => {
+    const catalog = new CapabilityCatalog();
+    const leases = new LeaseStore();
+    expect(
+      () =>
+        new RoutingService({
+          catalog,
+          leases,
+          policy: { policyVersion: "policy-v1", roles: {} },
+        } as never),
+    ).toThrow(/audit sink/i);
+  });
   it("uses configured preference/fallback and issues the ordinary lease", () => {
     const { service, work } = fixture();
     const routed = service.route({

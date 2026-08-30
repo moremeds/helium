@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { invokeCodex } from "./invoke.js";
 
-function fakeCodex(): { dir: string; capture: string } {
+function fakeCodex(message = "CODEX_OK"): { dir: string; capture: string } {
   const dir = mkdtempSync(join(tmpdir(), "helium-codex-bin-"));
   const capture = join(dir, "argv.json");
   const bin = join(dir, "codex");
@@ -13,7 +13,7 @@ function fakeCodex(): { dir: string; capture: string } {
     [
       "#!/bin/sh",
       `printf '%s\\n' \"$@\" > \"${capture}\"`,
-      `echo '{"type":"item.completed","item":{"type":"agent_message","text":"CODEX_OK"}}'`,
+      `echo '${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: message } })}'`,
       `echo '{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":3}}'`,
     ].join("\n"),
   );
@@ -164,5 +164,24 @@ describe("invokeCodex", () => {
         mcpConfigPath,
       }),
     ).rejects.toThrow(/configured MCP server/i);
+  });
+
+  it("does not classify successful answer text about quotas as provider exhaustion", async () => {
+    const { dir } = fakeCodex("The quota and rate-limit policy is documented here.");
+    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
+    const out = await invokeCodex({
+      model: "gpt-5.6-sol",
+      effort: "high",
+      prompt: "EXPLAIN",
+      cwd: workspace,
+      timeoutMs: 5_000,
+      sandbox: "read-only",
+      env: { PATH: dir },
+      allowedTools: [],
+    });
+    expect(out).toMatchObject({
+      ok: true,
+      text: "The quota and rate-limit policy is documented here.",
+    });
   });
 });

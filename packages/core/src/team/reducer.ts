@@ -310,9 +310,7 @@ export function reduceTeam(
             task.state = dependenciesComplete(team, task.dependsOn) ? "ready" : "pending";
           }
         }
-        if (event.payload.patch.state !== undefined) task.state = event.payload.patch.state;
         task.revision = event.payload.revision;
-        if (task.state === "completed") refreshReadyTasks(team);
         break;
       }
 

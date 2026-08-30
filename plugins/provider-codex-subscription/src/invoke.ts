@@ -285,7 +285,7 @@ export async function invokeCodex(input: {
         },
       });
     });
-    child.on("close", () => {
+    child.on("close", (code) => {
       const events = parseEvents(stdout);
       const agentMessages = events
         .map((event) =>
@@ -320,6 +320,10 @@ export async function invokeCodex(input: {
         finish({ ok: false, classification: terminal, runtimeSnapshot });
         return;
       }
+      if (code === 0 && completed !== undefined && text !== undefined) {
+        finish({ ok: true, text, runtimeSnapshot });
+        return;
+      }
       const blob = `${stderr}\n${stdout}`;
       if (QUOTA_RE.test(blob)) {
         const retryAfter = RETRY_RE.exec(blob)?.[1];
@@ -331,11 +335,7 @@ export async function invokeCodex(input: {
         });
         return;
       }
-      finish(
-        text === undefined
-          ? { ok: false, classification: "error", runtimeSnapshot }
-          : { ok: true, text, runtimeSnapshot },
-      );
+      finish({ ok: false, classification: "error", runtimeSnapshot });
     });
   });
 }

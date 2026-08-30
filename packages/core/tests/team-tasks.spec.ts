@@ -62,8 +62,8 @@ describe("TaskGraph", () => {
       { id: "b", ownerAgentId: "lead", dependsOn: [], acceptance: { outputSchema: "b/v1" } },
       0,
     )).toThrow(/stale graph revision/);
-    graph.update("a", 1, { state: "running" });
-    expect(() => graph.update("a", 1, { state: "needs-input" })).toThrow(/stale task revision/);
+    graph.update("a", 1, { dependsOn: [] });
+    expect(() => graph.update("a", 1, { dependsOn: [] })).toThrow(/stale task revision/);
   });
 
   it("rejects cycles introduced by an update", () => {
@@ -100,10 +100,11 @@ describe("TaskGraph", () => {
     expect(graph.get("a").lease).toBeUndefined();
   });
 
-  it("rejects an update after a task becomes terminal", () => {
+  it("rejects direct state transitions that bypass leasing and execution", () => {
     const { graph } = setup();
     graph.add({ id: "a", ownerAgentId: "lead", dependsOn: [], acceptance: { outputSchema: "a/v1" } }, 0);
-    graph.update("a", 1, { state: "completed" });
-    expect(() => graph.update("a", 2, { state: "running" })).toThrow(/already terminal/);
+    expect(() =>
+      graph.update("a", 1, { state: "completed" } as never),
+    ).toThrow(/state transitions require/i);
   });
 });

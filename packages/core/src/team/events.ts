@@ -105,7 +105,6 @@ export const TaskDefinitionSchema = z.strictObject({
 export type TaskDefinition = z.infer<typeof TaskDefinitionSchema>;
 
 export const TaskPatchSchema = z.strictObject({
-  state: z.enum(TASK_STATES).optional(),
   dependsOn: z.array(TeamIdSchema).max(500).optional(),
 });
 export type TaskPatch = z.infer<typeof TaskPatchSchema>;

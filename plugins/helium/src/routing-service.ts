@@ -43,13 +43,16 @@ export class RoutingService {
     leases: LeaseStore;
     policy: SelectionPolicy;
     now?: () => Date;
-    audit?: (record: RoutingAuditRecord) => void;
+    audit: (record: RoutingAuditRecord) => void;
   }) {
     this.#catalog = input.catalog;
     this.#leases = input.leases;
     this.#policy = input.policy;
     this.#now = input.now ?? (() => new Date());
-    this.#audit = input.audit ?? (() => {});
+    if (typeof input.audit !== "function") {
+      throw new Error("routing audit sink is required");
+    }
+    this.#audit = input.audit;
   }
 
   route(input: {

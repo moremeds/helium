@@ -54,7 +54,10 @@ export class TaskGraph {
   }
 
   update(taskId: string, expectedRevision: number, patch: TaskPatch): TaskProjection {
-    if (patch.state === undefined && patch.dependsOn === undefined) {
+    if ("state" in (patch as object)) {
+      throw new Error("task state transitions require lease or execution events");
+    }
+    if (patch.dependsOn === undefined) {
       throw new Error("task update patch is empty");
     }
     const team = this.#team();
@@ -135,4 +138,3 @@ export class TaskGraph {
     };
   }
 }
-

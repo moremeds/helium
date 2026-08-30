@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -240,6 +240,35 @@ describe("dispatch", () => {
     });
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
+    expect(seen.every((workspace) => !existsSync(workspace))).toBe(true);
+  });
+
+  it("removes the owned workspace after a failed executor settles", async () => {
+    const registry = new ExecutorRegistry();
+    const leases = new LeaseStore();
+    let seen = "";
+    registry.register(
+      stub("a", "in-process", (async (
+        _w: WorkOrder,
+        _s: AbortSignal,
+        context: ExecutionContext,
+      ) => {
+        seen = context.workspace;
+        writeFileSync(join(seen, "partial.txt"), "partial");
+        throw new Error("provider failed");
+      }) as Executor["run"]),
+      conformanceAtFloor(ExecutionTargetId("a")),
+    );
+    await expect(
+      registry.run({
+        work: work(),
+        lease: leaseFor(leases, "a"),
+        leases,
+        ...dirs(),
+        now,
+      }),
+    ).rejects.toThrow(/provider failed/);
+    expect(existsSync(seen)).toBe(false);
   });
 
   it("drains every registered executor", async () => {
