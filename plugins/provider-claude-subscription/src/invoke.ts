@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeProviderProcessReceipt } from "@helium/provider-sdk/process-receipt";
+import {
+  ProviderProcessExitedBeforeReceiptError,
+  writeProviderProcessReceipt,
+} from "@helium/provider-sdk/process-receipt";
 import type { ClaudeEffort } from "./catalog.js";
 
 export type ClaudeClassification =
@@ -123,7 +126,7 @@ export async function invokeClaude(
       });
       return;
     }
-    let receipt;
+    let receipt: { clear(): void } = { clear() {} };
     try {
       receipt = writeProviderProcessReceipt({
         workspace: input.cwd,
@@ -131,19 +134,30 @@ export async function invokeClaude(
         provider: "claude-subscription",
       });
     } catch (error) {
-      child.on("error", () => {});
-      killTree(child, "SIGKILL");
-      resolve({
-        ok: false,
-        classification: "error",
-        raw: { receiptError: error instanceof Error ? error.message : String(error) },
-        runtimeSnapshot: {
-          requestedModel: input.model,
-          ...(input.effort === undefined ? {} : { requestedEffort: input.effort, effectiveEffort: input.effort }),
-          modelUsage: {},
-        },
-      });
-      return;
+      if (error instanceof ProviderProcessExitedBeforeReceiptError) {
+        // The close handler still owns the already-buffered provider result.
+      } else {
+        child.on("error", () => {});
+        killTree(child, "SIGKILL");
+        resolve({
+          ok: false,
+          classification: "error",
+          raw: {
+            receiptError: error instanceof Error ? error.message : String(error),
+          },
+          runtimeSnapshot: {
+            requestedModel: input.model,
+            ...(input.effort === undefined
+              ? {}
+              : {
+                  requestedEffort: input.effort,
+                  effectiveEffort: input.effort,
+                }),
+            modelUsage: {},
+          },
+        });
+        return;
+      }
     }
     let stdout = "";
     let stderr = "";

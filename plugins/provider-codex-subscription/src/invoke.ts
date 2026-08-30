@@ -1,6 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { writeProviderProcessReceipt } from "@helium/provider-sdk/process-receipt";
+import {
+  ProviderProcessExitedBeforeReceiptError,
+  writeProviderProcessReceipt,
+} from "@helium/provider-sdk/process-receipt";
 import type { CodexEffort } from "./catalog.js";
 
 export type CodexClassification =
@@ -262,7 +265,7 @@ export async function invokeCodex(input: {
       });
       return;
     }
-    let receipt;
+    let receipt: { clear(): void } = { clear() {} };
     try {
       receipt = writeProviderProcessReceipt({
         workspace: input.cwd,
@@ -270,20 +273,29 @@ export async function invokeCodex(input: {
         provider: "codex-subscription",
       });
     } catch (error) {
-      child.on("error", () => {});
-      killTree(child, "SIGKILL");
-      resolve({
-        ok: false,
-        classification: "error",
-        runtimeSnapshot: {
-          requestedModel: input.model,
-          requestedEffort: input.effort,
-          effectiveEffort: input.effort,
-          usage: {},
-          events: [{ receiptError: error instanceof Error ? error.message : String(error) }],
-        },
-      });
-      return;
+      if (error instanceof ProviderProcessExitedBeforeReceiptError) {
+        // The close handler still owns the already-buffered provider result.
+      } else {
+        child.on("error", () => {});
+        killTree(child, "SIGKILL");
+        resolve({
+          ok: false,
+          classification: "error",
+          runtimeSnapshot: {
+            requestedModel: input.model,
+            requestedEffort: input.effort,
+            effectiveEffort: input.effort,
+            usage: {},
+            events: [
+              {
+                receiptError:
+                  error instanceof Error ? error.message : String(error),
+              },
+            ],
+          },
+        });
+        return;
+      }
     }
     let stdout = "";
     let stderr = "";

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PROCESS_RECEIPT_FILE,
+  ProviderProcessExitedBeforeReceiptError,
   reapOrphanProviderProcesses,
   writeProviderProcessReceipt,
 } from "../src/process-receipt.js";
@@ -29,6 +30,20 @@ function stubbornChild() {
 }
 
 describe("provider process receipts", () => {
+  it("distinguishes a child that finished before receipt capture from a receipt failure", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-process-reaper-"));
+    const child = spawn(process.execPath, ["-e", ""], { stdio: "ignore" });
+    if (child.pid === undefined) throw new Error("missing child pid");
+    await new Promise<void>((resolve) => child.once("exit", () => resolve()));
+    expect(() =>
+      writeProviderProcessReceipt({
+        workspace: join(root, "work", "fast-attempt"),
+        pid: child.pid!,
+        provider: "fixture",
+      }),
+    ).toThrow(ProviderProcessExitedBeforeReceiptError);
+  });
+
   it("reaps a matching orphan process group and removes its owned workspace", async () => {
     const root = mkdtempSync(join(tmpdir(), "helium-process-reaper-"));
     const workspace = join(root, "work", "attempt-1");

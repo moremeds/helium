@@ -30,6 +30,13 @@ export interface ProviderProcessReceiptHandle {
   clear(): void;
 }
 
+export class ProviderProcessExitedBeforeReceiptError extends Error {
+  constructor(pid: number) {
+    super(`provider process ${pid} exited before its receipt was recorded`);
+    this.name = "ProviderProcessExitedBeforeReceiptError";
+  }
+}
+
 export interface ReapOutcome {
   path: string;
   pid: number;
@@ -75,7 +82,7 @@ export function writeProviderProcessReceipt(input: {
   if (input.provider.trim() === "") throw new Error("provider name must not be empty");
   const observed = identityHash(input.pid);
   if (observed === undefined) {
-    throw new Error(`provider process ${input.pid} exited before its receipt was recorded`);
+    throw new ProviderProcessExitedBeforeReceiptError(input.pid);
   }
   mkdirSync(input.workspace, { recursive: true, mode: 0o700 });
   const path = join(input.workspace, PROCESS_RECEIPT_FILE);
