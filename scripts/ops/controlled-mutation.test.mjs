@@ -408,6 +408,46 @@ test("approve-cycle proof waits for the fresh zero-action condition", async () =
   assert.equal(polls, 3);
 });
 
+test("approve-cycle proof timestamps the event snapshot after reading it", async () => {
+  const f = fixture();
+  writeFileSync(f.layout.eventsPath, "");
+  const cycleAt = new Date(NOW.getTime() + 1);
+  let clockReads = 0;
+  await waitForFreshZeroActionCycle(f.layout, NOW, () => {
+    clockReads += 1;
+    if (clockReads === 1) {
+      writeFileSync(f.layout.eventsPath, `${JSON.stringify({ record: {
+        at: cycleAt.toISOString(),
+        type: "controller-cycle-recorded",
+        controllerId: "com.helium.opsd",
+        releaseRef: f.promotion.release.dir,
+        observationCount: 1,
+        collectionFailureCount: 0,
+      } })}\n`, { flag: "a" });
+      return NOW;
+    }
+    return cycleAt;
+  }, {
+    timeoutMs: 100,
+    pollIntervalMs: 1,
+    sleep: async () => {},
+  });
+  assert.equal(clockReads, 2);
+});
+
+test("approve-cycle proof ignores only an incomplete concurrent tail", async () => {
+  const f = fixture();
+  writeFileSync(f.layout.eventsPath, `${JSON.stringify({ record: {
+    at: NOW.toISOString(),
+    type: "controller-cycle-recorded",
+    controllerId: "com.helium.opsd",
+    releaseRef: f.promotion.release.dir,
+    observationCount: 1,
+    collectionFailureCount: 0,
+  } })}\n{"hash":`);
+  await waitForFreshZeroActionCycle(f.layout, NOW, () => NOW);
+});
+
 test("approve-cycle proof remains bounded and refuses any action", async () => {
   const timeout = fixture();
   writeFileSync(timeout.layout.eventsPath, "");
