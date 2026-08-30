@@ -1,0 +1,49 @@
+Helium Ops Phase D container-only wrapper staging
+captured_at=2026-08-30T02:26:17Z
+capture_date_hkt=2026-08-30
+source_commit=a8b94a0
+
+candidate.path=/Users/moremeds/projects/helium-ops-candidates/a8b94a0
+candidate.active=false
+collector.active_candidate=/Users/moremeds/projects/helium-ops-candidates/e6b0a87
+
+wrapper.source=scripts/ops/actions/trading-stack-reconcile.mjs
+wrapper.source_sha256=15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074
+wrapper.installer=scripts/ops/actions/install-action-wrapper.mjs
+wrapper.installer_sha256=82dfd99cfef5e5204089fba613a10cb47c5b85e5de291545f98d3e1c863c66a9
+wrapper.target=/Users/moremeds/.helium/ops/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs
+wrapper.target_sha256=15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074
+wrapper.target_owner=moremeds uid=501
+wrapper.target_mode=0500
+wrapper.directory_mode=0700
+wrapper.invoked=false
+
+delegate.path=/Users/moremeds/trading-stack/scripts/reconcile.sh
+delegate.sha256=3da35c87a76a90a55669c5e86db038e92fb21f6ff737526a0a1d6dc1c613da2e
+delegate.argv=--containers
+public.argv=--scope containers --pull false
+delegate.invoked=false
+
+opsd.config_sha256=6ed49b473085d20820706bedbaa60dc6c48594a57a95aee97393220765ed40b1
+opsd.config_changed=false
+opsd.state=running
+opsd.runs=1
+opsd.last_exit_code=never_exited
+opsd.latest_full_cycle.at=2026-08-30T02:24:34.566Z
+opsd.latest_full_cycle.seq=3451
+opsd.latest_full_cycle.observations=43
+opsd.latest_full_cycle.collection_failures=0
+opsd.action_events=0
+
+deadman.runs=94
+deadman.last_exit_code=0
+deadman.stderr_bytes=0
+deadman.latest=opsd fresh: last observation 24s ago (2026-08-30T02:24:30.859Z)
+
+authority.entries=0
+executor.active_registration=false
+sop.active_reference=false
+mutation_owner.colima=external
+result=PARTIAL
+reason=exact wrapper bytes are staged at a private content-addressed path and the branch registration pins that identity; the active e6b0a87 collector does not load this registration, no SOP references the executor, no authority grant exists, ownership remains external, and no wrapper or delegated action was invoked
+rollback=remove only the exact derived wrapper file and its two empty installer-owned directories; the source remains recoverable from candidate a8b94a0

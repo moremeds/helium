@@ -24,6 +24,8 @@ const reconcileWrapper = join(
   root,
   "scripts/ops/actions/trading-stack-reconcile.mjs",
 );
+const stagedReconcileWrapper =
+  "/Users/moremeds/.helium/ops/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs";
 
 const executorIds = [
   "trading-stack-reconcile",
@@ -93,13 +95,27 @@ describe("initial operations script inventory", () => {
     expect(inventory).toContain("AC#1");
   });
 
-  it("keeps every undeployed executor registration fail-closed", () => {
+  it("pins the staged wrapper while unresolved registrations fail closed", () => {
     const raw = executorIds.map((id) => yaml(join(executorDir, `${id}.yaml`)));
     const scripts = raw.map((value) => RegisteredScriptSchema.parse(value));
     const registry = ScriptRegistry.load(raw);
     expect(scripts.map((script) => script.executorId).sort()).toEqual([...executorIds].sort());
     for (const script of scripts) {
-      expect(script.path).toMatch(/^\/__HELIUM_UNCERTIFIED__\//);
+      if (script.executorId === "trading-stack-reconcile") {
+        expect(script).toMatchObject({
+          path: stagedReconcileWrapper,
+          identity: {
+            kind: "sha256",
+            value: createHash("sha256")
+              .update(readFileSync(reconcileWrapper))
+              .digest("hex"),
+          },
+          cwd: "/Users/moremeds/trading-stack",
+          expectedOwnerUid: 501,
+        });
+      } else {
+        expect(script.path).toMatch(/^\/__HELIUM_UNCERTIFIED__\//);
+      }
       expect(registry.verifyIdentity(script)).toMatchObject({
         ok: false,
         reason: "script-missing",
@@ -121,7 +137,9 @@ describe("initial operations script inventory", () => {
     expect(entry).toContain(
       "- Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh`",
     );
-    expect(entry).toContain("- Deployment state: not deployed");
+    expect(entry).toContain(
+      "- Deployment state: staged at the immutable path; not loaded by the active e6b0a87 collector and never invoked",
+    );
     expect(entry).toContain(
       `- Wrapper source identity: SHA-256 \`${createHash("sha256")
         .update(readFileSync(reconcileWrapper))

@@ -432,18 +432,20 @@ claims:
     evidencePolicyVersion: p0-1
     verification:
       verifier: command
-      command: "identity capture complete; certification remains not runnable because no inspected legacy script matches the registered exact argv/blast-radius contract and no drill/signature exists"
-      toolVersion: "mini macOS 26.5.1; node 25.9.0"
+      command: "node --test scripts/ops/actions/install-action-wrapper.test.mjs scripts/ops/actions/trading-stack-reconcile.test.mjs && pnpm exec vitest run --project unit plugins/ops-agent/tests/script-certification.spec.ts; read-only mini staging verification recorded in docs/evidence/p2.5a/phase-d-action-wrapper-2026-08-30.log"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml:21,49); pnpm 11.24.0; vitest 3.2.7; mini macOS 26.5.1; mini node 25.9.0"
       decision: inconclusive
     artifacts:
       - path: "docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log"
         sha256: "df10e33744ed5d757d060ab4c7e611d48cdeb4f1d967561792a94b344f567578"
-    baseline: "docs/ops/script-inventory.md and the sentinel executor/SOP registrations committed on feat/ops-phase-d."
-    reproduction: "Identity capture is recorded. Certification remains blocked until purpose-built exact wrappers and runnable postcondition probes exist, the ownership handoff is reviewed, the controlled drill passes, and the operator signs off-mini."
-    failures: "UIDs, paths, hashes, release targets and external controller labels were captured. The legacy trading-stack and Livewire interfaces do not match the registered exact SOP contracts and were deliberately not promoted."
+      - path: "docs/evidence/p2.5a/phase-d-action-wrapper-2026-08-30.log"
+        sha256: "ef129068416634f5a7575eb1de439909ce64617ba7aca2c108e36f0fd883cc38"
+    baseline: "docs/ops/script-inventory.md, the two remaining sentinel registrations, and the content-addressed trading-stack wrapper registration committed on feat/ops-phase-d."
+    reproduction: "Run the wrapper/installer contracts and script-certification test, then compare the staged mini path, hash, owner and mode with docs/evidence/p2.5a/phase-d-action-wrapper-2026-08-30.log. Certification remains blocked until exact live postcondition probes and an SOP exist, the ownership handoff is reviewed, the controlled drill passes, and the operator signs off-mini."
+    failures: "The exact container-only wrapper is staged and the branch registration pins its immutable path, hash and UID, but the active e6b0a87 collector does not load it. No SOP references it, no action was invoked, the other two executor identities remain sentinels, and live ownership remains external or none."
     status: BLOCKED
-    limitation: "Task 16 is not complete. The authority manifest remains empty, production mutation owners remain external or none, executor identities are sentinels, and no controlled drill or operator signature exists."
-    nextGate: "Author/review purpose-built wrappers and live postcondition probes; then reviewed ownership handoff, controlled drill, and off-mini signature."
+    limitation: "Task 16 is not complete. Staging and registering one exact wrapper closes executable identity only; the active collector still has an empty authority manifest, production mutation owners remain external or none, two executor identities remain sentinels, and no live SOP, controlled drill or operator signature exists."
+    nextGate: "Build and review the registered live postcondition probe inventory and exact container-reconcile SOP while ownership stays external; then resolve the remaining Livewire and Colima wrappers before any reviewed ownership handoff, controlled drill or off-mini signature."
 
   - id: P2.5A-OBSERVE-PACKAGING
     assertion: "The observe-only macOS package is private, explicitly authorized, reversible, release-isolated, fail-closed on authority and capable of independent dead-man monitoring."

@@ -1,8 +1,8 @@
 executorId: trading-stack-reconcile
-path: /__HELIUM_UNCERTIFIED__/trading-stack-reconcile
+path: /Users/moremeds/.helium/ops/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs
 identity:
   kind: sha256
-  value: "0000000000000000000000000000000000000000000000000000000000000000"
+  value: "15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074"
 argvSchema:
   id: trading-stack-reconcile-argv-v1
   params:
@@ -12,9 +12,9 @@ argvSchema:
     - flag: --pull
       valuePattern: "false"
       required: true
-cwd: /__HELIUM_UNCERTIFIED__/trading-stack
+cwd: /Users/moremeds/trading-stack
 environmentProfile:
-  PATH: /usr/bin:/bin:/usr/sbin:/sbin
+  PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 timeoutMs: 120000
 maxOutputBytes: 65536
-expectedOwnerUid: 0
+expectedOwnerUid: 501

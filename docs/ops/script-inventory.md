@@ -10,10 +10,10 @@ configuration/state writes remained frozen until the separately recorded
 weekend commissioning waiver. That waiver permits only the isolated
 empty-authority observe-only install and does not certify any script below.
 
-All three executor registrations therefore retain the impossible
-`/__HELIUM_UNCERTIFIED__/` prefix. A reviewed container-only reconcile wrapper
-now exists in this repository, but it has not been installed at an immutable,
-content-addressed production path and has never been invoked on the mini. The
+The unresolved Colima-restart and Livewire registrations retain the impossible
+`/__HELIUM_UNCERTIFIED__/` prefix. The reviewed container-only reconcile
+wrapper is now staged at an immutable, content-addressed production path but is
+not loaded by the active collector and has never been invoked on the mini. The
 committed authority manifest has no entries, and current mutation ownership is
 `external` or `none`, so every mutating SOP is still held at effective
 `observe`.
@@ -29,11 +29,12 @@ hash immediately before signing; a structurally uncertified SOP cannot enter
 the manifest.
 
 Executable ownership is likewise explicit: live inspection confirmed operator
-UID 501. All sentinel registrations retain `expectedOwnerUid: 0`; the
-container-only wrapper independently pins UID 501 plus the mode, SHA-256 and
-path of the legacy script it delegates to. It remains non-executable until a
-reviewed install puts the exact wrapper bytes at an immutable path and updates
-the executor registration in the same reviewed change.
+UID 501. The two sentinel registrations retain `expectedOwnerUid: 0`; the
+container-only registration pins UID 501 and its staged wrapper hash, while the
+wrapper independently pins the mode, SHA-256 and path of the legacy script it
+delegates to. This closes executable identity only. With no SOP referencing the
+executor, no signed grant and external Colima mutation ownership, it remains
+outside every executable action path.
 The signer also requires a separately exported `--registered-probes` inventory
 from the actual host probe registry; it never derives runnable probe ids from
 the submitted check files. Until every postcondition probe is present in that
@@ -70,16 +71,17 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
 - Repository owner: Helium wrapper; pinned trading-stack target outside this repository
 - Deployment owner: UID 501
-- Exact path: `/__HELIUM_UNCERTIFIED__/trading-stack-reconcile`; remains a non-deployable sentinel
-- Release or hash identity: unresolved until immutable wrapper installation; executor digest remains the zero sentinel
+- Exact path: `/Users/moremeds/.helium/ops/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs`
+- Release or hash identity: SHA-256 `15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074`
 - Wrapper source: `scripts/ops/actions/trading-stack-reconcile.mjs`
 - Wrapper installer: `scripts/ops/actions/install-action-wrapper.mjs`
 - Wrapper source identity: SHA-256 `15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074`
 - Planned immutable path: `$OPS_ROOT/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs`
 - Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh` owned by UID 501, non-group/world-writable, SHA-256 `3da35c87a76a90a55669c5e86db038e92fb21f6ff737526a0a1d6dc1c613da2e`
-- Deployment state: not deployed
+- Deployment state: staged at the immutable path; not loaded by the active e6b0a87 collector and never invoked
+- Staging evidence: `docs/evidence/p2.5a/phase-d-action-wrapper-2026-08-30.log`
 - Argv schema: `trading-stack-reconcile-argv-v1`; fixed `--scope containers --pull false`
-- Working directory: `/__HELIUM_UNCERTIFIED__/trading-stack` until deployment
+- Working directory: `/Users/moremeds/trading-stack`
 - Environment profile: the wrapper internally fixes HOME, Colima Docker socket, trading-stack root, and bounded system/Homebrew PATH; no inherited environment
 - Preflight: wrapper and delegated script identities match; Docker reachable; DATA_LAKE mount identity correct; no image pull
 - Postconditions: exact expected container set and business readiness
@@ -88,7 +90,7 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 - Cooldown: 600000 ms
 - Blast radius: container-only reconcile; no images, volumes, mounts, or IB Gateway
 - Rollback or compensation: stop and return to the existing operator runbook; no blind retry
-- Drill state: fake delegated-script contract passes; wrapper is not deployed and no production command has run
+- Drill state: fake delegated-script contract passes; wrapper is staged but no production command has run
 - Mutation owner: `colima=external` under
   `com.moremeds.colima-runtime-watchdog`, with
   `com.moremeds.colima-after-datalake` also competing
