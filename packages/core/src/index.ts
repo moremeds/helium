@@ -48,3 +48,4 @@ export * from "./evidence/ledger.js";
 export * from "./evidence/manifest.js";
 export * from "./team/events.js";
 export * from "./team/reducer.js";
+export * from "./team/store.js";
