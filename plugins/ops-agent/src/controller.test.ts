@@ -175,16 +175,24 @@ function registry(
 }
 
 function failingObservation(sequence: number): Observation {
+  return observation(sequence, "failed", NOW);
+}
+
+function observation(
+  sequence: number,
+  state: "ok" | "failed",
+  observedAt: Date,
+): Observation {
   return {
     version: 1,
     id: `obs-fixture-${sequence}`,
     componentId: component.id,
     probeId: "fixture.integrity.v1",
-    observedAt: NOW.toISOString(),
-    expiresAt: new Date(NOW.getTime() + 60_000).toISOString(),
-    state: "failed",
+    observedAt: observedAt.toISOString(),
+    expiresAt: new Date(observedAt.getTime() + 60_000).toISOString(),
+    state,
     dimension: "integrity",
-    value: { integrity: false },
+    value: { integrity: state === "ok" },
     evidenceRefs: [`artifact://fixture/raw-${sequence}`],
     parserVersion: "fixture/1",
   };
@@ -242,6 +250,7 @@ interface HarnessOptions {
   postconditionStateFor?: (
     checks: readonly CheckDefinition[],
   ) => "pass" | "fail" | "unknown";
+  observationStates?: Array<"ok" | "failed">;
 }
 
 function harness(options: HarnessOptions) {
@@ -287,9 +296,13 @@ function harness(options: HarnessOptions) {
     now,
     collect: async (sink) => {
       if (options.emptyRegistry === true) return { observations: [], failures: [] };
-      const observation = failingObservation(++observationSequence);
-      await sink.append(observation);
-      return { observations: [observation], failures: [] };
+      const sequence = ++observationSequence;
+      const state = options.observationStates?.[
+        Math.min(sequence - 1, options.observationStates.length - 1)
+      ] ?? "failed";
+      const sampled = observation(sequence, state, now());
+      await sink.append(sampled);
+      return { observations: [sampled], failures: [] };
     },
     runChecks: async () => ({}),
     sampleChecks: async (checks, phase) => {
@@ -408,6 +421,32 @@ describe("OpsController modes", () => {
     expect(h.store.events.map((event) => event.type)).toContain("action-proposed");
     expect(h.factoryCalls()).toBe(0);
     expect(h.executor.runs).toBe(0);
+  });
+
+  it("allows one fresh attempt budget when a recovered incident recurs", async () => {
+    let nowMs = NOW.getTime();
+    const h = harness({
+      mode: "auto",
+      now: () => new Date(nowMs),
+      observationStates: ["failed", "failed", "failed", "ok", "failed"],
+    });
+
+    await h.controller.tick();
+    nowMs += 61_000;
+    await h.controller.tick();
+    nowMs += 61_000;
+    expect((await h.controller.tick()).actions).toHaveLength(0);
+    nowMs += 61_000;
+    expect((await h.controller.tick()).incidents).toHaveLength(0);
+    nowMs += 61_000;
+    const recurrence = await h.controller.tick();
+
+    expect(recurrence.actions[0]).toMatchObject({
+      disposition: "execute",
+      outcome: "succeeded",
+    });
+    expect(h.executor.runs).toBe(3);
+    expect(h.store.events.filter((event) => event.type === "action-proposed")).toHaveLength(3);
   });
 
   it("approve holds a proposal until a matching signed approval arrives", async () => {

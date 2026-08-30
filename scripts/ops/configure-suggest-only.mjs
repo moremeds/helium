@@ -9,12 +9,13 @@ import {
   lstatSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const COMMANDS = new Set(["preflight", "apply", "restore", "status"]);
 const FLAGS = new Set(["--config", "--release", "--authority-manifest", "--trusted-key"]);
@@ -233,7 +234,8 @@ function parseArgs(argv) {
   };
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] !== undefined &&
+    realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1])) {
   try {
     const { command, input } = parseArgs(process.argv.slice(2));
     process.stdout.write(`${JSON.stringify(runSuggestConfig(command, input), null, 2)}\n`);

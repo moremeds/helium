@@ -49,6 +49,12 @@ export interface AuthorityInput {
   /** One result per referenced check id. A missing entry is not a pass. */
   checkResults: Record<string, CheckResult>;
   history: AttemptRecord[];
+  /**
+   * Start of the current occurrence of this stable incident key. Attempts
+   * before the latest recovered transition do not consume this occurrence's
+   * budget, but they still participate in the cross-occurrence cooldown.
+   */
+  attemptWindowStartedAt?: string;
   now: Date;
   approval?: OperatorApproval;
   /** Required promotion binding for controlled approve-mode execution. */
@@ -107,7 +113,13 @@ export function decideAuthority(input: AuthorityInput): AuthorityDecision {
   const attempts = history.filter(
     (h) => h.sopId === sop.id && h.incidentId === incident.key,
   );
-  if (attempts.length >= sop.maxAttempts) reasons.push("max-attempts");
+  const windowStart = input.attemptWindowStartedAt === undefined
+    ? undefined
+    : Date.parse(input.attemptWindowStartedAt);
+  const budgetAttempts = windowStart === undefined || Number.isNaN(windowStart)
+    ? attempts
+    : attempts.filter((attempt) => Date.parse(attempt.at) > windowStart);
+  if (budgetAttempts.length >= sop.maxAttempts) reasons.push("max-attempts");
 
   const last = attempts
     .map((a) => Date.parse(a.at))
