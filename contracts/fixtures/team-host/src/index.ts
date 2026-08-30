@@ -161,7 +161,7 @@ export function apply(ctx: Context, config: Config): void {
     let cancelled = false;
     void (async () => {
       await ctx.get("loader")?.await();
-      const registry = new ExecutorRegistry();
+      const registry = new ExecutorRegistry({ onResult: () => {} });
       const leases = new LeaseStore();
       const dshTarget = ExecutionTargetId("fixture-dsh-target");
       const processTarget = ExecutionTargetId("fixture-process-target");
@@ -244,6 +244,7 @@ export function apply(ctx: Context, config: Config): void {
           additionalProperties: false,
         }),
         maxDepth: 1,
+        observeResult: () => {},
       });
 
       const completeWork = work("complete", "complete");

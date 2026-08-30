@@ -112,6 +112,7 @@ export class DshTeamHost {
   readonly #mcpConfigPath?: string;
   readonly #outputSchemaFor: (schemaId: string) => object;
   readonly #maxDepth: number;
+  readonly #observeResult: (result: AgentResult) => void;
   readonly #parentHandles = new Map<string, Promise<TeamParentHandle>>();
 
   constructor(input: {
@@ -124,6 +125,7 @@ export class DshTeamHost {
     mcpConfigPath?: string;
     outputSchemaFor(schemaId: string): object;
     maxDepth: number;
+    observeResult(result: AgentResult): void;
   }) {
     if (!Number.isSafeInteger(input.maxDepth) || input.maxDepth < 0) {
       throw new Error("team subagent maxDepth must be a non-negative safe integer");
@@ -137,6 +139,7 @@ export class DshTeamHost {
     this.#mcpConfigPath = input.mcpConfigPath;
     this.#outputSchemaFor = input.outputSchemaFor;
     this.#maxDepth = input.maxDepth;
+    this.#observeResult = input.observeResult;
   }
 
   async run(
@@ -168,11 +171,13 @@ export class DshTeamHost {
       RANK[executor.isolationClass] <
       RANK[work.constraints.minIsolationClass]
     ) {
-      return executor.failureResult(
+      const result = executor.failureResult(
         work,
         "tool-boundary-violation",
         `work requires ${work.constraints.minIsolationClass}; target demonstrates ${executor.isolationClass}`,
       );
+      this.#observeResult(result);
+      return result;
     }
 
     const parent = await this.#parent(teamRunId, signal);
@@ -197,17 +202,21 @@ export class DshTeamHost {
         persona: executor.dsh.persona,
       });
       const terminal = await run.result;
-      return executor.fromSubagentResult(
+      const result = executor.fromSubagentResult(
         work,
         terminal,
         Date.now() - startedAt,
       );
+      this.#observeResult(result);
+      return result;
     } catch (error) {
-      return executor.failureResult(
+      const result = executor.failureResult(
         work,
         signal.aborted ? "cancelled" : "provider-error",
         error instanceof Error ? error.message : String(error),
       );
+      this.#observeResult(result);
+      return result;
     } finally {
       await run?.dispose();
     }

@@ -60,7 +60,8 @@ const processProof = (targetId: ReturnType<typeof ExecutionTargetId>): Conforman
 });
 
 function setup() {
-  const registry = new ExecutorRegistry();
+  const registry = new ExecutorRegistry({ onResult: () => {} });
+  const observed: AgentResult[] = [];
   const leases = new LeaseStore();
   const disposeRun = vi.fn(async () => {});
   const start = vi.fn<TeamSubagentRuntime["start"]>().mockResolvedValue({
@@ -157,6 +158,7 @@ function setup() {
       additionalProperties: false,
     }),
     maxDepth: 1,
+    observeResult: (value) => void observed.push(value),
   });
   return {
     registry,
@@ -168,6 +170,7 @@ function setup() {
     ensure,
     parentDispose,
     processRun,
+    observed,
   };
 }
 
@@ -190,6 +193,7 @@ describe("DshTeamHost", () => {
       new AbortController().signal,
     );
     expect(out.outcome).toBe("completed");
+    expect(fx.observed).toEqual([out]);
     expect(fx.ensure).toHaveBeenCalledTimes(1);
     expect(fx.start).toHaveBeenCalledWith(
       "registered-in-process-provider",
@@ -238,6 +242,7 @@ describe("DshTeamHost", () => {
       outcome: "failed",
       failure: { class: "tool-boundary-violation" },
     });
+    expect(fx.observed).toEqual([out]);
     expect(fx.start).not.toHaveBeenCalled();
     expect(fx.ensure).not.toHaveBeenCalled();
   });

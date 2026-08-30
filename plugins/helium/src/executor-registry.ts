@@ -106,6 +106,11 @@ export interface RegistryRunInput {
 export class ExecutorRegistry {
   readonly #executors = new Map<string, Executor>();
   readonly #conformance = new Map<string, ConformanceRecord>();
+  readonly #onResult: (result: AgentResult) => void;
+
+  constructor(input: { onResult(result: AgentResult): void }) {
+    this.#onResult = input.onResult;
+  }
 
   /**
    * @throws on a duplicate target, on a record issued for a different target,
@@ -188,7 +193,9 @@ export class ExecutorRegistry {
       );
       // Normalized at the boundary: a provider adapter returning a shape core
       // does not accept fails here rather than downstream in the ledger.
-      return AgentResultSchema.parse(result);
+      const parsed = AgentResultSchema.parse(result);
+      this.#onResult(parsed);
+      return parsed;
     } finally {
       // `run()` settles only after the executor's child has quiesced. Remove
       // exactly the UUID workspace this registry created, never its caller-owned root.

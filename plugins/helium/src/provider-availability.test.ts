@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { CapabilityCatalog, ExecutionTargetId } from "@helium/core";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CapabilityCatalog, ExecutionTargetId, type AgentResult } from "@helium/core";
 import { ProviderAvailability } from "./provider-availability.js";
 
 function catalog() {
@@ -20,10 +23,13 @@ function catalog() {
   return value;
 }
 
+const statePath = () =>
+  join(mkdtempSync(join(tmpdir(), "helium-provider-availability-")), "state.json");
+
 describe("ProviderAvailability", () => {
   it("fans a shared quota-domain update out atomically and preserves opaque hints", () => {
     const capabilities = catalog();
-    const availability = new ProviderAvailability(capabilities);
+    const availability = new ProviderAvailability(capabilities, { statePath: statePath() });
     availability.registerDomain("shared-session", [
       ExecutionTargetId("target-a"),
       ExecutionTargetId("target-b"),
@@ -46,7 +52,7 @@ describe("ProviderAvailability", () => {
 
   it("is content-versioned and idempotent, and only an explicit refresh restores", () => {
     const capabilities = catalog();
-    const availability = new ProviderAvailability(capabilities);
+    const availability = new ProviderAvailability(capabilities, { statePath: statePath() });
     availability.registerDomain("shared-session", [ExecutionTargetId("target-a")]);
     const first = availability.publish("shared-session", { state: "unavailable" });
     const duplicate = availability.publish("shared-session", { state: "unavailable" });
@@ -57,5 +63,48 @@ describe("ProviderAvailability", () => {
     expect(restored.changed).toBe(true);
     expect(restored.snapshot.version).not.toBe(first.snapshot.version);
     expect(capabilities.snapshot(new Date()).targets[0]?.available).toBe(true);
+  });
+
+  it("restores a durable exhausted domain on restart before routing", () => {
+    const path = statePath();
+    const firstCatalog = catalog();
+    const first = new ProviderAvailability(firstCatalog, { statePath: path });
+    first.registerDomain("shared-session", [ExecutionTargetId("target-a")]);
+    first.publish("shared-session", { state: "quota-exhausted", retryAfter: "opaque" });
+
+    const restartedCatalog = catalog();
+    const restarted = new ProviderAvailability(restartedCatalog, { statePath: path });
+    restarted.registerDomain("shared-session", [ExecutionTargetId("target-a")]);
+    expect(
+      restartedCatalog.snapshot(new Date()).targets.find((target) => target.targetId === "target-a"),
+    ).toMatchObject({ available: false, availability: { retryAfter: "opaque" } });
+  });
+
+  it("rejects overlapping domains and records executor quota results", () => {
+    const capabilities = catalog();
+    const availability = new ProviderAvailability(capabilities, { statePath: statePath() });
+    availability.registerDomain("shared-session", [ExecutionTargetId("target-a")]);
+    expect(() =>
+      availability.registerDomain("other-session", [ExecutionTargetId("target-a")]),
+    ).toThrow(/already belongs/i);
+
+    const result: AgentResult = {
+      workId: "work-1",
+      outcome: "failed",
+      failure: { class: "quota-exhausted", retryAfter: "opaque-reset" },
+      artifacts: [],
+      usage: { ms: 1 },
+      executionSnapshot: {
+        targetId: ExecutionTargetId("target-a"),
+        providerId: "fixture",
+        model: "fixture",
+        providerVersion: "1",
+        isolationClass: "process",
+        recordedAt: "2026-08-30T00:00:00.000Z",
+      },
+      runtimeMetadata: {},
+    };
+    expect(availability.observe(result).changed).toBe(true);
+    expect(capabilities.snapshot(new Date()).targets[0]?.available).toBe(false);
   });
 });
