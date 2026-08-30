@@ -92,6 +92,58 @@ Track observation freshness, collection failures, incident noise, daemon
 restarts, log rotation, and dead-man delivery. Provider/model availability is
 irrelevant to the deterministic collector path.
 
+## Controlled mutation handoff (not yet commissioned)
+
+The offline readiness branch adds `scripts/ops/controlled-mutation.mjs`, but
+its production signing-key fingerprint is deliberately `UNCOMMISSIONED` until
+Task 7 creates and independently records the real Ed25519 trust root. Therefore
+the tool currently refuses production preflight and cannot be used to shorten
+the seven-day observation gate.
+
+After that gate closes and the signed promotion package is independently
+reviewed, the only accepted sequence is:
+
+1. `preflight` — read-only identity, expiry, label and candidate validation;
+2. `handoff` — fsynced backup, bootout both exact legacy labels, prove absence,
+   switch to the exact approve config, restart only `com.helium.opsd`, then
+   prove a fresh zero-action cycle;
+3. the separately signed one-incident approval and controlled failure drill;
+4. `rollback` — stop approve-mode opsd, restore the backed-up observe config,
+   restore both exact legacy plists/labels, then restart observe-mode opsd.
+
+The tool accepts no path flags or free-form command. It never deletes a source
+plist. Every state-changing step is journaled and fsynced before and after, and
+the fake-host suite injects a crash after every handoff prefix and requires
+rollback convergence.
+
+Before commissioning that key, generate the canonical logical promotion input
+off-mini with `scripts/ops/export-promotion-input.mjs`. The exporter refuses a
+release-commit mismatch, a changed bundle hash, probe-inventory drift,
+non-`opsd` ownership, a stale SOP digest, or an executor/wrapper mismatch. Its
+`0600` output binds the exact release, all promotion files, registered probes,
+owner decision, executor, one-attempt SOP, expiry, and rollback reference.
+
+`sign-authority-manifest.mjs --promotion-input ...` signs the SOP grant together
+with that promotion id and canonical input hash. `sign-approval.mjs` requires
+the same input and refuses any approval whose incident/SOP/digest/promotion/hash
+or attempt differs. Private keys remain on the commissioned operator signing
+host; deployment receives only the public key, signed manifest, signed approval
+and reviewed promotion material.
+
+Stage that canonical input at the fixed
+`~/.helium/ops/promotions/trading-stack-reconcile/promotion-input.json` path.
+On the mini, `promotion-package.mjs export` performs a read-only inventory of
+the exact candidate config, promotion input, signed authority, public key,
+wrapper/delegate, release opsd binary, current opsd plist and both legacy
+plists. Transfer only that unsigned inventory and the canonical promotion input
+to the registered operator workstation. There,
+`promotion-package.mjs sign` checks that the inventory is bound to the same
+release, expiry, rollback reference and promotion-input hash before signing it.
+Return only the signed package to the fixed `promotion-package.json` path. The
+live `preflight` re-hashes every staged artifact, verifies the independent
+signature, and runs the candidate release's own `--check-config` path before
+any launchd write.
+
 ## Rollback and uninstall
 
 Release rollback validates that the target contains both the ops-agent plugin

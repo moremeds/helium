@@ -201,10 +201,20 @@ export function createProductionObservationProbes(
   runtime: ProductionObservationRuntime,
 ): ObservationProbe[] {
   const targets = ProductionObservationTargetsSchema.parse(input);
+  return createUnpacedProductionObservationProbes(targets, runtime)
+    .map((probe) => paceProbe(probe, targets.sampleIntervalMs));
+}
+
+/** Fresh, unpaced snapshots used only for action baseline/postcondition checks. */
+export function createUnpacedProductionObservationProbes(
+  input: ProductionObservationTargets,
+  runtime: ProductionObservationRuntime,
+): ObservationProbe[] {
+  const targets = ProductionObservationTargetsSchema.parse(input);
   if (!isAbsolute(runtime.releaseDir) || !isAbsolute(runtime.nodePath)) {
     throw new Error("production observation runtime paths must be absolute");
   }
-  const probes = [
+  return [
     livewireProbe(targets, runtime),
     argonProbe(targets),
     apexProbe(targets),
@@ -212,7 +222,6 @@ export function createProductionObservationProbes(
     postgresProbe(targets),
     heliumProbe(targets, runtime),
   ];
-  return probes.map((probe) => paceProbe(probe, targets.sampleIntervalMs));
 }
 
 function paceProbe(probe: ObservationProbe, intervalMs: number): ObservationProbe {

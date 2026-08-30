@@ -223,6 +223,7 @@ interface HarnessOptions {
   authority?: SopAuthority;
   manifest?: boolean;
   baselinePassing?: boolean;
+  baselineState?: "pass" | "fail" | "unknown";
   controllerResults?: Array<"clear" | "competing" | "unknown">;
   rivalAppearsDuringBaseline?: boolean;
   graceMs?: number;
@@ -237,6 +238,7 @@ interface HarnessOptions {
   emptyRegistry?: boolean;
   checkExpectedValue?: boolean;
   sampledChecks?: CheckDefinition[][];
+  promotionBinding?: boolean;
   postconditionStateFor?: (
     checks: readonly CheckDefinition[],
   ) => "pass" | "fail" | "unknown";
@@ -295,7 +297,10 @@ function harness(options: HarnessOptions) {
       const checkId = checks[0]?.id ?? check.id;
       if (phase === "baseline") {
         rivalAppeared = options.rivalAppearsDuringBaseline === true;
-        return sample(options.baselinePassing === true ? "pass" : "fail", checkId);
+        return sample(
+          options.baselineState ?? (options.baselinePassing === true ? "pass" : "fail"),
+          checkId,
+        );
       }
       return sample(
         options.postconditionStateFor?.(checks) ??
@@ -336,6 +341,9 @@ function harness(options: HarnessOptions) {
       return executor;
     },
     argvFor: () => [],
+    ...(options.promotionBinding === true
+      ? { promotionId: "fixture-promotion", promotionInputSha256: "b".repeat(64) }
+      : {}),
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     ...(options.graceIntervalMs === undefined
       ? {}
@@ -366,6 +374,9 @@ function signApproval(nonce: string) {
       sopId: "repair-fixture",
       sopVersion: 1,
       sopDigest: digest,
+      promotionId: "fixture-promotion",
+      promotionInputSha256: "b".repeat(64),
+      attempt: 1 as const,
       expiresAt: "2026-08-30T00:10:00.000Z",
     },
   };
@@ -400,7 +411,7 @@ describe("OpsController modes", () => {
   });
 
   it("approve holds a proposal until a matching signed approval arrives", async () => {
-    const h = harness({ mode: "approve", authority: "approve" });
+    const h = harness({ mode: "approve", authority: "approve", promotionBinding: true });
     expect((await h.controller.tick()).actions[0]).toMatchObject({
       disposition: "propose",
       reason: "approval-required",
@@ -489,6 +500,28 @@ describe("OpsController modes", () => {
     );
     expect(h.store.state().actions[result.actions[0]!.actionId!]?.state).toBe(
       "not-needed",
+    );
+  });
+
+  it("refuses an approved mutation when any fresh baseline result is unknown", async () => {
+    const h = harness({
+      mode: "approve",
+      authority: "approve",
+      baselineState: "unknown",
+    });
+    await h.controller.tick();
+    h.approvals.accept(signApproval("approval-unknown-baseline-1"));
+
+    const result = await h.controller.tick();
+
+    expect(result.actions[0]).toMatchObject({
+      disposition: "observe",
+      reason: "baseline-unavailable",
+    });
+    expect(h.factoryCalls()).toBe(0);
+    expect(h.executor.runs).toBe(0);
+    expect(h.store.events.map((event) => event.type)).not.toContain(
+      "action-intent-recorded",
     );
   });
 

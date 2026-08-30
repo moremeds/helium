@@ -512,3 +512,24 @@ claims:
     status: PROVEN
     limitation: "This remains the offline code gate. Live commissioning subsequently began under a separately recorded waiver and is tracked by P2.5A-LIVE-HOST-OBSERVATION; P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
     nextGate: "Keep PR 19 draft while live observe coverage, Task 16 and the controlled drill remain incomplete."
+
+  - id: P2.5A-MUTATION-READINESS-OFFLINE
+    assertion: "The controlled approve-only mutation path is fail-closed, identity-bound, single-attempt, reversibly handed off, and ready for its separately gated live commissioning step."
+    acceptanceBound: "The production fixture is absent; every YAML check maps to a compiled runtime probe; baseline and postcondition samples are fresh and raw-evidence-bearing; unknown baseline refuses mutation; the promotion bundle binds exact executable identity, argv, SOP digest, owner, probe inventory and signed approval to one canonical input; every handoff and rollback interruption prefix converges; and observe/suggest modes cannot reach the executor."
+    assertionClass: deterministic
+    evidencePolicyVersion: p0-1
+    verification:
+      verifier: command
+      command: "pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && bash scripts/ops/install-observe-only.test.sh && node --test scripts/ops/controlled-mutation.test.mjs scripts/ops/export-promotion-input.test.mjs scripts/ops/promotion-package.test.mjs && git diff --check"
+      toolVersion: "node 22.19.0 (pinned in .github/workflows/ci.yml); pnpm 11.24.0; vitest 3.2.7"
+      outputHash: "sha256:753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2"
+      decision: pass
+    artifacts:
+      - path: "docs/evidence/p2.5a/phase-d-mutation-readiness-2026-08-30.log"
+        sha256: "753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2"
+    baseline: "Phase D merge a7879cd5b8150ce806ed90ddccaa7ed107cd324d and the Task 16/post-AC#1 execution attachment in docs/plans/2026-08-30-helium-ops-task16-controlled-mutation.md."
+    reproduction: "Run the focused adversarial sampler/controller/lock/evidence and handoff/rollback suites 20 times, then run the complete command gate recorded above."
+    failures: "None in GitHub Actions run 33291015130 at commit ffadf921c5f24f21c43b035aef4fe2a10abeb07a. The credentialed live-provider contract remained explicitly skipped."
+    status: PROVEN
+    limitation: "This proves offline mutation readiness at PR commit ffadf92 under the pinned Node 22 CI gate. No live mutation, signed production package, final host preflight, or drill has occurred; the production trust key remains UNCOMMISSIONED and P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED."
+    nextGate: "Re-verify this artifact hash in PR CI, merge readiness by PR, then commission the independent key/package and run the final read-only live preflight before any controlled mutation."

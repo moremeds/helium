@@ -1,0 +1,12 @@
+id: colima-container-set
+kind: business
+probe:
+  probeId: colima.container-inventory.v1
+  args: {}
+expect:
+  dimension: expected-set
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 30000
+owner: ops

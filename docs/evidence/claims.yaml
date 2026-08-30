@@ -780,3 +780,26 @@ claims:
         sha256: 5bce667ec30c326386f85ee0199aaa4eef1593b5e3de6bfca62a6abb3f1e5726
       - path: docs/evidence/p2.5a/phase-d-macos-packaging.log
         sha256: 19572ad924b2b8d2df5b9df9a792b52de7ead977a2731d8dc9e504d1afc91a7e
+  - id: P2.5A-MUTATION-READINESS-OFFLINE
+    phase: P2.5a
+    assertion: The controlled approve-only mutation path is fail-closed,
+      identity-bound, single-attempt, reversibly handed off, and ready for its
+      separately gated live commissioning step.
+    assertionClass: deterministic
+    command: pnpm build && pnpm typecheck && pnpm test && pnpm test:contracts && pnpm test:e2e-local && bash scripts/ops/install-observe-only.test.sh && node --test scripts/ops/controlled-mutation.test.mjs scripts/ops/export-promotion-input.test.mjs scripts/ops/promotion-package.test.mjs && git diff --check
+    toolVersion: node 22.19.0 (pinned in .github/workflows/ci.yml); pnpm 11.24.0;
+      vitest 3.2.7
+    decision: pass
+    status: PROVEN
+    limitation: This proves offline mutation readiness at PR commit ffadf92
+      under the pinned Node 22 CI gate. No live mutation, signed production
+      package, final host preflight, or drill has occurred; the production trust
+      key remains UNCOMMISSIONED and
+      P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain BLOCKED.
+    nextGate: Re-verify this artifact hash in PR CI, merge readiness by PR, then
+      commission the independent key/package and run the final read-only live
+      preflight before any controlled mutation.
+    outputHash: sha256:753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2
+    artifacts:
+      - path: docs/evidence/p2.5a/phase-d-mutation-readiness-2026-08-30.log
+        sha256: 753c0f49e6d15091f3fe39cd007c46032e87dfcbc164119648303e475f5868c2

@@ -1,0 +1,98 @@
+Helium Ops Task 16 controlled-mutation readiness — local pre-PR verification
+Recorded at: 2026-08-30T03:45:13Z
+Branch: feat/ops-task16-controlled-mutation
+Commit tested: 7b11154c02e84f5d06755415afeead7b49fdc980
+Runtime: node v26.8.1; pnpm 11.24.0; vitest 3.2.7
+
+Focused adversarial repetition
+--------------------------------
+Command group 1:
+  bash scripts/test-repeat.sh 20 pnpm exec vitest run --project unit \
+    plugins/ops-agent/src/production-checks.test.ts \
+    plugins/ops-agent/src/controller.test.ts \
+    packages/core/tests/operations-component-lock.spec.ts \
+    plugins/ops-agent/src/recovery-evidence-store.test.ts
+Result: PASS — 20 complete repetitions; 37 tests per repetition; zero failures.
+
+Command group 2:
+  bash scripts/test-repeat.sh 20 node --test \
+    scripts/ops/controlled-mutation.test.mjs \
+    scripts/ops/promotion-package.test.mjs
+Result: PASS — 20 complete repetitions; 10 tests per repetition; zero failures.
+The repeated mutation-tool suite includes every handoff interruption prefix,
+every rollback interruption prefix, identity/path ambiguity, future package,
+extra controller, missing backup, and post-handoff identity drift.
+
+Full local gate
+---------------
+Commands:
+  pnpm build
+  pnpm typecheck
+  pnpm test
+  pnpm test:contracts
+  pnpm test:e2e-local
+  bash scripts/ops/install-observe-only.test.sh
+  node --test scripts/ops/controlled-mutation.test.mjs scripts/ops/export-promotion-input.test.mjs scripts/ops/promotion-package.test.mjs
+  git diff --check
+Result: PASS
+  - 12 workspace build/typecheck targets passed.
+  - 87 unit files / 859 tests passed.
+  - 12 contract files / 85 tests passed; the one credentialed live-provider
+    contract remained explicitly skipped.
+  - 1 local E2E file / 2 tests passed.
+  - observe-only installer, freeze/waiver, dead-man, release-cycle and rollback
+    packaging checks passed.
+  - controlled mutation, promotion-input and deployment-package tools: 12 tests passed.
+  - diff whitespace check passed.
+
+Evidence boundary
+-----------------
+This is a local pre-PR verification record, not a CI output artifact. It does
+not satisfy the repository policy that pins a decided offline claim to the
+Node 22 CI run. The offline readiness claim remains unpromoted until the PR CI
+run passes and its immutable output is recorded.
+
+No live mutation, launchd lifecycle command, service restart, collector
+restart, provider call, or Mac mini write occurred during this verification.
+The production trust key is still UNCOMMISSIONED. The signed deployment
+package, final live preflight, controlled drill, and seven-day observation gate
+remain outstanding. P2.5A-LIVE-SCRIPT-CERTIFICATION and P2.5A-LIVE-DRILL remain
+BLOCKED.
+
+Pinned Node 22 PR CI gate
+-------------------------
+Source: GitHub Actions run 33291015130
+URL: https://github.com/moremeds/helium/actions/runs/33291015130
+Event: pull_request
+Branch: feat/ops-task16-controlled-mutation
+Commit: ffadf921c5f24f21c43b035aef4fe2a10abeb07a
+Created: 2026-08-30T03:46:05Z
+Completed: 2026-08-30T03:48:39Z
+Conclusion: success
+
+Job 99202524895 — check — success
+  - install, build, typecheck: success
+  - unit: 87 files / 859 tests passed
+  - local E2E: 1 file / 2 tests passed
+  - tenant dead-man: 6 tests passed
+  - global dead-man: ALL PASS
+  - offline ops signing and release-boundary tests: 30 passed
+  - adversarial ops boundary repetition: 20 complete repetitions of
+    30 contract tests; zero failures
+  - fake executor package neutrality: PASS
+
+Job 99202524681 — contracts — success
+  - install and build: success
+  - contracts: 12 files / 85 tests passed
+  - one credentialed live-provider contract explicitly skipped
+
+Job 99202524806 — ops-macos-offline — success
+  - install and build: success
+  - observe-only installer/freeze/waiver, release-cycle, dead-man and rollback
+    packaging gate: ALL PASS
+
+The GitHub run metadata and job logs were read after completion. This committed
+artifact is the immutable evidence byte sequence used by the claim register;
+its sha256 is recorded in both the P2.5a manifest and the closed claims
+register. A second PR CI run must re-hash this file and pass those contracts
+before merge.

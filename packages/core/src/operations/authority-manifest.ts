@@ -38,7 +38,9 @@ export interface AuthorityManifestEntry {
 
 export interface SignedAuthorityManifest {
   entries: AuthorityManifestEntry[];
-  /** Base64 Ed25519 signature over the canonical JSON of `entries`. */
+  /** Optional exact promotion input this grant is bound to. */
+  promotion?: { promotionId: string; inputSha256: string };
+  /** Base64 Ed25519 signature over entries plus the optional promotion binding. */
   signature: string;
 }
 
@@ -57,8 +59,11 @@ export type AuthorityResolution =
 /** The bytes a manifest signature covers. Exported so the signer cannot drift. */
 export function manifestSigningPayload(
   entries: AuthorityManifestEntry[],
+  promotion?: { promotionId: string; inputSha256: string },
 ): Buffer {
-  return Buffer.from(canonicalJson(entries), "utf8");
+  return Buffer.from(canonicalJson(
+    promotion === undefined ? entries : { entries, promotion },
+  ), "utf8");
 }
 
 /** Ed25519 verification. The one helper; do not add a second scheme. */
@@ -75,7 +80,7 @@ export function verifyManifestSignature(
   try {
     return verify(
       null,
-      manifestSigningPayload(manifest.entries),
+      manifestSigningPayload(manifest.entries, manifest.promotion),
       trustedKey,
       signature,
     );

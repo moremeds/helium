@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { canonicalJson } from "../../packages/core/lib/event-store.js";
+import { manifestSigningPayload } from "../../packages/core/lib/index.js";
 import { runManifestSigner } from "./sign-authority-manifest.mjs";
 import { hardwareIdentityHash } from "./signing-host-policy.mjs";
 
@@ -122,6 +123,103 @@ test("signs exact certified SOP id/version/digest/authority entries with Ed25519
     verify(null, Buffer.from(canonicalJson(manifest.entries)), publicKey, Buffer.from(manifest.signature, "base64")),
     true,
   );
+});
+
+test("binds a manifest to the exact promotion input and rejects drift", async () => {
+  const root = join(dir, "promotion-bound-manifest");
+  mkdirSync(root);
+  const executable = join(root, "fixture-executable");
+  writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  const raw = sop();
+  const fixture = certificationFixture(root, raw, executable);
+  raw.digest = `sha256:${createHash("sha256").update(canonicalJson(
+    Object.fromEntries(Object.entries(raw).filter(([key]) => key !== "digest")),
+  )).digest("hex")}`;
+  const sops = join(root, "sops");
+  mkdirSync(sops);
+  const sopPath = join(sops, "fixture.json");
+  writeFileSync(sopPath, JSON.stringify(raw));
+  const executor = JSON.parse(readFileSync(join(fixture.executors, "fixture.json"), "utf8"));
+  const component = JSON.parse(readFileSync(join(fixture.components, "fixture.json"), "utf8"));
+  const registered = JSON.parse(readFileSync(fixture.registeredProbes, "utf8"));
+  const bundleFiles = [
+    ["components", join(fixture.components, "fixture.json")],
+    ["checks", join(fixture.checks, "fixture.json")],
+    ["executors", join(fixture.executors, "fixture.json")],
+    ["sops", sopPath],
+  ].map(([section, path]) => ({
+    path: `${section}/fixture.json`,
+    sha256: createHash("sha256").update(readFileSync(path)).digest("hex"),
+  }));
+  const unsignedPromotion = {
+    version: 1,
+    promotionId: "fixture-promotion",
+    release: { dir: root, commit: "fixture-commit" },
+    bundleFiles,
+    registeredProbes: {
+      sha256: createHash("sha256").update(readFileSync(fixture.registeredProbes)).digest("hex"),
+      probeIds: registered.probeIds,
+    },
+    componentOwner: { componentId: component.id, owner: "opsd" },
+    executor: {
+      executorId: executor.executorId,
+      path: executor.path,
+      identity: executor.identity,
+      expectedOwnerUid: executor.expectedOwnerUid,
+      argvSchema: executor.argvSchema,
+    },
+    sop: {
+      id: raw.id,
+      version: raw.version,
+      digest: raw.digest,
+      authority: raw.authority,
+      maxAttempts: raw.maxAttempts,
+    },
+  };
+  const promotion = {
+    ...unsignedPromotion,
+    inputSha256: createHash("sha256").update(canonicalJson(unsignedPromotion)).digest("hex"),
+  };
+  const promotionPath = join(root, "promotion-input.json");
+  writeFileSync(promotionPath, JSON.stringify(promotion));
+  const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+  const key = join(root, "operator.pem");
+  const output = join(root, "manifest.json");
+  writeFileSync(key, privateKey.export({ format: "pem", type: "pkcs8" }), { mode: 0o600 });
+  const args = [
+    "--sops-dir", sops,
+    "--components-dir", fixture.components,
+    "--checks-dir", fixture.checks,
+    "--executors-dir", fixture.executors,
+    "--registered-probes", fixture.registeredProbes,
+    "--private-key", key,
+    "--output", output,
+    "--promotion-input", promotionPath,
+  ];
+  await runManifestSigner(args, {
+    signingHost,
+    resolveReleaseCommit: () => "fixture-commit",
+  });
+  const manifest = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(manifest.promotion, {
+    promotionId: "fixture-promotion",
+    inputSha256: promotion.inputSha256,
+  });
+  assert.equal(verify(
+    null,
+    manifestSigningPayload(manifest.entries, manifest.promotion),
+    publicKey,
+    Buffer.from(manifest.signature, "base64"),
+  ), true);
+
+  promotion.componentOwner.owner = "external";
+  const driftPath = join(root, "promotion-drift.json");
+  writeFileSync(driftPath, JSON.stringify(promotion));
+  await assert.rejects(runManifestSigner([
+    ...args.slice(0, args.indexOf("--output")),
+    "--output", join(root, "drift-manifest.json"),
+    "--promotion-input", driftPath,
+  ], { signingHost, resolveReleaseCommit: () => "fixture-commit" }), /input hash mismatch|owner differs/);
 });
 
 test("refuses a registered mini, an exposed key, and a stale declared digest", async () => {

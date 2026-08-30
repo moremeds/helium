@@ -36,13 +36,18 @@ export function apply(ctx: EffectContext, raw: OpsPluginConfig): void {
 
 export {
   OpsDaemon,
+  composeOpsDaemon,
+  composeObserveOnlyOpsDaemon,
   createStandaloneOpsDaemon,
+  loadOpsdRuntimeConfig,
+  OpsdRuntimeConfigSchema,
   validateOpsdRelease,
   runOpsdReleaseCheck,
   type OpsAnalysisClient,
   type OpsDaemonControl,
   type OpsDaemonController,
   type OpsDaemonOptions,
+  type OpsdRuntimeConfig,
   type StandaloneOpsDaemonOptions,
 } from "./bin/opsd.js";
 export { OpsControlClient, OpsControlServer } from "./ipc.js";
@@ -170,6 +175,11 @@ export {
   type ObservationProbe,
   type ObservationSink,
 } from "./collector.js";
+export {
+  ProductionCheckRuntime,
+  createProductionCheckRuntime,
+  type CheckObservationSource,
+} from "./production-checks.js";
 export { adaptLivewire, type LivewireSnapshot } from "./adapters/livewire.js";
 export { adaptArgon, type ArgonSnapshot } from "./adapters/argon.js";
 export { adaptApex, type ApexSnapshot } from "./adapters/apex.js";

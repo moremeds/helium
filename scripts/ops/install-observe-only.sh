@@ -80,9 +80,10 @@ binary="$release/plugins/ops-agent/lib/bin/opsd.js"
 manifest="$release/ops/authority-manifest.json"
 public_key="$release/ops/authority-manifest.pub.pem"
 observation_targets="$release/ops/observation-targets.yaml"
+registered_probes="$release/ops/registered-probes.json"
 heartbeat_reader="$release/scripts/ops/read-latest-heartbeats.mjs"
 parquet_checker="$release/scripts/ops/check-parquet-integrity.py"
-for required in "$template" "$deadman_template" "$runner" "$deadman" "$alerter" "$binary" "$manifest" "$public_key" "$observation_targets" "$heartbeat_reader" "$parquet_checker"; do
+for required in "$template" "$deadman_template" "$runner" "$deadman" "$alerter" "$binary" "$manifest" "$public_key" "$observation_targets" "$registered_probes" "$heartbeat_reader" "$parquet_checker"; do
   [ -f "$required" ] || { echo "required release file missing: $required" >&2; exit 66; }
 done
 

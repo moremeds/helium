@@ -57,27 +57,22 @@ describe("OpsBundleLoader", () => {
       baseDir: repoRoot,
       config: config(),
       registeredProbeIds: [
-        "fixture.readiness.v1",
-        "colima.vm-status.v1",
-        "host.volume.data-lake.v1",
-        "colima.transport.v1",
         "colima.container-inventory.v1",
-        "livewire.input-source.v1",
+        "colima.guest-runtime.v1",
+        "colima.vm-state.v1",
+        "host.volume.data-lake.v1",
+        "livewire.coverage-freshness.v1",
         "livewire.parquet-integrity.v1",
-        "livewire.target-freshness.v1",
-        "livewire.coverage.v1",
+        "livewire.status-parser.v1",
       ],
       now,
     });
 
     const installed = loader.installTenant("phase-c", repoRoot);
     expect(installed.health).toEqual({ tenantId: "phase-c", state: "loaded" });
-    expect(loader.registry.component("fixture-service")).toBeDefined();
+    expect(loader.registry.component("fixture-service")).toBeUndefined();
     expect(loader.registry.component("livewire")).toBeDefined();
-    expect(loader.registry.sop("fixture-observe")).toMatchObject({
-      authority: "observe",
-      certified: true,
-    });
+    expect(loader.registry.sop("fixture-observe")).toBeUndefined();
     expect(loader.registry.sop("colima-reconnect")).toMatchObject({
       authority: "observe",
       authorityDowngradeReason: "manifest-entry-missing",
@@ -88,6 +83,28 @@ describe("OpsBundleLoader", () => {
       "livewire",
       "postgres",
     ]);
+  });
+
+  it("loads the isolated fixture bundle only when a test selects it", () => {
+    const loader = new OpsBundleLoader({
+      baseDir: repoRoot,
+      config: config({
+        componentsDir: "contracts/fixtures/ops-live-bundle/components",
+        dependenciesDir: "contracts/fixtures/ops-live-bundle/dependencies",
+        sopsDir: "contracts/fixtures/ops-live-bundle/sops",
+        checksDir: "contracts/fixtures/ops-live-bundle/checks",
+      }),
+      registeredProbeIds: ["fixture.readiness.v1"],
+      now,
+    });
+
+    const installed = loader.installTenant("fixture", repoRoot);
+    expect(installed.health).toEqual({ tenantId: "fixture", state: "loaded" });
+    expect(loader.registry.component("fixture-service")).toBeDefined();
+    expect(loader.registry.sop("fixture-observe")).toMatchObject({
+      authority: "observe",
+      certified: true,
+    });
   });
 
   it("loads a future component written only as YAML and disposes it effect-scoped", () => {

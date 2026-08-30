@@ -95,6 +95,11 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
   `com.moremeds.colima-runtime-watchdog`, with
   `com.moremeds.colima-after-datalake` also competing
 - Certification state: blocked
+- Candidate promotion bundle: `ops/promotions/trading-stack-reconcile`
+- Candidate authority: `approve` only; never `auto`
+- Candidate mutation target: one intentionally absent `trading-cadvisor` container, subject to final live preflight
+- Candidate state: defined offline; not signed, installed, or active
+- Candidate ownership boundary: the isolated bundle records `colima=opsd`, but it cannot become effective until the signed handoff removes both competing legacy labels and the controller probe is clear
 
 ## colima-restart
 

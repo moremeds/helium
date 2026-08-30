@@ -1,7 +1,5 @@
 # A fixture SOP at `observe` authority. It mutates nothing and needs no
-# manifest entry: observing is what a loaded SOP does by default, and requiring
-# a signature to do nothing would make the manifest an availability dependency
-# for reading.
+# manifest entry.
 version: 1
 id: fixture-observe
 digest: "sha256:0000000000000000000000000000000000000000000000000000000000000000"

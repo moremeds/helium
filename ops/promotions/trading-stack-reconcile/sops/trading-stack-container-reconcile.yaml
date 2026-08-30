@@ -1,0 +1,27 @@
+version: 1
+id: trading-stack-container-reconcile
+digest: "sha256:198764bfe3e2ee15140fc86e8ad6f0eca407a91dc32246b3b5bcb175a47d208c"
+componentId: colima
+matches:
+  dimension: readiness
+  failureClass: failed
+authority: approve
+mutating: true
+priority: 100
+action:
+  executorId: trading-stack-reconcile
+  executable:
+    path: /Users/moremeds/.helium/ops/actions/sha256-15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074/trading-stack-reconcile.mjs
+    identity:
+      kind: sha256
+      value: "15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074"
+  argvSchemaId: trading-stack-reconcile-argv-v1
+  cwdId: trading-stack-workdir
+  environmentProfileId: trading-stack-reconcile-env-v1
+  timeoutMs: 120000
+preconditions: [data-lake-mounted, colima-transport-ready]
+postconditions: [colima-container-set]
+exclusiveGroup: colima-recovery
+graceMs: 60000
+maxAttempts: 1
+cooldownMs: 1800000

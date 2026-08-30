@@ -80,6 +80,8 @@ export interface OpsControllerOptions {
   evidence: RecoveryEvidencePort;
   createExecutor: () => ActionExecutor;
   argvFor: (sop: SopDefinition, incident: Incident) => string[];
+  promotionId?: string;
+  promotionInputSha256?: string;
   nextId?: (prefix: string) => string;
   sleep?: (ms: number) => Promise<void>;
   graceIntervalMs?: number;
@@ -118,6 +120,9 @@ export class OpsController {
   #startupReconciled = false;
 
   constructor(private readonly options: OpsControllerOptions) {
+    if ((options.promotionId === undefined) !== (options.promotionInputSha256 === undefined)) {
+      throw new Error("controller promotion id and input hash must be configured together");
+    }
     this.#nextId =
       options.nextId ?? ((prefix) => `${prefix}-${randomUUID()}`);
   }
@@ -251,6 +256,15 @@ export class OpsController {
         this.options.mode === "approve" && sop.authority === "auto"
           ? { ...sop, authority: "approve" }
           : sop;
+      const action = this.#actionIdentity({
+        loaded,
+        sop,
+        incident,
+        approved: approval !== undefined,
+        ...(approval === undefined ? {} : { approvedBy: approval.operatorId }),
+        eligible: false,
+        policyReasons: [],
+      });
       const decision = decideAuthority({
         sop: policySop,
         incident,
@@ -258,6 +272,16 @@ export class OpsController {
         history: this.#history(),
         now: this.options.now(),
         ...(approval === undefined ? {} : { approval }),
+        ...(this.options.promotionId === undefined ||
+            this.options.promotionInputSha256 === undefined
+          ? {}
+          : {
+              promotion: {
+                id: this.options.promotionId,
+                inputSha256: this.options.promotionInputSha256,
+                attempt: action.attempt,
+              },
+            }),
       });
       const ignorable = new Set([
         "approval-missing",
@@ -400,6 +424,16 @@ export class OpsController {
         samples,
         allPassing: samples.every((sample) => sample.state === "pass"),
       };
+      if (samples.some((sample) => sample.state === "unknown")) {
+        return {
+          incidentId: candidate.incident.key,
+          sopId: candidate.sop.id,
+          disposition: "observe",
+          reason: "baseline-unavailable",
+          actionId: action.actionId,
+          controllerEvidenceRef: boundaryRef,
+        };
+      }
       if (baseline.allPassing) {
         // This is a terminal policy result, not an intent to mutate. Recording
         // an intent here would make a crash replay look as if a spawn may have
