@@ -7,7 +7,7 @@ DeepSeek Harness supplies the underlying agent runtime. Helium adds ecosystem
 capabilities, triggers, escalation, persistence, delivery, health checks, and
 release operations.
 
-The current production release is `v0.1.9`.
+The current production release is `v0.1.11`.
 
 ## What works today
 
@@ -36,13 +36,16 @@ stopped at an attributable human-review decision with no team email or
 mutation. The deterministic `helium-opsd` collector also runs independently of
 providers; its first approve-only controlled drill restored one deliberately
 stopped monitoring container, verified the recovery evidence, and returned to
-observe-only ownership.
+observe-only ownership. It now also runs a signed `suggest-only` window: a
+second controlled stop produced a certified recovery suggestion, executed
+nothing, and retained the operator's signed alternate decision across a cold
+daemon restart.
 
 This is a working multi-agent and Ops system, not unrestricted autonomy. The
 Macro team cannot deliver automatically, the normal v1 path remains the
 immediate fallback, and Ops currently has no standing approve or automatic
 authority. The five-trading-day window, a real material Macro case, and the
-separate Ops suggest-only evidence window are still accruing P4 evidence.
+longer Ops observation window are still accruing P4 evidence.
 
 ## Where Helium is going
 
