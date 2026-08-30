@@ -58,6 +58,10 @@ import {
   createProductionObservationProbes,
   loadProductionObservationTargets,
 } from "../production-observations.js";
+import {
+  createProductionCheckRuntime,
+  type ProductionCheckRuntime,
+} from "../production-checks.js";
 import { FileRecoveryEvidenceStore } from "../recovery-evidence-store.js";
 import { ScriptRegistry } from "../script-registry.js";
 import type { CommandResult, CommandRunner } from "../probes/process.js";
@@ -305,7 +309,11 @@ export function validateOpsdRelease(
       ? {}
       : { observationTargetsPath: rebase(config.observationTargetsPath) }),
   });
-  const registeredProbeIds = discoverConfiguredProbeIds(parsed);
+  const checkRuntime = configuredCheckRuntime(parsed);
+  const registeredProbeIds = checkRuntime?.probeIds() ?? [];
+  if (checkRuntime !== undefined) {
+    validateRegisteredProbeExport(parsed.releaseDir, registeredProbeIds);
+  }
   const loader = new OpsBundleLoader({
     baseDir: parsed.releaseDir,
     config: loaderConfig(parsed),
@@ -318,8 +326,7 @@ export function validateOpsdRelease(
   }
   ScriptRegistry.load(loadConfiguredDocuments(parsed, parsed.executorsDir, "executor"));
   createPublicKey(readFileSync(parsed.trustedKeyPath, "utf8"));
-  if (parsed.observationTargetsPath !== undefined) {
-    loadProductionObservationTargets(parsed.observationTargetsPath);
+  if (checkRuntime !== undefined) {
     statSync(resolve(parsed.releaseDir, "scripts/ops/read-latest-heartbeats.mjs"));
     statSync(resolve(parsed.releaseDir, "scripts/ops/check-parquet-integrity.py"));
   }
@@ -345,7 +352,19 @@ export function composeObserveOnlyOpsDaemon(
   mkdirSync(parsed.stateDir, { recursive: true, mode: 0o700 });
   mkdirSync(dirname(parsed.socketPath), { recursive: true, mode: 0o700 });
 
-  const registeredProbeIds = discoverConfiguredProbeIds(parsed);
+  const targets = parsed.observationTargetsPath === undefined
+    ? undefined
+    : loadProductionObservationTargets(parsed.observationTargetsPath);
+  const checkRuntime = targets === undefined
+    ? undefined
+    : createProductionCheckRuntime(targets, {
+        releaseDir: parsed.releaseDir,
+        nodePath: process.execPath,
+      });
+  const registeredProbeIds = checkRuntime?.probeIds() ?? [];
+  if (checkRuntime !== undefined) {
+    validateRegisteredProbeExport(parsed.releaseDir, registeredProbeIds);
+  }
   const loader = new OpsBundleLoader({
     baseDir: parsed.releaseDir,
     config: loaderConfig(parsed),
@@ -384,9 +403,6 @@ export function composeObserveOnlyOpsDaemon(
   });
   const runner = overrides.runner ??
     new PersistingCommandRunner(resolve(parsed.stateDir, "raw"), now);
-  const targets = parsed.observationTargetsPath === undefined
-    ? undefined
-    : loadProductionObservationTargets(parsed.observationTargetsPath);
   const probes = overrides.probes ?? [
     macosResourceProbe({ componentId: "host" }),
     ...(targets === undefined ? [] : createConfiguredHostProbes(targets)),
@@ -408,9 +424,21 @@ export function composeObserveOnlyOpsDaemon(
     registry: loader.registry,
     store,
     now,
-    runChecks: async (ids) =>
-      Object.fromEntries(ids.map((id) => [id, "unknown" as const])),
-    sampleChecks: async (checks, phase) => unavailableSamples(checks, phase, now()),
+    runChecks: async (ids) => {
+      if (checkRuntime === undefined) {
+        return Object.fromEntries(ids.map((id) => [id, "unknown" as const]));
+      }
+      const samples = await checkRuntime.sample(
+        loader.registry.checks(ids),
+        "baseline",
+        runner,
+        now(),
+      );
+      return Object.fromEntries(samples.map((sample) => [sample.checkId, sample.state]));
+    },
+    sampleChecks: async (checks, phase) => checkRuntime === undefined
+      ? unavailableSamples(checks, phase, now())
+      : checkRuntime.sample(checks, phase, runner, now()),
     controllerProbe: {
       async check() {
         return {
@@ -493,35 +521,27 @@ function loadConfiguredDocuments(
   });
 }
 
-function discoverConfiguredProbeIds(config: OpsdRuntimeConfig): string[] {
-  const dir = configuredDir(config.releaseDir, config.checksDir);
-  const names = readdirSync(dir)
-    .filter((name) => /\.ya?ml$/i.test(name))
-    .sort();
-  if (names.length > config.maxFiles) throw new Error("check file limit exceeded");
-  const ids = new Set<string>();
-  for (const name of names) {
-    const path = resolve(dir, name);
-    if (!statSync(path).isFile()) throw new Error(`check is not a file: ${path}`);
-    if (statSync(path).size > config.maxFileBytes) {
-      throw new Error(`check file byte limit exceeded: ${path}`);
-    }
-    const documents = parseAllDocuments(readFileSync(path, "utf8"), {
-      strict: true,
-      uniqueKeys: true,
-    });
-    const errors = documents.flatMap((document) => document.errors);
-    if (errors.length > 0) throw new Error(`invalid check YAML: ${path}`);
-    for (const document of documents) {
-      const raw = document.toJS() as { probe?: { probeId?: unknown } } | null;
-      const id = raw?.probe?.probeId;
-      if (typeof id !== "string" || id === "") {
-        throw new Error(`check does not name a probe: ${path}`);
-      }
-      ids.add(id);
-    }
+function configuredCheckRuntime(config: OpsdRuntimeConfig): ProductionCheckRuntime | undefined {
+  if (config.observationTargetsPath === undefined) return undefined;
+  return createProductionCheckRuntime(
+    loadProductionObservationTargets(config.observationTargetsPath),
+    { releaseDir: config.releaseDir, nodePath: process.execPath },
+  );
+}
+
+function validateRegisteredProbeExport(releaseDir: string, compiledIds: readonly string[]): void {
+  const path = resolve(releaseDir, "ops/registered-probes.json");
+  const inventory = z.object({
+    version: z.literal(1),
+    probeIds: z.array(z.string().min(1)),
+  }).strict().parse(JSON.parse(readFileSync(path, "utf8")));
+  const exported = [...inventory.probeIds].sort();
+  const compiled = [...compiledIds].sort();
+  if (new Set(exported).size !== exported.length ||
+      exported.length !== compiled.length ||
+      exported.some((id, index) => id !== compiled[index])) {
+    throw new Error("registered probe inventory does not match compiled runtime");
   }
-  return [...ids].sort();
 }
 
 function unavailableSamples(

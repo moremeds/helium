@@ -12,6 +12,8 @@ import {
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
 import { loadAuthoritySource, resolveSopAuthority } from "../src/authority-manifest-loader.js";
+import { createProductionCheckRuntime } from "../src/production-checks.js";
+import { loadProductionObservationTargets } from "../src/production-observations.js";
 import { RegisteredScriptSchema, ScriptRegistry } from "../src/script-registry.js";
 
 const root = process.cwd();
@@ -20,6 +22,7 @@ const executorDir = join(root, "ops/executors");
 const sopDir = join(root, "ops/sops");
 const checkDir = join(root, "ops/checks");
 const componentDir = join(root, "ops/components");
+const registeredProbesPath = join(root, "ops/registered-probes.json");
 const reconcileWrapper = join(
   root,
   "scripts/ops/actions/trading-stack-reconcile.mjs",
@@ -73,6 +76,17 @@ describe("initial operations script inventory", () => {
 
     expect(ids.filter((id) => typeof id === "string" && id.startsWith("fixture")))
       .toEqual([]);
+  });
+
+  it("exports exactly the compiled production probe inventory for signing", () => {
+    const runtime = createProductionCheckRuntime(
+      loadProductionObservationTargets(join(root, "ops/observation-targets.yaml")),
+      { releaseDir: root, nodePath: process.execPath },
+    );
+    const exported = JSON.parse(readFileSync(registeredProbesPath, "utf8"));
+
+    expect(exported).toEqual({ version: 1, probeIds: runtime.probeIds() });
+    expect(new Set(exported.probeIds).size).toBe(exported.probeIds.length);
   });
 
   it("records every required certification field and explicit blocker", () => {
@@ -162,9 +176,7 @@ describe("initial operations script inventory", () => {
 
   it("keeps every mutating SOP ineffective while ownership and live identity are unresolved", () => {
     const checks = documents(checkDir);
-    const probeIds = checks.map((raw) =>
-      (raw as { probe: { probeId: string } }).probe.probeId,
-    );
+    const probeIds = JSON.parse(readFileSync(registeredProbesPath, "utf8")).probeIds;
     const registry = CheckRegistry.load(checks, probeIds);
     const components = documents(componentDir).map((raw) => ComponentSpecSchema.parse(raw));
     const byComponent = new Map(components.map((component) => [component.id, component]));

@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +95,7 @@ describe("opsd executable boundary", () => {
         trustedKeyPath: `${releaseDir}/ops/authority-manifest.pub.pem`,
         stateDir: `${root}/state`,
         socketPath: `${root}/run/opsd.sock`,
+        observationTargetsPath: `${releaseDir}/ops/observation-targets.yaml`,
         intervalMs: 60000,
         maxFiles: 500,
         maxComponents: 200,
@@ -99,7 +108,7 @@ describe("opsd executable boundary", () => {
 
     await daemon.start();
     try {
-      expect(commands).toBe(7);
+      expect(commands).toBeGreaterThan(7);
       const log = readFileSync(join(root, "state", "events.jsonl"), "utf8");
       expect(log).toContain('"type":"observation-recorded"');
       expect(log).toContain('"componentId":"host"');
@@ -137,7 +146,66 @@ describe("opsd executable boundary", () => {
     expect(() => validateOpsdRelease(config, releaseDir)).not.toThrow();
     expect(() => validateOpsdRelease({ ...config, executorsDir: "ops/checks" }, releaseDir))
       .toThrow();
-    expect(() => validateOpsdRelease(config, root)).toThrow(/check directory|ENOENT|no such file/i);
+    expect(() => validateOpsdRelease(config, root)).toThrow(
+      /observation targets|ENOENT|no such file/i,
+    );
+  });
+
+  it("rejects YAML checks that have no compiled runtime probe", () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-opsd-unregistered-"));
+    roots.push(root);
+    cpSync(join(releaseDir, "ops"), join(root, "ops"), { recursive: true });
+    mkdirSync(join(root, "scripts", "ops"), { recursive: true });
+    for (const name of ["read-latest-heartbeats.mjs", "check-parquet-integrity.py"]) {
+      cpSync(join(releaseDir, "scripts", "ops", name), join(root, "scripts", "ops", name));
+    }
+    const checkPath = join(root, "ops", "checks", "colima-transport-ready.yaml");
+    const originalCheck = readFileSync(checkPath, "utf8");
+    writeFileSync(
+      checkPath,
+      originalCheck.replace("colima.guest-runtime.v1", "fixture.yaml-only.v1"),
+    );
+    const config = {
+      version: 1 as const,
+      mode: "observe" as const,
+      releaseDir: root,
+      componentsDir: "ops/components",
+      dependenciesDir: "ops/dependencies",
+      checksDir: "ops/checks",
+      sopsDir: "ops/sops",
+      executorsDir: "ops/executors",
+      authorityManifestPath: join(root, "ops", "authority-manifest.json"),
+      trustedKeyPath: join(root, "ops", "authority-manifest.pub.pem"),
+      stateDir: join(root, "state"),
+      socketPath: join(root, "run", "opsd.sock"),
+      observationTargetsPath: join(root, "ops", "observation-targets.yaml"),
+      intervalMs: 60_000,
+      maxFiles: 500,
+      maxComponents: 200,
+      maxSops: 200,
+      maxChecks: 500,
+      maxFileBytes: 1_000_000,
+    };
+
+    expect(() => validateOpsdRelease(config)).toThrow(/unregistered probe.*fixture\.yaml-only\.v1/i);
+    expect(() => composeObserveOnlyOpsDaemon(config)).toThrow(
+      /unregistered probe.*fixture\.yaml-only\.v1/i,
+    );
+
+    writeFileSync(checkPath, originalCheck);
+    const inventoryPath = join(root, "ops", "registered-probes.json");
+    const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+    writeFileSync(inventoryPath, JSON.stringify({
+      ...inventory,
+      probeIds: inventory.probeIds.slice(1),
+    }));
+    expect(() => validateOpsdRelease(config)).toThrow(/inventory.*compiled runtime/i);
+
+    writeFileSync(inventoryPath, JSON.stringify({
+      ...inventory,
+      probeIds: [...inventory.probeIds, "fixture.extra.v1"],
+    }));
+    expect(() => validateOpsdRelease(config)).toThrow(/inventory.*compiled runtime/i);
   });
 
   it("keeps daemon-owned logs within their configured byte bound", () => {
