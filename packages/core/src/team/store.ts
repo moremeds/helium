@@ -1,5 +1,6 @@
 /** Team-specific partitioning and projection over the generic event store. */
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   openEventStore,
   type AppendedEvent,
@@ -16,6 +17,7 @@ export interface TeamStore {
   readonly caseId: string;
   readonly logPath: string;
   readonly snapshotPath: string;
+  readonly artifactRoot: string;
   append(event: TeamEvent): AppendedEvent;
   events(): TeamEvent[];
   load(): TeamState;
@@ -37,11 +39,14 @@ export function openTeamStore(
     ...(options.sync === undefined ? {} : { sync: options.sync }),
   });
   let projection = reduceTeam(backing.replay());
+  const artifactRoot = join(dirname(backing.logPath), "artifacts");
+  mkdirSync(artifactRoot, { recursive: true, mode: 0o700 });
 
   return {
     caseId,
     logPath: backing.logPath,
     snapshotPath: backing.snapshotPath,
+    artifactRoot,
 
     append(event: TeamEvent): AppendedEvent {
       const validated = TeamEventSchema.parse(event);
@@ -73,4 +78,3 @@ export function openTeamStore(
     },
   };
 }
-
