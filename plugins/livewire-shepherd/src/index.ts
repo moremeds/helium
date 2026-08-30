@@ -10,4 +10,5 @@ export * from "./reducer.js";
 export * from "./scheduler.js";
 export * from "./output-contracts.js";
 export * from "./store.js";
+export * from "./team-tools.js";
 export * from "./work-unit.js";
