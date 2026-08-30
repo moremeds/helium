@@ -1,3 +1,7 @@
+## v0.1.10 — 2026-08-30
+
+- feat(ops): enable signed suggest-only review
+
 ## v0.1.9 — 2026-08-30
 
 - fix(release): reload canary launchd environment
