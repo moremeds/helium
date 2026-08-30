@@ -7,6 +7,7 @@
  * @module @helium/core/team/events
  */
 import { z } from "zod";
+import { AgentResultSchema, WorkOrderSchema } from "../work.js";
 
 export const TeamIdSchema = z.string().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 export const TeamIsoUtcSchema = z.string().refine(
@@ -60,6 +61,7 @@ export const AgentRosteredEventSchema = z.strictObject({
   type: z.literal("agent/rostered"),
   payload: z.strictObject({
     agentId: TeamIdSchema,
+    parentAgentId: TeamIdSchema.optional(),
     role: RoleContractSchema,
   }),
 });
@@ -168,6 +170,139 @@ export const ArtifactPublishedEventSchema = z.strictObject({
   }),
 });
 
+export const BudgetAmountSchema = z.strictObject({
+  tokens: z.number().int().nonnegative(),
+  cost: z.number().nonnegative(),
+  ms: z.number().int().nonnegative(),
+});
+export type BudgetAmount = z.infer<typeof BudgetAmountSchema>;
+
+export const BudgetReservedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("budget/reserved"),
+  payload: z.strictObject({
+    operationId: TeamIdSchema,
+    agentId: TeamIdSchema,
+    amount: BudgetAmountSchema,
+  }),
+});
+
+export const ExecutionAttemptSeedSchema = z.strictObject({
+  attemptId: TeamIdSchema,
+  taskId: TeamIdSchema,
+  targetId: TeamIdSchema,
+  catalogSnapshotId: TeamIdSchema,
+  workOrder: WorkOrderSchema,
+  artifactRefs: z.array(z.string().min(1).max(1_024)).max(500),
+  remainingBudget: BudgetAmountSchema,
+  exactTarget: z.boolean(),
+});
+export type ExecutionAttemptSeed = z.infer<typeof ExecutionAttemptSeedSchema>;
+
+export const ExecutionAttemptInputSchema = ExecutionAttemptSeedSchema.extend({
+  leaseId: TeamIdSchema,
+}).strict();
+export type ExecutionAttemptInput = z.infer<typeof ExecutionAttemptInputSchema>;
+
+export const TaskExecutionIntentEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("task/execution-intent"),
+  payload: ExecutionAttemptInputSchema,
+});
+
+export const TaskExecutionResultEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("task/execution-result"),
+  payload: z.strictObject({
+    attemptId: TeamIdSchema,
+    result: AgentResultSchema,
+  }),
+});
+
+export const TaskInterruptedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("task/interrupted"),
+  payload: z.strictObject({
+    attemptId: TeamIdSchema,
+    taskId: TeamIdSchema,
+    reason: z.literal("startup-recovery"),
+    outcome: z.literal("uncertain"),
+  }),
+});
+
+export const TaskFallbackCreatedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("task/fallback-created"),
+  payload: z.strictObject({
+    priorAttemptId: TeamIdSchema,
+    attempt: ExecutionAttemptSeedSchema,
+  }),
+});
+
+export const TeamWaitingForCapacityEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("team/waiting-for-capacity"),
+  payload: z.strictObject({
+    waitId: TeamIdSchema,
+    taskId: TeamIdSchema,
+    exhaustedAttemptId: TeamIdSchema,
+  }),
+});
+
+export const TeamCapacityResumedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("team/capacity-resumed"),
+  payload: z.strictObject({
+    waitId: TeamIdSchema,
+    availabilityEventId: TeamIdSchema,
+    attempt: ExecutionAttemptSeedSchema,
+  }),
+});
+
+export const TeamCancellationRequestedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("team/cancellation-requested"),
+  payload: z.strictObject({ reason: z.string().min(1).max(1_000) }),
+});
+
+export const TaskCancelledEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("task/cancelled"),
+  payload: z.strictObject({
+    taskId: TeamIdSchema,
+    expectedRevision: z.number().int().positive(),
+    revision: z.number().int().positive(),
+    reason: z.string().min(1).max(1_000),
+  }),
+});
+
+export const AgentCancelledEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("agent/cancelled"),
+  payload: z.strictObject({
+    agentId: TeamIdSchema,
+    reason: z.string().min(1).max(1_000),
+  }),
+});
+
+export const DeliveryIntentRecordedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("delivery/intent-recorded"),
+  payload: z.strictObject({
+    deliveryId: TeamIdSchema,
+    artifactRefs: z.array(z.string().min(1).max(1_024)).min(1).max(500),
+  }),
+});
+
+export const DeliveryOutcomeRecordedEventSchema = z.strictObject({
+  ...teamBase,
+  type: z.literal("delivery/outcome-recorded"),
+  payload: z.strictObject({
+    deliveryId: TeamIdSchema,
+    outcome: z.enum(["delivered", "failed", "uncertain"]),
+  }),
+});
+
 export const TeamEventSchema = z.discriminatedUnion("type", [
   CaseOpenedEventSchema,
   CaseClosedEventSchema,
@@ -181,5 +316,17 @@ export const TeamEventSchema = z.discriminatedUnion("type", [
   TaskLeasedEventSchema,
   TaskLeaseExpiredEventSchema,
   ArtifactPublishedEventSchema,
+  BudgetReservedEventSchema,
+  TaskExecutionIntentEventSchema,
+  TaskExecutionResultEventSchema,
+  TaskInterruptedEventSchema,
+  TaskFallbackCreatedEventSchema,
+  TeamWaitingForCapacityEventSchema,
+  TeamCapacityResumedEventSchema,
+  TeamCancellationRequestedEventSchema,
+  TaskCancelledEventSchema,
+  AgentCancelledEventSchema,
+  DeliveryIntentRecordedEventSchema,
+  DeliveryOutcomeRecordedEventSchema,
 ]);
 export type TeamEvent = z.infer<typeof TeamEventSchema>;
