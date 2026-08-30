@@ -92,6 +92,30 @@ Track observation freshness, collection failures, incident noise, daemon
 restarts, log rotation, and dead-man delivery. Provider/model availability is
 irrelevant to the deterministic collector path.
 
+## Controlled mutation handoff (not yet commissioned)
+
+The offline readiness branch adds `scripts/ops/controlled-mutation.mjs`, but
+its production signing-key fingerprint is deliberately `UNCOMMISSIONED` until
+Task 7 creates and independently records the real Ed25519 trust root. Therefore
+the tool currently refuses production preflight and cannot be used to shorten
+the seven-day observation gate.
+
+After that gate closes and the signed promotion package is independently
+reviewed, the only accepted sequence is:
+
+1. `preflight` — read-only identity, expiry, label and candidate validation;
+2. `handoff` — fsynced backup, bootout both exact legacy labels, prove absence,
+   switch to the exact approve config, restart only `com.helium.opsd`, then
+   prove a fresh zero-action cycle;
+3. the separately signed one-incident approval and controlled failure drill;
+4. `rollback` — stop approve-mode opsd, restore the backed-up observe config,
+   restore both exact legacy plists/labels, then restart observe-mode opsd.
+
+The tool accepts no path flags or free-form command. It never deletes a source
+plist. Every state-changing step is journaled and fsynced before and after, and
+the fake-host suite injects a crash after every handoff prefix and requires
+rollback convergence.
+
 ## Rollback and uninstall
 
 Release rollback validates that the target contains both the ops-agent plugin
