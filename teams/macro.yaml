@@ -1,0 +1,123 @@
+manifestVersion: team-v1
+name: macro-causal-shadow-team
+
+roles:
+  inflation-researcher:
+    responsibility: evidence
+    requires: [macro-source-research, inflation-analysis]
+    permissions:
+      externalResearch: true
+      mutations: forbidden
+      artifactRead: [source-artifacts]
+  policy-researcher:
+    responsibility: evidence
+    requires: [macro-source-research, policy-analysis]
+    permissions:
+      externalResearch: true
+      mutations: forbidden
+      artifactRead: [source-artifacts]
+  rates-analyst:
+    responsibility: analysis
+    requires: [rates-path-analysis]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [dependency-artifacts]
+  usd-analyst:
+    responsibility: analysis
+    requires: [usd-transmission-analysis]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [dependency-artifacts]
+  gold-analyst:
+    responsibility: analysis
+    requires: [gold-impact-analysis]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [dependency-artifacts]
+  verifier:
+    responsibility: verification
+    requires: [claim-verification, fresh-evidence, independent-source]
+    permissions:
+      externalResearch: true
+      mutations: forbidden
+      artifactRead: [source-artifacts, dependency-artifacts]
+  lead:
+    responsibility: synthesis
+    requires: [macro-causal-synthesis]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+  renderer:
+    responsibility: rendering
+    requires: [render-adjudicated-claims]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+
+tasks:
+  - id: inflation-evidence
+    role: inflation-researcher
+    dependsOn: []
+    requires: [macro-source-research, inflation-analysis]
+    inputs: [source-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: policy-evidence
+    role: policy-researcher
+    dependsOn: []
+    requires: [macro-source-research, policy-analysis]
+    inputs: [source-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: rates-path
+    role: rates-analyst
+    dependsOn: [inflation-evidence, policy-evidence]
+    requires: [rates-path-analysis]
+    inputs: [dependency-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: usd-transmission
+    role: usd-analyst
+    dependsOn: [rates-path]
+    requires: [usd-transmission-analysis]
+    inputs: [dependency-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: gold-impact
+    role: gold-analyst
+    dependsOn: [usd-transmission]
+    requires: [gold-impact-analysis]
+    inputs: [dependency-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: verifier
+    role: verifier
+    dependsOn: [usd-transmission, gold-impact]
+    requires: [claim-verification, fresh-evidence, independent-source]
+    inputs: [source-artifacts, dependency-artifacts]
+    outputSchema: EvidenceDecisionSet.v1
+  - id: lead-synthesis
+    role: lead
+    dependsOn: [verifier]
+    requires: [macro-causal-synthesis]
+    inputs: [accepted-claim-ledger]
+    outputSchema: AdjudicatedSynthesis.v1
+  - id: renderer
+    role: renderer
+    dependsOn: [lead-synthesis]
+    requires: [render-adjudicated-claims]
+    inputs: [accepted-claim-ledger]
+    outputSchema: ShadowReport.v1
+
+crossReference:
+  compareClaims: true
+  materialContradictions: fresh-evidence-work-order
+  requireIndependentEvidence: true
+
+budgets:
+  maxAttempts: 24
+  maxTokens: 240000
+
+acceptance:
+  allowPartialClaims: true
+  terminalTasks: [renderer]
