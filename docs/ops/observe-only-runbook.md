@@ -141,6 +141,11 @@ or attempt differs. Private keys remain on the commissioned operator signing
 host; deployment receives only the public key, signed manifest, signed approval
 and reviewed promotion material.
 
+The approval `incidentId` is copied verbatim from the persisted
+`action-proposed` event. The controller resolves that public id back to its
+internal correlation key only after the durable approval ledger has matched the
+signed envelope; operators never sign an unpublished internal key.
+
 Stage that canonical input at the fixed
 `~/.helium/ops/promotions/trading-stack-reconcile/promotion-input.json` path.
 On the mini, `promotion-package.mjs export` performs a read-only inventory of
