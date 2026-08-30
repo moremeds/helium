@@ -41,6 +41,7 @@ export const CONTROLLED_MUTATION_ARTIFACT_KEYS = [
   "delegate",
   "opsdBinary",
   "opsdPlist",
+  "candidateOpsdPlist",
   "legacyRuntimePlist",
   "legacyAfterDataLakePlist",
 ];
@@ -71,6 +72,7 @@ export function createControlledMutationLayout(home = "/Users/moremeds", uid = 5
     delegate: join(home, "trading-stack", "scripts", "reconcile.sh"),
     opsdBinary: join(promotionRoot, "opsd.js"),
     opsdPlist: join(launchdRoot, `${OPSD_LABEL}.plist`),
+    candidateOpsdPlist: join(promotionRoot, `${OPSD_LABEL}.approve.plist`),
     legacyRuntimePlist: join(launchdRoot, `${LEGACY_RUNTIME_LABEL}.plist`),
     legacyAfterDataLakePlist: join(launchdRoot, `${LEGACY_AFTER_DATALAKE_LABEL}.plist`),
     eventsPath: join(opsRoot, "state", "events.jsonl"),
@@ -212,6 +214,7 @@ async function validatePreflight(context, command) {
     executable: expectedPaths.opsdBinary,
     configPath: layout.candidateConfig,
     releaseDir: promotion.release.dir,
+    plistPath: layout.candidateOpsdPlist,
   });
   const relevant = await relevantLabels(context);
   const extras = relevant.filter((label) =>
@@ -244,7 +247,7 @@ async function handoff(context, packageState) {
   await step(context, "switch-approve-config", async () =>
     atomicReplace(context.layout.candidateConfig, context.layout.activeConfig, 0o600));
   await step(context, `bootstrap:${OPSD_LABEL}`, async () =>
-    launchctl(context, ["bootstrap", domain(context.layout), context.layout.opsdPlist]));
+    launchctl(context, ["bootstrap", domain(context.layout), context.layout.candidateOpsdPlist]));
   await step(context, "verify-approve-cycle", async () => {
     const labels = await relevantLabels(context);
     if (!labels.includes(OPSD_LABEL) || labels.includes(LEGACY_RUNTIME_LABEL) ||
@@ -537,43 +540,50 @@ function productionLaunchctlRunner() {
 }
 
 function productionCandidateValidator() {
-  return async ({ executable, configPath, releaseDir }) => {
-    const { spawn } = await import("node:child_process");
-    await new Promise((resolvePromise, rejectPromise) => {
-      const child = spawn(process.execPath, [
-        executable,
-        "--check-config",
-        configPath,
-        "--release",
-        releaseDir,
-      ], {
-        shell: false,
-        stdio: ["ignore", "ignore", "pipe"],
+  return async ({ executable, configPath, releaseDir, plistPath }) => {
+    const { execFile } = await import("node:child_process");
+    const run = (program, argv) => new Promise((resolvePromise, rejectPromise) => {
+      execFile(program, argv, {
         env: { PATH: "/usr/bin:/bin:/usr/sbin:/sbin" },
-      });
-      let stderr = "";
-      let bytes = 0;
-      let settled = false;
-      const timer = setTimeout(() => child.kill("SIGKILL"), 30_000);
-      child.stderr.on("data", (chunk) => {
-        bytes += chunk.length;
-        if (bytes > 64_000) child.kill("SIGKILL");
-        else stderr += chunk.toString();
-      });
-      const finish = (error) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        if (error === undefined) resolvePromise();
-        else rejectPromise(error);
-      };
-      child.once("error", (error) => finish(error));
-      child.once("close", (code) => {
-        if (code === 0 && bytes <= 64_000) finish();
-        else finish(new Error(`candidate opsd config check failed: ${code ?? 1}: ${stderr.slice(-4_000)}`));
+        timeout: 30_000,
+        maxBuffer: 64_000,
+        encoding: "utf8",
+      }, (error, stdout, stderr) => {
+        if (error !== null) {
+          rejectPromise(new Error(
+            `candidate validation failed: ${program}: ${error.code ?? 1}: ${stderr.slice(-4_000)}`,
+          ));
+        } else {
+          resolvePromise(stdout);
+        }
       });
     });
+    await run(process.execPath, [
+      executable,
+      "--check-config",
+      configPath,
+      "--release",
+      releaseDir,
+    ]);
+    const plist = JSON.parse(await run("/usr/bin/plutil", [
+      "-convert", "json", "-o", "-", plistPath,
+    ]));
+    assertCandidateOpsdPlist(plist, { configPath, releaseDir });
   };
+}
+
+export function assertCandidateOpsdPlist(plist, { configPath, releaseDir }) {
+    const expectedRunner = join(releaseDir, "scripts", "ops", "run-opsd.sh");
+    if (plist.Label !== OPSD_LABEL ||
+        JSON.stringify(plist.ProgramArguments) !==
+          JSON.stringify(["/bin/bash", expectedRunner]) ||
+        plist.WorkingDirectory !== releaseDir || plist.RunAtLoad !== true ||
+        plist.KeepAlive !== true ||
+        plist.EnvironmentVariables?.HELIUM_OPSD_CONFIG !== configPath ||
+        plist.EnvironmentVariables?.HOME !== "/Users/moremeds" ||
+        typeof plist.EnvironmentVariables?.HELIUM_NODE_BIN !== "string") {
+      throw new Error("candidate opsd plist does not bind the exact release and config");
+    }
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {

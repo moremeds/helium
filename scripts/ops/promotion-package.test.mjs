@@ -85,6 +85,7 @@ function fixture() {
     layout.delegate,
     layout.opsdBinary,
     layout.opsdPlist,
+    layout.candidateOpsdPlist,
     layout.legacyRuntimePlist,
     layout.legacyAfterDataLakePlist,
   ]) write(path, `${path}\n`, path.includes("wrapper") || path.includes("opsd.js") ? 0o500 : 0o600);
@@ -114,7 +115,7 @@ test("exports exact host identities and signs the same canonical promotion bindi
   assert.equal(payload.promotionInputSha256, f.promotion.inputSha256);
   assert.equal(payload.release.dir, f.promotion.release.dir);
   assert.equal(payload.artifacts.opsdBinary.path, f.layout.opsdBinary);
-  assert.equal(Object.keys(payload.artifacts).length, 11);
+  assert.equal(Object.keys(payload.artifacts).length, 12);
   assert.equal(lstatSync(f.unsignedPackagePath).mode & 0o777, 0o600);
 
   const envelope = signPromotionPackage({
