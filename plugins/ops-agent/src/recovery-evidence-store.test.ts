@@ -209,4 +209,53 @@ describe("FileRecoveryEvidenceStore", () => {
     writeFileSync(join(rawDir, "controller.json"), "tampered\n", { mode: 0o600 });
     expect(() => store.verifyEvent(event)).toThrow(/raw evidence hash mismatch/);
   });
+
+  it("keeps derived authority provenance without treating it as a raw file", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "helium-recovery-authority-"));
+    const rawDir = join(stateDir, "raw");
+    mkdirSync(rawDir, { mode: 0o700 });
+    for (const name of ["observation.json", "controller.json", "baseline.json", "postcondition.json"]) {
+      writeFileSync(join(rawDir, name), `${name}\n`, { mode: 0o600 });
+    }
+    const store = new FileRecoveryEvidenceStore(join(stateDir, "evidence"));
+    const raw = store.hashArtifacts([
+      "artifact://ops/raw/observation.json",
+      "artifact://ops/authority/colima-reconnect",
+      "artifact://ops/raw/controller.json",
+      "artifact://ops/raw/baseline.json",
+      "artifact://ops/raw/postcondition.json",
+    ]);
+    expect(raw.map((artifact) => artifact.ref)).not.toContain(
+      "artifact://ops/authority/colima-reconnect",
+    );
+    const artifacts = {
+      receipt: store.persistArtifact("receipt", { output: "bounded" }),
+      observation: store.persistArtifact("observation", {
+        version: 1,
+        id: "obs-authority-1",
+        componentId: "runtime",
+        probeId: "ops.authority-manifest.v1",
+        observedAt: NOW,
+        expiresAt: "2026-08-30T01:00:00.000Z",
+        state: "degraded",
+        dimension: "controller",
+        evidenceRefs: [
+          "artifact://ops/raw/observation.json",
+          "artifact://ops/authority/colima-reconnect",
+        ],
+        parserVersion: "authority-manifest/1",
+      }),
+      incident: store.persistArtifact("incident", { state: "open" }),
+      raw,
+    };
+    const bundle = fixture(artifacts);
+    const ref = store.persistBundle(bundle);
+    const event = {
+      v: 1, id: "terminal-authority", at: NOW, type: "action-verified",
+      actionId: "act-1", outcome: "succeeded", attribution: "automatic",
+      postconditionRefs: ["ready"], postconditionSamples: bundle.postconditionSamples,
+      recoveryEvidence: ref,
+    } satisfies OperationsEvent;
+    expect(() => store.verifyEvent(event)).not.toThrow();
+  });
 });
