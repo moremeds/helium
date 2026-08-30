@@ -1,3 +1,7 @@
+## v0.1.11 — 2026-08-30
+
+- fix(ops): reset attempt budget after recovery
+
 ## v0.1.10 — 2026-08-30
 
 - feat(ops): enable signed suggest-only review
