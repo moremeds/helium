@@ -1,3 +1,7 @@
+## v0.1.8 — 2026-08-30
+
+- fix(ops): rebind observe-only package to current
+
 ## v0.1.7 — 2026-08-30
 
 - fix(release): validate jobs through v1 compat
