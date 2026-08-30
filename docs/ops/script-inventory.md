@@ -10,11 +10,13 @@ configuration/state writes remained frozen until the separately recorded
 weekend commissioning waiver. That waiver permits only the isolated
 empty-authority observe-only install and does not certify any script below.
 
-The YAML registrations therefore use the impossible
-`/__HELIUM_UNCERTIFIED__/` prefix. They exercise exact-argv and policy contracts
-without making a guessed production path executable. The committed authority
-manifest has no entries, and current mutation ownership is `external` or
-`none`, so every mutating SOP is held at effective `observe`.
+All three executor registrations therefore retain the impossible
+`/__HELIUM_UNCERTIFIED__/` prefix. A reviewed container-only reconcile wrapper
+now exists in this repository, but it has not been installed at an immutable,
+content-addressed production path and has never been invoked on the mini. The
+committed authority manifest has no entries, and current mutation ownership is
+`external` or `none`, so every mutating SOP is still held at effective
+`observe`.
 
 The signing-host identity boundary is now commissioned. On 2026-08-30 the
 approved off-mini operator workstation was recorded as a SHA-256 hardware hash
@@ -27,14 +29,15 @@ hash immediately before signing; a structurally uncertified SOP cannot enter
 the manifest.
 
 Executable ownership is likewise explicit: live inspection confirmed operator
-UID 501, but `expectedOwnerUid: 0` remains in the sentinel registrations because
-none of the inspected legacy scripts implements the exact registered argv and
-blast-radius contract. The mismatch keeps them non-executable until purpose-built
-wrappers are reviewed and deployed. The signer also requires a separately exported
-`--registered-probes` inventory from the actual host probe registry; it never
-derives runnable probe ids from the submitted check files. Until every
-postcondition probe is present in that inventory, an above-observe grant cannot
-be signed.
+UID 501. All sentinel registrations retain `expectedOwnerUid: 0`; the
+container-only wrapper independently pins UID 501 plus the mode, SHA-256 and
+path of the legacy script it delegates to. It remains non-executable until a
+reviewed install puts the exact wrapper bytes at an immutable path and updates
+the executor registration in the same reviewed change.
+The signer also requires a separately exported `--registered-probes` inventory
+from the actual host probe registry; it never derives runnable probe ids from
+the submitted check files. Until every postcondition probe is present in that
+inventory, an above-observe grant cannot be signed.
 
 IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
@@ -52,11 +55,12 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 - No `com.helium.opsd` label or plist existed at capture time.
 - Exact plist/script owners, modes and SHA-256 values are in
   `docs/evidence/p2.5a/phase-d-live-identity-2026-08-30.log`.
-- `trading-stack/scripts/reconcile.sh` exists, but its interface is legacy
-  mode/dry-run behavior, not the registered fixed `--scope containers --pull
-  false` contract. The Colima runtime watchdog has its own stateful automatic
-  restart behavior and is the external mutation owner; it is not repurposed as
-  an opsd executor.
+- `trading-stack/scripts/reconcile.sh` exposes a bounded `--containers` mode.
+  The Helium wrapper translates only the registered fixed `--scope containers
+  --pull false` contract to that mode after rechecking the inspected legacy
+  script identity. The Colima runtime watchdog has its own stateful automatic
+  restart behavior and remains the external mutation owner; it is not
+  repurposed as an opsd executor.
 - Livewire exposes several repair families, but no inspected entry point matches
   the proposed exact `--target-date` plus `--partition` generic Parquet contract.
   The target data layer and repair family must be chosen from a real incident;
@@ -64,21 +68,25 @@ IB Gateway restart: forbidden. It is not registered as an executor or SOP.
 
 ## trading-stack-reconcile
 
-- Repository owner: trading-stack (outside this repository)
+- Repository owner: Helium wrapper; pinned trading-stack target outside this repository
 - Deployment owner: UID 501
-- Exact path: `/__HELIUM_UNCERTIFIED__/trading-stack-reconcile`
-- Release or hash identity: unresolved; zero digest is a non-deployable sentinel
+- Exact path: `/__HELIUM_UNCERTIFIED__/trading-stack-reconcile`; remains a non-deployable sentinel
+- Release or hash identity: unresolved until immutable wrapper installation; executor digest remains the zero sentinel
+- Wrapper source: `scripts/ops/actions/trading-stack-reconcile.mjs`
+- Wrapper source identity: SHA-256 `15f49270f6a5f0ad118a91af92dfe96327109fadbfdad2c8022a1b0bc568a074`
+- Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh` owned by UID 501, non-group/world-writable, SHA-256 `3da35c87a76a90a55669c5e86db038e92fb21f6ff737526a0a1d6dc1c613da2e`
+- Deployment state: not deployed
 - Argv schema: `trading-stack-reconcile-argv-v1`; fixed `--scope containers --pull false`
-- Working directory: `/__HELIUM_UNCERTIFIED__/trading-stack`
-- Environment profile: `ops-minimal`; only `/usr/bin:/bin:/usr/sbin:/sbin`
-- Preflight: Docker reachable, DATA_LAKE mount identity correct, no image pull
+- Working directory: `/__HELIUM_UNCERTIFIED__/trading-stack` until deployment
+- Environment profile: the wrapper internally fixes HOME, Colima Docker socket, trading-stack root, and bounded system/Homebrew PATH; no inherited environment
+- Preflight: wrapper and delegated script identities match; Docker reachable; DATA_LAKE mount identity correct; no image pull
 - Postconditions: exact expected container set and business readiness
 - Timeout: 120000 ms
 - Attempt limit: 1
 - Cooldown: 600000 ms
 - Blast radius: container-only reconcile; no images, volumes, mounts, or IB Gateway
 - Rollback or compensation: stop and return to the existing operator runbook; no blind retry
-- Drill state: not run; production-derived fixture does not exercise this command
+- Drill state: fake delegated-script contract passes; wrapper is not deployed and no production command has run
 - Mutation owner: `colima=external` under
   `com.moremeds.colima-runtime-watchdog`, with
   `com.moremeds.colima-after-datalake` also competing

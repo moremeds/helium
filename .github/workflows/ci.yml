@@ -39,6 +39,7 @@ jobs:
       - name: offline ops signing and release-boundary tests
         run: >-
           node --test
+          scripts/ops/actions/trading-stack-reconcile.test.mjs
           scripts/ops/sign-approval.test.mjs
           scripts/ops/sign-authority-manifest.test.mjs
           scripts/release/opsd-cycle-after.test.mjs

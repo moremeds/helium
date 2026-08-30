@@ -20,6 +20,10 @@ const executorDir = join(root, "ops/executors");
 const sopDir = join(root, "ops/sops");
 const checkDir = join(root, "ops/checks");
 const componentDir = join(root, "ops/components");
+const reconcileWrapper = join(
+  root,
+  "scripts/ops/actions/trading-stack-reconcile.mjs",
+);
 
 const executorIds = [
   "trading-stack-reconcile",
@@ -89,7 +93,7 @@ describe("initial operations script inventory", () => {
     expect(inventory).toContain("AC#1");
   });
 
-  it("loads exact-argv registrations but their unresolved deployment identities fail closed", () => {
+  it("keeps every undeployed executor registration fail-closed", () => {
     const raw = executorIds.map((id) => yaml(join(executorDir, `${id}.yaml`)));
     const scripts = raw.map((value) => RegisteredScriptSchema.parse(value));
     const registry = ScriptRegistry.load(raw);
@@ -101,6 +105,24 @@ describe("initial operations script inventory", () => {
         reason: "script-missing",
       });
     }
+  });
+
+  it("records the wrapper boundary without claiming deployment or mutation ownership", () => {
+    const entry = section(readFileSync(inventoryPath, "utf8"), "trading-stack-reconcile");
+    expect(entry).toContain(
+      "- Wrapper source: `scripts/ops/actions/trading-stack-reconcile.mjs`",
+    );
+    expect(entry).toContain(
+      "- Underlying target identity: `/Users/moremeds/trading-stack/scripts/reconcile.sh`",
+    );
+    expect(entry).toContain("- Deployment state: not deployed");
+    expect(entry).toContain(
+      `- Wrapper source identity: SHA-256 \`${createHash("sha256")
+        .update(readFileSync(reconcileWrapper))
+        .digest("hex")}\``,
+    );
+    expect(entry).toContain("- Mutation owner: `colima=external`");
+    expect(entry).toContain("- Certification state: blocked");
   });
 
   it("keeps every mutating SOP ineffective while ownership and live identity are unresolved", () => {
