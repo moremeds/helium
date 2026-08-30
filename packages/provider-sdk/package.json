@@ -1,0 +1,21 @@
+{
+  "name": "@helium/provider-sdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./lib/catalog.js",
+  "exports": {
+    ".": "./lib/catalog.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}
