@@ -1,3 +1,7 @@
+## v0.1.7 — 2026-08-30
+
+- fix(release): validate jobs through v1 compat
+
 ## v0.1.6 — 2026-08-30
 
 - feat: add bounded P4 review-only canary
