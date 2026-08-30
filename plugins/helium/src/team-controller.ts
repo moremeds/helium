@@ -16,8 +16,11 @@ import {
   compareClaimSets,
   openTeamStore,
   type AgentResult,
+  type AdmissionDecision,
+  type AdmissionPolicy,
   type ClaimDecision,
   type ExecutionLease,
+  type ResourcePressure,
   type SelectionDecision,
   type TeamManifest,
   type TeamRunProjection,
@@ -72,6 +75,22 @@ export interface TeamControllerOptions {
   execution: TeamExecutionPort;
   now?: () => Date;
   leaseMs?: number;
+  admission?: {
+    decide: (
+      work: { id: string; workClass: "optional-team" | "subagent-fanout" },
+      pressure: ResourcePressure,
+      policy: AdmissionPolicy,
+    ) => AdmissionDecision;
+    pressure: () => ResourcePressure;
+    policy: AdmissionPolicy;
+  };
+}
+
+export class TeamAdmissionRefusedError extends Error {
+  constructor(readonly reason: "host-memory-pressure" | "host-memory-pressure-recovery") {
+    super(reason);
+    this.name = "TeamAdmissionRefusedError";
+  }
 }
 
 const ClaimSetOutputSchema = z.strictObject({
@@ -107,6 +126,7 @@ export class TeamController {
   readonly #execution: TeamExecutionPort;
   readonly #now: () => Date;
   readonly #leaseMs: number;
+  readonly #admission?: NonNullable<TeamControllerOptions["admission"]>;
   readonly #controllers = new Map<string, Set<AbortController>>();
 
   constructor(options: TeamControllerOptions) {
@@ -116,6 +136,7 @@ export class TeamController {
     this.#execution = options.execution;
     this.#now = options.now ?? (() => new Date());
     this.#leaseMs = options.leaseMs ?? 15 * 60_000;
+    this.#admission = options.admission;
   }
 
   store(caseId: string): TeamStore {
@@ -126,6 +147,13 @@ export class TeamController {
     this.#validateInputs(input.inputArtifacts);
     const store = this.store(input.caseId);
     const teamRunId = `${input.caseId}:shadow`;
+    if (store.load().teams[teamRunId] === undefined) {
+      const refusal = this.#admissionRefusal(store, {
+        id: input.caseId,
+        workClass: "optional-team",
+      });
+      if (refusal !== undefined) throw new TeamAdmissionRefusedError(refusal);
+    }
     this.#initialize(store, teamRunId, input);
     const existing = store.load().teams[teamRunId]!;
     if (existing.state !== "running") return existing;
@@ -163,6 +191,14 @@ export class TeamController {
         }
         return team;
       }
+
+      const refusal = this.#admissionRefusal(store, {
+        id: `${teamRunId}:${task.id}`,
+        workClass: "subagent-fanout",
+        teamRunId,
+        taskId: task.id,
+      });
+      if (refusal !== undefined) return team;
 
       const outcome = await this.#runTask(store, teamRunId, task.id, input);
       if (outcome === "failed" || outcome === "waiting") {
@@ -584,6 +620,51 @@ export class TeamController {
 
   #eventId(store: TeamStore): string {
     return `shadow-${store.events().length + 1}`;
+  }
+
+  #admissionRefusal(
+    store: TeamStore,
+    work: {
+      id: string;
+      workClass: "optional-team" | "subagent-fanout";
+      teamRunId?: string;
+      taskId?: string;
+    },
+  ): "host-memory-pressure" | "host-memory-pressure-recovery" | undefined {
+    if (this.#admission === undefined) return undefined;
+    const pressure = this.#admission.pressure();
+    const decision = this.#admission.decide(work, pressure, this.#admission.policy);
+    if (decision.admitted) return undefined;
+    const duplicate = store.events().at(-1);
+    if (
+      duplicate?.type !== "team/admission-refused"
+      || duplicate.payload.workId !== work.id
+      || duplicate.payload.reason !== decision.reason
+    ) {
+      store.append({
+        version: 1,
+        eventId: this.#eventId(store),
+        at: this.#now().toISOString(),
+        caseId: store.caseId,
+        type: "team/admission-refused",
+        payload: {
+          workId: work.id,
+          workClass: work.workClass,
+          reason: decision.reason,
+          memoryState: pressure.memoryState,
+          observedForMs: pressure.observedForMs,
+          ...(pressure.recoveringFromPressure === undefined
+            ? {}
+            : { recoveringFromPressure: pressure.recoveringFromPressure }),
+          ...(pressure.recoveredForMs === undefined
+            ? {}
+            : { recoveredForMs: pressure.recoveredForMs }),
+          ...(work.teamRunId === undefined ? {} : { teamRunId: work.teamRunId }),
+          ...(work.taskId === undefined ? {} : { taskId: work.taskId }),
+        },
+      });
+    }
+    return decision.reason;
   }
 
   #append(store: TeamStore, teamRunId: string, type: string, payload: object): void {

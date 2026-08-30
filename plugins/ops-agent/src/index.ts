@@ -79,6 +79,16 @@ export {
 } from "./mode.js";
 export { DurableOpsAnalysisClient } from "./analysis-client.js";
 export {
+  OPS_TEAM_ROLES,
+  OpsTeamTools,
+  createOpsTeamTools,
+  type EligibilitySnapshot,
+  type FreshProbeRequest,
+  type OpsSopSelection,
+  type OpsTeamRole,
+  type OpsTeamToolOptions,
+} from "./team-tools.js";
+export {
   FileComponentActionLocks,
   hostBootId,
   type ComponentActionLockPort,

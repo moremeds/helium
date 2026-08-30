@@ -118,7 +118,14 @@ function validateManifest(manifest: TeamManifest): TeamManifest {
   return manifest;
 }
 
-const FORBIDDEN_ROUTING_KEYS = new Set(["provider", "providerid", "model", "modelid"]);
+const FORBIDDEN_ROUTING_KEYS = new Set([
+  "provider",
+  "providerid",
+  "model",
+  "modelid",
+  "effort",
+  "reasoningeffort",
+]);
 
 function rejectRoutingKeys(value: unknown, path = "manifest"): void {
   if (Array.isArray(value)) {
