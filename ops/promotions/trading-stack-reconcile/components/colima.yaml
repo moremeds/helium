@@ -1,0 +1,12 @@
+version: 1
+id: colima
+kind: container-runtime
+displayName: Colima
+dimensions: [liveness, readiness, stability, capacity, controller]
+mutationOwner:
+  owner: opsd
+  competingLabels:
+    - com.moremeds.colima-runtime-watchdog
+    - com.moremeds.colima-after-datalake
+  changedAt: "2026-08-30T00:00:00.000Z"
+  changeRef: "promotion://trading-stack-reconcile/pending-signed-handoff"

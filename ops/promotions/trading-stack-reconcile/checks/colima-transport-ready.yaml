@@ -1,0 +1,12 @@
+id: colima-transport-ready
+kind: business
+probe:
+  probeId: colima.guest-runtime.v1
+  args: {}
+expect:
+  dimension: readiness
+  operator: eq
+  value: true
+onUnavailable: unknown
+timeoutMs: 10000
+owner: ops
