@@ -49,3 +49,5 @@ export * from "./evidence/manifest.js";
 export * from "./team/events.js";
 export * from "./team/reducer.js";
 export * from "./team/store.js";
+export * from "./team/tasks.js";
+export * from "./team/artifacts.js";
