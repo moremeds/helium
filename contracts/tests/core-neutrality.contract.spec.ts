@@ -102,4 +102,10 @@ describe("core neutrality", () => {
     ).toBe(true);
     expect(wordPattern("gpt-").test("gpt-5")).toBe(true);
   });
+
+  it("guards every live provider family at the core boundary", () => {
+    expect(FORBIDDEN_PROVIDER_WORDS).toEqual(
+      expect.arrayContaining(["deepseek", "codex", "openai", "claude", "anthropic"]),
+    );
+  });
 });
