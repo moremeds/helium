@@ -261,6 +261,15 @@ describe("production observation probes", () => {
       "--path",
       "/lake/bronze/asset_class=equity/symbol=NULG/1m.parquet",
     ]);
+    expect(calls).toContainEqual([
+      "/opt/homebrew/bin/docker",
+      "ps",
+      "--no-trunc",
+      "--format",
+      "{{json .Names}}",
+    ]);
+    expect(calls.some((argv) => argv[0] === "/opt/homebrew/bin/docker" &&
+      argv[1] === "ps" && argv.includes("--all"))).toBe(false);
   });
 
   it("does not rerun expensive application probes before their configured interval", async () => {

@@ -31,7 +31,7 @@ describe("adaptColima", () => {
   it("declares only exact, read-only command argv", () => {
     expect(COLIMA_READ_COMMANDS).toEqual({
       status: ["colima", "status", "--json"],
-      inventory: ["docker", "ps", "--all", "--no-trunc", "--format", "{{json .}}"],
+      inventory: ["docker", "ps", "--no-trunc", "--format", "{{json .}}"],
       inspect: ["docker", "inspect", "--type", "container"],
     });
     expect(JSON.stringify(COLIMA_READ_COMMANDS)).not.toMatch(/\b(?:restart|start|stop|rm)\b|sh -c/i);
