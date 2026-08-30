@@ -102,6 +102,8 @@ async function waitGone(pid: number, label: string, budgetMs = 15_000) {
 
 const run = (dir: string, timeoutMs = 5_000) =>
   runClaude({
+    model: "claude-sonnet-5",
+    effort: "high",
     prompt: "analyze",
     cwd: process.cwd(),
     maxTurns: 4,
@@ -126,6 +128,8 @@ describe("runClaude", () => {
       `echo "{\\"result\\":\\"$*\\",\\"is_error\\":false}"`,
     );
     const out = await runClaude({
+      model: "claude-sonnet-5",
+      effort: "xhigh",
       prompt: "PROMPTBODY",
       cwd: process.cwd(),
       maxTurns: 8,
@@ -137,6 +141,8 @@ describe("runClaude", () => {
     expect(out.text).toContain("PROMPTBODY");
     expect(out.text).toContain("--output-format json");
     expect(out.text).toContain("--max-turns 8");
+    expect(out.text).toContain("--model claude-sonnet-5");
+    expect(out.text).toContain("--effort xhigh");
     expect(out.text).toContain("--mcp-config /tmp/mcp.json");
     expect(out.text).toContain("--allowedTools Read");
   });
@@ -212,6 +218,8 @@ describe("runClaude", () => {
   it("disables built-ins, allow-lists only declared MCP tools, and pins MCP config", async () => {
     const { dir, capture } = fakeClaudeWithCapture(RECORD_ARGV);
     const out = await runClaude({
+      model: "claude-sonnet-5",
+      effort: "high",
       prompt: "PROMPTBODY",
       cwd: workspace(),
       maxTurns: 4,
@@ -246,6 +254,8 @@ describe("runClaude", () => {
   it("emits an EMPTY allow-list for an empty declared set rather than omitting the flag", async () => {
     const { dir, capture } = fakeClaudeWithCapture(RECORD_ARGV);
     const out = await runClaude({
+      model: "claude-sonnet-5",
+      effort: "high",
       prompt: "PROMPTBODY",
       cwd: workspace(),
       maxTurns: 4,
@@ -281,6 +291,8 @@ describe("runClaude", () => {
       // grandchild exists would make this test pass without ever proving
       // anything about the process group.
       const pending = runClaude({
+        model: "claude-sonnet-5",
+        effort: "high",
         prompt: "analyze",
         cwd: workspace(),
         maxTurns: 4,

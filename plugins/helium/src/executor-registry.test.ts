@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ExecutorRegistry, asBoundarySubject } from "./executor-registry.js";
 
 const now = new Date("2026-08-29T00:00:00.000Z");
+const createRegistry = () => new ExecutorRegistry({ onResult: () => {} });
 
 const work = (overrides: Partial<WorkOrder> = {}): WorkOrder => ({
   id: "work-1",
@@ -84,7 +85,7 @@ const dirs = () => ({
 
 describe("registration", () => {
   it("registers an executor against a conformance record and disposes it", () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const dispose = registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a")));
     expect(registry.list()).toHaveLength(1);
     dispose();
@@ -92,7 +93,7 @@ describe("registration", () => {
   });
 
   it("refuses a duplicate executor for the same target", () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a")));
     expect(() =>
       registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a"))),
@@ -100,7 +101,7 @@ describe("registration", () => {
   });
 
   it("refuses a conformance record issued for a different target", () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     expect(() =>
       registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("b"))),
     ).toThrow(/conformance record is for b/);
@@ -110,14 +111,14 @@ describe("registration", () => {
   // demonstrates only `process` fails registration rather than downgrading
   // silently to what it can prove.
   it("refuses an executor whose declared class exceeds its proven one", () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     expect(() =>
       registry.register(stub("a", "sandboxed"), proven("a", "process")),
     ).toThrow(/declares "sandboxed" but its conformance record proves only "process"/);
   });
 
   it("admits an executor that declares less than it proved", () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     expect(() =>
       registry.register(stub("a", "process"), proven("a", "sandboxed")),
     ).not.toThrow();
@@ -126,7 +127,7 @@ describe("registration", () => {
 
 describe("dispatch", () => {
   it("rejects a lease for a target that is not registered", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     await expect(
       registry.run({
@@ -140,7 +141,7 @@ describe("dispatch", () => {
   });
 
   it("rejects work requiring a stronger class BEFORE run() is called", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     const run = vi.fn();
     registry.register(
@@ -164,7 +165,7 @@ describe("dispatch", () => {
   });
 
   it("refuses a lease bound to different work", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a")));
     await expect(
@@ -179,7 +180,7 @@ describe("dispatch", () => {
   });
 
   it("normalizes the result and carries runtime metadata through untouched", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a")));
     const out = await registry.run({
@@ -193,8 +194,23 @@ describe("dispatch", () => {
     expect(out.runtimeMetadata).toEqual({ opaque: { nested: [1, 2, 3] } });
   });
 
+  it("publishes every normalized provider result before returning it", async () => {
+    const observed: AgentResult[] = [];
+    const registry = new ExecutorRegistry({ onResult: (value) => void observed.push(value) });
+    const leases = new LeaseStore();
+    registry.register(stub("a"), conformanceAtFloor(ExecutionTargetId("a")));
+    const out = await registry.run({
+      work: work(),
+      lease: leaseFor(leases, "a"),
+      leases,
+      ...dirs(),
+      now,
+    });
+    expect(observed).toEqual([out]);
+  });
+
   it("rejects an executor result core's schema does not accept", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     registry.register(
       stub("a", "in-process", (async (w: WorkOrder) => ({
@@ -215,7 +231,7 @@ describe("dispatch", () => {
   });
 
   it("gives each run its own empty workspace", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const leases = new LeaseStore();
     const seen: string[] = [];
     registry.register(
@@ -240,10 +256,39 @@ describe("dispatch", () => {
     });
     expect(seen).toHaveLength(2);
     expect(seen[0]).not.toBe(seen[1]);
+    expect(seen.every((workspace) => !existsSync(workspace))).toBe(true);
+  });
+
+  it("removes the owned workspace after a failed executor settles", async () => {
+    const registry = createRegistry();
+    const leases = new LeaseStore();
+    let seen = "";
+    registry.register(
+      stub("a", "in-process", (async (
+        _w: WorkOrder,
+        _s: AbortSignal,
+        context: ExecutionContext,
+      ) => {
+        seen = context.workspace;
+        writeFileSync(join(seen, "partial.txt"), "partial");
+        throw new Error("provider failed");
+      }) as Executor["run"]),
+      conformanceAtFloor(ExecutionTargetId("a")),
+    );
+    await expect(
+      registry.run({
+        work: work(),
+        lease: leaseFor(leases, "a"),
+        leases,
+        ...dirs(),
+        now,
+      }),
+    ).rejects.toThrow(/provider failed/);
+    expect(existsSync(seen)).toBe(false);
   });
 
   it("drains every registered executor", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = createRegistry();
     const drained: string[] = [];
     for (const id of ["a", "b"]) {
       registry.register(

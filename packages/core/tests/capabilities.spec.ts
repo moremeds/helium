@@ -102,7 +102,7 @@ describe("availability", () => {
     expect(catalog.available(ExecutionTargetId("target-a"), now)).toBe(false);
   });
 
-  it("becomes available again once retryAfter has passed", () => {
+  it("does not parse retryAfter or auto-readmit without a provider update", () => {
     const catalog = new CapabilityCatalog();
     catalog.register(profile());
     catalog.setAvailability(ExecutionTargetId("target-a"), {
@@ -114,7 +114,7 @@ describe("availability", () => {
         ExecutionTargetId("target-a"),
         new Date("2026-08-29T01:00:01.000Z"),
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("keeps an unavailable target unavailable with no retryAfter to wait for", () => {

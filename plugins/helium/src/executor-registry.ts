@@ -9,7 +9,8 @@
  * @module dsh-plugin-helium/executor-registry
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { reapOrphanProviderProcesses } from "@helium/provider-sdk/process-receipt";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   AgentResultSchema,
@@ -40,6 +41,7 @@ const RANK: Readonly<Record<string, number>> = Object.fromEntries(
  */
 export interface BoundarySubjectLike {
   readonly name: string;
+  readonly dialect?: "claude-cli" | "codex-cli";
   readonly declaredIsolationClass: IsolationClass;
   invoke(input: {
     prompt: string;
@@ -57,9 +59,11 @@ export interface BoundarySubjectLike {
 export function asBoundarySubject(
   executor: Executor,
   name: string,
+  dialect?: "claude-cli" | "codex-cli",
 ): BoundarySubjectLike {
   return {
     name,
+    ...(dialect === undefined ? {} : { dialect }),
     declaredIsolationClass: executor.isolationClass,
     async invoke(input) {
       const work: WorkOrder = {
@@ -103,6 +107,11 @@ export interface RegistryRunInput {
 export class ExecutorRegistry {
   readonly #executors = new Map<string, Executor>();
   readonly #conformance = new Map<string, ConformanceRecord>();
+  readonly #onResult: (result: AgentResult) => void;
+
+  constructor(input: { onResult(result: AgentResult): void }) {
+    this.#onResult = input.onResult;
+  }
 
   /**
    * @throws on a duplicate target, on a record issued for a different target,
@@ -177,17 +186,29 @@ export class ExecutorRegistry {
       mcpConfigPath,
     };
 
-    const result = await executor.run(
-      work,
-      input.signal ?? new AbortController().signal,
-      context,
-    );
-    // Normalized at the boundary: a provider adapter returning a shape core
-    // does not accept fails here rather than downstream in the ledger.
-    return AgentResultSchema.parse(result);
+    try {
+      const result = await executor.run(
+        work,
+        input.signal ?? new AbortController().signal,
+        context,
+      );
+      // Normalized at the boundary: a provider adapter returning a shape core
+      // does not accept fails here rather than downstream in the ledger.
+      const parsed = AgentResultSchema.parse(result);
+      this.#onResult(parsed);
+      return parsed;
+    } finally {
+      // `run()` settles only after the executor's child has quiesced. Remove
+      // exactly the UUID workspace this registry created, never its caller-owned root.
+      rmSync(workspace, { recursive: true, force: true });
+    }
   }
 
   async drain(): Promise<void> {
     await Promise.all(this.list().map((e) => e.drain()));
+  }
+
+  async reconcileOrphanProcesses(workspacesDir: string) {
+    return await reapOrphanProviderProcesses(workspacesDir);
   }
 }

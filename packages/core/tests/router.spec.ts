@@ -158,7 +158,7 @@ describe("preference and fallback", () => {
     expect(decision.fallbackPosition).toBe(2);
   });
 
-  it("falls through a quota-exhausted preference, and returns to it after retryAfter", () => {
+  it("falls through a quota-exhausted preference until the provider restores it", () => {
     const catalog = catalogOf(target("target-a"), target("target-b"));
     catalog.setAvailability(ExecutionTargetId("target-a"), {
       state: "quota-exhausted",
@@ -172,8 +172,11 @@ describe("preference and fallback", () => {
     ]);
 
     const after = select(work(), policy("target-a", ["target-b"]), catalog.snapshot(later));
-    expect(after.selected).toBe(ExecutionTargetId("target-a"));
-    expect(after.fallbackPosition).toBe(0);
+    expect(after.selected).toBe(ExecutionTargetId("target-b"));
+    catalog.setAvailability(ExecutionTargetId("target-a"), { state: "available" });
+    const restored = select(work(), policy("target-a", ["target-b"]), catalog.snapshot(later));
+    expect(restored.selected).toBe(ExecutionTargetId("target-a"));
+    expect(restored.fallbackPosition).toBe(0);
   });
 
   it("never lets a preference re-admit a target a hard filter excluded", () => {
@@ -194,6 +197,41 @@ describe("preference and fallback", () => {
 });
 
 describe("shortage", () => {
+  it("reports dynamic capacity when every configured target is only unavailable", () => {
+    const catalog = catalogOf(target("target-a"), target("target-b"));
+    catalog.setAvailability(ExecutionTargetId("target-a"), {
+      state: "quota-exhausted",
+      retryAfter: "opaque-hint",
+    });
+    catalog.setAvailability(ExecutionTargetId("target-b"), {
+      state: "unavailable",
+    });
+    const decision = select(
+      work(),
+      policy("target-a", ["target-b"]),
+      catalog.snapshot(later),
+    );
+    expect(decision.failure?.class).toBe("unavailable");
+    expect(decision.failure?.reasons).toEqual([
+      "target-a: quota-exhausted",
+      "target-b: unavailable",
+    ]);
+  });
+
+  it("keeps static exclusion classified as capability shortage", () => {
+    const catalog = catalogOf(
+      target("target-a", { isolationClass: "in-process" }),
+      target("target-b"),
+    );
+    catalog.setAvailability(ExecutionTargetId("target-b"), {
+      state: "unavailable",
+    });
+    expect(
+      select(work(), policy("target-a", ["target-b"]), catalog.snapshot(now))
+        .failure?.class,
+    ).toBe("capability-shortage");
+  });
+
   it("reports per-target exclusion reasons and never relaxes a requirement", () => {
     const catalog = catalogOf(
       target("target-a", { isolationClass: "in-process" }),

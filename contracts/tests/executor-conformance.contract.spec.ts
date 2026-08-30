@@ -119,7 +119,7 @@ const run = async (
 
 describe("billing models stay distinct", () => {
   it("reports no cost and no tokens for a flat-rate run — absent, not zero", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(flatRate, conformanceAtFloor(FLAT_RATE));
     const result = await run(registry, FLAT_RATE, work());
 
@@ -132,7 +132,7 @@ describe("billing models stay distinct", () => {
   });
 
   it("charges a flat-rate run without recording a zero it never observed", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(flatRate, conformanceAtFloor(FLAT_RATE));
     const result = await run(registry, FLAT_RATE, work());
 
@@ -145,7 +145,7 @@ describe("billing models stay distinct", () => {
   });
 
   it("reports tokens and cost for a metered run", async () => {
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(metered, provenProcess);
     const result = await run(
       registry,
@@ -167,7 +167,7 @@ describe("billing models stay distinct", () => {
       budgetExhausted: true,
     });
 
-    const registry = new ExecutorRegistry();
+    const registry = new ExecutorRegistry({ onResult: () => {} });
     registry.register(exhaustedQuota, conformanceAtFloor(ExecutionTargetId("flat-exhausted")));
     registry.register(exhaustedBudget, {
       targetId: ExecutionTargetId("metered-exhausted"),
@@ -208,7 +208,7 @@ describe("isolation class governs selection", () => {
     ).toEqual(["isolation"]);
   });
 
-  it("falls through a quota-exhausted preference in configured order, and returns after retryAfter", () => {
+  it("falls through a quota-exhausted preference until a provider-owned availability update", () => {
     const catalog = new CapabilityCatalog();
     catalog.register(profile("fake-flat-rate", "in-process"));
     catalog.register(profile("fake-metered", "process"));
@@ -222,6 +222,9 @@ describe("isolation class governs selection", () => {
     expect(during.failure).toBeUndefined();
 
     const after = select(work(), policy, catalog.snapshot(later));
-    expect(after.selected).toBe(FLAT_RATE);
+    expect(after.selected).toBe(METERED);
+    catalog.setAvailability(FLAT_RATE, { state: "available" });
+    const restored = select(work(), policy, catalog.snapshot(later));
+    expect(restored.selected).toBe(FLAT_RATE);
   });
 });

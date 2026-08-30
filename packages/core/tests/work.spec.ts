@@ -44,11 +44,14 @@ describe("WorkOrderSchema", () => {
     expect(WorkOrderSchema.parse(work).role).toBe("evidence-verifier");
   });
 
-  it("rejects any provider or model key", () => {
-    expect(() => WorkOrderSchema.parse({ ...work, model: "anything" })).toThrow();
-    expect(() =>
-      WorkOrderSchema.parse({ ...work, provider: "anything" }),
-    ).toThrow();
+  it("rejects provider-native selection fields", () => {
+    for (const forbidden of [
+      { provider: "provider-subscription" },
+      { model: "provider-model" },
+      { effort: "high" },
+    ]) {
+      expect(() => WorkOrderSchema.parse({ ...work, ...forbidden })).toThrow();
+    }
   });
 
   it("rejects the graded requires shape deferred to v2", () => {

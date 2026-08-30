@@ -36,6 +36,8 @@ export type IsolationClass = "in-process" | "process" | "sandboxed";
 
 export interface ExecutionBoundarySubject {
   readonly name: string;
+  /** CLI boundary dialect. The assertions remain centralized in this suite. */
+  readonly dialect?: "claude-cli" | "codex-cli";
   /** What the subject claims about what its child inherits. */
   readonly declaredIsolationClass: IsolationClass;
   /** Run one probe prompt under the supplied restriction and environment. */
@@ -57,6 +59,9 @@ const RANK: Record<IsolationClass, number> = {
 
 const FAKE_CLAUDE = fileURLToPath(
   new URL("../fixtures/senior-isolation/fake-claude.mjs", import.meta.url),
+);
+const FAKE_CODEX = fileURLToPath(
+  new URL("../fixtures/senior-isolation/fake-codex.mjs", import.meta.url),
 );
 
 /**
@@ -119,6 +124,7 @@ interface BoundaryReport {
     allowedToolsCount: number;
     mcpServers: string[] | null;
     mcpConfigError: string | null;
+    exposedTools: string[];
     workspaceEntries: string[];
     escape: {
       readOutside: "allowed" | "blocked" | "missing";
@@ -201,13 +207,18 @@ export function runExecutionBoundaryConformance(
       // loaded as CommonJS and the fixture's ESM syntax would not parse.
       binDir = join(root, "bin");
       mkdirSync(binDir, { recursive: true });
-      const shim = join(binDir, "claude");
-      writeFileSync(
-        shim,
-        `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(FAKE_CLAUDE)} "$@"\n`,
-        "utf8",
-      );
-      chmodSync(shim, 0o755);
+      for (const [name, fixture] of [
+        ["claude", FAKE_CLAUDE],
+        ["codex", FAKE_CODEX],
+      ] as const) {
+        const shim = join(binDir, name);
+        writeFileSync(
+          shim,
+          `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(fixture)} "$@"\n`,
+          "utf8",
+        );
+        chmodSync(shim, 0o755);
+      }
 
       // Exactly one declared MCP server, written at runtime the way
       // production writes <stateRoot>/mcp.json.
@@ -291,6 +302,30 @@ export function runExecutionBoundaryConformance(
 
         it("keeps the declared tool list exactly as declared, empty included", () => {
           const { observed } = report;
+          expect(observed.exposedTools).toEqual(scenario.allowedTools);
+          if (subject.dialect === "codex-cli") {
+            expect(observed.argv).toEqual(
+              expect.arrayContaining([
+                "--ignore-user-config",
+                "--ignore-rules",
+                "--strict-config",
+              ]),
+            );
+            for (const value of [
+              "features.shell_tool=false",
+              "features.unified_exec=false",
+              "tools.web_search=false",
+              "features.multi_agent=false",
+              "features.apps=false",
+              "features.browser_use=false",
+              "features.computer_use=false",
+              "features.image_generation=false",
+            ]) {
+              expect(observed.argv).toContain(value);
+            }
+            expect(observed.argv).not.toContain("--dangerously-bypass-approvals-and-sandbox");
+            return;
+          }
           // `--tools ""` disables the built-in set; `--allowedTools` is the
           // only flag that carries mcp__* names. Both must be present with
           // exactly the declared value — an empty declared set must stay an
@@ -308,11 +343,17 @@ export function runExecutionBoundaryConformance(
 
           expect(observed.mcpConfigError).toBeNull();
           expect(observed.mcpConfigCount).toBe(1);
-          expect(observed.mcpConfigPath).toBe(mcpConfigPath);
           expect(observed.mcpServers).toEqual(["helium"]);
-          expect(observed.argv).toContain("--strict-mcp-config");
-
-          expect(observed.settingSources).toBe("");
+          if (subject.dialect === "codex-cli") {
+            expect(observed.mcpConfigPath).toBeNull();
+            expect(observed.argv).toContain("--strict-config");
+            expect(observed.argv).toContain("mcp_servers.helium.required=true");
+            expect(observed.settingSources).toBeNull();
+          } else {
+            expect(observed.mcpConfigPath).toBe(mcpConfigPath);
+            expect(observed.argv).toContain("--strict-mcp-config");
+            expect(observed.settingSources).toBe("");
+          }
 
           for (const flag of UNDECLARED_SOURCE_FLAGS) {
             expect(observed.argv).not.toContain(flag);

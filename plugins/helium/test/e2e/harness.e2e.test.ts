@@ -149,6 +149,8 @@ describe.each(["legacy-direct", "work-order-adapter"] as const)(
           senior: {
             dispatch: async (job, _ev, prompt) => {
               const result = await runClaude({
+                model: "claude-sonnet-5",
+                effort: "high",
                 prompt,
                 cwd: root,
                 maxTurns: job.maxTurns.senior,
