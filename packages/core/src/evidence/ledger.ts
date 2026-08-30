@@ -173,6 +173,9 @@ export class AcceptedClaimLedger {
     if (input.evidence.assertionClass !== `claim:${claim.kind}`) {
       throw new Error(`claim kind requires assertion class claim:${claim.kind}`);
     }
+    if (input.evidence.executionSnapshot === undefined) {
+      throw new Error("accepted claim evidence requires an execution snapshot");
+    }
     for (const stage of REQUIRED_CLAIM_STAGES[claim.kind]) {
       if (!input.evidence.requiredStages.includes(stage)) {
         throw new Error(`claim policy requires evidence stage: ${stage}`);

@@ -98,6 +98,11 @@ describe("AcceptedClaimLedger", () => {
         now,
       ),
     ).toThrow(/not bound to hashed evidence/);
+
+    const { executionSnapshot: _omitted, ...withoutSnapshot } = decision().evidence;
+    expect(() =>
+      ledger.publish(decision({ evidence: withoutSnapshot as never }), now),
+    ).toThrow(/execution snapshot/);
   });
 
   it("does not let a renderer add, remove, or promote a claim", () => {
