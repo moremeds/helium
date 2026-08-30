@@ -56,7 +56,7 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
   }
 
   hashArtifacts(refs: readonly string[]): EvidenceRef[] {
-    return [...new Set(refs)].sort().map((ref) => {
+    return this.#rawSourceRefs(refs).map((ref) => {
       const raw = this.#readSource(ref);
       return {
         ref,
@@ -115,14 +115,14 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
     ]) {
       this.#read(nested);
     }
-    const expectedSources = [...new Set([
+    const expectedSources = this.#rawSourceRefs([
       ...observationValues.flatMap((observation) => observation.evidenceRefs),
       bundle.controllerProbe.evidenceRef,
       ...(bundle.baseline === undefined
         ? []
         : bundle.baseline.samples.flatMap((sample) => sample.evidenceRefs)),
       ...bundle.postconditionSamples.flatMap((sample) => sample.evidenceRefs),
-    ])].sort();
+    ]);
     const actualSources = [...new Set(bundle.rawArtifacts.map((artifact) => artifact.ref))].sort();
     if (canonicalJson(actualSources) !== canonicalJson(expectedSources)) {
       throw new Error(`recovery evidence raw artifact set mismatch: ${event.actionId}`);
@@ -133,6 +133,21 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
         throw new Error(`raw evidence hash mismatch: ${artifact.ref}`);
       }
     }
+  }
+
+  #rawSourceRefs(refs: readonly string[]): string[] {
+    const unique = [...new Set(refs)].sort();
+    if (this.options.readSourceArtifact !== undefined) return unique;
+    return unique.filter((ref) => {
+      if (ref.startsWith("artifact://ops/raw/")) return true;
+      const authority = ref.match(/^artifact:\/\/ops\/authority\/([a-zA-Z0-9._-]+)$/);
+      if (authority !== null) return false;
+      const unavailable = ref.match(
+        /^artifact:\/\/ops\/check-unavailable\/(baseline|postcondition)\/([a-zA-Z0-9._-]+)$/,
+      );
+      if (unavailable !== null) return false;
+      throw new Error(`unsupported raw evidence ref: ${ref}`);
+    });
   }
 
   #readSource(ref: string): string | Buffer {
