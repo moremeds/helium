@@ -38,6 +38,8 @@ export type IncidentFailureClass = Exclude<ObservationState, "ok">;
 export interface Incident {
   /** Stable across runs; see {@link incidentKey}. */
   key: string;
+  /** Optional exact work scope for callers that schedule a bounded repair. */
+  scopeId?: string;
   rootComponentId: string;
   /** Components inhibited under this root, sorted. Never the root itself. */
   symptomComponentIds: string[];
@@ -71,11 +73,19 @@ export function incidentKey(parts: {
   dimension: string;
   failureClass: IncidentFailureClass;
   rootComponentId: string;
+  scopeId?: string;
 }): string {
-  return [
+  if (
+    parts.scopeId !== undefined &&
+    (parts.scopeId.length === 0 || parts.scopeId.length > 256 || parts.scopeId.includes("|"))
+  ) {
+    throw new Error("incident scope id must be an opaque bounded value without the key delimiter");
+  }
+  const base = [
     parts.componentId,
     parts.dimension,
     parts.failureClass,
     parts.rootComponentId,
-  ].join("|");
+  ];
+  return (parts.scopeId === undefined ? base : [...base, parts.scopeId]).join("|");
 }

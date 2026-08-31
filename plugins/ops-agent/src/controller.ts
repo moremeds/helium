@@ -8,26 +8,20 @@ import {
 import type { PostconditionSample } from "@helium/core/operations/action.js";
 import type { CheckDefinition } from "@helium/core/operations/check.js";
 import { correlate } from "@helium/core/operations/correlate.js";
-import type { OperationsEvent } from "@helium/core/operations/events.js";
 import type { Incident } from "@helium/core/operations/incident.js";
 import type { ActionLease, ActionLeaseController } from "@helium/core/operations/lease.js";
-import {
-  canMutate,
-  type ControllerProbeOutcome,
-} from "@helium/core/operations/mutation-owner.js";
+import type { ControllerProbeOutcome } from "@helium/core/operations/mutation-owner.js";
 import type { Observation } from "@helium/core/operations/observation.js";
 import {
   reconcileOnStartup,
 } from "@helium/core/operations/reconcile.js";
 import type {
   ActionProjection,
-  OperationsState,
 } from "@helium/core/operations/reducer.js";
 import type { RecoveryEvidence } from "@helium/core/operations/recovery-evidence.js";
 import type { SopDefinition } from "@helium/core/operations/sop.js";
 import {
   runGraceWindow,
-  verifyAction,
 } from "@helium/core/operations/verify.js";
 import type { CollectionResult, ObservationSink } from "./collector.js";
 import type { ComponentRegistry, LoadedSop } from "./component-registry.js";
@@ -36,30 +30,17 @@ import type { ApprovalLedger } from "./approval.js";
 import type { ComponentActionLockPort } from "./component-action-lock.js";
 import type { RecoveryEvidencePort } from "./recovery-evidence-store.js";
 import {
-  ExecutionSuppressedError,
-  type ExecutionGate,
-  type ExecutionReceipt,
-  type ExecutionRequest,
-} from "./script-executor.js";
+  CertifiedActionRunner,
+  type ActionExecutor,
+  type ControllerProbePort,
+  type OperationsStorePort,
+} from "./action-runner.js";
 
-export interface OperationsStorePort {
-  append(raw: unknown): OperationsEvent;
-  state(): OperationsState;
-  replay(): OperationsEvent[];
-}
-
-export interface ActionExecutor {
-  run(
-    request: ExecutionRequest,
-    signal: AbortSignal,
-    gate?: ExecutionGate,
-  ): Promise<ExecutionReceipt>;
-}
-
-export interface ControllerProbePort {
-  check(component: NonNullable<ReturnType<ComponentRegistry["component"]>>):
-    Promise<ControllerProbeOutcome>;
-}
+export type {
+  ActionExecutor,
+  ControllerProbePort,
+  OperationsStorePort,
+} from "./action-runner.js";
 
 export interface OpsControllerOptions {
   mode: OpsMode;
@@ -116,6 +97,7 @@ interface Candidate {
 
 export class OpsController {
   readonly #nextId: (prefix: string) => string;
+  readonly #actionRunner: CertifiedActionRunner;
   readonly #incidentKeys = new Map<string, string>();
   #startupReconciled = false;
 
@@ -125,6 +107,17 @@ export class OpsController {
     }
     this.#nextId =
       options.nextId ?? ((prefix) => `${prefix}-${randomUUID()}`);
+    this.#actionRunner = new CertifiedActionRunner({
+      store: options.store,
+      now: options.now,
+      nextId: this.#nextId,
+      sampleChecks: options.sampleChecks,
+      sampleGrace: (policy) => this.#sampleGrace(policy),
+      controllerProbe: options.controllerProbe,
+      leases: options.leases,
+      componentLocks: options.componentLocks,
+      createExecutor: options.createExecutor,
+    });
   }
 
   async tick(signal: AbortSignal = new AbortController().signal): Promise<ControllerTickResult> {
@@ -365,207 +358,57 @@ export class OpsController {
         reason: "component-missing",
       };
     }
-    const initialProbe = await this.options.controllerProbe.check(component);
-    const initialPermission = canMutate(component, initialProbe);
-    if (!initialPermission.ok) {
-      return {
-        incidentId: candidate.incident.key,
-        sopId: candidate.sop.id,
-        disposition: "observe",
-        reason: initialPermission.reason,
-        controllerEvidenceRef: initialProbe.evidenceRef,
-      };
-    }
-
     const argv = this.options.argvFor(candidate.sop, candidate.incident);
     const verificationPolicy = {
       postconditions: this.options.registry.checks(candidate.sop.postconditions),
       graceMs: candidate.sop.graceMs,
     };
-    let leaseId: string | undefined;
-    let componentLock: { release(): void } | undefined;
-    let boundaryRef = initialProbe.evidenceRef;
-    let suppressionReason: string | undefined;
-
-    try {
-      const acquired = this.options.leases.acquire({
-        componentId: component.id,
-        incidentId: persistedIncidentId(candidate.incident.key),
-        sopId: candidate.sop.id,
-        sopDigest: candidate.sop.digest,
-        attempt: action.attempt,
-      });
-      if (!acquired.ok) {
-        return {
-          incidentId: candidate.incident.key,
-          sopId: candidate.sop.id,
-          disposition: "observe",
-          reason: acquired.reason,
-          controllerEvidenceRef: boundaryRef,
-        };
-      }
-      leaseId = acquired.lease.leaseId;
-
-      const locked = this.options.componentLocks.acquire({
-        componentId: component.id,
-        leaseId: acquired.lease.leaseId,
-        sopDigest: candidate.sop.digest,
-        acquiredAt: acquired.lease.acquiredAt,
-        expiresAt: acquired.lease.expiresAt,
-      });
-      if (!locked.ok) {
-        return {
-          incidentId: candidate.incident.key,
-          sopId: candidate.sop.id,
-          disposition: "observe",
-          reason: locked.reason,
-          controllerEvidenceRef: boundaryRef,
-        };
-      }
-      componentLock = locked.handle;
-
-      const baselineCapturedAt = this.options.now().toISOString();
-      const samples = await this.options.sampleChecks(
-        verificationPolicy.postconditions,
-        "baseline",
-      );
-      if (samples.length !== candidate.sop.postconditions.length) {
-        throw new Error("baseline did not sample every postcondition");
-      }
-      const baseline = {
-        samples,
-        allPassing: samples.every((sample) => sample.state === "pass"),
-      };
-      if (samples.some((sample) => sample.state === "unknown")) {
-        return {
-          incidentId: candidate.incident.key,
-          sopId: candidate.sop.id,
-          disposition: "observe",
-          reason: "baseline-unavailable",
-          actionId: action.actionId,
-          controllerEvidenceRef: boundaryRef,
-        };
-      }
-      if (baseline.allPassing) {
-        // This is a terminal policy result, not an intent to mutate. Recording
-        // an intent here would make a crash replay look as if a spawn may have
-        // happened, which is precisely what `not-needed` rules out.
-        this.#ensureProposed(action.actionId, candidate);
-        this.#ensureAuthorized(action.actionId, candidate);
-        this.#recordTerminal(action.actionId, "not-needed", baseline.samples, {
-          lease: acquired.lease,
-          baseline: { capturedAt: baselineCapturedAt, ...baseline },
-          controllerProbe: initialProbe,
-        });
-        return this.#executedResult(candidate, action.actionId, boundaryRef);
-      }
-
-      const executor = this.options.createExecutor();
-      const receipt = await executor.run(
-        {
-          actionId: action.actionId,
-          executorId: candidate.sop.action.executorId,
-          argv,
-        },
-        signal,
-        async () => {
-          // Baseline sampling may take time. Enumerate competing controllers
-          // only after it finishes, then append intent synchronously. The
-          // executor performs no asynchronous step between this gate and
-          // spawn.
-          const atSpawn = await this.options.controllerProbe.check(component);
-          boundaryRef = atSpawn.evidenceRef;
-          const permission = canMutate(component, atSpawn);
-          if (!permission.ok) {
-            suppressionReason = permission.reason;
-            return { admitted: false, reason: permission.reason };
-          }
-          this.#ensureProposed(action.actionId, candidate);
-          this.#ensureAuthorized(action.actionId, candidate);
-          this.options.store.append({
-            v: 1,
-            id: this.#nextId("evt-action-intent"),
-            at: this.options.now().toISOString(),
-            type: "action-intent-recorded",
-            actionId: action.actionId,
-            leaseId,
-            operationId: acquired.lease.operationId,
-            argv,
-            baseline: {
-              capturedAt: baselineCapturedAt,
-              samples: baseline.samples,
-              allPassing: false,
-            },
-            controllerProbe: atSpawn,
-            eligibility: {
-              eligible: candidate.eligible,
-              reasons: [
-                ...candidate.loaded.certificationReasons,
-                ...candidate.policyReasons,
-              ],
-            },
-            mutationOwner: component.mutationOwner,
-            dependencyIds: this.options.registry
-              .graph()
-              .transitiveDependenciesOf(component.id),
-            verificationPolicy: {
-              postconditions: verificationPolicy.postconditions,
-              graceMs: verificationPolicy.graceMs,
-            },
-          });
-          return { admitted: true };
-        },
-      );
-
-      this.options.store.append({
-        v: 1,
-        id: this.#nextId("evt-action-receipt"),
-        at: this.options.now().toISOString(),
-        type: "action-receipt-recorded",
+    const result = await this.#actionRunner.run(
+      {
+        scopeId: candidate.incident.scopeId ?? persistedIncidentId(candidate.incident.key),
         actionId: action.actionId,
-        exitCode: receipt.exit.code,
-        timedOut: receipt.timedOut,
-        outputDigest: receipt.outputDigest,
-        outputTail: receipt.outputTail,
-        outputBytes: receipt.outputBytes,
-        startedAt: receipt.startedAt,
-        finishedAt: receipt.finishedAt,
-      });
-      const verified = await this.#sampleGrace(verificationPolicy);
-      const verdict = verifyAction({
-        baseline,
-        intentRecorded: true,
-        receipt: { exitCode: receipt.exit.code, timedOut: receipt.timedOut },
-        postconditions: verified.verdict,
-        operatorConfirmed:
-          this.options.store.state().actions[action.actionId]?.supersededAt !== undefined,
-      });
-      if (verdict.decision !== "outcome") {
-        throw new Error(`unexpected verification refusal: ${verdict.reason}`);
-      }
-      this.#recordTerminal(action.actionId, verdict.outcome, verified.samples);
-      return this.#executedResult(candidate, action.actionId, boundaryRef);
-    } catch (error) {
-      if (error instanceof ExecutionSuppressedError) {
-        return {
-          incidentId: candidate.incident.key,
-          sopId: candidate.sop.id,
-          disposition: "observe",
-          reason: suppressionReason ?? error.reason,
-          controllerEvidenceRef: boundaryRef,
-        };
-      }
-      if (this.options.store.state().actions[action.actionId]?.state === "intent-recorded") {
-        this.#recordTerminal(action.actionId, "uncertain", []);
-        return this.#executedResult(candidate, action.actionId, boundaryRef, error);
-      }
-      throw error;
-    } finally {
-      componentLock?.release();
-      if (leaseId !== undefined) {
-        this.options.leases.release(leaseId, component.id);
-      }
-    }
+        attempt: action.attempt,
+        incidentId: persistedIncidentId(candidate.incident.key),
+        component,
+        sop: {
+          id: candidate.sop.id,
+          digest: candidate.sop.digest,
+          executorId: candidate.sop.action.executorId,
+          postconditions: candidate.sop.postconditions,
+        },
+        argv,
+        verificationPolicy,
+        eligibility: {
+          eligible: candidate.eligible,
+          reasons: [
+            ...candidate.loaded.certificationReasons,
+            ...candidate.policyReasons,
+          ],
+        },
+        mutationOwner: component.mutationOwner,
+        dependencyIds: () => this.options.registry
+          .graph()
+          .transitiveDependenciesOf(component.id),
+      },
+      {
+        ensureProposed: () => this.#ensureProposed(action.actionId, candidate),
+        ensureAuthorized: () => this.#ensureAuthorized(action.actionId, candidate),
+        recordTerminal: (outcome, samples, overrides) =>
+          this.#recordTerminal(action.actionId, outcome, samples, overrides),
+      },
+      signal,
+    );
+    return {
+      incidentId: candidate.incident.key,
+      sopId: candidate.sop.id,
+      disposition: result.disposition,
+      ...(result.reason === undefined ? {} : { reason: result.reason }),
+      ...(result.outcome === undefined ? {} : { outcome: result.outcome }),
+      controllerEvidenceRef: result.controllerEvidenceRef,
+      ...(result.disposition === "execute" || result.reason === "baseline-unavailable"
+        ? { actionId: action.actionId }
+        : {}),
+    };
   }
 
   #ensureProposed(actionId: string, candidate: Candidate): void {
@@ -897,24 +740,6 @@ export class OpsController {
       });
     }
     this.#startupReconciled = true;
-  }
-
-  #executedResult(
-    candidate: Candidate,
-    actionId: string,
-    controllerEvidenceRef: string,
-    error?: unknown,
-  ): ControllerActionResult {
-    const state = this.options.store.state().actions[actionId]?.state;
-    return {
-      incidentId: candidate.incident.key,
-      sopId: candidate.sop.id,
-      disposition: "execute",
-      actionId,
-      ...(state === undefined ? {} : { outcome: state }),
-      controllerEvidenceRef,
-      ...(error instanceof Error ? { reason: error.message } : {}),
-    };
   }
 
   #actionIdentity(candidate: Candidate): {

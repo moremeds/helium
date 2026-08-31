@@ -78,6 +78,16 @@ export {
   type OpsControllerOptions,
 } from "./controller.js";
 export {
+  CertifiedActionRunner,
+  type ActionExecutor,
+  type CertifiedActionHooks,
+  type CertifiedActionRequest,
+  type CertifiedActionResult,
+  type CertifiedActionRunnerOptions,
+  type ControllerProbePort,
+  type OperationsStorePort,
+} from "./action-runner.js";
+export {
   OPS_MODES,
   OpsModeSchema,
   decideRuntimeMode,
