@@ -109,6 +109,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
+      - name: macOS Livewire recovery contract
+        run: >-
+          pnpm exec vitest run --project contracts
+          contracts/tests/livewire-shepherd-recovery.contract.spec.ts
       # Redirected temporary roots only: this renders and removes packaging,
       # but never loads launchd or touches a live host installation.
       - run: bash scripts/ops/install-observe-only.test.sh

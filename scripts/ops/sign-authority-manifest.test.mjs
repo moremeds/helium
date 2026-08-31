@@ -162,6 +162,7 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
     version: 1,
     promotionId: "fixture-promotion",
     release: { dir: root, commit: "fixture-commit" },
+    runtimeFiles: [],
     bundleFiles,
     registeredProbes: {
       sha256: createHash("sha256").update(readFileSync(fixture.registeredProbes)).digest("hex"),
@@ -208,6 +209,8 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
   await runManifestSigner(args, {
     signingHost,
     resolveReleaseCommit: () => "fixture-commit",
+    assertReleaseClean: () => {},
+    resolveRuntimeFiles: () => [],
   });
   const manifest = JSON.parse(readFileSync(output, "utf8"));
   assert.deepEqual(manifest.promotion, {
@@ -229,7 +232,7 @@ test("binds a manifest to the exact promotion input and rejects drift", async ()
   driftArgs[driftArgs.indexOf("--promotion-input") + 1] = driftPath;
   await assert.rejects(runManifestSigner(
     driftArgs,
-    { signingHost, resolveReleaseCommit: () => "fixture-commit" },
+    { signingHost, resolveReleaseCommit: () => "fixture-commit", assertReleaseClean: () => {}, resolveRuntimeFiles: () => [] },
   ), /input hash mismatch|owner differs/);
 });
 

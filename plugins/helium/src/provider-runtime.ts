@@ -65,6 +65,7 @@ import {
 
 type ProviderId = CircuitProvider;
 type AvailabilityRefresher = () => Promise<Availability>;
+type RegisteredTarget = RegisteredProviderTargets[number];
 
 function conformance(
   targetId: ExecutionTargetId,
@@ -101,6 +102,14 @@ function targetProfile() {
       "ops-independent-verification",
       "ops-incident-lead",
       "ops-incident-reporting",
+      "shepherd-incident-lead",
+      "shepherd-bounded-repair-planning",
+      "shepherd-independent-verification",
+      "shepherd-reporting",
+      "ib-source-investigation",
+      "massive-source-investigation",
+      "corporate-action-universe-research",
+      "point-in-time-adjudication",
     ],
     operations: {},
     supports: {
@@ -111,15 +120,52 @@ function targetProfile() {
   };
 }
 
-function optionalTarget(
-  registered: RegisteredProviderTargets,
-  targetRef: string,
-  effort: string,
-): ExecutionTargetId | undefined {
-  return registered.find(
-    (entry) => entry.native.targetRef === targetRef && entry.native.effort === effort,
-  )?.profile.targetId;
+function orderedTargets(
+  registered: ProviderRuntime["registered"],
+  preference: ReadonlyArray<readonly [ProviderId, string, string | undefined]>,
+): ExecutionTargetId[] {
+  const entries = new Map<string, RegisteredTarget>();
+  for (const [provider, targets] of Object.entries(registered) as Array<[ProviderId, RegisteredProviderTargets]>) {
+    for (const entry of targets) {
+      entries.set(`${provider}\0${entry.native.targetRef}\0${entry.native.effort ?? ""}`, entry);
+    }
+  }
+  const ordered: ExecutionTargetId[] = [];
+  for (const [provider, targetRef, effort] of preference) {
+    const entry = entries.get(`${provider}\0${targetRef}\0${effort ?? ""}`);
+    if (entry === undefined) continue;
+    ordered.push(entry.profile.targetId);
+    entries.delete(`${provider}\0${targetRef}\0${effort ?? ""}`);
+  }
+  ordered.push(...[...entries.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, entry]) => entry.profile.targetId));
+  return ordered;
 }
+
+const CHEAP_TARGET_PREFERENCE = [
+  ["codex", "gpt-5.6-luna", "low"],
+  ["codex", "gpt-5.6-luna", "medium"],
+  ["claude", "claude-haiku-4-5-20251001", undefined],
+  ["deepseek", "deepseek-v4-flash", "off"],
+  ["deepseek", "deepseek-v4-flash", "low"],
+  ["codex", "gpt-5.6-terra", "low"],
+  ["codex", "gpt-5.6-terra", "medium"],
+  ["claude", "claude-sonnet-5", "low"],
+  ["codex", "gpt-5.6-sol", "high"],
+] as const;
+
+const SENIOR_TARGET_PREFERENCE = [
+  ["codex", "gpt-5.6-sol", "high"],
+  ["codex", "gpt-5.6-sol", "xhigh"],
+  ["codex", "gpt-5.6-sol", "max"],
+  ["deepseek", "deepseek-v4-pro", "high"],
+  ["deepseek", "deepseek-v4-pro", "max"],
+  ["claude", "claude-opus-5", "high"],
+  ["claude", "claude-opus-5", "max"],
+  ["deepseek", "deepseek-v4-flash", "high"],
+  ["claude", "claude-sonnet-5", "high"],
+] as const;
 
 class DurableNdjsonAudit {
   constructor(private readonly path: string) {}
@@ -181,6 +227,7 @@ export class ProviderRuntime {
   readonly #cfg: ProviderRuntimeConfig;
   readonly #refreshers = new Map<ProviderId, AvailabilityRefresher>();
   readonly #refreshTimers = new Map<ProviderId, NodeJS.Timeout>();
+  readonly #refreshInFlight = new Map<ProviderId, Promise<ReturnType<ProviderAvailability["publish"]>>>();
   readonly #refreshDelayMs: number;
   readonly #circuits: ProviderCircuitBreaker;
   readonly #observedResults = new Set<string>();
@@ -198,6 +245,11 @@ export class ProviderRuntime {
     const certifications = options.certifications ?? productionProviderCertifications;
     const codexInvoker = options.codexInvoke ?? invokeCodex;
     const claudeInvoker = options.claudeInvoke ?? invokeClaude;
+    const deepseekBoundary = options.deepseekBoundary ?? ({
+      run: async () => {
+        throw new Error("DeepSeek work must run through DshTeamHost");
+      },
+    } satisfies DeepSeekDshBoundary);
     const availabilityAudit = new DurableNdjsonAudit(
       join(cfg.stateRoot, "audit", "provider-availability.ndjson"),
     );
@@ -232,13 +284,7 @@ export class ProviderRuntime {
           conformance(targetId, "in-process", deepseekDshCatalog.source.recordedAt),
         targetProfile: targetProfile(),
         subagentProviderName: "spawn",
-        boundary:
-          options.deepseekBoundary ??
-          ({
-            run: async () => {
-              throw new Error("DeepSeek work must run through DshTeamHost");
-            },
-          } satisfies DeepSeekDshBoundary),
+        boundary: deepseekBoundary,
       }),
       claude: registerCertifiedClaudeTargets({
         certification: certifications.claude,
@@ -285,34 +331,43 @@ export class ProviderRuntime {
       }),
     });
 
-    const ordered = [
-      optionalTarget(this.registered.codex, "gpt-5.6-sol", "high"),
-      optionalTarget(this.registered.deepseek, "deepseek-v4-flash", "high"),
-      optionalTarget(this.registered.claude, "claude-opus-5", "max"),
-    ].filter((target): target is ExecutionTargetId => target !== undefined);
-    if (ordered.length === 0) {
+    const cheap = orderedTargets(this.registered, CHEAP_TARGET_PREFERENCE);
+    const senior = orderedTargets(this.registered, SENIOR_TARGET_PREFERENCE);
+    if (senior.length === 0) {
       throw new Error("production provider policy has no certified target");
     }
+    const route = (ordered: ExecutionTargetId[]) => ({
+      preferred: ordered[0]!,
+      fallback: ordered.slice(1),
+    });
+    const seniorRoles = [
+      "v1-senior",
+      "inflation-researcher",
+      "policy-researcher",
+      "rates-analyst",
+      "usd-analyst",
+      "gold-analyst",
+      "verifier",
+      "lead",
+      "renderer",
+      "diagnostician",
+      "independent-verifier",
+      "incident-lead",
+      "repair-planner",
+      "pit-adjudicator",
+    ];
+    const cheapRoles = [
+      "reporter",
+      "ib-investigator",
+      "massive-investigator",
+      "corporate-action-universe-researcher",
+    ];
     const policy: SelectionPolicy = {
-      policyVersion: "phase-4-production-v1",
-      roles: Object.fromEntries([
-        "v1-senior",
-        "inflation-researcher",
-        "policy-researcher",
-        "rates-analyst",
-        "usd-analyst",
-        "gold-analyst",
-        "verifier",
-        "lead",
-        "renderer",
-        "diagnostician",
-        "independent-verifier",
-        "incident-lead",
-        "reporter",
-      ].map((role) => [
-        role,
-        { preferred: ordered[0]!, fallback: ordered.slice(1) },
-      ])),
+      policyVersion: "livewire-shepherd-cost-aware-v1",
+      roles: {
+        ...Object.fromEntries(seniorRoles.map((role) => [role, route(senior)])),
+        ...Object.fromEntries(cheapRoles.map((role) => [role, route(cheap)])),
+      },
     };
     const audit = new DurableNdjsonAudit(
       join(cfg.stateRoot, "audit", "routing.ndjson"),
@@ -340,17 +395,30 @@ export class ProviderRuntime {
       observeResult: (result) => this.#observeResult(result),
     });
 
-    const codexRefresh: AvailabilityRefresher = async () => {
+    const probeWorkspace = async <T>(provider: ProviderId, run: (workspace: string) => Promise<T>): Promise<T> => {
       const workspace = join(
         this.#cfg.workspacesDir,
         "provider-refresh",
-        `codex-${randomUUID()}`,
+        `${provider}-${randomUUID()}`,
       );
       mkdirSync(workspace, { recursive: true, mode: 0o700 });
       try {
+        return await run(workspace);
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    };
+    const cheapest = (provider: ProviderId): RegisteredTarget | undefined => {
+      const targets = orderedTargets(this.registered, CHEAP_TARGET_PREFERENCE);
+      return targets.flatMap((targetId) => this.registered[provider].filter((entry) => entry.profile.targetId === targetId))[0];
+    };
+    const defaultRefreshers: Partial<Record<ProviderId, AvailabilityRefresher>> = {};
+    const codexProbe = cheapest("codex");
+    if (codexProbe !== undefined) {
+      defaultRefreshers.codex = async () => await probeWorkspace("codex", async (workspace) => {
         const result = await codexInvoker({
-          model: "gpt-5.6-sol",
-          effort: "high",
+          model: codexProbe.native.model,
+          effort: codexProbe.native.effort as never,
           prompt: "Return exactly: HELIUM_PROVIDER_AVAILABLE",
           cwd: workspace,
           timeoutMs: 120_000,
@@ -366,12 +434,60 @@ export class ProviderRuntime {
           };
         }
         return { state: "unavailable" };
-      } finally {
-        rmSync(workspace, { recursive: true, force: true });
-      }
-    };
+      });
+    }
+    const claudeProbe = cheapest("claude");
+    if (claudeProbe !== undefined) {
+      defaultRefreshers.claude = async () => await probeWorkspace("claude", async (workspace) => {
+        const result = await claudeInvoker({
+          model: claudeProbe.native.model,
+          ...(claudeProbe.native.effort === undefined ? {} : { effort: claudeProbe.native.effort as never }),
+          prompt: "Return exactly: HELIUM_PROVIDER_AVAILABLE",
+          cwd: workspace,
+          maxTurns: 1,
+          timeoutMs: 120_000,
+          allowedTools: [],
+          env: this.#childEnv(),
+        });
+        if (result.ok) return { state: "available" };
+        if (result.classification === "quota-exhausted") {
+          return { state: "quota-exhausted", ...(result.retryAfter === undefined ? {} : { retryAfter: result.retryAfter }) };
+        }
+        return { state: "unavailable" };
+      });
+    }
+    const deepseekProbe = cheapest("deepseek");
+    if (deepseekProbe !== undefined) {
+      defaultRefreshers.deepseek = async () => await probeWorkspace("deepseek", async (workspace) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 120_000);
+        timeout.unref();
+        try {
+          await deepseekBoundary.run({
+            prompt: "Return exactly: HELIUM_PROVIDER_AVAILABLE",
+            workspace,
+            allowedTools: [],
+            signal: controller.signal,
+            agentOptions: {
+              provider: "deepseek-official",
+              model: deepseekProbe.native.model,
+              reasoningEffort: deepseekProbe.native.effort as never,
+              maxTokens: 32,
+            },
+          });
+          return { state: "available" };
+        } catch (error) {
+          const code = (error as { code?: unknown }).code;
+          return code === "QUOTA" || code === "RATE_LIMIT"
+            ? { state: "quota-exhausted" }
+            : { state: "unavailable" };
+        } finally {
+          clearTimeout(timeout);
+        }
+      });
+    }
     for (const [provider, refresher] of Object.entries({
-      codex: codexRefresh,
+      ...defaultRefreshers,
       ...options.availabilityRefreshers,
     }) as Array<[ProviderId, AvailabilityRefresher]>) {
       this.#refreshers.set(provider, refresher);
@@ -385,29 +501,51 @@ export class ProviderRuntime {
         this.availability.publish(this.#domain(circuit.provider), { state: "unavailable" });
       }
     }
-    const unavailable = new Set(
+    const unavailable = new Map(
       this.availability
         .snapshot()
         .domains.filter((entry) => entry.availability.state !== "available")
-        .map((entry) => entry.quotaDomain),
+        .map((entry) => [entry.quotaDomain, entry.availability]),
     );
     for (const provider of this.#refreshers.keys()) {
-      if (unavailable.has(this.#domain(provider))) {
-        await this.refreshProviderAvailability(provider);
-      }
+      const state = unavailable.get(this.#domain(provider));
+      if (state === undefined) continue;
+      if (state.retryAfter !== undefined && retryDelayMs(state.retryAfter, this.#refreshDelayMs) > 0) {
+        this.#scheduleRefresh(provider, state);
+      } else await this.refreshProviderAvailability(provider);
     }
   }
 
   /** Runs the provider-owned probe, then publishes its opaque domain state. */
   async refreshProviderAvailability(provider: ProviderId) {
+    const active = this.#refreshInFlight.get(provider);
+    if (active !== undefined) return await active;
+    const pending = this.#refreshProviderAvailability(provider);
+    this.#refreshInFlight.set(provider, pending);
+    try {
+      return await pending;
+    } finally {
+      this.#refreshInFlight.delete(provider);
+    }
+  }
+
+  async #refreshProviderAvailability(provider: ProviderId) {
     const refresher = this.#refreshers.get(provider);
     if (refresher === undefined) {
       throw new Error(`provider has no availability refresher: ${provider}`);
     }
-    const availability = await refresher();
+    let availability: Availability;
+    try {
+      availability = await refresher();
+    } catch {
+      availability = {
+        state: "unavailable",
+        retryAfter: new Date(Date.now() + this.#refreshDelayMs).toISOString(),
+      };
+    }
     if (availability.state === "available") this.#circuits.reset(provider);
     const published = this.availability.publish(this.#domain(provider), availability);
-    if (availability.state !== "available") this.#scheduleRefresh(provider);
+    if (availability.state !== "available") this.#scheduleRefresh(provider, availability);
     return published;
   }
 
@@ -545,10 +683,15 @@ export class ProviderRuntime {
     const provider = this.#providerFor(result.executionSnapshot.targetId);
     if (provider !== undefined) this.#circuits.observe(provider, result);
     if (result.failure?.class !== "quota-exhausted") return;
-    if (provider !== undefined) this.#scheduleRefresh(provider);
+    if (provider !== undefined) {
+      this.#scheduleRefresh(provider, {
+        state: "quota-exhausted",
+        ...(result.failure.retryAfter === undefined ? {} : { retryAfter: result.failure.retryAfter }),
+      });
+    }
   }
 
-  #scheduleRefresh(provider: ProviderId): void {
+  #scheduleRefresh(provider: ProviderId, availability?: Availability): void {
     if (this.#refreshers.get(provider) === undefined || this.#refreshTimers.has(provider)) {
       return;
     }
@@ -557,7 +700,7 @@ export class ProviderRuntime {
       void this.refreshProviderAvailability(provider).catch(() => {
         this.#scheduleRefresh(provider);
       });
-    }, this.#refreshDelayMs);
+    }, retryDelayMs(availability?.retryAfter, this.#refreshDelayMs));
     timer.unref();
     this.#refreshTimers.set(provider, timer);
   }
@@ -606,6 +749,17 @@ export class ProviderRuntime {
     }
     return { outcome: "run_failed", error: "waiting-for-capacity" };
   }
+}
+
+function retryDelayMs(retryAfter: string | undefined, fallbackMs: number): number {
+  if (retryAfter === undefined) return fallbackMs;
+  const relative = /^provider-ms:(\d+)$/.exec(retryAfter)?.[1];
+  if (relative !== undefined) return Math.max(1_000, Math.min(Number(relative), 2_147_000_000));
+  const absolute = Date.parse(retryAfter);
+  if (Number.isFinite(absolute)) {
+    return Math.max(1_000, Math.min(absolute - Date.now(), 2_147_000_000));
+  }
+  return fallbackMs;
 }
 
 function resultToSenior(result: AgentResult): Awaited<ReturnType<SeniorLane["dispatch"]>> {

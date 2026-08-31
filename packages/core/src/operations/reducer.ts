@@ -44,12 +44,16 @@ export interface ActionProjection {
   leaseId?: string;
   operationId?: string;
   argv?: string[];
+  scopeId?: string;
+  inputArtifacts?: Array<{ ref: string; sha256: string }>;
   baseline?: { capturedAt: string; samples: PostconditionSample[]; allPassing: boolean };
   controllerProbe?: ControllerProbeOutcome;
   eligibility?: { eligible: boolean; reasons: string[] };
   mutationOwner?: MutationOwnership;
   dependencyIds?: string[];
   verificationPolicy?: { postconditions: CheckDefinition[]; graceMs: number };
+  childPid?: number;
+  childAdoptedAt?: string;
   exitCode?: number | null;
   timedOut?: boolean;
   outputDigest?: string;
@@ -119,6 +123,7 @@ const TERMINAL = new Set<ActionState>([
 const REQUIRED_PRIOR: Readonly<Record<string, ActionState[]>> = {
   "action-authorized": ["proposed"],
   "action-intent-recorded": ["authorized"],
+  "action-child-adopted": ["intent-recorded"],
   "action-receipt-recorded": ["intent-recorded"],
 };
 
@@ -213,6 +218,11 @@ export function reduceOperations(
           sopId: event.sopId,
           sopVersion: event.sopVersion,
           sopDigest: event.sopDigest,
+          ...(event.scopeId === undefined ? {} : { scopeId: event.scopeId }),
+          ...(event.proposedAuthority === undefined ? {} : { authority: event.proposedAuthority }),
+          ...(event.proposedAuthorityManifestEntry === undefined
+            ? {}
+            : { authorityManifestEntry: { ...event.proposedAuthorityManifestEntry } }),
           state: "proposed",
         };
         break;
@@ -233,6 +243,13 @@ export function reduceOperations(
         action.leaseId = event.leaseId;
         action.operationId = event.operationId;
         action.argv = [...event.argv];
+        if (event.scopeId !== undefined && event.inputArtifacts !== undefined) {
+          if (action.scopeId !== undefined && action.scopeId !== event.scopeId) {
+            throw new Error(`action intent scope differs from proposal: ${event.actionId}`);
+          }
+          action.scopeId = event.scopeId;
+          action.inputArtifacts = event.inputArtifacts.map((artifact) => ({ ...artifact }));
+        }
         action.baseline = {
           capturedAt: event.baseline.capturedAt,
           samples: event.baseline.samples.map((sample) => ({
@@ -277,6 +294,13 @@ export function reduceOperations(
         action.outputBytes = event.outputBytes;
         action.startedAt = event.startedAt;
         action.finishedAt = event.finishedAt;
+        break;
+      }
+
+      case "action-child-adopted": {
+        const action = state.actions[event.actionId];
+        action.childPid = event.pid;
+        action.childAdoptedAt = event.at;
         break;
       }
 

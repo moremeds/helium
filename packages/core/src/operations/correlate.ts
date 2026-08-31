@@ -50,6 +50,10 @@ interface Unhealthy {
   state: IncidentFailureClass;
 }
 
+function scopedComponentKey(componentId: string, scopeId: string | undefined): string {
+  return JSON.stringify([scopeId ?? null, componentId]);
+}
+
 export function correlate(
   input: CorrelateInput,
   now: Date,
@@ -67,38 +71,48 @@ export function correlate(
       a.observation.id < b.observation.id ? -1 : a.observation.id > b.observation.id ? 1 : 0,
     );
 
-  const failingComponents = new Set(
-    unhealthy.map((u) => u.observation.componentId),
-  );
+  const failingComponents = new Set(unhealthy.map((u) =>
+    scopedComponentKey(u.observation.componentId, u.observation.scopeId)));
 
   // 2. A component whose transitive dependency is also failing is a SYMPTOM;
   //    its root is the furthest failing dependency, so a chain collapses to one
   //    incident rather than one per hop.
   const rootOf = new Map<string, string>();
-  for (const componentId of [...failingComponents].sort()) {
+  for (const item of unhealthy) {
+    const componentId = item.observation.componentId;
+    const scopeId = item.observation.scopeId;
+    const componentKey = scopedComponentKey(componentId, scopeId);
+    if (rootOf.has(componentKey)) continue;
     const failingDeps = graph
       .transitiveDependenciesOf(componentId)
-      .filter((dep) => failingComponents.has(dep));
-    rootOf.set(componentId, failingDeps.at(-1) ?? componentId);
+      .filter((dep) => failingComponents.has(scopedComponentKey(dep, scopeId)));
+    rootOf.set(componentKey, failingDeps.at(-1) ?? componentId);
   }
 
-  const inhibitions: Inhibition[] = [...rootOf]
-    .filter(([child, parent]) => child !== parent)
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([child, parent]) => ({
+  const inhibitionsByPair = new Map<string, Inhibition>();
+  for (const [componentKey, parent] of rootOf) {
+    const parsed = JSON.parse(componentKey) as [string | null, string];
+    const child = parsed[1];
+    if (child === parent) continue;
+    inhibitionsByPair.set(`${child}\u0000${parent}`, {
       child,
       parent,
-      reason: "dependency-root-failing" as const,
-    }));
+      reason: "dependency-root-failing",
+    });
+  }
+  const inhibitions = [...inhibitionsByPair.values()].sort((a, b) =>
+    a.child.localeCompare(b.child) || a.parent.localeCompare(b.parent));
 
   // 3. One incident per root, keyed on the ROOT's own worst reading.
   const byRoot = new Map<string, Unhealthy[]>();
   for (const item of unhealthy) {
-    const root = rootOf.get(item.observation.componentId);
+    const scopeId = item.observation.scopeId;
+    const root = rootOf.get(scopedComponentKey(item.observation.componentId, scopeId));
     if (root === undefined) continue;
-    const bucket = byRoot.get(root) ?? [];
+    const rootKey = scopedComponentKey(root, scopeId);
+    const bucket = byRoot.get(rootKey) ?? [];
     bucket.push(item);
-    byRoot.set(root, bucket);
+    byRoot.set(rootKey, bucket);
   }
 
   const previousByKey = new Map(previous.map((i) => [i.key, i]));
@@ -106,8 +120,10 @@ export function correlate(
 
   const incidents: Incident[] = [...byRoot.keys()]
     .sort()
-    .map((root) => {
-      const contributing = (byRoot.get(root) ?? []).slice().sort((a, b) =>
+    .map((rootKey) => {
+      const [rawScopeId, root] = JSON.parse(rootKey) as [string | null, string];
+      const scopeId = rawScopeId ?? undefined;
+      const contributing = (byRoot.get(rootKey) ?? []).slice().sort((a, b) =>
         a.observation.id < b.observation.id ? -1 : 1,
       );
       const rootReadings = contributing.filter(
@@ -125,11 +141,13 @@ export function correlate(
         dimension: worst.observation.dimension,
         failureClass: worst.state,
         rootComponentId: root,
+        ...(scopeId === undefined ? {} : { scopeId }),
       });
       const prior = previousByKey.get(key);
 
       return {
         key,
+        ...(scopeId === undefined ? {} : { scopeId }),
         rootComponentId: root,
         symptomComponentIds: [
           ...new Set(

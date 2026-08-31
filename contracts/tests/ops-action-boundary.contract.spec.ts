@@ -124,6 +124,14 @@ describe("mutation action boundary", () => {
       { v: 1, id: "event-4", at: at(4), type: "action-receipt-recorded", actionId: "act-1", exitCode: 0, timedOut: false, outputDigest: digest, outputTail: "ok", outputBytes: 2, startedAt: at(4), finishedAt: at(4) },
       { v: 1, id: "event-5", at: at(5), type: "action-verified", actionId: "act-1", outcome: "succeeded", postconditionRefs: ["ready"], postconditionSamples: [postconditionSample], recoveryEvidence: terminalEvidence },
     ];
+    const expectedStates = [
+      undefined,
+      "proposed",
+      "authorized",
+      "intent-recorded",
+      "executed",
+      "succeeded",
+    ];
 
     for (let prefix = 0; prefix <= sequence.length; prefix += 1) {
       const dir = mkdtempSync(join(tmpdir(), `helium-contract-crash-${prefix}-`));
@@ -131,6 +139,7 @@ describe("mutation action boundary", () => {
       for (const event of sequence.slice(0, prefix)) store.append(event);
       const reopened = OperationsStore.open(dir, { sync: () => {} });
       expect(reopened.replay()).toHaveLength(prefix);
+      expect(reopened.state().actions["act-1"]?.state).toBe(expectedStates[prefix]);
       const decisions = reconcileOnRestart(reopened);
       expect(decisions.every((decision) => decision.rerun === false)).toBe(true);
       if (prefix < sequence.length) {

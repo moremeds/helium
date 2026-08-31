@@ -48,7 +48,12 @@ export {
   type OpsDaemonController,
   type OpsDaemonOptions,
   type OpsdRuntimeConfig,
+  type OpsCompositionOverrides,
   type StandaloneOpsDaemonOptions,
+  authorizeAutomaticArgv,
+  automaticAuthorityInputDigest,
+  livewireRuntimeFiles,
+  nativeRuntimeFiles,
 } from "./bin/opsd.js";
 export { OpsControlClient, OpsControlServer } from "./ipc.js";
 export {
@@ -77,6 +82,16 @@ export {
   type ControllerTickResult,
   type OpsControllerOptions,
 } from "./controller.js";
+export {
+  CertifiedActionRunner,
+  type ActionExecutor,
+  type CertifiedActionHooks,
+  type CertifiedActionRequest,
+  type CertifiedActionResult,
+  type CertifiedActionRunnerOptions,
+  type ControllerProbePort,
+  type OperationsStorePort,
+} from "./action-runner.js";
 export {
   OPS_MODES,
   OpsModeSchema,

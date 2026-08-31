@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { reduceOperations } from "../src/operations/reducer.js";
-import type { OperationsEvent } from "../src/operations/events.js";
+import { OperationsEventSchema, type OperationsEvent } from "../src/operations/events.js";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const evidence = {
@@ -26,6 +26,22 @@ const verificationCheck = {
 };
 const at = (n: number) => `2026-08-25T04:0${n}:00.000Z`;
 
+it("rejects a proposal authority snapshot that is incomplete or mismatched", () => {
+  const base = {
+    v: 1, id: "proposal-snapshot", at: at(0), type: "action-proposed",
+    actionId: "act-snapshot", incidentId: "inc-1", componentId: "runtime",
+    sopId: "restart-runtime", sopVersion: 1, sopDigest: digest,
+    proposedAuthority: "auto",
+  };
+  expect(OperationsEventSchema.safeParse(base).success).toBe(false);
+  expect(OperationsEventSchema.safeParse({
+    ...base,
+    proposedAuthorityManifestEntry: {
+      sopId: "other-sop", version: 2, digest: `sha256:${"f".repeat(64)}`, authority: "approve",
+    },
+  }).success).toBe(false);
+});
+
 const opened: OperationsEvent = {
   v: 1,
   id: "ev-1",
@@ -47,6 +63,7 @@ const proposed: OperationsEvent = {
   sopId: "restart-runtime",
   sopVersion: 1,
   sopDigest: digest,
+  scopeId: `lws-${"1".repeat(32)}:sha256:${"2".repeat(64)}`,
 };
 const authorized: OperationsEvent = {
   v: 1,
@@ -112,6 +129,7 @@ describe("reduceOperations", () => {
     expect(state.actions["act-1"]).toMatchObject({
       state: "succeeded",
       attribution: "automatic",
+      scopeId: proposed.scopeId,
     });
   });
 

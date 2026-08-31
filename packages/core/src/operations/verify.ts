@@ -33,6 +33,8 @@ export interface VerificationInput {
   intentRecorded: boolean;
   /** Absent means no receipt landed -- which is NOT by itself evidence of anything. */
   receipt?: ExecutionReceiptFacts;
+  /** The gated child took the component lock and was released to execute. */
+  executionStarted?: boolean;
   postconditions: PostconditionVerdict;
   operatorConfirmed: boolean;
   /** When present and refusing, the action never reached the action plane. */
@@ -109,6 +111,24 @@ export function verifyAction(input: VerificationInput): VerificationVerdict {
   // `external-recovery` would credit someone else for a mutation Helium may
   // have performed (review OPS-5).
   if (input.receipt === undefined) {
+    if (input.executionStarted === true) {
+      if (input.postconditions === "pass") {
+        return {
+          decision: "outcome",
+          outcome: "succeeded",
+          attribution: "automatic",
+          automationCredit: true,
+        };
+      }
+      if (input.postconditions === "fail") {
+        return {
+          decision: "outcome",
+          outcome: "failed",
+          attribution: "automatic",
+          automationCredit: false,
+        };
+      }
+    }
     return {
       decision: "outcome",
       outcome: "uncertain",

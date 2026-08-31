@@ -79,6 +79,17 @@ export const RecoveryEvidenceSchema = z
       .strictObject({
         actionId: OpsIdSchema,
         argv: z.array(z.string().max(4096)),
+        scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|")).optional(),
+        inputArtifacts: z.array(HashedRefSchema).min(1).max(50).optional(),
+      })
+      .superRefine((intent, ctx) => {
+        if ((intent.scopeId === undefined) !== (intent.inputArtifacts === undefined)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [intent.scopeId === undefined ? "scopeId" : "inputArtifacts"],
+            message: "scoped recovery intent requires both scopeId and inputArtifacts",
+          });
+        }
       })
       .optional(),
     receipt: z
@@ -89,6 +100,10 @@ export const RecoveryEvidenceSchema = z
         evidence: HashedRefSchema,
       })
       .optional(),
+    executionStart: z.strictObject({
+      pid: z.number().int().positive(),
+      adoptedAt: z.string().min(1),
+    }).optional(),
 
     postconditionSamples: z.array(
       z.strictObject({
@@ -164,8 +179,9 @@ export const RecoveryEvidenceSchema = z
     }
     // A success claim requires the evidence a success is made of.
     if (bundle.outcome === "succeeded") {
-      if (bundle.intent === undefined || bundle.receipt === undefined) {
-        issue(["outcome"], "a succeeded outcome requires both an intent and a receipt");
+      if (bundle.intent === undefined ||
+          (bundle.receipt === undefined && bundle.executionStart === undefined)) {
+        issue(["outcome"], "a succeeded outcome requires an intent and execution evidence");
       } else if (bundle.baseline === undefined) {
         issue(["baseline"], "a succeeded outcome requires its exact baseline");
       } else if (bundle.baseline.allPassing) {

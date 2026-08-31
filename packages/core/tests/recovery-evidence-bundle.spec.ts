@@ -85,6 +85,25 @@ describe("RecoveryEvidenceSchema", () => {
     expect(RecoveryEvidenceSchema.parse(bundle()).outcome).toBe("succeeded");
   });
 
+  it("binds scoped recovery intent to the exact immutable input artifact", () => {
+    const scoped = {
+      ...bundle(),
+      intent: {
+        ...bundle().intent,
+        scopeId: `lws-${"1".repeat(32)}:sha256:${"2".repeat(64)}`,
+        inputArtifacts: [{ ref: "artifact://sha256/manifest", sha256: hash }],
+      },
+    };
+    expect(RecoveryEvidenceSchema.parse(scoped).intent).toMatchObject({
+      scopeId: scoped.intent.scopeId,
+      inputArtifacts: scoped.intent.inputArtifacts,
+    });
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...scoped,
+      intent: { ...scoped.intent, inputArtifacts: undefined },
+    })).toThrow(/requires both scopeId and inputArtifacts/);
+  });
+
   it.each([
     "observations",
     "incidentSnapshot",
@@ -141,7 +160,16 @@ describe("RecoveryEvidenceSchema", () => {
         ...without,
         notApplicable: { receipt: "claimed missing" },
       }),
-    ).toThrow(/requires both an intent and a receipt/);
+    ).toThrow(/intent and execution evidence/);
+  });
+
+  it("accepts a gated child-lock handoff when the controller died before its receipt", () => {
+    const { receipt: _drop, ...without } = bundle();
+    expect(RecoveryEvidenceSchema.parse({
+      ...without,
+      executionStart: { pid: 1234, adoptedAt: "2026-08-25T04:00:01.000Z" },
+      notApplicable: { receipt: "controller died after the child lock handoff" },
+    }).outcome).toBe("succeeded");
   });
 
   // The rule the whole baseline mechanism exists for.

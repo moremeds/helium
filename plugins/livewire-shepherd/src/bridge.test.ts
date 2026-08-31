@@ -44,6 +44,49 @@ describe("LivewireReceiptSchema", () => {
 });
 
 describe("LivewireBridge", () => {
+  it("accepts exit 75 only with a typed AWAITING_USER receipt", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-livewire-wait-"));
+    const artifacts = new ContentAddressedArtifactStore(join(root, "artifacts"), { sync: () => {} });
+    const output = JSON.stringify(receipt({
+      outcome: "temporary-unavailable",
+      stateHint: "AWAITING_USER",
+      evidence: [],
+    }));
+    const body = `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output)}); process.exitCode = 75;\n`;
+    const script = join(root, "probe");
+    writeFileSync(script, body, { mode: 0o700 });
+    chmodSync(script, 0o700);
+    const registry = ScriptRegistry.load([{
+      executorId: "livewire-probe",
+      path: script,
+      identity: { kind: "sha256", value: createHash("sha256").update(body).digest("hex") },
+      argvSchema: { id: "probe-v1", params: [] },
+      cwd: root,
+      environmentProfile: {},
+      timeoutMs: 5_000,
+      maxOutputBytes: 100_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
+    }]);
+    const bridge = new LivewireBridge({
+      registry,
+      executor: new ScriptExecutor(registry),
+      artifacts,
+      changedPathRoots: [join(root, "data")],
+    });
+
+    const result = await bridge.probe({
+      executorId: "livewire-probe",
+      operationId: "probe-1",
+      workUnit: unit,
+      argv: [],
+      signal: new AbortController().signal,
+    });
+
+    expect(result.execution.exit.code).toBe(75);
+    expect(result.outcome).toBe("temporary-unavailable");
+    expect(result.stateHint).toBe("AWAITING_USER");
+  });
+
   it("persists exact stdout before parsing and binds the receipt to the work unit", async () => {
     const root = mkdtempSync(join(tmpdir(), "helium-livewire-bridge-"));
     const artifacts = new ContentAddressedArtifactStore(join(root, "artifacts"), { sync: () => {} });

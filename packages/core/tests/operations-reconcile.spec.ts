@@ -54,6 +54,27 @@ describe("reconcileOnStartup", () => {
     });
   });
 
+  it("converges a gated child that started before controller death without rerunning it", () => {
+    const [decision] = reconcileOnStartup({
+      actions: [action("act-1", "intent-recorded")],
+      evidence: {
+        "act-1": {
+          intentRecorded: true,
+          executionStarted: true,
+          baselineAllPassing: false,
+          postconditions: "pass",
+          operatorConfirmed: false,
+        },
+      },
+    });
+    expect(decision).toMatchObject({
+      outcome: "succeeded",
+      attribution: "automatic",
+      automationCredit: true,
+      rerun: false,
+    });
+  });
+
   it("classifies a recovered component with no intent as external", () => {
     const [decision] = reconcileOnStartup({
       actions: [action("act-1", "proposed")],

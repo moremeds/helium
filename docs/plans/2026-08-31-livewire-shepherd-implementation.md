@@ -57,6 +57,7 @@ LS-01.1 -> LS-01.2 -> LS-01.3 -> LS-01.4
                                                                                                   +-> LS-06.2a -> LS-06.2b -> LS-06.2c
                                                                                                                               |
                                                                                                                               +-> LS-06.3a -> LS-06.3b -> LS-07.3
+                                                                                                                                                    +-> LS-06.4
                                                                                                                               +-> LS-08.1 -> LS-08.2
 
 LS-01.4 + LS-02.3 + LS-03.2 + LS-05.2 + LS-06.3b + LS-07.3 -> LS-GATE
@@ -87,7 +88,8 @@ parallel after `LS-02.3`. None may stop the deterministic queue.
 | Parquet canonical, DuckDB verified query truth | LS-02.1, LS-02.3, LS-03.1, LS-05.2 | sampled byte-hash reconciliation |
 | Current members first without shrinking full PIT goal | LS-02, LS-03, LS-08 | current gate plus explicit historical denominator |
 | All material assertions independently verified | LS-07.1–07.2 | claim/evidence-decision contract tests |
-| Exact reversible autonomous repair | LS-06.1–06.3b | scope, crash, rollback, and signed-authority drills |
+| Exact reversible autonomous repair | LS-06.1–06.3b | daily scope, crash, rollback, and signed-authority drills |
+| Additional canonical repair adapters | LS-06.4 | operation-specific multi-artifact and crash matrices |
 | Target-repo engineering issue lifecycle | LS-07.3 | dedupe, deploy, and production-verification tests |
 | Cost-aware agents and provider quota recovery | LS-01.3, LS-07.2 | cheap/senior routing, checkpoint, no-busy-loop tests |
 | AnySearch/OpenCLI/Massive/IB/UW source tools | LS-03.2, LS-05.1, LS-07.2 | allowlist, raw-evidence, and provider-state tests |
@@ -783,6 +785,7 @@ git commit -m "feat: plan verified current-member daily coverage"
 
 - Modify: `livewire_scripts/shepherd_daily.py`
 - Modify: `livewire_scripts/run_ib_fetch_robust.py`
+- Modify: `scripts/livewire_ingest.py`
 - Create: `tests/test_shepherd_daily_execution.py`
 - Modify: `tests/test_run_ib_fetch_robust.py`
 
@@ -790,6 +793,18 @@ git commit -m "feat: plan verified current-member daily coverage"
 
 - Create: `plugins/livewire-shepherd/src/livewire-cycle.test.ts`
 - Modify: `plugins/livewire-shepherd/src/daemon.ts`
+- Modify: `plugins/livewire-shepherd/src/bridge.ts`
+- Modify: `plugins/livewire-shepherd/src/bridge.test.ts`
+
+**Verified boundary correction:** the existing `LivewireBridge` is read-only and
+rejects every non-empty `changedPaths` list. Daily retrieval writes Bronze and
+therefore must not be routed through that bridge. `fetch` emits a mutation
+receipt for the later LS-06 certified action boundary. This task proves the
+typed waiting path and same-cycle isolation in Helium; it does not weaken the
+read-only bridge or grant the daemon direct write authority. The LS-07.3
+scanner adapter must also project Livewire's richer manifest identity into a
+Helium work unit and persist both hashes; it must not pretend the two current
+schemas are byte-identical.
 
 **Step 1: Freeze source-selection behavior in tests**
 
@@ -803,14 +818,19 @@ git commit -m "feat: plan verified current-member daily coverage"
 **Step 2: Add manifest-bound execution**
 
 `shepherd_daily.py fetch --manifest ABS` validates the work-unit scope hash and
-invokes the canonical robust path. It emits one JSON receipt and never restarts
-IB. Existing `clientId` collision retry remains inside `IBClient`; 2FA/session
-failure returns exit 75.
+invokes the canonical robust path once. It emits one JSON **mutation** receipt
+and never restarts IB. Existing `clientId` collision retry remains inside
+`IBClient`; gateway preflight failure or a later typed `IBConnectionError`
+returns exit 75. No production caller may execute this mutating command until
+LS-06 binds it to staged publication, rollback, and the certified action
+transaction.
 
 **Step 3: Import receipts in Helium**
 
-Map exit 75 plus the typed state hint to local waiting state. Do not parse human
-stderr or infer provider state from text.
+For read-only IB observations, map exit 75 plus the typed state hint to local
+waiting state and continue other ready work units in the same cycle. Do not
+parse human stderr or infer provider state from text. Mutation receipts remain
+handoffs until LS-06.
 
 **Step 4: Verify both repositories and commit separately**
 
@@ -826,11 +846,11 @@ Commit one PR-ready change in each repository:
 
 ```bash
 # Livewire
-git add livewire_scripts/shepherd_daily.py livewire_scripts/run_ib_fetch_robust.py tests/test_shepherd_daily_execution.py tests/test_run_ib_fetch_robust.py
+git add livewire_scripts/shepherd_daily.py livewire_scripts/run_ib_fetch_robust.py scripts/livewire_ingest.py tests/test_shepherd_daily_execution.py tests/test_run_ib_fetch_robust.py tests/test_livewire_entrypoints.py
 git commit -m "feat: expose resumable Shepherd daily retrieval"
 
 # Helium
-git add plugins/livewire-shepherd/src/daemon.ts plugins/livewire-shepherd/src/livewire-cycle.test.ts
+git add plugins/livewire-shepherd/src/daemon.ts plugins/livewire-shepherd/src/livewire-cycle.test.ts plugins/livewire-shepherd/src/bridge.ts plugins/livewire-shepherd/src/bridge.test.ts
 git commit -m "feat: isolate unavailable Livewire sources"
 ```
 
@@ -1031,9 +1051,16 @@ class RepairManifest:
     operation_id: str
     work_unit_id: str
     scope_hash: str
+    data_lake_root: Path
     layer: Literal["bronze", "silver", "query"]
     security_id: str
     symbol: str
+    symbol_valid_from: datetime
+    symbol_valid_to: datetime | None
+    identity_as_of: datetime
+    security_master_revision: int
+    security_master_sha256: str
+    session_policy: Literal["XNYS-close-and-early-close-v2"]
     date_from: date
     date_to: date
     timeframe: str
@@ -1042,12 +1069,26 @@ class RepairManifest:
     max_rows: int
     max_bytes: int
     expires_at: datetime
-    operation: Literal["daily-merge", "flatfile-date-republish", "silver-rebuild", "duckdb-rebuild"]
+    operation: Literal["daily-merge"]
 ```
+
+Version 1 is intentionally one exact current-member daily Bronze transaction.
+It must reject every unimplemented operation during preflight rather than
+advertise a capability that fails only after authorization. Flat-file date,
+Silver revision, and DuckDB rebuilds have different multi-artifact publication
+contracts and are added separately in LS-06.4.
 
 Reject an expired manifest, changed prior hash, different data-lake root, path
 escape, symlink escape, source evidence missing from the local store, wider
 dates, extra symbols, over-budget output, and a second attempt.
+Reconstruct the complete Helium `security-interval` scope including symbol
+validity, recompute its canonical hash, derive the work-unit ID, and reject any
+mismatch. Verification must resolve the exact SecurityMaster interval and raw
+identity evidence from a fixed append-prefix revision/hash and as-of, reject
+non-session rows under the shared versioned XNYS calendar, and derive
+coverage/freshness from the final candidate bytes and actual session close
+rather than echoing manifest claims. All cross-repository timestamps use the
+same UTC `Z` grammar accepted by Helium, with golden hash vectors on both sides.
 
 **Step 2: Implement dry-run and stage**
 
@@ -1074,16 +1115,16 @@ Rollback restores only the prior hashed artifact/pointer and verifies it.
 
 **Step 4: Crash-matrix tests**
 
-Inject failure before stage, after stage, before publish, after publish, during
-DuckDB rebuild, before verification, and during rollback. Re-running must
+Inject failure before stage, after stage, before publish, after publish, before
+verification, and during rollback. Re-running must
 converge without duplicate rows or a widened mutation.
 
 **Step 5: Verify and commit**
 
 ```bash
-uv run pytest tests/test_shepherd_repair.py tests/test_daily_bronze_repair.py tests/test_silver_revision.py -q
+uv run pytest tests/test_shepherd_repair.py tests/test_trading_calendar.py tests/test_pit_silver_revision.py tests/test_livewire_entrypoints.py -q
 uv run pytest tests -q --cov=clients --cov=scripts --cov-report=term-missing
-git add clients/shepherd_repair.py livewire_scripts/shepherd_repair.py scripts/livewire_store.py tests/test_shepherd_repair.py
+git add clients/shepherd_repair.py clients/trading_calendar.py clients/pit_silver_revision.py livewire_scripts/shepherd_repair.py scripts/livewire_store.py tests/test_shepherd_repair.py tests/test_trading_calendar.py tests/test_livewire_entrypoints.py
 git commit -m "feat: add reversible Shepherd repairs"
 ```
 
@@ -1266,6 +1307,14 @@ The service has owner-only state, a Unix control socket, periodic deterministic
 ticks, bounded logs, and no provider requirement. It reads the Livewire release
 path and data roots from validated config, not from a sourced shell environment.
 
+The registered mutation executable is an owner-controlled, content-pinned
+wrapper that validates only `--manifest ABS` and then uses `exec` to replace
+itself with the pinned Livewire Python transaction. Do not launch Python as an
+untracked grandchild: a killed Node or shell parent must not leave a writer
+running after Ops reclaims the component lock. The transaction performs
+preflight, stage, publish and independent verify, and byte-exactly rolls back a
+failed verification.
+
 **Step 2: Add controlled fixture drills**
 
 Contract-test:
@@ -1291,9 +1340,31 @@ bash -n scripts/ops/install-livewire-shepherd.sh
 **Step 4: Commit**
 
 ```bash
-git add plugins/livewire-shepherd scripts/ops ops/sops ops/executors contracts/tests/livewire-shepherd-recovery.contract.spec.ts
-git commit -m "feat: package automatic Livewire Shepherd recovery"
+git add plugins/livewire-shepherd scripts/ops/install-livewire-shepherd.sh scripts/ops/install-livewire-shepherd.test.sh ops/sops/livewire-shepherd-targeted-repair.yaml ops/executors/livewire-shepherd-targeted-repair.yaml contracts/tests/livewire-shepherd-recovery.contract.spec.ts
+git commit -m "feat: package unattended Livewire Shepherd recovery"
 ```
+
+### Task LS-06.4: Add operation-specific canonical repair adapters
+
+**depends_on:** `[LS-06.3b]`
+
+**Repository:** Livewire and Helium
+
+Keep these operations outside the single-file daily-merge v1 contract:
+
+- `flatfile-date-republish` binds a whole provider/date partition and its
+  symbol denominator;
+- `silver-rebuild` publishes an immutable Silver revision plus its pointer;
+- `duckdb-rebuild` publishes a derived query catalog only from verified
+  Parquet/manifests.
+
+Each adapter gets its own strict manifest version, exact target set, writer
+lock, byte-hashed prior state, independent business postconditions, rollback,
+and failure injection at every multi-artifact pointer boundary. The Shepherd
+controller may register an adapter only after its focused crash matrix and the
+shared Ops action-boundary contracts pass. These extensions do not block the
+first current-member daily repair gate, but remain required for broader
+intraday and automatic query-layer recovery.
 
 ## LS-07 Periodic Agent Verification
 
@@ -1705,6 +1776,7 @@ LS-07.3
 LS-GATE for current-member daily + one real repair
 ```
 
-Then deliver `LS-04` and expand `LS-08` continuously. This order yields a
-working unattended system before the full historical denominator is filled,
-without redefining the full PIT objective.
+Then deliver `LS-04`, `LS-06.4`, and expand `LS-08` continuously. This order
+yields a working unattended system before the full historical denominator and
+every multi-artifact repair adapter are filled, without redefining either
+objective.

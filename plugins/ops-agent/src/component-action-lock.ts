@@ -6,6 +6,7 @@ import {
   acquireComponentLock,
   reclaimComponentLock,
   type LockHandle,
+  type LockReceipt,
 } from "@helium/core";
 
 export interface ComponentActionLockInput {
@@ -17,12 +18,21 @@ export interface ComponentActionLockInput {
 }
 
 export type ComponentActionLockAcquisition =
-  | { ok: true; handle: LockHandle }
+  | { ok: true; handle: ComponentActionLockHandle }
   | { ok: false; reason: "component-lock-held" };
+
+export interface ComponentActionLockHandle extends LockHandle {
+  /**
+   * Release only when the detached writer process group is completely gone.
+   * A killed wrapper can leave its mutating descendant alive after Node has
+   * already received a child `close` event.
+   */
+  releaseIfProcessGroupDead(): "released" | "holder-alive";
+}
 
 export interface ComponentActionLockPort {
   acquire(input: ComponentActionLockInput): ComponentActionLockAcquisition;
-  reconcile(componentId: string): void;
+  reconcile(componentId: string): "clear" | "holder-alive";
 }
 
 export class FileComponentActionLocks implements ComponentActionLockPort {
@@ -35,14 +45,15 @@ export class FileComponentActionLocks implements ComponentActionLockPort {
     },
   ) {}
 
-  reconcile(componentId: string): void {
+  reconcile(componentId: string): "clear" | "holder-alive" {
     const result = reclaimComponentLock(this.options.dir, componentId, {
       bootId: this.options.bootId,
       isAlive: this.options.isAlive ?? processIsAlive,
     });
     if (!result.reclaimed && result.reason === "holder-alive") {
-      throw new Error(`component lock is held by a live process: ${componentId}`);
+      return "holder-alive";
     }
+    return "clear";
   }
 
   acquire(input: ComponentActionLockInput): ComponentActionLockAcquisition {
@@ -55,9 +66,28 @@ export class FileComponentActionLocks implements ComponentActionLockPort {
       acquiredAt: input.acquiredAt,
       expiresAt: input.expiresAt,
     });
-    return acquired.ok
-      ? acquired
-      : { ok: false, reason: "component-lock-held" };
+    if (!acquired.ok) return { ok: false, reason: "component-lock-held" };
+    const handle = acquired.handle;
+    let adoptedPid: number | undefined;
+    const isAlive = this.options.isAlive ?? processIsAlive;
+    return {
+      ok: true,
+      handle: {
+        get receipt(): LockReceipt { return handle.receipt; },
+        adopt(pid: number): void {
+          handle.adopt(pid);
+          adoptedPid = pid;
+        },
+        release(): void {
+          handle.release();
+        },
+        releaseIfProcessGroupDead(): "released" | "holder-alive" {
+          if (adoptedPid !== undefined && isAlive(adoptedPid)) return "holder-alive";
+          handle.release();
+          return "released";
+        },
+      },
+    };
   }
 }
 
@@ -80,6 +110,17 @@ export function hostBootId(): string {
 function processIsAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
+  }
+  // ScriptExecutor starts each mutation as a detached process-group leader.
+  // The adopted leader can be killed while one of its writer/watchdog
+  // descendants is still alive.  In that state the positive PID is gone but
+  // the process group still exists; treating the lock as dead would admit a
+  // second writer.  A negative pid probes that complete group on POSIX.
+  try {
+    process.kill(-pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM";

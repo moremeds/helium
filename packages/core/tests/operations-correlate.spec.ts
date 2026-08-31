@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DependencyGraph } from "../src/operations/dependency-graph.js";
 import { correlate } from "../src/operations/correlate.js";
+import { incidentKey } from "../src/operations/incident.js";
 import type { Observation } from "../src/operations/observation.js";
 
 const now = new Date("2026-08-25T04:00:00.000Z");
@@ -176,6 +177,50 @@ describe("correlate", () => {
       now,
     ).incidents;
     expect(incident.key).toBe("runtime|readiness|failed|runtime");
+  });
+
+  it("keeps legacy keys byte-identical and appends an optional exact repair scope", () => {
+    const parts = {
+      componentId: "runtime",
+      dimension: "readiness",
+      failureClass: "failed" as const,
+      rootComponentId: "runtime",
+    };
+    expect(incidentKey(parts)).toBe("runtime|readiness|failed|runtime");
+    expect(incidentKey({ ...parts, scopeId: "lws-123:sha256:abc" })).toBe(
+      "runtime|readiness|failed|runtime|lws-123:sha256:abc",
+    );
+    expect(() => incidentKey({ ...parts, scopeId: "scope|escape" })).toThrow(/key delimiter/);
+  });
+
+  it("keeps two exact repair scopes on the same component as separate incidents", () => {
+    const firstScope = "lws-a:sha256:111";
+    const secondScope = "lws-b:sha256:222";
+    const result = correlate(
+      {
+        graph,
+        observations: [
+          obs("runtime", "failed", { id: "obs-scope-a", scopeId: firstScope }),
+          obs("runtime", "failed", { id: "obs-scope-b", scopeId: secondScope }),
+        ],
+        previous: [],
+      },
+      now,
+    );
+
+    expect(result.incidents).toHaveLength(2);
+    expect(result.incidents.map((incident) => incident.scopeId)).toEqual([
+      firstScope,
+      secondScope,
+    ]);
+    expect(result.incidents.map((incident) => incident.observationIds)).toEqual([
+      ["obs-scope-a"],
+      ["obs-scope-b"],
+    ]);
+    expect(result.incidents.map((incident) => incident.key)).toEqual([
+      `runtime|readiness|failed|runtime|${firstScope}`,
+      `runtime|readiness|failed|runtime|${secondScope}`,
+    ]);
   });
 
   it("carries openedAt forward for an incident it has seen before", () => {

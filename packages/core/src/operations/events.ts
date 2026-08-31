@@ -64,6 +64,38 @@ export const ActionProposedSchema = z.strictObject({
   sopId: OpsIdSchema,
   sopVersion: z.number().int().positive(),
   sopDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  /** Persist the opaque adapter scope before baseline sampling or authorization. */
+  scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|")).optional(),
+  /** Decision-time authority snapshot; this does not advance state to authorized. */
+  proposedAuthority: z.enum(SOP_AUTHORITIES).optional(),
+  proposedAuthorityManifestEntry: z
+    .strictObject({
+      sopId: OpsIdSchema,
+      version: z.number().int().positive(),
+      digest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      authority: z.enum(SOP_AUTHORITIES),
+    })
+    .optional(),
+}).superRefine((event, ctx) => {
+  const grant = event.proposedAuthorityManifestEntry;
+  if ((event.proposedAuthority === undefined) !== (grant === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [event.proposedAuthority === undefined
+        ? "proposedAuthority"
+        : "proposedAuthorityManifestEntry"],
+      message: "proposal authority snapshot requires both authority and exact manifest entry",
+    });
+    return;
+  }
+  if (grant !== undefined && (grant.sopId !== event.sopId || grant.version !== event.sopVersion ||
+      grant.digest !== event.sopDigest || grant.authority !== event.proposedAuthority)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["proposedAuthorityManifestEntry"],
+      message: "proposal authority snapshot does not match the exact proposed SOP grant",
+    });
+  }
 });
 
 export const ActionAuthorizedSchema = z.strictObject({
@@ -91,6 +123,12 @@ export const ActionIntentRecordedSchema = z.strictObject({
   operationId: OpsIdSchema,
   /** Structured argv. A command string is not representable. */
   argv: z.array(z.string().max(4096)),
+  /** Optional bounded work scope and exact immutable inputs for scoped adapters. */
+  scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|")).optional(),
+  inputArtifacts: z.array(z.strictObject({
+    ref: z.string().min(1).max(512),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  })).min(1).max(50).optional(),
   baseline: z.strictObject({
     capturedAt: IsoTimestampSchema,
     samples: z.array(PostconditionSampleSchema).min(1),
@@ -114,6 +152,21 @@ export const ActionIntentRecordedSchema = z.strictObject({
     postconditions: z.array(CheckDefinitionSchema).min(1).max(500),
     graceMs: z.number().int().nonnegative().max(86_400_000),
   }),
+}).superRefine((event, ctx) => {
+  if ((event.scopeId === undefined) !== (event.inputArtifacts === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [event.scopeId === undefined ? "scopeId" : "inputArtifacts"],
+      message: "scoped intent requires both scopeId and inputArtifacts",
+    });
+  }
+});
+
+export const ActionChildAdoptedSchema = z.strictObject({
+  ...base,
+  type: z.literal("action-child-adopted"),
+  actionId: OpsIdSchema,
+  pid: z.number().int().positive(),
 });
 
 export const ActionReceiptRecordedSchema = z.strictObject({
@@ -205,6 +258,7 @@ export const OperationsEventSchema = z.discriminatedUnion("type", [
   ActionProposedSchema,
   ActionAuthorizedSchema,
   ActionIntentRecordedSchema,
+  ActionChildAdoptedSchema,
   ActionReceiptRecordedSchema,
   ActionVerifiedSchema,
   OperatorIntervenedSchema,

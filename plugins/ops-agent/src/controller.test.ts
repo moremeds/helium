@@ -22,6 +22,7 @@ import {
   type AuthorityManifestEntry,
 } from "@helium/core/operations/authority-manifest.js";
 import type { Observation } from "@helium/core/operations/observation.js";
+import type { Incident } from "@helium/core/operations/incident.js";
 import type { SopAuthority, SopDefinition } from "@helium/core/operations/sop.js";
 import { describe, expect, it } from "vitest";
 import { ApprovalLedger, approvalSigningPayload } from "./approval.js";
@@ -34,7 +35,10 @@ import {
   FileComponentActionLocks,
   type ComponentActionLockPort,
 } from "./component-action-lock.js";
-import { FileRecoveryEvidenceStore } from "./recovery-evidence-store.js";
+import {
+  FileRecoveryEvidenceStore,
+  type RecoveryEvidencePort,
+} from "./recovery-evidence-store.js";
 import { ComponentRegistry, type OpsBundle } from "./component-registry.js";
 import {
   ExecutionSuppressedError,
@@ -51,8 +55,11 @@ class MemoryStore implements OperationsStorePort {
   readonly events: OperationsEvent[] = [];
   #state: OperationsState = emptyOperationsState();
 
+  constructor(private readonly trace?: string[]) {}
+
   append(raw: unknown): OperationsEvent {
     const event = OperationsEventSchema.parse(raw);
+    this.trace?.push(`event:${event.type}`);
     this.#state = reduceOperations([event], this.#state);
     this.events.push(event);
     return event;
@@ -201,21 +208,28 @@ function observation(
 class FakeExecutor implements ActionExecutor {
   runs = 0;
 
+  constructor(
+    private readonly trace?: string[],
+    private readonly exitCode = 0,
+  ) {}
+
   async run(
     request: ExecutionRequest,
     _signal: AbortSignal,
     gate?: ExecutionGate,
   ): Promise<ExecutionReceipt> {
+    this.trace?.push("executor:gate");
     const decision = await gate?.();
     if (decision !== undefined && !decision.admitted) {
       throw new ExecutionSuppressedError(decision.reason);
     }
+    this.trace?.push("executor:spawn");
     this.runs += 1;
     return {
       actionId: request.actionId,
       executorId: request.executorId,
       argv: request.argv,
-      exit: { code: 0, signal: null },
+      exit: { code: this.exitCode, signal: null },
       timedOut: false,
       outputTail: "ok",
       outputBytes: 2,
@@ -251,13 +265,106 @@ interface HarnessOptions {
     checks: readonly CheckDefinition[],
   ) => "pass" | "fail" | "unknown";
   observationStates?: Array<"ok" | "failed">;
+  trace?: string[];
+  exitCode?: number;
+  scopedObservations?: Array<{ id: string; scopeId: string }>;
+  prepareAction?: (sop: SopDefinition, incident: Incident) => {
+    argv: string[];
+    inputArtifacts: Array<{ ref: string; sha256: string }>;
+    preSpawn(): void;
+    verificationPolicy?: {
+      postconditions: CheckDefinition[];
+      graceMs: number;
+    };
+  };
+}
+
+function tracedLeases(
+  trace: string[] | undefined,
+  leases: ActionLeaseController,
+): ActionLeaseController {
+  if (trace === undefined) return leases;
+  const acquire = leases.acquire.bind(leases);
+  const release = leases.release.bind(leases);
+  leases.acquire = (key) => {
+    trace.push("lease:acquire");
+    return acquire(key);
+  };
+  leases.release = (leaseId, componentId) => {
+    trace.push("lease:release");
+    return release(leaseId, componentId);
+  };
+  return leases;
+}
+
+function tracedComponentLocks(
+  trace: string[] | undefined,
+  locks: ComponentActionLockPort,
+): ComponentActionLockPort {
+  if (trace === undefined) return locks;
+  return {
+    acquire(input) {
+      trace.push("component-lock:acquire");
+      const acquired = locks.acquire(input);
+      if (!acquired.ok) return acquired;
+      return {
+        ok: true,
+        handle: {
+          get receipt() { return acquired.handle.receipt; },
+          adopt(pid) {
+            trace.push("component-lock:adopt");
+            acquired.handle.adopt(pid);
+          },
+          release() {
+            trace.push("component-lock:release");
+            acquired.handle.release();
+          },
+          releaseIfProcessGroupDead() {
+            trace.push("component-lock:release");
+            return acquired.handle.releaseIfProcessGroupDead();
+          },
+        },
+      };
+    },
+    reconcile(componentId) {
+      return locks.reconcile(componentId);
+    },
+  };
+}
+
+function tracedEvidence(
+  trace: string[] | undefined,
+  evidence: RecoveryEvidencePort,
+): RecoveryEvidencePort {
+  if (trace === undefined) return evidence;
+  return {
+    persistArtifact(kind, value) {
+      return evidence.persistArtifact(kind, value);
+    },
+    hashArtifacts(refs) {
+      return evidence.hashArtifacts(refs);
+    },
+    persistBundle(bundle) {
+      trace.push("evidence:persist");
+      return evidence.persistBundle(bundle);
+    },
+    verifyEvent(event) {
+      evidence.verifyEvent(event);
+    },
+    verifyHistory(events) {
+      evidence.verifyHistory(events);
+    },
+    readArtifact(ref) {
+      return evidence.readArtifact(ref);
+    },
+  };
 }
 
 function harness(options: HarnessOptions) {
   const stateDir = options.stateDir ?? mkdtempSync(join(tmpdir(), "helium-controller-unit-"));
-  const store = options.store ?? new MemoryStore();
+  const store = options.store ?? new MemoryStore(options.trace);
   const now = options.now ?? (() => NOW);
-  const executor = new FakeExecutor();
+  const executor = new FakeExecutor(options.trace, options.exitCode);
   const approvals = new ApprovalLedger({ trustedKey: publicKey, now: () => NOW });
   let observationSequence = 0;
   let factoryCalls = 0;
@@ -296,6 +403,15 @@ function harness(options: HarnessOptions) {
     now,
     collect: async (sink) => {
       if (options.emptyRegistry === true) return { observations: [], failures: [] };
+      if (options.scopedObservations !== undefined) {
+        const sampled = options.scopedObservations.map(({ id, scopeId }, index) => ({
+          ...observation(index + 1, "failed", now()),
+          id,
+          scopeId,
+        }));
+        for (const current of sampled) await sink.append(current);
+        return { observations: sampled, failures: [] };
+      }
       const sequence = ++observationSequence;
       const state = options.observationStates?.[
         Math.min(sequence - 1, options.observationStates.length - 1)
@@ -306,6 +422,7 @@ function harness(options: HarnessOptions) {
     },
     runChecks: async () => ({}),
     sampleChecks: async (checks, phase) => {
+      options.trace?.push(`checks:${phase}`);
       options.sampledChecks?.push(checks.map((definition) => structuredClone(definition)));
       const checkId = checks[0]?.id ?? check.id;
       if (phase === "baseline") {
@@ -325,6 +442,7 @@ function harness(options: HarnessOptions) {
     },
     controllerProbe: {
       async check() {
+        options.trace?.push("controller-probe");
         const result = rivalAppeared
           ? "competing"
           : controllerResults[Math.min(probeIndex++, controllerResults.length - 1)]!;
@@ -336,24 +454,31 @@ function harness(options: HarnessOptions) {
         };
       },
     },
-    leases: new ActionLeaseController(new ActionLeaseTable(), {
+    leases: tracedLeases(options.trace, new ActionLeaseController(new ActionLeaseTable(), {
       controllerId: "test-controller",
       ttlMs: 60_000,
       now: () => NOW,
-    }),
-    componentLocks: options.componentLocks ?? new FileComponentActionLocks({
-      dir: join(stateDir, "locks"),
-      bootId: "boot-test",
-    }),
+    })),
+    componentLocks: tracedComponentLocks(
+      options.trace,
+      options.componentLocks ?? new FileComponentActionLocks({
+        dir: join(stateDir, "locks"),
+        bootId: "boot-test",
+      }),
+    ),
     approvals,
-    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
-      readSourceArtifact: (ref) => JSON.stringify({ ref }),
-    }),
+    evidence: tracedEvidence(
+      options.trace,
+      new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
+        readSourceArtifact: (ref) => JSON.stringify({ ref }),
+      }),
+    ),
     createExecutor() {
       factoryCalls += 1;
       return executor;
     },
     argvFor: () => [],
+    ...(options.prepareAction === undefined ? {} : { prepareAction: options.prepareAction }),
     ...(options.promotionBinding === true
       ? { promotionId: "fixture-promotion", promotionInputSha256: "b".repeat(64) }
       : {}),
@@ -502,6 +627,125 @@ describe("OpsController modes", () => {
     });
   });
 
+  it("keeps scoped observations distinct through controller correlation", async () => {
+    const scopes = [
+      { id: "obs-scope-a", scopeId: "lws-a:sha256:111" },
+      { id: "obs-scope-b", scopeId: "lws-b:sha256:222" },
+    ];
+    const h = harness({ mode: "observe", scopedObservations: scopes });
+
+    const result = await h.controller.tick();
+
+    expect(result.incidents.map((incident) => incident.scopeId)).toEqual(
+      scopes.map(({ scopeId }) => scopeId),
+    );
+  });
+
+  it("persists scoped inputs and revalidates them immediately before intent and spawn", async () => {
+    const trace: string[] = [];
+    const scopeId = "lws-a:sha256:111";
+    const h = harness({
+      mode: "auto",
+      trace,
+      scopedObservations: [{ id: "obs-scope-a", scopeId }],
+      prepareAction: (_sop, incident) => {
+        expect(incident.scopeId).toBe(scopeId);
+        return {
+          argv: ["--manifest", "/private/ready/sha256:abc.json"],
+          inputArtifacts: [{ ref: "artifact://sha256/abc", sha256: "a".repeat(64) }],
+          verificationPolicy: {
+            postconditions: [{
+              ...check,
+              probe: {
+                probeId: "livewire.repair-postcondition.v1",
+                args: { manifest: "/private/ready/sha256:abc.json" },
+              },
+            }],
+            graceMs: 0,
+          },
+          preSpawn: () => trace.push("repair:pre-spawn"),
+        };
+      },
+    });
+
+    await h.controller.tick();
+
+    expect(h.store.events.find((event) => event.type === "action-intent-recorded"))
+      .toMatchObject({
+        scopeId,
+        argv: ["--manifest", "/private/ready/sha256:abc.json"],
+        inputArtifacts: [{ ref: "artifact://sha256/abc", sha256: "a".repeat(64) }],
+        verificationPolicy: {
+          postconditions: [{
+            id: check.id,
+            probe: {
+              probeId: "livewire.repair-postcondition.v1",
+              args: { manifest: "/private/ready/sha256:abc.json" },
+            },
+          }],
+        },
+      });
+    expect(trace.indexOf("repair:pre-spawn")).toBeGreaterThan(trace.indexOf("controller-probe"));
+    expect(trace.indexOf("repair:pre-spawn")).toBeLessThan(trace.indexOf("event:action-intent-recorded"));
+    expect(trace.indexOf("repair:pre-spawn")).toBeLessThan(trace.indexOf("executor:spawn"));
+  });
+
+  it("keeps a stale scoped preparation local and executes the next ready incident", async () => {
+    const scopes = [
+      { id: "obs-scope-a", scopeId: "lws-a:sha256:111" },
+      { id: "obs-scope-b", scopeId: "lws-b:sha256:222" },
+    ];
+    const h = harness({
+      mode: "auto",
+      scopedObservations: scopes,
+      prepareAction: (_sop, incident) => {
+        if (incident.scopeId === scopes[0]!.scopeId) throw new Error("scope advanced");
+        return {
+          argv: ["--manifest", "/private/ready/sha256:def.json"],
+          inputArtifacts: [{ ref: "artifact://sha256/def", sha256: "d".repeat(64) }],
+          preSpawn: () => undefined,
+        };
+      },
+    });
+
+    const result = await h.controller.tick();
+
+    expect(result.actions).toEqual([
+      expect.objectContaining({ disposition: "observe", reason: "action-preparation-failed" }),
+      expect.objectContaining({ disposition: "execute", outcome: "succeeded" }),
+    ]);
+    expect(h.executor.runs).toBe(1);
+  });
+
+  it("freezes the proven mutation boundary ordering before Livewire extraction", async () => {
+    const trace: string[] = [];
+    const h = harness({ mode: "auto", trace });
+
+    await h.controller.tick();
+
+    expect(trace).toEqual([
+      "event:observation-recorded",
+      "event:incident-opened",
+      "event:incident-updated",
+      "controller-probe",
+      "lease:acquire",
+      "component-lock:acquire",
+      "checks:baseline",
+      "executor:gate",
+      "controller-probe",
+      "event:action-proposed",
+      "event:action-authorized",
+      "event:action-intent-recorded",
+      "executor:spawn",
+      "event:action-receipt-recorded",
+      "checks:postcondition",
+      "evidence:persist",
+      "event:action-verified",
+      "component-lock:release",
+      "lease:release",
+    ]);
+  });
+
   it("records a failed automatic recovery as FAILED with a failing verifier", async () => {
     const h = harness({ mode: "auto", postconditionStates: ["fail"] });
     await h.controller.tick();
@@ -515,6 +759,26 @@ describe("OpsController modes", () => {
       outcome: "failed",
       status: "FAILED",
       verifier: { decision: "fail" },
+    });
+  });
+
+  it("records a nonzero command with passing postconditions as uncertain, never proven", async () => {
+    const h = harness({ mode: "auto", exitCode: 1, postconditionStates: ["pass"] });
+
+    const result = await h.controller.tick();
+
+    expect(result.actions[0]).toMatchObject({ outcome: "uncertain" });
+    expect(h.store.state().actions[result.actions[0]!.actionId!]?.state).toBe("uncertain");
+    const terminal = h.store.events.find((event) => event.type === "action-verified");
+    if (terminal?.type !== "action-verified") throw new Error("missing terminal event");
+    const bundle = JSON.parse(
+      readFileSync(join(h.stateDir, "evidence", terminal.recoveryEvidence.ref.split("/").at(-1)!), "utf8"),
+    );
+    expect(bundle).toMatchObject({
+      outcome: "uncertain",
+      status: "PARTIAL",
+      verifier: { decision: "inconclusive" },
+      receipt: { exitCode: 1 },
     });
   });
 
@@ -542,6 +806,37 @@ describe("OpsController modes", () => {
     expect(h.store.state().actions[result.actions[0]!.actionId!]?.state).toBe(
       "not-needed",
     );
+  });
+
+  it("cold-reconciles a crash after authorization but before not-needed terminalization", async () => {
+    const seed = harness({ mode: "auto" });
+    const incidentKey = "fixture-service|integrity|failed|fixture-service";
+    const incidentId = `inc-${createHash("sha256").update(incidentKey).digest("hex").slice(0, 32)}`;
+    for (const event of [
+      { v: 1, id: "preintent-observation", at: NOW.toISOString(), type: "observation-recorded", observation: failingObservation(201) },
+      { v: 1, id: "preintent-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-201"] },
+      { v: 1, id: "preintent-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-preintent", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest, scopeId: `lws-${"1".repeat(32)}:sha256:${"2".repeat(64)}` },
+      { v: 1, id: "preintent-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-preintent", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
+    ]) seed.store.append(event);
+
+    const restarted = harness({ mode: "auto", store: seed.store, stateDir: seed.stateDir, baselinePassing: true });
+    await restarted.controller.tick();
+    expect(seed.store.state().actions["act-preintent"]?.state).toBe("external-recovery");
+    expect(restarted.executor.runs).toBe(0);
+  });
+
+  it("cold-reconciles a crash after proposal without leaving an in-flight action forever", async () => {
+    const seed = harness({ mode: "auto" });
+    const incidentKey = "fixture-service|integrity|failed|fixture-service";
+    const incidentId = `inc-${createHash("sha256").update(incidentKey).digest("hex").slice(0, 32)}`;
+    seed.store.append({ v: 1, id: "proposal-observation", at: NOW.toISOString(), type: "observation-recorded", observation: failingObservation(202) });
+    seed.store.append({ v: 1, id: "proposal-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-202"] });
+    seed.store.append({ v: 1, id: "proposal-only", at: NOW.toISOString(), type: "action-proposed", actionId: "act-proposal-only", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest, scopeId: `lws-${"3".repeat(32)}:sha256:${"4".repeat(64)}`, proposedAuthority: "auto", proposedAuthorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } });
+
+    const restarted = harness({ mode: "auto", store: seed.store, stateDir: seed.stateDir, baselinePassing: true });
+    await restarted.controller.tick();
+    expect(seed.store.state().actions["act-proposal-only"]?.state).toBe("external-recovery");
+    expect(restarted.executor.runs).toBe(0);
   });
 
   it("refuses an approved mutation when any fresh baseline result is unknown", async () => {
@@ -676,6 +971,35 @@ describe("OpsController modes", () => {
     expect(h.executor.runs).toBe(1);
   });
 
+  it("keeps monitoring while an adopted live child owns the component lock", async () => {
+    const lockDir = mkdtempSync(join(tmpdir(), "helium-controller-live-child-lock-"));
+    const locks = new FileComponentActionLocks({
+      dir: lockDir,
+      bootId: "boot-live-child",
+      isAlive: () => true,
+    });
+    const held = locks.acquire({
+      componentId: component.id,
+      leaseId: "lease-live-child",
+      sopDigest: digest,
+      acquiredAt: NOW.toISOString(),
+      expiresAt: new Date(NOW.getTime() + 60_000).toISOString(),
+    });
+    expect(held.ok).toBe(true);
+    const h = harness({ mode: "auto", componentLocks: locks });
+
+    const blocked = await h.controller.tick();
+    expect(blocked.observations).not.toHaveLength(0);
+    expect(blocked.actions[0]).toMatchObject({ disposition: "observe", reason: "component-lock-held" });
+    expect(h.executor.runs).toBe(0);
+
+    if (!held.ok) throw new Error("expected live lock");
+    held.handle.release();
+    const recovered = await h.controller.tick();
+    expect(recovered.actions.some((action) => action.outcome === "succeeded")).toBe(true);
+    expect(h.executor.runs).toBe(1);
+  });
+
   it("reconciles a persisted intent to uncertain on startup and never reruns it", async () => {
     const seed = harness({ mode: "auto" });
     const incidentKey = "fixture-service|integrity|failed|fixture-service";
@@ -719,6 +1043,43 @@ describe("OpsController modes", () => {
       "utf8",
     ));
     expect(incidentSnapshot.dependencyIds).toEqual(["decision-time-dependency"]);
+  });
+
+  it("reconciles a child-lock handoff with passing postconditions without rerunning it", async () => {
+    const seed = harness({ mode: "auto" });
+    const incidentKey = "fixture-service|integrity|failed|fixture-service";
+    const incidentId = `inc-${createHash("sha256").update(incidentKey).digest("hex").slice(0, 32)}`;
+    const baseline = {
+      checkId: check.id,
+      state: "fail" as const,
+      observedAt: NOW.toISOString(),
+      evidenceRefs: ["artifact://check/fail"],
+    };
+    for (const event of [
+      { v: 1, id: "adopt-observation", at: NOW.toISOString(), type: "observation-recorded", observation: failingObservation(101) },
+      { v: 1, id: "adopt-incident", at: NOW.toISOString(), type: "incident-opened", incidentId, componentId: component.id, dimension: "integrity", observationIds: ["obs-fixture-101"] },
+      { v: 1, id: "adopt-proposed", at: NOW.toISOString(), type: "action-proposed", actionId: "act-adopt", incidentId, componentId: component.id, sopId: "repair-fixture", sopVersion: 1, sopDigest: digest },
+      { v: 1, id: "adopt-authorized", at: NOW.toISOString(), type: "action-authorized", actionId: "act-adopt", authority: "auto", authorityManifestEntry: { sopId: "repair-fixture", version: 1, digest, authority: "auto" } },
+      { v: 1, id: "adopt-intent", at: NOW.toISOString(), type: "action-intent-recorded", actionId: "act-adopt", leaseId: "lease-adopt", operationId: "op-adopt", argv: [], baseline: { capturedAt: NOW.toISOString(), samples: [baseline], allPassing: false }, controllerProbe: { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/adopt" }, eligibility: { eligible: true, reasons: [] }, mutationOwner: component.mutationOwner, dependencyIds: [], verificationPolicy: { postconditions: [check], graceMs: 0 } },
+      { v: 1, id: "adopt-child", at: NOW.toISOString(), type: "action-child-adopted", actionId: "act-adopt", pid: 4321 },
+    ]) seed.store.append(event);
+
+    const restarted = harness({ mode: "auto", store: seed.store, stateDir: seed.stateDir, emptyRegistry: true });
+    await restarted.controller.tick();
+    expect(seed.store.state().actions["act-adopt"]?.state).toBe("succeeded");
+    expect(restarted.executor.runs).toBe(0);
+    const terminal = seed.store.events.find((event) =>
+      event.type === "action-verified" && event.actionId === "act-adopt");
+    if (terminal?.type !== "action-verified") throw new Error("missing adopted terminal event");
+    const bundle = JSON.parse(readFileSync(
+      join(seed.stateDir, "evidence", terminal.recoveryEvidence.ref.split("/").at(-1)!),
+      "utf8",
+    ));
+    expect(bundle).toMatchObject({
+      executionStart: { pid: 4321, adoptedAt: NOW.toISOString() },
+      outcome: "succeeded",
+      status: "PROVEN",
+    });
   });
 
   it("reconciles an executed action against its persisted check definition, not a same-id replacement", async () => {

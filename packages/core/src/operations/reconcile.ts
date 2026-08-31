@@ -25,6 +25,7 @@ export interface ReconcileEvidence {
   intentRecorded: boolean;
   baselineAllPassing?: boolean;
   receipt?: ExecutionReceiptFacts;
+  executionStarted?: boolean;
   postconditions: PostconditionVerdict;
   operatorConfirmed: boolean;
 }
@@ -72,6 +73,9 @@ export function reconcileOnStartup(input: {
           : { baseline: { allPassing: evidence.baselineAllPassing, samples: [] } }),
         intentRecorded: evidence.intentRecorded,
         ...(evidence.receipt === undefined ? {} : { receipt: evidence.receipt }),
+        ...(evidence.executionStarted === undefined
+          ? {}
+          : { executionStarted: evidence.executionStarted }),
         postconditions: evidence.postconditions,
         operatorConfirmed: evidence.operatorConfirmed,
       });

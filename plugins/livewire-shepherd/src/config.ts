@@ -15,6 +15,12 @@ export const ShepherdRuntimeConfigSchema = z.strictObject({
   livewire: z.strictObject({
     executorId: z.string().min(1).max(128),
     changedPathRoots: z.array(AbsolutePathSchema).min(1),
+    repair: z.strictObject({
+      executorId: z.string().min(1).max(128),
+      postconditionExecutorId: z.string().min(1).max(128),
+      readyDir: AbsolutePathSchema,
+      dataLakeRoots: z.array(AbsolutePathSchema).min(1).max(16),
+    }),
   }),
   scripts: z.array(RegisteredScriptSchema).min(1),
 }).superRefine((config, ctx) => {
@@ -22,6 +28,23 @@ export const ShepherdRuntimeConfigSchema = z.strictObject({
     const registry = ScriptRegistry.load(config.scripts);
     if (registry.get(config.livewire.executorId) === undefined) {
       ctx.addIssue({ code: "custom", path: ["livewire", "executorId"], message: "probe executor is not registered" });
+    }
+    if (registry.get(config.livewire.repair.executorId) === undefined) {
+      ctx.addIssue({ code: "custom", path: ["livewire", "repair", "executorId"], message: "repair executor is not registered" });
+    }
+    if (registry.get(config.livewire.repair.postconditionExecutorId) === undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["livewire", "repair", "postconditionExecutorId"],
+        message: "repair postcondition executor is not registered",
+      });
+    }
+    if (config.livewire.repair.postconditionExecutorId === config.livewire.repair.executorId) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["livewire", "repair", "postconditionExecutorId"],
+        message: "repair postcondition executor must be distinct from the mutation executor",
+      });
     }
   } catch (error) {
     ctx.addIssue({ code: "custom", path: ["scripts"], message: error instanceof Error ? error.message : "invalid scripts" });

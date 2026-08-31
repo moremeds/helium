@@ -1,0 +1,50 @@
+manifestVersion: team-v1
+name: livewire-shepherd-pit
+
+roles:
+  incident-lead:
+    responsibility: synthesis
+    requires: [shepherd-incident-lead]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [accepted-claim-ledger], tools: [] }
+  ib-investigator:
+    responsibility: evidence
+    requires: [ib-source-investigation]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [source-artifacts], tools: [livewire.evidence.read, livewire.ib.observe] }
+  massive-investigator:
+    responsibility: evidence
+    requires: [massive-source-investigation]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [source-artifacts], tools: [livewire.evidence.read, livewire.massive.read] }
+  corporate-action-universe-researcher:
+    responsibility: evidence
+    requires: [corporate-action-universe-research]
+    permissions: { externalResearch: true, mutations: forbidden, artifactRead: [source-artifacts], tools: [livewire.evidence.read, anysearch.search, anysearch.extract, opencli.read] }
+  pit-adjudicator:
+    responsibility: analysis
+    requires: [point-in-time-adjudication]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [dependency-artifacts], tools: [livewire.evidence.read] }
+  repair-planner:
+    responsibility: analysis
+    requires: [shepherd-bounded-repair-planning]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [accepted-claim-ledger], tools: [livewire.evidence.read, livewire.repair.eligible] }
+  independent-verifier:
+    responsibility: verification
+    requires: [shepherd-independent-verification, fresh-evidence]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [source-artifacts, dependency-artifacts], tools: [livewire.evidence.read, livewire.probe.request] }
+  reporter:
+    responsibility: rendering
+    requires: [shepherd-reporting]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [accepted-claim-ledger], tools: [] }
+
+tasks:
+  - { id: ib-investigation, role: ib-investigator, dependsOn: [], requires: [ib-source-investigation], inputs: [source-artifacts], outputSchema: ShepherdClaimSet.v1 }
+  - { id: massive-investigation, role: massive-investigator, dependsOn: [], requires: [massive-source-investigation], inputs: [source-artifacts], outputSchema: ShepherdClaimSet.v1 }
+  - { id: corporate-action-universe-research, role: corporate-action-universe-researcher, dependsOn: [], requires: [corporate-action-universe-research], inputs: [source-artifacts], outputSchema: ShepherdClaimSet.v1 }
+  - { id: pit-adjudication, role: pit-adjudicator, dependsOn: [ib-investigation, massive-investigation, corporate-action-universe-research], requires: [point-in-time-adjudication], inputs: [dependency-artifacts], outputSchema: ShepherdClaimSet.v1 }
+  - { id: independent-verification, role: independent-verifier, dependsOn: [pit-adjudication], requires: [shepherd-independent-verification, fresh-evidence], inputs: [source-artifacts, dependency-artifacts], outputSchema: EvidenceDecisionSet.v1 }
+  - { id: repair-proposal, role: repair-planner, dependsOn: [independent-verification], requires: [shepherd-bounded-repair-planning], inputs: [accepted-claim-ledger], outputSchema: ShepherdRepairProposal.v1 }
+  - { id: incident-decision, role: incident-lead, dependsOn: [independent-verification], requires: [shepherd-incident-lead], inputs: [accepted-claim-ledger], outputSchema: AdjudicatedSynthesis.v1 }
+  - { id: incident-report, role: reporter, dependsOn: [incident-decision], requires: [shepherd-reporting], inputs: [accepted-claim-ledger], outputSchema: ShadowReport.v1 }
+
+crossReference: { compareClaims: true, materialContradictions: fresh-evidence-work-order, requireIndependentEvidence: true }
+budgets: { maxAttempts: 24, maxTokens: 160000 }
+acceptance: { allowPartialClaims: false, terminalTasks: [repair-proposal, incident-report] }

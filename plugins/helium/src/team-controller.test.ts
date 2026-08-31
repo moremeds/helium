@@ -19,6 +19,10 @@ import {
   type TeamExecutionPort,
   type TeamRoutingPort,
 } from "./team-controller.js";
+import {
+  OutputContractRegistry,
+  createBuiltinOutputContractRegistry,
+} from "./output-contract-registry.js";
 
 const root = () => mkdtempSync(join(tmpdir(), "helium-team-controller-"));
 const targetId = ExecutionTargetId("fake-target");
@@ -485,5 +489,54 @@ describe("TeamController", () => {
     expect(state.state).toBe("completed");
     expect(Object.keys(state.tasks)).toHaveLength(8);
     expect(state.tasks.renderer?.state).toBe("completed");
+  });
+
+  it("uses an injected output contract without teaching the generic controller its schema", async () => {
+    const customManifest = parseTeamYaml(`
+manifestVersion: team-v1
+name: custom-contract
+roles:
+  analyst:
+    responsibility: analysis
+    requires: [custom-analysis]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [source-artifacts], tools: [] }
+tasks:
+  - { id: analysis, role: analyst, dependsOn: [], requires: [custom-analysis], inputs: [source-artifacts], outputSchema: Custom.v1 }
+crossReference: { compareClaims: true, materialContradictions: fresh-evidence-work-order, requireIndependentEvidence: true }
+budgets: { maxAttempts: 1, maxTokens: 100 }
+acceptance: { allowPartialClaims: false, terminalTasks: [analysis] }
+`);
+    const contracts: OutputContractRegistry = createBuiltinOutputContractRegistry().register("Custom.v1", {
+      prompt: ({ contract }) => `scope=${contract?.scopeHash}`,
+      validate: (value, context) => {
+        if ((value as { scopeHash?: string }).scopeHash !== context.contract?.scopeHash) {
+          throw new Error("wrong scope");
+        }
+        return value;
+      },
+    });
+    const execution: TeamExecutionPort = {
+      run: vi.fn(async (_teamRunId, work) => result(work, {
+        scopeHash: `sha256:${"c".repeat(64)}`,
+      })),
+      closeTeam: vi.fn(async () => {}),
+      drain: vi.fn(async () => {}),
+    };
+    const controller = new TeamController({
+      stateRoot: root(),
+      manifest: customManifest,
+      routing: routePort(),
+      execution,
+      outputContracts: contracts,
+    });
+    const state = await controller.run({
+      ...input,
+      caseId: "custom-contract",
+      contractContext: { scopeHash: `sha256:${"c".repeat(64)}` },
+    });
+    expect(state.state).toBe("completed");
+    expect(vi.mocked(execution.run).mock.calls[0]?.[1].inputs.prompt).toContain(
+      `scope=sha256:${"c".repeat(64)}`,
+    );
   });
 });
