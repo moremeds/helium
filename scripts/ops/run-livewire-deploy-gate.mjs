@@ -9,7 +9,6 @@ if (typeof livewireRoot !== "string" || livewireRoot === "" ||
   process.stderr.write("HELIUM_LIVEWIRE_ROOT and exact HELIUM_LIVEWIRE_COMMIT are required\n");
   process.exit(1);
 }
-
 const suites = [
   [
     "run", "--project", "unit",
@@ -43,4 +42,3 @@ for (const args of suites) {
   if (result.error !== undefined) throw result.error;
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
-

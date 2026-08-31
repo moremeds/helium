@@ -112,7 +112,6 @@ test("exports and verifies an exact content-addressed production-path evidence b
     rmSync(f.root, { recursive: true, force: true });
   }
 });
-
 test("refuses a tampered or extra content-addressed blob", () => {
   const f = fixture();
   const output = join(f.root, "evidence");
@@ -174,4 +173,3 @@ test("refuses source symlinks and refuses overwriting an evidence directory", ()
     rmSync(f.root, { recursive: true, force: true });
   }
 });
-
