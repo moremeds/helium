@@ -34,7 +34,10 @@ import {
   FileComponentActionLocks,
   type ComponentActionLockPort,
 } from "./component-action-lock.js";
-import { FileRecoveryEvidenceStore } from "./recovery-evidence-store.js";
+import {
+  FileRecoveryEvidenceStore,
+  type RecoveryEvidencePort,
+} from "./recovery-evidence-store.js";
 import { ComponentRegistry, type OpsBundle } from "./component-registry.js";
 import {
   ExecutionSuppressedError,
@@ -51,8 +54,11 @@ class MemoryStore implements OperationsStorePort {
   readonly events: OperationsEvent[] = [];
   #state: OperationsState = emptyOperationsState();
 
+  constructor(private readonly trace?: string[]) {}
+
   append(raw: unknown): OperationsEvent {
     const event = OperationsEventSchema.parse(raw);
+    this.trace?.push(`event:${event.type}`);
     this.#state = reduceOperations([event], this.#state);
     this.events.push(event);
     return event;
@@ -201,21 +207,28 @@ function observation(
 class FakeExecutor implements ActionExecutor {
   runs = 0;
 
+  constructor(
+    private readonly trace?: string[],
+    private readonly exitCode = 0,
+  ) {}
+
   async run(
     request: ExecutionRequest,
     _signal: AbortSignal,
     gate?: ExecutionGate,
   ): Promise<ExecutionReceipt> {
+    this.trace?.push("executor:gate");
     const decision = await gate?.();
     if (decision !== undefined && !decision.admitted) {
       throw new ExecutionSuppressedError(decision.reason);
     }
+    this.trace?.push("executor:spawn");
     this.runs += 1;
     return {
       actionId: request.actionId,
       executorId: request.executorId,
       argv: request.argv,
-      exit: { code: 0, signal: null },
+      exit: { code: this.exitCode, signal: null },
       timedOut: false,
       outputTail: "ok",
       outputBytes: 2,
@@ -251,13 +264,85 @@ interface HarnessOptions {
     checks: readonly CheckDefinition[],
   ) => "pass" | "fail" | "unknown";
   observationStates?: Array<"ok" | "failed">;
+  trace?: string[];
+  exitCode?: number;
+}
+
+function tracedLeases(
+  trace: string[] | undefined,
+  leases: ActionLeaseController,
+): ActionLeaseController {
+  if (trace === undefined) return leases;
+  const acquire = leases.acquire.bind(leases);
+  const release = leases.release.bind(leases);
+  leases.acquire = (key) => {
+    trace.push("lease:acquire");
+    return acquire(key);
+  };
+  leases.release = (leaseId, componentId) => {
+    trace.push("lease:release");
+    return release(leaseId, componentId);
+  };
+  return leases;
+}
+
+function tracedComponentLocks(
+  trace: string[] | undefined,
+  locks: ComponentActionLockPort,
+): ComponentActionLockPort {
+  if (trace === undefined) return locks;
+  return {
+    acquire(input) {
+      trace.push("component-lock:acquire");
+      const acquired = locks.acquire(input);
+      if (!acquired.ok) return acquired;
+      return {
+        ok: true,
+        handle: {
+          receipt: acquired.handle.receipt,
+          release() {
+            trace.push("component-lock:release");
+            acquired.handle.release();
+          },
+        },
+      };
+    },
+    reconcile(componentId) {
+      locks.reconcile(componentId);
+    },
+  };
+}
+
+function tracedEvidence(
+  trace: string[] | undefined,
+  evidence: RecoveryEvidencePort,
+): RecoveryEvidencePort {
+  if (trace === undefined) return evidence;
+  return {
+    persistArtifact(kind, value) {
+      return evidence.persistArtifact(kind, value);
+    },
+    hashArtifacts(refs) {
+      return evidence.hashArtifacts(refs);
+    },
+    persistBundle(bundle) {
+      trace.push("evidence:persist");
+      return evidence.persistBundle(bundle);
+    },
+    verifyEvent(event) {
+      evidence.verifyEvent(event);
+    },
+    verifyHistory(events) {
+      evidence.verifyHistory(events);
+    },
+  };
 }
 
 function harness(options: HarnessOptions) {
   const stateDir = options.stateDir ?? mkdtempSync(join(tmpdir(), "helium-controller-unit-"));
-  const store = options.store ?? new MemoryStore();
+  const store = options.store ?? new MemoryStore(options.trace);
   const now = options.now ?? (() => NOW);
-  const executor = new FakeExecutor();
+  const executor = new FakeExecutor(options.trace, options.exitCode);
   const approvals = new ApprovalLedger({ trustedKey: publicKey, now: () => NOW });
   let observationSequence = 0;
   let factoryCalls = 0;
@@ -306,6 +391,7 @@ function harness(options: HarnessOptions) {
     },
     runChecks: async () => ({}),
     sampleChecks: async (checks, phase) => {
+      options.trace?.push(`checks:${phase}`);
       options.sampledChecks?.push(checks.map((definition) => structuredClone(definition)));
       const checkId = checks[0]?.id ?? check.id;
       if (phase === "baseline") {
@@ -325,6 +411,7 @@ function harness(options: HarnessOptions) {
     },
     controllerProbe: {
       async check() {
+        options.trace?.push("controller-probe");
         const result = rivalAppeared
           ? "competing"
           : controllerResults[Math.min(probeIndex++, controllerResults.length - 1)]!;
@@ -336,19 +423,25 @@ function harness(options: HarnessOptions) {
         };
       },
     },
-    leases: new ActionLeaseController(new ActionLeaseTable(), {
+    leases: tracedLeases(options.trace, new ActionLeaseController(new ActionLeaseTable(), {
       controllerId: "test-controller",
       ttlMs: 60_000,
       now: () => NOW,
-    }),
-    componentLocks: options.componentLocks ?? new FileComponentActionLocks({
-      dir: join(stateDir, "locks"),
-      bootId: "boot-test",
-    }),
+    })),
+    componentLocks: tracedComponentLocks(
+      options.trace,
+      options.componentLocks ?? new FileComponentActionLocks({
+        dir: join(stateDir, "locks"),
+        bootId: "boot-test",
+      }),
+    ),
     approvals,
-    evidence: new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
-      readSourceArtifact: (ref) => JSON.stringify({ ref }),
-    }),
+    evidence: tracedEvidence(
+      options.trace,
+      new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
+        readSourceArtifact: (ref) => JSON.stringify({ ref }),
+      }),
+    ),
     createExecutor() {
       factoryCalls += 1;
       return executor;
@@ -502,6 +595,35 @@ describe("OpsController modes", () => {
     });
   });
 
+  it("freezes the proven mutation boundary ordering before Livewire extraction", async () => {
+    const trace: string[] = [];
+    const h = harness({ mode: "auto", trace });
+
+    await h.controller.tick();
+
+    expect(trace).toEqual([
+      "event:observation-recorded",
+      "event:incident-opened",
+      "event:incident-updated",
+      "controller-probe",
+      "lease:acquire",
+      "component-lock:acquire",
+      "checks:baseline",
+      "executor:gate",
+      "controller-probe",
+      "event:action-proposed",
+      "event:action-authorized",
+      "event:action-intent-recorded",
+      "executor:spawn",
+      "event:action-receipt-recorded",
+      "checks:postcondition",
+      "evidence:persist",
+      "event:action-verified",
+      "component-lock:release",
+      "lease:release",
+    ]);
+  });
+
   it("records a failed automatic recovery as FAILED with a failing verifier", async () => {
     const h = harness({ mode: "auto", postconditionStates: ["fail"] });
     await h.controller.tick();
@@ -515,6 +637,26 @@ describe("OpsController modes", () => {
       outcome: "failed",
       status: "FAILED",
       verifier: { decision: "fail" },
+    });
+  });
+
+  it("records a nonzero command with passing postconditions as uncertain, never proven", async () => {
+    const h = harness({ mode: "auto", exitCode: 1, postconditionStates: ["pass"] });
+
+    const result = await h.controller.tick();
+
+    expect(result.actions[0]).toMatchObject({ outcome: "uncertain" });
+    expect(h.store.state().actions[result.actions[0]!.actionId!]?.state).toBe("uncertain");
+    const terminal = h.store.events.find((event) => event.type === "action-verified");
+    if (terminal?.type !== "action-verified") throw new Error("missing terminal event");
+    const bundle = JSON.parse(
+      readFileSync(join(h.stateDir, "evidence", terminal.recoveryEvidence.ref.split("/").at(-1)!), "utf8"),
+    );
+    expect(bundle).toMatchObject({
+      outcome: "uncertain",
+      status: "PARTIAL",
+      verifier: { decision: "inconclusive" },
+      receipt: { exitCode: 1 },
     });
   });
 
