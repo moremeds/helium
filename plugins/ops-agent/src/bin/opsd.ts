@@ -251,13 +251,24 @@ const UnixSocketPathSchema = AbsolutePathSchema.refine(
   { message: "Unix socket path exceeds the macOS 103-byte limit" },
 );
 
-const AutomaticAuthorityCapSchema = z.strictObject({
+const AutomaticAuthorityCommon = {
   sopId: z.string().min(1).max(128),
   componentId: z.string().min(1).max(128),
   executorId: z.string().min(1).max(128),
-  argv: z.array(z.string().max(4096)).max(32),
   postconditionIds: z.array(z.string().min(1).max(128)).min(1).max(50),
-});
+};
+const AutomaticAuthorityCapSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    ...AutomaticAuthorityCommon,
+    kind: z.literal("exact-argv"),
+    argv: z.array(z.string().max(4096)).max(32),
+  }),
+  z.strictObject({
+    ...AutomaticAuthorityCommon,
+    kind: z.literal("manifest-argv-v1"),
+    manifestRoot: AbsolutePathSchema,
+  }),
+]);
 
 /** Auto is representable only as one signed, exact runtime capability. */
 export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
@@ -716,8 +727,34 @@ export function automaticAuthorityInputDigest(input: {
     .digest("hex");
 }
 
+/** Check one runtime argv against the signed automatic capability class. */
+export function authorizeAutomaticArgv(
+  cap: z.infer<typeof AutomaticAuthorityCapSchema>,
+  argv: readonly string[],
+): void {
+  if (cap.kind === "exact-argv") {
+    if (JSON.stringify(argv) !== JSON.stringify(cap.argv)) {
+      throw new Error("automatic argv does not match the exact signed capability");
+    }
+    return;
+  }
+  const manifest = argv.length === 2 && argv[0] === "--manifest" ? argv[1] : undefined;
+  if (manifest === undefined || !isAbsolute(manifest)) {
+    throw new Error("automatic manifest capability requires only --manifest ABS");
+  }
+  const root = resolve(cap.manifestRoot);
+  const candidate = resolve(manifest);
+  const name = candidate.slice(root.length + 1);
+  if (dirname(candidate) !== root || !/^sha256:[0-9a-f]{64}\.json$/.test(name)) {
+    throw new Error("automatic manifest argv is outside the signed ready directory");
+  }
+}
+
 function compiledActionArgv(sopId: string, config: OpsdRuntimeConfig): string[] {
   if (config.mode === "auto" && config.automaticAuthority?.sopId === sopId) {
+    if (config.automaticAuthority.kind !== "exact-argv") {
+      throw new Error("scoped automatic capability requires its registered adapter");
+    }
     return [...config.automaticAuthority.argv];
   }
   if (sopId === "trading-stack-container-reconcile") {

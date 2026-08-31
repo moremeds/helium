@@ -10,18 +10,39 @@ function fixture() {
   const script = join(root, "probe");
   writeFileSync(script, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   chmodSync(script, 0o700);
+  const repair = join(root, "repair");
+  writeFileSync(repair, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  chmodSync(repair, 0o700);
   return {
     version: 1 as const,
     stateRoot: join(root, "state"),
     appendLockRoot: join(root, "locks"),
     intervalMs: 60_000,
     providerRetryMs: 300_000,
-    livewire: { executorId: "livewire-probe", changedPathRoots: [join(root, "data")] },
+    livewire: {
+      executorId: "livewire-probe",
+      changedPathRoots: [join(root, "data")],
+      repair: {
+        executorId: "livewire-repair-transaction",
+        readyDir: join(root, "ready"),
+        dataLakeRoots: [join(root, "data")],
+      },
+    },
     scripts: [{
       executorId: "livewire-probe",
       path: script,
       identity: { kind: "sha256" as const, value: createHash("sha256").update("#!/bin/sh\nexit 0\n").digest("hex") },
       argvSchema: { id: "probe-v1", params: [] },
+      cwd: root,
+      environmentProfile: {},
+      timeoutMs: 5_000,
+      maxOutputBytes: 100_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
+    }, {
+      executorId: "livewire-repair-transaction",
+      path: repair,
+      identity: { kind: "sha256" as const, value: createHash("sha256").update("#!/bin/sh\nexit 0\n").digest("hex") },
+      argvSchema: { id: "repair-v1", params: [{ flag: "--manifest", valuePattern: ".+", required: true }] },
       cwd: root,
       environmentProfile: {},
       timeoutMs: 5_000,
@@ -50,6 +71,10 @@ describe("ShepherdRuntimeConfig", () => {
       "livewire:",
       "  executorId: livewire-probe",
       `  changedPathRoots: [${config.livewire.changedPathRoots[0]}]`,
+      "  repair:",
+      "    executorId: livewire-repair-transaction",
+      `    readyDir: ${config.livewire.repair.readyDir}`,
+      `    dataLakeRoots: [${config.livewire.repair.dataLakeRoots[0]}]`,
       "scripts:",
       "  - executorId: livewire-probe",
       `    path: ${config.scripts[0]?.path}`,
@@ -62,6 +87,17 @@ describe("ShepherdRuntimeConfig", () => {
       "    timeoutMs: 5000",
       "    maxOutputBytes: 100000",
       `    expectedOwnerUid: ${config.scripts[0]?.expectedOwnerUid}`,
+      "  - executorId: livewire-repair-transaction",
+      `    path: ${config.scripts[1]?.path}`,
+      "    identity:",
+      "      kind: sha256",
+      `      value: ${config.scripts[1]?.identity.value}`,
+      "    argvSchema: { id: repair-v1, params: [{ flag: --manifest, valuePattern: '.+', required: true }] }",
+      `    cwd: ${config.scripts[1]?.cwd}`,
+      "    environmentProfile: {}",
+      "    timeoutMs: 5000",
+      "    maxOutputBytes: 100000",
+      `    expectedOwnerUid: ${config.scripts[1]?.expectedOwnerUid}`,
     ].join("\n"));
     expect(loadShepherdRuntimeConfig(path).stateRoot).toBe(config.stateRoot);
     expect(() => loadShepherdRuntimeConfig("relative.yaml")).toThrow(/absolute/i);

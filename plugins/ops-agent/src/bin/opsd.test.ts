@@ -143,6 +143,7 @@ function autoFixture() {
   component.mutationOwner.competingLabels = [];
   writeFileSync(componentPath, stringify(component));
   const automaticAuthority = {
+    kind: "exact-argv" as const,
     sopId: sop.id as string,
     componentId: sop.componentId as string,
     executorId: sop.action.executorId as string,

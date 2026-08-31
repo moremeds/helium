@@ -1,7 +1,7 @@
 /** Bind one REPAIR_READY Shepherd work unit to the certified Ops transaction. */
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { CheckDefinition, ComponentSpec } from "@helium/core";
 import {
   CertifiedActionRunner,
@@ -53,6 +53,7 @@ export interface ResolvedRepairManifest {
 
 export interface ShepherdRepairControllerOptions {
   readyDir: string;
+  dataLakeRoots: readonly string[];
   runner: CertifiedActionRunner;
   component: ComponentSpec;
   sop: {
@@ -63,6 +64,8 @@ export interface ShepherdRepairControllerOptions {
     postconditions: readonly CheckDefinition[];
   };
   now: () => Date;
+  /** Signed capability check, separate from manifest/work-unit validation. */
+  authorizeArgv(argv: readonly string[]): void;
   verifyEvidence(evidence: HashedArtifactRef): void;
   hooksFor(context: {
     actionId: string;
@@ -84,6 +87,9 @@ export interface ShepherdRepairRunResult extends CertifiedActionResult {
 export class ShepherdRepairController {
   constructor(private readonly options: ShepherdRepairControllerOptions) {
     if (!isAbsolute(options.readyDir)) throw new Error("Shepherd ready directory must be absolute");
+    if (options.dataLakeRoots.length === 0 || options.dataLakeRoots.some((root) => !isAbsolute(root))) {
+      throw new Error("Shepherd repair requires at least one absolute data-lake root");
+    }
   }
 
   async run(
@@ -98,6 +104,8 @@ export class ShepherdRepairController {
       throw new Error("Shepherd daily repair requires one Bronze security interval");
     }
     const manifest = this.#resolveManifest(projection);
+    const argv = ["--manifest", manifest.path];
+    this.options.authorizeArgv(argv);
     const scopeId = `${unit.workUnitId}:${unit.scopeHash}`;
     const attempt = Object.keys(projection.attempts).length + 1;
     const actionId = stableId("act", `${scopeId}|${this.options.sop.digest}|${attempt}`);
@@ -116,7 +124,7 @@ export class ShepherdRepairController {
           executorId: this.options.sop.executorId,
           postconditions: this.options.sop.postconditions.map((check) => check.id),
         },
-        argv: ["--manifest", manifest.path],
+        argv,
         verificationPolicy: {
           postconditions: this.options.sop.postconditions,
           graceMs: this.options.sop.graceMs,
@@ -128,7 +136,10 @@ export class ShepherdRepairController {
           sha256: manifest.evidence.hash.slice("sha256:".length),
         }],
         dependencyIds: this.options.dependencyIds ?? (() => []),
-        preSpawn: () => this.#verifyUnchanged(projection, manifest),
+        preSpawn: () => {
+          this.options.authorizeArgv(argv);
+          this.#verifyUnchanged(projection, manifest);
+        },
       },
       hooks,
       signal,
@@ -191,6 +202,9 @@ export class ShepherdRepairController {
       manifest.timeframe === scope.timeframe &&
       manifest.layer === scope.layer;
     if (!matches) throw new Error("Shepherd repair manifest does not match the exact work-unit scope");
+    if (!this.options.dataLakeRoots.some((root) => resolve(root) === resolve(manifest.dataLakeRoot))) {
+      throw new Error("Shepherd repair manifest names an unconfigured data-lake root");
+    }
   }
 }
 

@@ -1307,6 +1307,14 @@ The service has owner-only state, a Unix control socket, periodic deterministic
 ticks, bounded logs, and no provider requirement. It reads the Livewire release
 path and data roots from validated config, not from a sourced shell environment.
 
+The registered mutation executable is an owner-controlled, content-pinned
+wrapper that validates only `--manifest ABS` and then uses `exec` to replace
+itself with the pinned Livewire Python transaction. Do not launch Python as an
+untracked grandchild: a killed Node or shell parent must not leave a writer
+running after Ops reclaims the component lock. The transaction performs
+preflight, stage, publish and independent verify, and byte-exactly rolls back a
+failed verification.
+
 **Step 2: Add controlled fixture drills**
 
 Contract-test:
@@ -1332,8 +1340,8 @@ bash -n scripts/ops/install-livewire-shepherd.sh
 **Step 4: Commit**
 
 ```bash
-git add plugins/ops-agent/src/controller.test.ts contracts/tests/ops-action-boundary.contract.spec.ts
-git commit -m "test: freeze Ops action boundary behavior"
+git add plugins/livewire-shepherd scripts/ops/install-livewire-shepherd.sh scripts/ops/install-livewire-shepherd.test.sh ops/sops/livewire-shepherd-targeted-repair.yaml ops/executors/livewire-shepherd-targeted-repair.yaml contracts/tests/livewire-shepherd-recovery.contract.spec.ts
+git commit -m "feat: package unattended Livewire Shepherd recovery"
 ```
 
 ### Task LS-06.4: Add operation-specific canonical repair adapters

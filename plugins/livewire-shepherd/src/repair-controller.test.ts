@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
@@ -174,6 +174,7 @@ function fixture(options: { beforeGate?: (manifestPath: string) => void } = {}) 
   });
   const controller = new ShepherdRepairController({
     readyDir,
+    dataLakeRoots: ["/Volumes/DATA_LAKE/livewire/data-lake"],
     runner,
     component,
     sop: {
@@ -184,6 +185,11 @@ function fixture(options: { beforeGate?: (manifestPath: string) => void } = {}) 
       postconditions: [check],
     },
     now: () => NOW,
+    authorizeArgv(argv) {
+      if (argv.length !== 2 || argv[0] !== "--manifest" || argv[1] !== realpathSync(manifestPath)) {
+        throw new Error("fixture authority cap mismatch");
+      }
+    },
     verifyEvidence(evidence) {
       if (evidence.ref !== `artifact://sha256/${evidence.hash.slice("sha256:".length)}`) {
         throw new Error("fixture durable evidence mismatch");

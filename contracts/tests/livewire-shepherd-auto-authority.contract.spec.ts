@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   OpsdRuntimeConfigSchema,
+  authorizeAutomaticArgv,
   automaticAuthorityInputDigest,
 } from "../../plugins/ops-agent/src/bin/opsd.js";
 
 const cap = {
+  kind: "exact-argv" as const,
   sopId: "livewire-shepherd-targeted-repair",
   componentId: "livewire",
   executorId: "livewire-repair-transaction",
@@ -63,5 +65,26 @@ describe("Livewire Shepherd automatic authority cap", () => {
     ]) {
       expect(automaticAuthorityInputDigest(widened)).not.toBe(anchor);
     }
+  });
+
+  it("authorizes a dynamic manifest only inside one signed ready directory", () => {
+    const { argv: _drop, ...manifestCap } = {
+      ...cap,
+      kind: "manifest-argv-v1" as const,
+      manifestRoot: "/var/db/helium/livewire-shepherd/ready",
+    };
+    expect(() => authorizeAutomaticArgv(manifestCap, [
+      "--manifest",
+      `/var/db/helium/livewire-shepherd/ready/sha256:${"a".repeat(64)}.json`,
+    ])).not.toThrow();
+    expect(() => authorizeAutomaticArgv(manifestCap, [
+      "--manifest",
+      `/tmp/sha256:${"a".repeat(64)}.json`,
+    ])).toThrow(/signed ready directory/);
+    expect(() => authorizeAutomaticArgv(manifestCap, [
+      "--manifest",
+      "/var/db/helium/livewire-shepherd/ready/x.json",
+      "--force",
+    ])).toThrow(/requires only/);
   });
 });
