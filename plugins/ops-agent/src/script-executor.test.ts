@@ -403,6 +403,12 @@ describe("ScriptExecutor", () => {
 
     try { process.kill(-adoptedPid!, "SIGKILL"); } catch { /* already gone */ }
     await running;
-    expect(locks.reconcile("livewire")).toBe("clear");
+    const reapedDeadline = Date.now() + 5_000;
+    let reconciliation = locks.reconcile("livewire");
+    while (reconciliation === "holder-alive" && Date.now() < reapedDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      reconciliation = locks.reconcile("livewire");
+    }
+    expect(reconciliation).toBe("clear");
   }, 15_000);
 });
