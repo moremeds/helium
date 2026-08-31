@@ -44,6 +44,8 @@ export interface ActionProjection {
   leaseId?: string;
   operationId?: string;
   argv?: string[];
+  scopeId?: string;
+  inputArtifacts?: Array<{ ref: string; sha256: string }>;
   baseline?: { capturedAt: string; samples: PostconditionSample[]; allPassing: boolean };
   controllerProbe?: ControllerProbeOutcome;
   eligibility?: { eligible: boolean; reasons: string[] };
@@ -233,6 +235,10 @@ export function reduceOperations(
         action.leaseId = event.leaseId;
         action.operationId = event.operationId;
         action.argv = [...event.argv];
+        if (event.scopeId !== undefined && event.inputArtifacts !== undefined) {
+          action.scopeId = event.scopeId;
+          action.inputArtifacts = event.inputArtifacts.map((artifact) => ({ ...artifact }));
+        }
         action.baseline = {
           capturedAt: event.baseline.capturedAt,
           samples: event.baseline.samples.map((sample) => ({

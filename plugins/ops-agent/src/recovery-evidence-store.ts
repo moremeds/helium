@@ -133,6 +133,12 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
         throw new Error(`raw evidence hash mismatch: ${artifact.ref}`);
       }
     }
+    for (const artifact of bundle.intent?.inputArtifacts ?? []) {
+      const actual = createHash("sha256").update(this.#readSource(artifact.ref)).digest("hex");
+      if (actual !== artifact.sha256) {
+        throw new Error(`scoped input artifact hash mismatch: ${artifact.ref}`);
+      }
+    }
   }
 
   #rawSourceRefs(refs: readonly string[]): string[] {

@@ -79,6 +79,17 @@ export const RecoveryEvidenceSchema = z
       .strictObject({
         actionId: OpsIdSchema,
         argv: z.array(z.string().max(4096)),
+        scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|")).optional(),
+        inputArtifacts: z.array(HashedRefSchema).min(1).max(50).optional(),
+      })
+      .superRefine((intent, ctx) => {
+        if ((intent.scopeId === undefined) !== (intent.inputArtifacts === undefined)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [intent.scopeId === undefined ? "scopeId" : "inputArtifacts"],
+            message: "scoped recovery intent requires both scopeId and inputArtifacts",
+          });
+        }
       })
       .optional(),
     receipt: z

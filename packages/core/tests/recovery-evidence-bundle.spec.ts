@@ -85,6 +85,25 @@ describe("RecoveryEvidenceSchema", () => {
     expect(RecoveryEvidenceSchema.parse(bundle()).outcome).toBe("succeeded");
   });
 
+  it("binds scoped recovery intent to the exact immutable input artifact", () => {
+    const scoped = {
+      ...bundle(),
+      intent: {
+        ...bundle().intent,
+        scopeId: `lws-${"1".repeat(32)}:sha256:${"2".repeat(64)}`,
+        inputArtifacts: [{ ref: "artifact://sha256/manifest", sha256: hash }],
+      },
+    };
+    expect(RecoveryEvidenceSchema.parse(scoped).intent).toMatchObject({
+      scopeId: scoped.intent.scopeId,
+      inputArtifacts: scoped.intent.inputArtifacts,
+    });
+    expect(() => RecoveryEvidenceSchema.parse({
+      ...scoped,
+      intent: { ...scoped.intent, inputArtifacts: undefined },
+    })).toThrow(/requires both scopeId and inputArtifacts/);
+  });
+
   it.each([
     "observations",
     "incidentSnapshot",

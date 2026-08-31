@@ -91,6 +91,12 @@ export const ActionIntentRecordedSchema = z.strictObject({
   operationId: OpsIdSchema,
   /** Structured argv. A command string is not representable. */
   argv: z.array(z.string().max(4096)),
+  /** Optional bounded work scope and exact immutable inputs for scoped adapters. */
+  scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|")).optional(),
+  inputArtifacts: z.array(z.strictObject({
+    ref: z.string().min(1).max(512),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  })).min(1).max(50).optional(),
   baseline: z.strictObject({
     capturedAt: IsoTimestampSchema,
     samples: z.array(PostconditionSampleSchema).min(1),
@@ -114,6 +120,14 @@ export const ActionIntentRecordedSchema = z.strictObject({
     postconditions: z.array(CheckDefinitionSchema).min(1).max(500),
     graceMs: z.number().int().nonnegative().max(86_400_000),
   }),
+}).superRefine((event, ctx) => {
+  if ((event.scopeId === undefined) !== (event.inputArtifacts === undefined)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [event.scopeId === undefined ? "scopeId" : "inputArtifacts"],
+      message: "scoped intent requires both scopeId and inputArtifacts",
+    });
+  }
 });
 
 export const ActionReceiptRecordedSchema = z.strictObject({

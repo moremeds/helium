@@ -616,6 +616,12 @@ export class OpsController {
             intent: {
               actionId: action.actionId,
               argv: action.argv!,
+              ...(action.scopeId === undefined || action.inputArtifacts === undefined
+                ? {}
+                : {
+                    scopeId: action.scopeId,
+                    inputArtifacts: action.inputArtifacts.map((artifact) => ({ ...artifact })),
+                  }),
             },
           }),
       ...(missingReceipt ? {} : { receipt }),

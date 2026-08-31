@@ -165,6 +165,7 @@ describe("CertifiedActionRunner", () => {
         eligibility: { eligible: true, reasons: [] },
         mutationOwner: component.mutationOwner,
         dependencyIds: () => [],
+        preSpawn: () => trace.push("scope:revalidate"),
       },
       {
         ensureProposed,
@@ -197,6 +198,7 @@ describe("CertifiedActionRunner", () => {
       "checks:baseline",
       "executor:gate:livewire-repair",
       "controller-probe",
+      "scope:revalidate",
       "event:action-proposed",
       "event:action-authorized",
       "event:action-intent-recorded",

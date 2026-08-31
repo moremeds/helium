@@ -60,8 +60,12 @@ export interface CertifiedActionRequest {
     reasons: readonly string[];
   };
   mutationOwner: MutationOwnership;
+  /** Exact content-addressed inputs persisted with a scoped write-ahead intent. */
+  inputArtifacts?: readonly { ref: string; sha256: string }[];
   /** Resolve at the intent boundary, after the second controller probe. */
   dependencyIds: () => readonly string[];
+  /** Last synchronous integrity check before write-ahead intent and spawn. */
+  preSpawn?: () => void;
 }
 
 export interface CertifiedActionHooks {
@@ -212,6 +216,7 @@ export class CertifiedActionRunner {
             suppressionReason = permission.reason;
             return { admitted: false, reason: permission.reason };
           }
+          request.preSpawn?.();
           hooks.ensureProposed();
           hooks.ensureAuthorized();
           this.options.store.append({
@@ -223,6 +228,12 @@ export class CertifiedActionRunner {
             leaseId,
             operationId: acquired.lease.operationId,
             argv: [...request.argv],
+            ...(request.inputArtifacts === undefined
+              ? {}
+              : {
+                  scopeId: request.scopeId,
+                  inputArtifacts: request.inputArtifacts.map((artifact) => ({ ...artifact })),
+                }),
             baseline: {
               capturedAt: baselineCapturedAt,
               samples: baseline.samples,
