@@ -28,6 +28,7 @@ import {
   ActionLeaseController,
   ActionLeaseTable,
   OperationsStore,
+  canonicalJson,
   type PostconditionSample,
 } from "@helium/core";
 import { parseAllDocuments } from "yaml";
@@ -250,12 +251,21 @@ const UnixSocketPathSchema = AbsolutePathSchema.refine(
   { message: "Unix socket path exceeds the macOS 103-byte limit" },
 );
 
-/** The packaged executable caps authority at approve; auto is not representable. */
+const AutomaticAuthorityCapSchema = z.strictObject({
+  sopId: z.string().min(1).max(128),
+  componentId: z.string().min(1).max(128),
+  executorId: z.string().min(1).max(128),
+  argv: z.array(z.string().max(4096)).max(32),
+  postconditionIds: z.array(z.string().min(1).max(128)).min(1).max(50),
+});
+
+/** Auto is representable only as one signed, exact runtime capability. */
 export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
   version: z.literal(1),
-  mode: z.enum(["observe", "suggest", "approve"]),
+  mode: z.enum(["observe", "suggest", "approve", "auto"]),
   releaseDir: AbsolutePathSchema,
   promotionBundleDir: AbsolutePathSchema.optional(),
+  automaticAuthority: AutomaticAuthorityCapSchema.optional(),
   executorsDir: z.string().min(1),
   stateDir: AbsolutePathSchema,
   socketPath: UnixSocketPathSchema,
@@ -267,6 +277,13 @@ export const OpsdRuntimeConfigSchema = OpsConfigSchema.extend({
       code: z.ZodIssueCode.custom,
       path: ["promotionBundleDir"],
       message: `${config.mode} mode requires an explicit promotion bundle`,
+    });
+  }
+  if ((config.mode === "auto") !== (config.automaticAuthority !== undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["automaticAuthority"],
+      message: "auto mode requires exactly one explicit automatic authority cap",
     });
   }
 });
@@ -469,7 +486,7 @@ export function composeOpsDaemon(
     sampleChecks: async (checks, phase) => checkRuntime === undefined
       ? unavailableSamples(checks, phase, now())
       : checkRuntime.sample(checks, phase, runner, now()),
-    controllerProbe: parsed.mode === "approve"
+    controllerProbe: parsed.mode === "approve" || parsed.mode === "auto"
       ? launchdControllerProbe({
           launchctl: {
             async list(argv) {
@@ -495,14 +512,14 @@ export function composeOpsDaemon(
     }),
     approvals,
     evidence,
-    createExecutor: () => parsed.mode === "approve"
+    createExecutor: () => parsed.mode === "approve" || parsed.mode === "auto"
       ? new ScriptExecutor(scripts, { now })
       : {
           async run() {
             throw new Error("non-mutating runtime has no executor");
           },
         },
-    argvFor: (sop) => compiledActionArgv(sop.id),
+    argvFor: (sop) => compiledActionArgv(sop.id, parsed),
     ...(promotion === undefined
       ? {}
       : {
@@ -616,8 +633,14 @@ function assertRuntimeAuthority(
   if (JSON.stringify(manifest.entries) !== JSON.stringify(expectedEntries)) {
     throw new Error(`${mode} authority manifest does not exactly match the promotion SOP set`);
   }
+  const requiredAuthority = mode === "auto" ? "auto" : "approve";
+  if (mode === "auto") {
+    if (sops.length !== 1 || config.automaticAuthority === undefined) {
+      throw new Error("auto promotion must contain exactly one SOP and one authority cap");
+    }
+  }
   for (const loaded of sops) {
-    if (loaded.definition.authority !== "approve" || loaded.authority !== "approve" ||
+    if (loaded.definition.authority !== requiredAuthority || loaded.authority !== requiredAuthority ||
         loaded.authorityManifestEntry === undefined) {
       throw new Error(`${mode} SOP lacks an exact signed authority grant: ${loaded.definition.id}`);
     }
@@ -625,6 +648,20 @@ function assertRuntimeAuthority(
       throw new Error(
         `${mode} SOP is not certified: ${loaded.definition.id}: ${loaded.certificationReasons.join(", ")}`,
       );
+    }
+    const component = loader.registry.component(loaded.definition.componentId);
+    if (component === undefined || component.mutationOwner.owner !== "opsd" ||
+        (mode === "auto" && component.mutationOwner.competingLabels.length !== 0)) {
+      throw new Error(`${mode} SOP component lacks exclusive opsd mutation ownership: ${loaded.definition.id}`);
+    }
+    if (mode === "auto") {
+      const cap = config.automaticAuthority!;
+      if (cap.sopId !== loaded.definition.id ||
+          cap.componentId !== loaded.definition.componentId ||
+          cap.executorId !== loaded.definition.action.executorId ||
+          JSON.stringify(cap.postconditionIds) !== JSON.stringify(loaded.definition.postconditions)) {
+        throw new Error("auto authority cap does not exactly match the signed SOP");
+      }
     }
     const script = scripts.get(loaded.definition.action.executorId);
     if (script === undefined || script.path !== loaded.definition.action.executable.path ||
@@ -634,7 +671,22 @@ function assertRuntimeAuthority(
         script.timeoutMs < loaded.definition.action.timeoutMs) {
       throw new Error(`${mode} SOP action does not match its registered executor: ${loaded.definition.id}`);
     }
-    const argv = compiledActionArgv(loaded.definition.id);
+    if (mode === "auto") {
+      const inputSha256 = automaticAuthorityInputDigest({
+        cap: config.automaticAuthority!,
+        component,
+        sop: loaded.definition,
+        checks: loader.registry.checks([
+          ...loaded.definition.preconditions,
+          ...loaded.definition.postconditions,
+        ]),
+        executor: script,
+      });
+      if (inputSha256 !== manifest.promotion.inputSha256) {
+        throw new Error("auto executable capability is not bound by the signed promotion input hash");
+      }
+    }
+    const argv = compiledActionArgv(loaded.definition.id, config);
     scripts.validateArgv(script, argv);
     const identity = scripts.verifyIdentity(script);
     if (!identity.ok) {
@@ -646,7 +698,28 @@ function assertRuntimeAuthority(
   return manifest.promotion;
 }
 
-function compiledActionArgv(sopId: string): string[] {
+export function automaticAuthorityInputDigest(input: {
+  cap: z.infer<typeof AutomaticAuthorityCapSchema>;
+  component: unknown;
+  sop: unknown;
+  checks: readonly unknown[];
+  executor: unknown;
+}): string {
+  return createHash("sha256")
+    .update(canonicalJson({
+      cap: AutomaticAuthorityCapSchema.parse(input.cap),
+      component: input.component,
+      sop: input.sop,
+      checks: input.checks,
+      executor: input.executor,
+    }))
+    .digest("hex");
+}
+
+function compiledActionArgv(sopId: string, config: OpsdRuntimeConfig): string[] {
+  if (config.mode === "auto" && config.automaticAuthority?.sopId === sopId) {
+    return [...config.automaticAuthority.argv];
+  }
   if (sopId === "trading-stack-container-reconcile") {
     return ["--scope", "containers", "--pull", "false"];
   }

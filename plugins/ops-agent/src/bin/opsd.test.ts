@@ -17,6 +17,7 @@ import { canonicalJson, manifestSigningPayload } from "@helium/core";
 import { parse, stringify } from "yaml";
 import type { CommandRunner } from "../probes/process.js";
 import {
+  automaticAuthorityInputDigest,
   composeOpsDaemon,
   composeObserveOnlyOpsDaemon,
   loadOpsdRuntimeConfig,
@@ -115,7 +116,79 @@ function approveFixture() {
     maxChecks: 500,
     maxFileBytes: 1_000_000,
   };
-  return { root, config, promotionBundleDir, wrapperPath, authorityManifestPath };
+  return {
+    root,
+    config,
+    promotionBundleDir,
+    wrapperPath,
+    authorityManifestPath,
+    privateKey,
+  };
+}
+
+function autoFixture() {
+  const fixture = approveFixture();
+  const sopPath = join(
+    fixture.promotionBundleDir,
+    "sops",
+    "trading-stack-container-reconcile.yaml",
+  );
+  const sop = parse(readFileSync(sopPath, "utf8"));
+  sop.authority = "auto";
+  const { digest: _digest, ...unsigned } = sop;
+  sop.digest = `sha256:${createHash("sha256").update(canonicalJson(unsigned)).digest("hex")}`;
+  writeFileSync(sopPath, stringify(sop));
+  const componentPath = join(fixture.promotionBundleDir, "components", "colima.yaml");
+  const component = parse(readFileSync(componentPath, "utf8"));
+  component.mutationOwner.competingLabels = [];
+  writeFileSync(componentPath, stringify(component));
+  const automaticAuthority = {
+    sopId: sop.id as string,
+    componentId: sop.componentId as string,
+    executorId: sop.action.executorId as string,
+    argv: ["--scope", "containers", "--pull", "false"],
+    postconditionIds: [...sop.postconditions] as string[],
+  };
+  const checks = [...sop.preconditions, ...sop.postconditions].map((id: string) =>
+    parse(readFileSync(join(fixture.promotionBundleDir, "checks", `${id}.yaml`), "utf8"))
+  );
+  const executor = parse(readFileSync(
+    join(fixture.promotionBundleDir, "executors", "trading-stack-reconcile.yaml"),
+    "utf8",
+  ));
+  const promotion = {
+    promotionId: "trading-stack-reconcile-auto",
+    inputSha256: automaticAuthorityInputDigest({
+      cap: automaticAuthority,
+      component,
+      sop,
+      checks,
+      executor,
+    }),
+  };
+  const entries = [{
+    sopId: sop.id,
+    version: sop.version,
+    digest: sop.digest,
+    authority: sop.authority,
+  }];
+  writeFileSync(fixture.authorityManifestPath, JSON.stringify({
+    entries,
+    promotion,
+    signature: sign(
+      null,
+      manifestSigningPayload(entries, promotion),
+      fixture.privateKey,
+    ).toString("base64"),
+  }));
+  return {
+    ...fixture,
+    config: {
+      ...fixture.config,
+      mode: "auto" as const,
+      automaticAuthority,
+    },
+  };
 }
 
 describe("opsd executable boundary", () => {
@@ -155,6 +228,28 @@ describe("opsd executable boundary", () => {
     };
     writeFileSync(path, JSON.stringify(config));
     expect(() => loadOpsdRuntimeConfig(path)).toThrow(/mode/);
+  });
+
+  it("admits auto only as one signed exact capability and refuses widening", () => {
+    const valid = autoFixture();
+    expect(() => validateOpsdRelease(valid.config)).not.toThrow();
+    expect(() => composeOpsDaemon(valid.config)).not.toThrow();
+
+    const widened = autoFixture();
+    expect(() => composeOpsDaemon({
+      ...widened.config,
+      automaticAuthority: {
+        ...widened.config.automaticAuthority,
+        argv: ["--scope", "anything", "--pull", "false"],
+      },
+    })).toThrow(/not bound by the signed promotion input hash/);
+
+    const competing = autoFixture();
+    const componentPath = join(competing.promotionBundleDir, "components", "colima.yaml");
+    const component = parse(readFileSync(componentPath, "utf8"));
+    component.mutationOwner.competingLabels = ["com.fixture.rival"];
+    writeFileSync(componentPath, stringify(component));
+    expect(() => composeOpsDaemon(competing.config)).toThrow(/exclusive opsd mutation ownership/);
   });
 
   it("keeps observe independent but requires an explicit bundle above observe", () => {
