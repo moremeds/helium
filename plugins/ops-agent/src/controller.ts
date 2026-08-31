@@ -61,6 +61,20 @@ export interface OpsControllerOptions {
   evidence: RecoveryEvidencePort;
   createExecutor: () => ActionExecutor;
   argvFor: (sop: SopDefinition, incident: Incident) => string[];
+  /** Optional component adapter for exact incident-scoped mutation inputs. */
+  prepareAction?: (
+    sop: SopDefinition,
+    incident: Incident,
+    signedVerificationPolicy: { postconditions: CheckDefinition[]; graceMs: number },
+  ) => {
+    argv: string[];
+    inputArtifacts?: Array<{ ref: string; sha256: string }>;
+    preSpawn?: () => void;
+    verificationPolicy?: {
+      postconditions: CheckDefinition[];
+      graceMs: number;
+    };
+  };
   promotionId?: string;
   promotionInputSha256?: string;
   nextId?: (prefix: string) => string;
@@ -358,11 +372,36 @@ export class OpsController {
         reason: "component-missing",
       };
     }
-    const argv = this.options.argvFor(candidate.sop, candidate.incident);
-    const verificationPolicy = {
+    const signedVerificationPolicy = {
       postconditions: this.options.registry.checks(candidate.sop.postconditions),
       graceMs: candidate.sop.graceMs,
     };
+    let prepared: ReturnType<NonNullable<OpsControllerOptions["prepareAction"]>> | undefined;
+    try {
+      prepared = this.options.prepareAction?.(
+        candidate.sop,
+        candidate.incident,
+        signedVerificationPolicy,
+      );
+    } catch {
+      return {
+        incidentId: candidate.incident.key,
+        sopId: candidate.sop.id,
+        disposition: "observe",
+        reason: "action-preparation-failed",
+      };
+    }
+    const argv = prepared?.argv ?? this.options.argvFor(candidate.sop, candidate.incident);
+    const verificationPolicy = prepared?.verificationPolicy ?? signedVerificationPolicy;
+    if (JSON.stringify(verificationPolicy.postconditions.map((definition) => definition.id)) !==
+        JSON.stringify(candidate.sop.postconditions)) {
+      return {
+        incidentId: candidate.incident.key,
+        sopId: candidate.sop.id,
+        disposition: "observe",
+        reason: "action-preparation-failed",
+      };
+    }
     const result = await this.#actionRunner.run(
       {
         scopeId: candidate.incident.scopeId ?? persistedIncidentId(candidate.incident.key),
@@ -386,9 +425,13 @@ export class OpsController {
           ],
         },
         mutationOwner: component.mutationOwner,
+        ...(prepared?.inputArtifacts === undefined
+          ? {}
+          : { inputArtifacts: prepared.inputArtifacts }),
         dependencyIds: () => this.options.registry
           .graph()
           .transitiveDependenciesOf(component.id),
+        ...(prepared?.preSpawn === undefined ? {} : { preSpawn: prepared.preSpawn }),
       },
       {
         ensureProposed: () => this.#ensureProposed(action.actionId, candidate),
@@ -424,6 +467,13 @@ export class OpsController {
       sopId: candidate.sop.id,
       sopVersion: candidate.sop.version,
       sopDigest: candidate.sop.digest,
+      ...(candidate.loaded.authorityManifestEntry === undefined
+        ? {}
+        : {
+            proposedAuthority: candidate.sop.authority,
+            proposedAuthorityManifestEntry: candidate.loaded.authorityManifestEntry,
+          }),
+      ...(candidate.incident.scopeId === undefined ? {} : { scopeId: candidate.incident.scopeId }),
     });
   }
 
@@ -625,6 +675,9 @@ export class OpsController {
             },
           }),
       ...(missingReceipt ? {} : { receipt }),
+      ...(action.childPid === undefined || action.childAdoptedAt === undefined
+        ? {}
+        : { executionStart: { pid: action.childPid, adoptedAt: action.childAdoptedAt } }),
       postconditionSamples: samples.map((sample) => ({
         checkId: sample.checkId,
         state: sample.state,
@@ -693,15 +746,19 @@ export class OpsController {
     // action log, so reconcile every registered component once at startup.
     // Keep this out of acquire(): two live contenders must never race while
     // deciding whether the other's newly-created lock is stale.
+    const liveLockedComponents = new Set<string>();
     for (const component of this.options.registry
       .components()
       .sort((a, b) => a.id.localeCompare(b.id))) {
-      this.options.componentLocks.reconcile(component.id);
+      if (this.options.componentLocks.reconcile(component.id) === "holder-alive") {
+        liveLockedComponents.add(component.id);
+      }
     }
     const actions = Object.values(this.options.store.state().actions)
-      .filter((action) => ["authorized", "intent-recorded", "executed"].includes(action.state))
+      .filter((action) => ["proposed", "authorized", "intent-recorded", "executed"].includes(action.state))
       .sort((a, b) => a.actionId.localeCompare(b.actionId));
     for (const action of actions) {
+      if (liveLockedComponents.has(action.componentId)) continue;
       const policy = action.verificationPolicy;
       const loaded = policy === undefined ? this.options.registry.sop(action.sopId) : undefined;
       const currentPolicy = loaded === undefined
@@ -729,6 +786,7 @@ export class OpsController {
                     timedOut: action.timedOut ?? false,
                   },
                 }),
+            ...(action.childPid === undefined ? {} : { executionStarted: true }),
             postconditions: samplesVerdict(postconditions),
             operatorConfirmed: action.supersededAt !== undefined,
           },
@@ -745,7 +803,7 @@ export class OpsController {
         controllerProbe: probe,
       });
     }
-    this.#startupReconciled = true;
+    this.#startupReconciled = liveLockedComponents.size === 0;
   }
 
   #actionIdentity(candidate: Candidate): {
@@ -835,6 +893,7 @@ function latestObservations(observations: Observation[]): Observation[] {
       observation.componentId,
       observation.dimension,
       observation.probeId,
+      observation.scopeId ?? "",
     ].join("\u0000");
     const previous = latest.get(key);
     if (

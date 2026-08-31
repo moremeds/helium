@@ -38,6 +38,10 @@ export const ObservationSchema = z
     id: OpsIdSchema,
     componentId: OpsIdSchema,
     probeId: OpsIdSchema,
+    /** Optional exact work scope; keeps concurrent bounded repairs disjoint. */
+    scopeId: z.string().min(1).max(256).refine((value) => !value.includes("|"), {
+      message: "observation scope must not contain the incident-key delimiter",
+    }).optional(),
     observedAt: IsoTimestampSchema,
     /**
      * When this reading stops counting as current. An expired observation is

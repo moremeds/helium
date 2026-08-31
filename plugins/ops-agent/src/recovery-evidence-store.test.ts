@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -208,6 +209,44 @@ describe("FileRecoveryEvidenceStore", () => {
     expect(() => store.verifyEvent(event)).not.toThrow();
     writeFileSync(join(rawDir, "controller.json"), "tampered\n", { mode: 0o600 });
     expect(() => store.verifyEvent(event)).toThrow(/raw evidence hash mismatch/);
+  });
+
+  it("adds a scoped content-addressed reader without replacing production raw-file verification", () => {
+    const stateDir = mkdtempSync(join(tmpdir(), "helium-recovery-scoped-"));
+    const rawDir = join(stateDir, "raw");
+    mkdirSync(rawDir, { mode: 0o700 });
+    for (const name of ["observation.json", "controller.json", "baseline.json", "postcondition.json"]) {
+      writeFileSync(join(rawDir, name), `${name}\n`, { mode: 0o600 });
+    }
+    const inputRef = `artifact://sha256/${"1".repeat(64)}`;
+    let input = "exact manifest bytes";
+    const store = new FileRecoveryEvidenceStore(join(stateDir, "evidence"), {
+      readAdditionalSourceArtifact: (ref) => {
+        if (ref !== inputRef) throw new Error(`unexpected additional ref: ${ref}`);
+        return input;
+      },
+    });
+    const { bundle } = persistFixture(store);
+    bundle.intent = {
+      actionId: "act-1",
+      argv: ["--manifest", "/private/ready/manifest.json"],
+      scopeId: "lws-a:sha256:111",
+      inputArtifacts: [{
+        ref: inputRef,
+        sha256: createHash("sha256").update(input).digest("hex"),
+      }],
+    };
+    const ref = store.persistBundle(bundle);
+    const event = {
+      v: 1, id: "terminal-scoped", at: NOW, type: "action-verified",
+      actionId: "act-1", outcome: "succeeded", attribution: "automatic",
+      postconditionRefs: ["ready"], postconditionSamples: bundle.postconditionSamples,
+      recoveryEvidence: ref,
+    } satisfies OperationsEvent;
+
+    expect(() => store.verifyEvent(event)).not.toThrow();
+    input = "tampered manifest bytes";
+    expect(() => store.verifyEvent(event)).toThrow(/scoped input artifact hash mismatch/);
   });
 
   it("keeps derived authority provenance without treating it as a raw file", () => {

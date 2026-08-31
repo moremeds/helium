@@ -193,6 +193,36 @@ describe("correlate", () => {
     expect(() => incidentKey({ ...parts, scopeId: "scope|escape" })).toThrow(/key delimiter/);
   });
 
+  it("keeps two exact repair scopes on the same component as separate incidents", () => {
+    const firstScope = "lws-a:sha256:111";
+    const secondScope = "lws-b:sha256:222";
+    const result = correlate(
+      {
+        graph,
+        observations: [
+          obs("runtime", "failed", { id: "obs-scope-a", scopeId: firstScope }),
+          obs("runtime", "failed", { id: "obs-scope-b", scopeId: secondScope }),
+        ],
+        previous: [],
+      },
+      now,
+    );
+
+    expect(result.incidents).toHaveLength(2);
+    expect(result.incidents.map((incident) => incident.scopeId)).toEqual([
+      firstScope,
+      secondScope,
+    ]);
+    expect(result.incidents.map((incident) => incident.observationIds)).toEqual([
+      ["obs-scope-a"],
+      ["obs-scope-b"],
+    ]);
+    expect(result.incidents.map((incident) => incident.key)).toEqual([
+      `runtime|readiness|failed|runtime|${firstScope}`,
+      `runtime|readiness|failed|runtime|${secondScope}`,
+    ]);
+  });
+
   it("carries openedAt forward for an incident it has seen before", () => {
     const first = correlate(
       { graph, observations: [obs("runtime", "failed")], previous: [] },

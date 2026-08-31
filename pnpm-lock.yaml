@@ -33,6 +33,9 @@ importers:
 
   contracts:
     devDependencies:
+      '@duckdb/node-api':
+        specifier: 1.5.5-r.4
+        version: 1.5.5-r.4
       '@helium/core':
         specifier: file:../packages/core
         version: link:../packages/core
@@ -48,6 +51,9 @@ importers:
       '@types/node':
         specifier: ^22
         version: 22.20.1
+      dsh-plugin-livewire-shepherd:
+        specifier: file:../plugins/livewire-shepherd
+        version: link:../plugins/livewire-shepherd
       dsh-plugin-ops-agent:
         specifier: file:../plugins/ops-agent
         version: link:../plugins/ops-agent

@@ -72,6 +72,13 @@ describe("Livewire Shepherd automatic authority cap", () => {
       ...cap,
       kind: "manifest-argv-v1" as const,
       manifestRoot: "/var/db/helium/livewire-shepherd/ready",
+      verificationExecutor: {
+        executorId: "livewire-repair-postcondition",
+        path: "/opt/helium/livewire-repair-postcondition",
+        identity: { kind: "sha256" as const, value: "b".repeat(64) },
+        expectedOwnerUid: 501,
+        argvSchema: { id: "livewire-postcondition-v1", params: [] },
+      },
     };
     expect(() => authorizeAutomaticArgv(manifestCap, [
       "--manifest",
@@ -86,5 +93,20 @@ describe("Livewire Shepherd automatic authority cap", () => {
       "/var/db/helium/livewire-shepherd/ready/x.json",
       "--force",
     ])).toThrow(/requires only/);
+    expect(automaticAuthorityInputDigest({
+      cap: manifestCap,
+      component: {}, sop: {}, checks: [], executor: {},
+      verificationExecutor: manifestCap.verificationExecutor,
+    })).not.toBe(automaticAuthorityInputDigest({
+      cap: {
+        ...manifestCap,
+        verificationExecutor: {
+          ...manifestCap.verificationExecutor,
+          path: "/tmp/widened-verifier",
+        },
+      },
+      component: {}, sop: {}, checks: [], executor: {},
+      verificationExecutor: manifestCap.verificationExecutor,
+    }));
   });
 });

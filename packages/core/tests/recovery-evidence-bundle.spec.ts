@@ -160,7 +160,16 @@ describe("RecoveryEvidenceSchema", () => {
         ...without,
         notApplicable: { receipt: "claimed missing" },
       }),
-    ).toThrow(/requires both an intent and a receipt/);
+    ).toThrow(/intent and execution evidence/);
+  });
+
+  it("accepts a gated child-lock handoff when the controller died before its receipt", () => {
+    const { receipt: _drop, ...without } = bundle();
+    expect(RecoveryEvidenceSchema.parse({
+      ...without,
+      executionStart: { pid: 1234, adoptedAt: "2026-08-25T04:00:01.000Z" },
+      notApplicable: { receipt: "controller died after the child lock handoff" },
+    }).outcome).toBe("succeeded");
   });
 
   // The rule the whole baseline mechanism exists for.

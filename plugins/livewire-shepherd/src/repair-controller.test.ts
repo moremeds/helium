@@ -261,6 +261,24 @@ function sample(state: "pass" | "fail"): PostconditionSample {
 }
 
 describe("ShepherdRepairController", () => {
+  it("prepares exact Ops inputs without executing and carries a final byte recheck", () => {
+    const h = fixture();
+
+    const prepared = h.controller.prepare(h.projection);
+
+    expect(prepared).toMatchObject({
+      scopeId: `${h.projection.unit.workUnitId}:${h.projection.unit.scopeHash}`,
+      argv: ["--manifest", realpathSync(h.manifestPath)],
+      inputArtifacts: [{
+        ref: prepared.manifest.evidence.ref,
+        sha256: prepared.manifest.hash.slice("sha256:".length),
+      }],
+    });
+    expect(h.spawned()).toBe(false);
+    writeFileSync(h.manifestPath, `${readFileSync(h.manifestPath, "utf8")}\n`);
+    expect(() => prepared.preSpawn()).toThrow(/durable evidence|execution boundary/);
+  });
+
   it("derives the only argv from an evidence-bound ready manifest and uses the shared runner", async () => {
     const h = fixture();
 

@@ -93,6 +93,16 @@ describe("ObservationSchema", () => {
     expect(parsed.value).toEqual({ watchdogOutcome: "recovery_exhausted" });
   });
 
+  it("accepts one bounded opaque repair scope and rejects the incident-key delimiter", () => {
+    const scoped = ObservationSchema.parse({
+      ...observation,
+      scopeId: "lws-123:sha256:abc",
+    });
+    expect(scoped.scopeId).toBe("lws-123:sha256:abc");
+    expect(() => ObservationSchema.parse({ ...observation, scopeId: "scope|escape" }))
+      .toThrow(/scope/i);
+  });
+
   it("bounds opaque identifiers", () => {
     expect(() =>
       ObservationSchema.parse({ ...observation, componentId: "x".repeat(200) }),

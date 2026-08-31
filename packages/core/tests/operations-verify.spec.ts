@@ -121,6 +121,23 @@ describe("a missing receipt is not evidence of an external actor", () => {
     ).toBe("uncertain");
   });
 
+  it("uses a durable child-lock handoff plus independent postconditions as execution evidence", () => {
+    expect(outcome({
+      baseline: someFailing,
+      intentRecorded: true,
+      executionStarted: true,
+      postconditions: "pass",
+      operatorConfirmed: false,
+    })).toMatchObject({ outcome: "succeeded", attribution: "automatic", automationCredit: true });
+    expect(outcome({
+      baseline: someFailing,
+      intentRecorded: true,
+      executionStarted: true,
+      postconditions: "fail",
+      operatorConfirmed: false,
+    })).toMatchObject({ outcome: "failed", attribution: "automatic", automationCredit: false });
+  });
+
   it("is external only when nothing was ever attempted", () => {
     expect(
       outcome({ baseline: someFailing, intentRecorded: false, postconditions: "pass", operatorConfirmed: false }).outcome,

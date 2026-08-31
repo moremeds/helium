@@ -51,9 +51,16 @@ export interface ResolvedRepairManifest {
   evidence: HashedArtifactRef;
 }
 
-export interface ShepherdRepairControllerOptions {
+export interface ShepherdRepairPreparerOptions {
   readyDir: string;
   dataLakeRoots: readonly string[];
+  now: () => Date;
+  /** Signed capability check, separate from manifest/work-unit validation. */
+  authorizeArgv(argv: readonly string[]): void;
+  verifyEvidence(evidence: HashedArtifactRef): void;
+}
+
+export interface ShepherdRepairControllerOptions extends ShepherdRepairPreparerOptions {
   runner: CertifiedActionRunner;
   component: ComponentSpec;
   sop: {
@@ -63,10 +70,6 @@ export interface ShepherdRepairControllerOptions {
     graceMs: number;
     postconditions: readonly CheckDefinition[];
   };
-  now: () => Date;
-  /** Signed capability check, separate from manifest/work-unit validation. */
-  authorizeArgv(argv: readonly string[]): void;
-  verifyEvidence(evidence: HashedArtifactRef): void;
   hooksFor(context: {
     actionId: string;
     incidentId: string;
@@ -84,18 +87,27 @@ export interface ShepherdRepairRunResult extends CertifiedActionResult {
   manifest: ResolvedRepairManifest;
 }
 
-export class ShepherdRepairController {
-  constructor(private readonly options: ShepherdRepairControllerOptions) {
+export interface ShepherdPreparedRepair {
+  scopeId: string;
+  manifest: ResolvedRepairManifest;
+  argv: string[];
+  inputArtifacts: Array<{ ref: string; sha256: string }>;
+  preSpawn: () => void;
+  verificationPolicy?: {
+    postconditions: CheckDefinition[];
+    graceMs: number;
+  };
+}
+
+export class ShepherdRepairPreparer {
+  constructor(private readonly options: ShepherdRepairPreparerOptions) {
     if (!isAbsolute(options.readyDir)) throw new Error("Shepherd ready directory must be absolute");
     if (options.dataLakeRoots.length === 0 || options.dataLakeRoots.some((root) => !isAbsolute(root))) {
       throw new Error("Shepherd repair requires at least one absolute data-lake root");
     }
   }
 
-  async run(
-    projection: WorkUnitProjection,
-    signal: AbortSignal = new AbortController().signal,
-  ): Promise<ShepherdRepairRunResult> {
+  prepare(projection: WorkUnitProjection): ShepherdPreparedRepair {
     const unit = ShepherdWorkUnitSchema.parse(projection.unit);
     if (projection.state !== "REPAIR_READY") {
       throw new Error(`Shepherd work unit is not repair-ready: ${projection.state}`);
@@ -106,45 +118,19 @@ export class ShepherdRepairController {
     const manifest = this.#resolveManifest(projection);
     const argv = ["--manifest", manifest.path];
     this.options.authorizeArgv(argv);
-    const scopeId = `${unit.workUnitId}:${unit.scopeHash}`;
-    const attempt = Object.keys(projection.attempts).length + 1;
-    const actionId = stableId("act", `${scopeId}|${this.options.sop.digest}|${attempt}`);
-    const incidentId = stableId("inc", scopeId);
-    const hooks = this.options.hooksFor({ actionId, incidentId, scopeId, manifest, workUnit: projection });
-    const result = await this.options.runner.run(
-      {
-        scopeId,
-        actionId,
-        attempt,
-        incidentId,
-        component: this.options.component,
-        sop: {
-          id: this.options.sop.id,
-          digest: this.options.sop.digest,
-          executorId: this.options.sop.executorId,
-          postconditions: this.options.sop.postconditions.map((check) => check.id),
-        },
-        argv,
-        verificationPolicy: {
-          postconditions: this.options.sop.postconditions,
-          graceMs: this.options.sop.graceMs,
-        },
-        eligibility: { eligible: true, reasons: [] },
-        mutationOwner: this.options.component.mutationOwner,
-        inputArtifacts: [{
-          ref: manifest.evidence.ref,
-          sha256: manifest.evidence.hash.slice("sha256:".length),
-        }],
-        dependencyIds: this.options.dependencyIds ?? (() => []),
-        preSpawn: () => {
-          this.options.authorizeArgv(argv);
-          this.#verifyUnchanged(projection, manifest);
-        },
+    return {
+      scopeId: `${unit.workUnitId}:${unit.scopeHash}`,
+      manifest,
+      argv,
+      inputArtifacts: [{
+        ref: manifest.evidence.ref,
+        sha256: manifest.evidence.hash.slice("sha256:".length),
+      }],
+      preSpawn: () => {
+        this.options.authorizeArgv(argv);
+        this.#verifyUnchanged(projection, manifest);
       },
-      hooks,
-      signal,
-    );
-    return { ...result, actionId, incidentId, scopeId, manifest };
+    };
   }
 
   #resolveManifest(projection: WorkUnitProjection): ResolvedRepairManifest {
@@ -205,6 +191,58 @@ export class ShepherdRepairController {
     if (!this.options.dataLakeRoots.some((root) => resolve(root) === resolve(manifest.dataLakeRoot))) {
       throw new Error("Shepherd repair manifest names an unconfigured data-lake root");
     }
+  }
+}
+
+export class ShepherdRepairController {
+  readonly #preparer: ShepherdRepairPreparer;
+
+  constructor(private readonly options: ShepherdRepairControllerOptions) {
+    this.#preparer = new ShepherdRepairPreparer(options);
+  }
+
+  prepare(projection: WorkUnitProjection): ShepherdPreparedRepair {
+    return this.#preparer.prepare(projection);
+  }
+
+  async run(
+    projection: WorkUnitProjection,
+    signal: AbortSignal = new AbortController().signal,
+  ): Promise<ShepherdRepairRunResult> {
+    const prepared = this.prepare(projection);
+    const { scopeId, manifest, argv } = prepared;
+    const attempt = Object.keys(projection.attempts).length + 1;
+    const actionId = stableId("act", `${scopeId}|${this.options.sop.digest}|${attempt}`);
+    const incidentId = stableId("inc", scopeId);
+    const hooks = this.options.hooksFor({ actionId, incidentId, scopeId, manifest, workUnit: projection });
+    const result = await this.options.runner.run(
+      {
+        scopeId,
+        actionId,
+        attempt,
+        incidentId,
+        component: this.options.component,
+        sop: {
+          id: this.options.sop.id,
+          digest: this.options.sop.digest,
+          executorId: this.options.sop.executorId,
+          postconditions: this.options.sop.postconditions.map((check) => check.id),
+        },
+        argv,
+        verificationPolicy: {
+          postconditions: this.options.sop.postconditions,
+          graceMs: this.options.sop.graceMs,
+        },
+        eligibility: { eligible: true, reasons: [] },
+        mutationOwner: this.options.component.mutationOwner,
+        inputArtifacts: prepared.inputArtifacts,
+        dependencyIds: this.options.dependencyIds ?? (() => []),
+        preSpawn: prepared.preSpawn,
+      },
+      hooks,
+      signal,
+    );
+    return { ...result, actionId, incidentId, scopeId, manifest };
   }
 }
 

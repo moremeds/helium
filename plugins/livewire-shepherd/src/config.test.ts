@@ -13,6 +13,9 @@ function fixture() {
   const repair = join(root, "repair");
   writeFileSync(repair, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   chmodSync(repair, 0o700);
+  const postcondition = join(root, "postcondition");
+  writeFileSync(postcondition, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  chmodSync(postcondition, 0o700);
   return {
     version: 1 as const,
     stateRoot: join(root, "state"),
@@ -24,6 +27,7 @@ function fixture() {
       changedPathRoots: [join(root, "data")],
       repair: {
         executorId: "livewire-repair-transaction",
+        postconditionExecutorId: "livewire-repair-postcondition",
         readyDir: join(root, "ready"),
         dataLakeRoots: [join(root, "data")],
       },
@@ -48,6 +52,16 @@ function fixture() {
       timeoutMs: 5_000,
       maxOutputBytes: 100_000,
       expectedOwnerUid: process.getuid?.() ?? 0,
+    }, {
+      executorId: "livewire-repair-postcondition",
+      path: postcondition,
+      identity: { kind: "sha256" as const, value: createHash("sha256").update("#!/bin/sh\nexit 0\n").digest("hex") },
+      argvSchema: { id: "postcondition-v1", params: [{ flag: "--manifest", valuePattern: ".+", required: true }] },
+      cwd: root,
+      environmentProfile: {},
+      timeoutMs: 5_000,
+      maxOutputBytes: 100_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
     }],
   };
 }
@@ -57,6 +71,20 @@ describe("ShepherdRuntimeConfig", () => {
     expect(ShepherdRuntimeConfigSchema.parse(fixture()).livewire.executorId).toBe("livewire-probe");
     expect(() => ShepherdRuntimeConfigSchema.parse({ ...fixture(), stateRoot: "relative" })).toThrow();
     expect(() => ShepherdRuntimeConfigSchema.parse({ ...fixture(), extra: true })).toThrow();
+  });
+
+  it("rejects a transaction executor wired as its own postcondition verifier", () => {
+    const config = fixture();
+    expect(() => ShepherdRuntimeConfigSchema.parse({
+      ...config,
+      livewire: {
+        ...config.livewire,
+        repair: {
+          ...config.livewire.repair,
+          postconditionExecutorId: config.livewire.repair.executorId,
+        },
+      },
+    })).toThrow(/distinct/);
   });
 
   it("loads one strict YAML document without sourcing an env file", () => {
@@ -73,6 +101,7 @@ describe("ShepherdRuntimeConfig", () => {
       `  changedPathRoots: [${config.livewire.changedPathRoots[0]}]`,
       "  repair:",
       "    executorId: livewire-repair-transaction",
+      "    postconditionExecutorId: livewire-repair-postcondition",
       `    readyDir: ${config.livewire.repair.readyDir}`,
       `    dataLakeRoots: [${config.livewire.repair.dataLakeRoots[0]}]`,
       "scripts:",
@@ -98,6 +127,17 @@ describe("ShepherdRuntimeConfig", () => {
       "    timeoutMs: 5000",
       "    maxOutputBytes: 100000",
       `    expectedOwnerUid: ${config.scripts[1]?.expectedOwnerUid}`,
+      "  - executorId: livewire-repair-postcondition",
+      `    path: ${config.scripts[2]?.path}`,
+      "    identity:",
+      "      kind: sha256",
+      `      value: ${config.scripts[2]?.identity.value}`,
+      "    argvSchema: { id: postcondition-v1, params: [{ flag: --manifest, valuePattern: '.+', required: true }] }",
+      `    cwd: ${config.scripts[2]?.cwd}`,
+      "    environmentProfile: {}",
+      "    timeoutMs: 5000",
+      "    maxOutputBytes: 100000",
+      `    expectedOwnerUid: ${config.scripts[2]?.expectedOwnerUid}`,
     ].join("\n"));
     expect(loadShepherdRuntimeConfig(path).stateRoot).toBe(config.stateRoot);
     expect(() => loadShepherdRuntimeConfig("relative.yaml")).toThrow(/absolute/i);

@@ -48,7 +48,12 @@ export {
   type OpsDaemonController,
   type OpsDaemonOptions,
   type OpsdRuntimeConfig,
+  type OpsCompositionOverrides,
   type StandaloneOpsDaemonOptions,
+  authorizeAutomaticArgv,
+  automaticAuthorityInputDigest,
+  livewireRuntimeFiles,
+  nativeRuntimeFiles,
 } from "./bin/opsd.js";
 export { OpsControlClient, OpsControlServer } from "./ipc.js";
 export {

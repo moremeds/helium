@@ -1,12 +1,15 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ScriptExecutor } from "./script-executor.js";
+import { FileComponentActionLocks } from "./component-action-lock.js";
 import { ScriptRegistry, type RegisteredScript } from "./script-registry.js";
 import { writeFakeScript, type FakeScriptOptions } from "./testing/fake-script.js";
+import { acquireComponentLock, readLockHolder, reclaimComponentLock } from "@helium/core";
 
 const dir = () => mkdtempSync(join(tmpdir(), "helium-ops-exec-"));
 const signal = () => new AbortController().signal;
@@ -51,6 +54,18 @@ describe("ScriptExecutor", () => {
         signal(),
       ),
     ).resolves.toMatchObject({ actionId: "action-1", exit: { code: 0 } });
+  });
+
+  it("hands the child pid to the lock owner before releasing its execution gate", async () => {
+    const { executor } = rig({ exitCode: 0 });
+    let adoptedPid: number | undefined;
+    await executor.run({
+      actionId: "action-adopt",
+      executorId: "script-v1",
+      argv: [],
+      onSpawn(pid) { adoptedPid = pid; },
+    }, signal());
+    expect(adoptedPid).toBeTypeOf("number");
   });
 
   it("refuses argv the schema does not permit, before spawning anything", async () => {
@@ -224,4 +239,170 @@ describe("ScriptExecutor", () => {
       executor.run({ actionId: "a", executorId: "ghost", argv: [] }, signal()),
     ).rejects.toThrow(/unknown executor/);
   });
+
+  it("keeps the child-owned OS lock after the Node controller is killed", async () => {
+    const d = dir();
+    const lockDir = join(d, "locks");
+    const started = join(d, "writer-started");
+    const finished = join(d, "writer-finished");
+    const released = join(d, "writer-released");
+    const writer = join(d, "writer.sh");
+    writeFileSync(writer, [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      "IFS= read -r gate <&3",
+      "[ \"$gate\" = go ]",
+      `printf started >${JSON.stringify(started)}`,
+      "/bin/sleep 1",
+      `printf finished >${JSON.stringify(finished)}`,
+      "",
+    ].join("\n"), { mode: 0o500 });
+    chmodSync(writer, 0o500);
+    const executorModule = fileURLToPath(new URL("../lib/script-executor.js", import.meta.url));
+    const registryModule = fileURLToPath(new URL("../lib/script-registry.js", import.meta.url));
+    const lockModule = fileURLToPath(new URL("../lib/component-action-lock.js", import.meta.url));
+    const controllerScript = `
+      import { createHash } from "node:crypto";
+      import { readFileSync, writeFileSync } from "node:fs";
+      import { ScriptExecutor } from ${JSON.stringify(executorModule)};
+      import { ScriptRegistry } from ${JSON.stringify(registryModule)};
+      import { FileComponentActionLocks } from ${JSON.stringify(lockModule)};
+      const locks = new FileComponentActionLocks({ dir: ${JSON.stringify(lockDir)}, bootId: "boot-test" });
+      const acquired = locks.acquire({
+        componentId: "livewire", leaseId: "lease-child", sopDigest: ${JSON.stringify(`sha256:${"a".repeat(64)}`)},
+        acquiredAt: "2026-08-31T00:00:00.000Z", expiresAt: "2026-08-31T00:10:00.000Z",
+      });
+      if (!acquired.ok) throw new Error("controller failed to acquire fixture lock");
+      const script = {
+        executorId: "writer", path: ${JSON.stringify(writer)},
+        identity: { kind: "sha256", value: createHash("sha256").update(readFileSync(${JSON.stringify(writer)})).digest("hex") },
+        argvSchema: { id: "writer-v1", params: [] }, cwd: ${JSON.stringify(d)},
+        environmentProfile: { PATH: "/usr/bin:/bin" }, timeoutMs: 10000,
+        maxOutputBytes: 1000, expectedOwnerUid: process.getuid?.() ?? 0,
+      };
+      const executor = new ScriptExecutor(ScriptRegistry.load([script]));
+      await executor.run({ actionId: "act-child", executorId: "writer", argv: [], onSpawn(pid) {
+        acquired.handle.adopt(pid);
+      }, onExecutionReleased() {
+        writeFileSync(${JSON.stringify(released)}, "released");
+      } }, new AbortController().signal);
+      acquired.handle.release();
+    `;
+    const controller = spawn(process.execPath, ["--input-type=module", "-e", controllerScript], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    controller.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    const waitFor = async (predicate: () => boolean, label: string, timeoutMs = 5_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error(`timed out waiting for ${label}: ${stderr}`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    };
+    await waitFor(() => existsSync(released), "execution gate release");
+    const adopted = readLockHolder(lockDir, "livewire");
+    expect(adopted?.pid).not.toBe(controller.pid);
+    controller.kill("SIGKILL");
+    await new Promise<void>((resolve) => controller.once("close", () => resolve()));
+
+    expect(readLockHolder(lockDir, "livewire")?.pid).toBe(adopted?.pid);
+    expect(acquireComponentLock(lockDir, {
+      componentId: "livewire", bootId: "boot-test", pid: process.pid,
+      leaseId: "lease-second", sopDigest: `sha256:${"a".repeat(64)}`,
+      acquiredAt: "2026-08-31T00:01:00.000Z", expiresAt: "2026-08-31T00:11:00.000Z",
+    }).ok).toBe(false);
+
+    await waitFor(() => existsSync(started), "writer start after controller kill");
+    await waitFor(() => existsSync(finished), "writer finish");
+    await waitFor(() => {
+      try { process.kill(adopted!.pid, 0); return false; } catch { return true; }
+    }, "writer exit");
+    expect(reclaimComponentLock(lockDir, "livewire", {
+      bootId: "boot-test",
+      isAlive: (pid) => {
+        try { process.kill(pid, 0); return true; } catch { return false; }
+      },
+    })).toEqual({ reclaimed: true, reason: "dead-process" });
+    expect(acquireComponentLock(lockDir, {
+      componentId: "livewire", bootId: "boot-test", pid: process.pid,
+      leaseId: "lease-after", sopDigest: `sha256:${"a".repeat(64)}`,
+      acquiredAt: "2026-08-31T00:02:00.000Z", expiresAt: "2026-08-31T00:12:00.000Z",
+    }).ok).toBe(true);
+  }, 15_000);
+
+  it("keeps the adopted process-group lock after its leader is killed", async () => {
+    const d = dir();
+    const lockDir = join(d, "locks");
+    const descendantPidPath = join(d, "descendant.pid");
+    const writer = join(d, "group-writer.sh");
+    writeFileSync(writer, [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      "IFS= read -r gate <&3",
+      "[ \"$gate\" = go ]",
+      "/bin/sleep 30 &",
+      `printf '%s' "$!" >${JSON.stringify(descendantPidPath)}`,
+      "wait",
+      "",
+    ].join("\n"), { mode: 0o500 });
+    chmodSync(writer, 0o500);
+    const locks = new FileComponentActionLocks({ dir: lockDir, bootId: "boot-test" });
+    const acquired = locks.acquire({
+      componentId: "livewire",
+      leaseId: "lease-group",
+      sopDigest: `sha256:${"b".repeat(64)}`,
+      acquiredAt: "2026-08-31T00:00:00.000Z",
+      expiresAt: "2026-08-31T00:10:00.000Z",
+    });
+    expect(acquired.ok).toBe(true);
+    if (!acquired.ok) return;
+    const script = {
+      executorId: "group-writer",
+      path: writer,
+      identity: {
+        kind: "sha256" as const,
+        value: createHash("sha256").update(readFileSync(writer)).digest("hex"),
+      },
+      argvSchema: { id: "group-writer-v1", params: [] },
+      cwd: d,
+      environmentProfile: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 60_000,
+      maxOutputBytes: 1_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
+    };
+    const executor = new ScriptExecutor(ScriptRegistry.load([script]));
+    let adoptedPid: number | undefined;
+    const running = executor.run({
+      actionId: "group-writer",
+      executorId: script.executorId,
+      argv: [],
+      onSpawn(pid) {
+        adoptedPid = pid;
+        acquired.handle.adopt(pid);
+      },
+    }, new AbortController().signal);
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(descendantPidPath)) {
+      if (Date.now() >= deadline) throw new Error("timed out waiting for writer descendant");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    expect(adoptedPid).toBeTypeOf("number");
+    process.kill(adoptedPid!, "SIGKILL");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(locks.reconcile("livewire")).toBe("holder-alive");
+    expect(readLockHolder(lockDir, "livewire")?.leaseId).toBe("lease-group");
+    expect(locks.acquire({
+      componentId: "livewire",
+      leaseId: "lease-overlap",
+      sopDigest: `sha256:${"b".repeat(64)}`,
+      acquiredAt: "2026-08-31T00:01:00.000Z",
+      expiresAt: "2026-08-31T00:11:00.000Z",
+    }).ok).toBe(false);
+
+    try { process.kill(-adoptedPid!, "SIGKILL"); } catch { /* already gone */ }
+    await running;
+    expect(locks.reconcile("livewire")).toBe("clear");
+  }, 15_000);
 });

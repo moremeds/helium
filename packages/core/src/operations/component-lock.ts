@@ -25,6 +25,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -47,7 +48,9 @@ export const LockReceiptSchema = z.strictObject({
 export type LockReceipt = z.infer<typeof LockReceiptSchema>;
 
 export interface LockHandle {
-  receipt: LockReceipt;
+  readonly receipt: LockReceipt;
+  /** Atomically transfer liveness ownership to the spawned mutation process. */
+  adopt(pid: number): void;
   release(): void;
 }
 
@@ -237,21 +240,50 @@ export function acquireComponentLock(
       }
       rmSync(staging, { force: true });
 
+      let currentReceipt = receipt;
       return {
         ok: true as const,
         handle: {
-          receipt,
+          get receipt(): LockReceipt {
+            return currentReceipt;
+          },
+          adopt(pid: number): void {
+            const next = LockReceiptSchema.parse({ ...currentReceipt, pid });
+            withComponentLockCoordination(
+              dir,
+              currentReceipt.componentId,
+              currentReceipt.bootId,
+              process.pid,
+              () => {
+                const holder = readLockHolder(dir, currentReceipt.componentId);
+                if (holder?.leaseId !== currentReceipt.leaseId) {
+                  throw new Error(`component lock changed before child adoption: ${currentReceipt.componentId}`);
+                }
+                const staging = join(
+                  dir,
+                  `.${currentReceipt.componentId}.${currentReceipt.leaseId}.${randomUUID()}.adopt.tmp`,
+                );
+                writeFileSync(staging, JSON.stringify(next), { mode: 0o600 });
+                try {
+                  renameSync(staging, target);
+                  currentReceipt = next;
+                } finally {
+                  rmSync(staging, { force: true });
+                }
+              },
+            );
+          },
           release(): void {
             withComponentLockCoordination(
               dir,
-              receipt.componentId,
-              receipt.bootId,
-              receipt.pid,
+              currentReceipt.componentId,
+              currentReceipt.bootId,
+              process.pid,
               () => {
-                const holder = readLockHolder(dir, receipt.componentId);
+                const holder = readLockHolder(dir, currentReceipt.componentId);
                 // Release only our own lock. Releasing someone else's is how a slow
                 // controller unlocks a component another one is actively mutating.
-                if (holder?.leaseId !== receipt.leaseId) return;
+                if (holder?.leaseId !== currentReceipt.leaseId) return;
                 rmSync(target, { force: true });
               },
             );

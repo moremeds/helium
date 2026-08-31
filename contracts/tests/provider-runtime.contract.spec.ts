@@ -174,7 +174,6 @@ describe("production provider capacity plane", () => {
       codexInvoke: async () => ({
         ok: false,
         classification: "quota-exhausted",
-        retryAfter: "opaque-reset",
         runtimeSnapshot: {
           requestedModel: "gpt-5.6-sol",
           requestedEffort: "high",

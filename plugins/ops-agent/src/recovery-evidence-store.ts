@@ -35,6 +35,7 @@ export interface RecoveryEvidencePort {
   persistBundle(bundle: RecoveryEvidence): TerminalEvidenceRef;
   verifyEvent(event: OperationsEvent): void;
   verifyHistory(events: readonly OperationsEvent[]): void;
+  readArtifact(ref: EvidenceRef): Buffer;
 }
 
 export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
@@ -43,6 +44,8 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
     private readonly options: {
       /** Test/fixture seam. Production resolves only artifact://ops/raw refs. */
       readSourceArtifact?: (ref: string) => string | Buffer;
+      /** Production extension for exact component-owned content-addressed inputs. */
+      readAdditionalSourceArtifact?: (ref: string) => string | Buffer;
     } = {},
   ) {
     ensurePrivateDirectory(dir);
@@ -79,6 +82,10 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
     for (const event of events) {
       this.verifyEvent(event);
     }
+  }
+
+  readArtifact(ref: EvidenceRef): Buffer {
+    return Buffer.from(this.#read(ref));
   }
 
   verifyEvent(event: OperationsEvent): void {
@@ -146,6 +153,8 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
     if (this.options.readSourceArtifact !== undefined) return unique;
     return unique.filter((ref) => {
       if (ref.startsWith("artifact://ops/raw/")) return true;
+      if (ref.startsWith("artifact://sha256/") &&
+          this.options.readAdditionalSourceArtifact !== undefined) return true;
       const authority = ref.match(/^artifact:\/\/ops\/authority\/([a-zA-Z0-9._-]+)$/);
       if (authority !== null) return false;
       const unavailable = ref.match(
@@ -159,6 +168,10 @@ export class FileRecoveryEvidenceStore implements RecoveryEvidencePort {
   #readSource(ref: string): string | Buffer {
     if (this.options.readSourceArtifact !== undefined) {
       return this.options.readSourceArtifact(ref);
+    }
+    if (ref.startsWith("artifact://sha256/") &&
+        this.options.readAdditionalSourceArtifact !== undefined) {
+      return this.options.readAdditionalSourceArtifact(ref);
     }
     const prefix = "artifact://ops/raw/";
     if (!ref.startsWith(prefix)) throw new Error(`unsupported raw evidence ref: ${ref}`);

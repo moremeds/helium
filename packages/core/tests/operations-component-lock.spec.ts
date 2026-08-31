@@ -45,6 +45,17 @@ describe("component lock", () => {
     });
   });
 
+  it("atomically transfers liveness ownership to the spawned writer", () => {
+    const d = dir();
+    const acquired = acquireComponentLock(d, receipt());
+    if (!acquired.ok) throw new Error("expected lock acquisition");
+    acquired.handle.adopt(process.pid + 1);
+    expect(acquired.handle.receipt.pid).toBe(process.pid + 1);
+    expect(readLockHolder(d, "runtime")?.pid).toBe(process.pid + 1);
+    acquired.handle.release();
+    expect(readLockHolder(d, "runtime")).toBeUndefined();
+  });
+
   it("locks per component, not globally", () => {
     const d = dir();
     expect(acquireComponentLock(d, receipt()).ok).toBe(true);

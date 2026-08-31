@@ -100,6 +100,10 @@ export const RecoveryEvidenceSchema = z
         evidence: HashedRefSchema,
       })
       .optional(),
+    executionStart: z.strictObject({
+      pid: z.number().int().positive(),
+      adoptedAt: z.string().min(1),
+    }).optional(),
 
     postconditionSamples: z.array(
       z.strictObject({
@@ -175,8 +179,9 @@ export const RecoveryEvidenceSchema = z
     }
     // A success claim requires the evidence a success is made of.
     if (bundle.outcome === "succeeded") {
-      if (bundle.intent === undefined || bundle.receipt === undefined) {
-        issue(["outcome"], "a succeeded outcome requires both an intent and a receipt");
+      if (bundle.intent === undefined ||
+          (bundle.receipt === undefined && bundle.executionStart === undefined)) {
+        issue(["outcome"], "a succeeded outcome requires an intent and execution evidence");
       } else if (bundle.baseline === undefined) {
         issue(["baseline"], "a succeeded outcome requires its exact baseline");
       } else if (bundle.baseline.allPassing) {
