@@ -57,6 +57,7 @@ LS-01.1 -> LS-01.2 -> LS-01.3 -> LS-01.4
                                                                                                   +-> LS-06.2a -> LS-06.2b -> LS-06.2c
                                                                                                                               |
                                                                                                                               +-> LS-06.3a -> LS-06.3b -> LS-07.3
+                                                                                                                                                    +-> LS-06.4
                                                                                                                               +-> LS-08.1 -> LS-08.2
 
 LS-01.4 + LS-02.3 + LS-03.2 + LS-05.2 + LS-06.3b + LS-07.3 -> LS-GATE
@@ -87,7 +88,8 @@ parallel after `LS-02.3`. None may stop the deterministic queue.
 | Parquet canonical, DuckDB verified query truth | LS-02.1, LS-02.3, LS-03.1, LS-05.2 | sampled byte-hash reconciliation |
 | Current members first without shrinking full PIT goal | LS-02, LS-03, LS-08 | current gate plus explicit historical denominator |
 | All material assertions independently verified | LS-07.1–07.2 | claim/evidence-decision contract tests |
-| Exact reversible autonomous repair | LS-06.1–06.3b | scope, crash, rollback, and signed-authority drills |
+| Exact reversible autonomous repair | LS-06.1–06.3b | daily scope, crash, rollback, and signed-authority drills |
+| Additional canonical repair adapters | LS-06.4 | operation-specific multi-artifact and crash matrices |
 | Target-repo engineering issue lifecycle | LS-07.3 | dedupe, deploy, and production-verification tests |
 | Cost-aware agents and provider quota recovery | LS-01.3, LS-07.2 | cheap/senior routing, checkpoint, no-busy-loop tests |
 | AnySearch/OpenCLI/Massive/IB/UW source tools | LS-03.2, LS-05.1, LS-07.2 | allowlist, raw-evidence, and provider-state tests |
@@ -1049,9 +1051,16 @@ class RepairManifest:
     operation_id: str
     work_unit_id: str
     scope_hash: str
+    data_lake_root: Path
     layer: Literal["bronze", "silver", "query"]
     security_id: str
     symbol: str
+    symbol_valid_from: datetime
+    symbol_valid_to: datetime | None
+    identity_as_of: datetime
+    security_master_revision: int
+    security_master_sha256: str
+    session_policy: Literal["XNYS-close-and-early-close-v2"]
     date_from: date
     date_to: date
     timeframe: str
@@ -1060,12 +1069,26 @@ class RepairManifest:
     max_rows: int
     max_bytes: int
     expires_at: datetime
-    operation: Literal["daily-merge", "flatfile-date-republish", "silver-rebuild", "duckdb-rebuild"]
+    operation: Literal["daily-merge"]
 ```
+
+Version 1 is intentionally one exact current-member daily Bronze transaction.
+It must reject every unimplemented operation during preflight rather than
+advertise a capability that fails only after authorization. Flat-file date,
+Silver revision, and DuckDB rebuilds have different multi-artifact publication
+contracts and are added separately in LS-06.4.
 
 Reject an expired manifest, changed prior hash, different data-lake root, path
 escape, symlink escape, source evidence missing from the local store, wider
 dates, extra symbols, over-budget output, and a second attempt.
+Reconstruct the complete Helium `security-interval` scope including symbol
+validity, recompute its canonical hash, derive the work-unit ID, and reject any
+mismatch. Verification must resolve the exact SecurityMaster interval and raw
+identity evidence from a fixed append-prefix revision/hash and as-of, reject
+non-session rows under the shared versioned XNYS calendar, and derive
+coverage/freshness from the final candidate bytes and actual session close
+rather than echoing manifest claims. All cross-repository timestamps use the
+same UTC `Z` grammar accepted by Helium, with golden hash vectors on both sides.
 
 **Step 2: Implement dry-run and stage**
 
@@ -1092,16 +1115,16 @@ Rollback restores only the prior hashed artifact/pointer and verifies it.
 
 **Step 4: Crash-matrix tests**
 
-Inject failure before stage, after stage, before publish, after publish, during
-DuckDB rebuild, before verification, and during rollback. Re-running must
+Inject failure before stage, after stage, before publish, after publish, before
+verification, and during rollback. Re-running must
 converge without duplicate rows or a widened mutation.
 
 **Step 5: Verify and commit**
 
 ```bash
-uv run pytest tests/test_shepherd_repair.py tests/test_daily_bronze_repair.py tests/test_silver_revision.py -q
+uv run pytest tests/test_shepherd_repair.py tests/test_trading_calendar.py tests/test_pit_silver_revision.py tests/test_livewire_entrypoints.py -q
 uv run pytest tests -q --cov=clients --cov=scripts --cov-report=term-missing
-git add clients/shepherd_repair.py livewire_scripts/shepherd_repair.py scripts/livewire_store.py tests/test_shepherd_repair.py
+git add clients/shepherd_repair.py clients/trading_calendar.py clients/pit_silver_revision.py livewire_scripts/shepherd_repair.py scripts/livewire_store.py tests/test_shepherd_repair.py tests/test_trading_calendar.py tests/test_livewire_entrypoints.py
 git commit -m "feat: add reversible Shepherd repairs"
 ```
 
@@ -1309,9 +1332,31 @@ bash -n scripts/ops/install-livewire-shepherd.sh
 **Step 4: Commit**
 
 ```bash
-git add plugins/livewire-shepherd scripts/ops ops/sops ops/executors contracts/tests/livewire-shepherd-recovery.contract.spec.ts
-git commit -m "feat: package automatic Livewire Shepherd recovery"
+git add plugins/ops-agent/src/controller.test.ts contracts/tests/ops-action-boundary.contract.spec.ts
+git commit -m "test: freeze Ops action boundary behavior"
 ```
+
+### Task LS-06.4: Add operation-specific canonical repair adapters
+
+**depends_on:** `[LS-06.3b]`
+
+**Repository:** Livewire and Helium
+
+Keep these operations outside the single-file daily-merge v1 contract:
+
+- `flatfile-date-republish` binds a whole provider/date partition and its
+  symbol denominator;
+- `silver-rebuild` publishes an immutable Silver revision plus its pointer;
+- `duckdb-rebuild` publishes a derived query catalog only from verified
+  Parquet/manifests.
+
+Each adapter gets its own strict manifest version, exact target set, writer
+lock, byte-hashed prior state, independent business postconditions, rollback,
+and failure injection at every multi-artifact pointer boundary. The Shepherd
+controller may register an adapter only after its focused crash matrix and the
+shared Ops action-boundary contracts pass. These extensions do not block the
+first current-member daily repair gate, but remain required for broader
+intraday and automatic query-layer recovery.
 
 ## LS-07 Periodic Agent Verification
 
@@ -1723,6 +1768,7 @@ LS-07.3
 LS-GATE for current-member daily + one real repair
 ```
 
-Then deliver `LS-04` and expand `LS-08` continuously. This order yields a
-working unattended system before the full historical denominator is filled,
-without redefining the full PIT objective.
+Then deliver `LS-04`, `LS-06.4`, and expand `LS-08` continuously. This order
+yields a working unattended system before the full historical denominator and
+every multi-artifact repair adapter are filled, without redefining either
+objective.
