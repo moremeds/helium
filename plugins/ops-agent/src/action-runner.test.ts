@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PostconditionSample } from "@helium/core/operations/action.js";
@@ -15,6 +16,8 @@ import {
 import { describe, expect, it } from "vitest";
 import { CertifiedActionRunner, type OperationsStorePort } from "./action-runner.js";
 import { FileComponentActionLocks } from "./component-action-lock.js";
+import { ScriptExecutor } from "./script-executor.js";
+import { ScriptRegistry, type RegisteredScript } from "./script-registry.js";
 
 const NOW = new Date("2026-08-31T00:00:00.000Z");
 const digest = `sha256:${"a".repeat(64)}`;
@@ -110,7 +113,10 @@ describe("CertifiedActionRunner", () => {
           trace.push(`executor:gate:${request.executorId}`);
           const admitted = await gate?.();
           if (admitted?.admitted !== true) throw new Error("runner gate refused fixture");
+          request.onSpawn?.(process.pid);
+          trace.push("executor:adopt");
           trace.push("executor:spawn");
+          request.onExecutionReleased?.(process.pid);
           return {
             actionId: request.actionId,
             executorId: request.executorId,
@@ -202,7 +208,9 @@ describe("CertifiedActionRunner", () => {
       "event:action-proposed",
       "event:action-authorized",
       "event:action-intent-recorded",
+      "executor:adopt",
       "executor:spawn",
+      "event:action-child-adopted",
       "event:action-receipt-recorded",
       "checks:postcondition",
       "event:action-verified",
@@ -250,4 +258,117 @@ describe("CertifiedActionRunner", () => {
     }, new AbortController().signal)).rejects.toThrow(/scope id is invalid/);
     expect(trace).toEqual([]);
   });
+
+  it("does not release the component lock while an adopted writer descendant survives", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-action-runner-group-lock-"));
+    const lockDir = join(root, "locks");
+    const descendantPidPath = join(root, "descendant.pid");
+    const wrapper = join(root, "writer.sh");
+    writeFileSync(wrapper, [
+      "#!/bin/bash",
+      "set -euo pipefail",
+      "IFS= read -r gate <&3",
+      "[ \"$gate\" = go ]",
+      `/bin/sleep 30 >/dev/null 2>&1 3>&- & printf '%s' \"$!\" >${JSON.stringify(descendantPidPath)}`,
+      "kill -KILL $$",
+      "",
+    ].join("\n"), { mode: 0o500 });
+    chmodSync(wrapper, 0o500);
+    const registered: RegisteredScript = {
+      executorId: "livewire-repair",
+      path: wrapper,
+      identity: {
+        kind: "sha256",
+        value: createHash("sha256").update(readFileSync(wrapper)).digest("hex"),
+      },
+      argvSchema: { id: "livewire-repair-v1", params: [] },
+      cwd: root,
+      environmentProfile: { PATH: "/usr/bin:/bin" },
+      timeoutMs: 60_000,
+      maxOutputBytes: 1_000,
+      expectedOwnerUid: process.getuid?.() ?? 0,
+    };
+    const locks = new FileComponentActionLocks({ dir: lockDir, bootId: "boot-test" });
+    const store = new MemoryStore([]);
+    let id = 0;
+    const makeRunner = () => new CertifiedActionRunner({
+      store,
+      now: () => NOW,
+      nextId: (prefix) => `${prefix}-${++id}`,
+      sampleChecks: async () => [sample("fail")],
+      sampleGrace: async () => ({ verdict: "unknown", samples: [sample("fail")] }),
+      controllerProbe: {
+        async check() {
+          return { result: "clear", observedLabels: [], evidenceRef: "artifact://controller/clear" };
+        },
+      },
+      leases: new ActionLeaseController(new ActionLeaseTable(), {
+        controllerId: `runner-${id}`,
+        ttlMs: 60_000,
+        now: () => NOW,
+      }),
+      componentLocks: locks,
+      createExecutor: () => new ScriptExecutor(ScriptRegistry.load([registered])),
+    });
+    const hooksFor = (actionId: string, incidentId: string) => ({
+      ensureProposed() {
+        store.append({
+          v: 1, id: `${actionId}-proposed`, at: NOW.toISOString(), type: "action-proposed",
+          actionId, incidentId, componentId: component.id, sopId: "repair", sopVersion: 1,
+          sopDigest: digest,
+        });
+      },
+      ensureAuthorized() {
+        store.append({
+          v: 1, id: `${actionId}-authorized`, at: NOW.toISOString(), type: "action-authorized",
+          actionId, authority: "auto",
+        });
+      },
+      recordTerminal(outcome: "succeeded" | "failed" | "uncertain" | "not-needed" | "external-recovery", samples: PostconditionSample[]) {
+        store.append({
+          v: 1, id: `${actionId}-verified`, at: NOW.toISOString(), type: "action-verified",
+          actionId, outcome, postconditionRefs: samples.map((row) => row.checkId),
+          postconditionSamples: samples,
+          recoveryEvidence: {
+            ref: `artifact://recovery/${actionId}`, sha256: "d".repeat(64),
+            schema: "helium.ops.recovery-evidence/v1", assertionId: `recovery-${actionId}`,
+          },
+        });
+      },
+    });
+    const requestFor = (actionId: string, incidentId: string) => ({
+      scopeId: `${actionId}:sha256:${"2".repeat(64)}`,
+      actionId,
+      attempt: 1,
+      incidentId,
+      component,
+      sop: { id: "repair", digest, executorId: registered.executorId, postconditions: [check.id] },
+      argv: [] as string[],
+      verificationPolicy: { postconditions: [check], graceMs: 0 },
+      eligibility: { eligible: true, reasons: [] as string[] },
+      mutationOwner: component.mutationOwner,
+      dependencyIds: () => [] as string[],
+    });
+
+    const first = await makeRunner().run(
+      requestFor("act-orphan", "inc-orphan"),
+      hooksFor("act-orphan", "inc-orphan"),
+      new AbortController().signal,
+    );
+    expect(first.disposition).toBe("execute");
+    expect(existsSync(descendantPidPath)).toBe(true);
+    const descendantPid = Number(readFileSync(descendantPidPath, "utf8"));
+    expect(() => process.kill(descendantPid, 0)).not.toThrow();
+
+    const second = await makeRunner().run(
+      requestFor("act-overlap", "inc-overlap"),
+      hooksFor("act-overlap", "inc-overlap"),
+      new AbortController().signal,
+    );
+    expect(second).toMatchObject({ disposition: "observe", reason: "component-lock-held" });
+
+    try { process.kill(-Number(readFileSync(descendantPidPath, "utf8")), "SIGKILL"); } catch {
+      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already gone */ }
+    }
+  }, 15_000);
 });

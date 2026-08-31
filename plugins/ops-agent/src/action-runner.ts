@@ -11,7 +11,10 @@ import {
 import type { OperationsState } from "@helium/core/operations/reducer.js";
 import type { RecoveryEvidence } from "@helium/core/operations/recovery-evidence.js";
 import { verifyAction } from "@helium/core/operations/verify.js";
-import type { ComponentActionLockPort } from "./component-action-lock.js";
+import type {
+  ComponentActionLockHandle,
+  ComponentActionLockPort,
+} from "./component-action-lock.js";
 import {
   ExecutionSuppressedError,
   type ExecutionGate,
@@ -133,7 +136,7 @@ export class CertifiedActionRunner {
     }
 
     let leaseId: string | undefined;
-    let componentLock: { release(): void } | undefined;
+    let componentLock: ComponentActionLockHandle | undefined;
     let boundaryRef = initialProbe.evidenceRef;
     let suppressionReason: string | undefined;
 
@@ -206,6 +209,19 @@ export class CertifiedActionRunner {
           actionId: request.actionId,
           executorId: request.sop.executorId,
           argv: [...request.argv],
+          onSpawn: (pid) => {
+            componentLock!.adopt(pid);
+          },
+          onExecutionReleased: (pid) => {
+            this.options.store.append({
+              v: 1,
+              id: this.options.nextId("evt-action-child-adopted"),
+              at: this.options.now().toISOString(),
+              type: "action-child-adopted",
+              actionId: request.actionId,
+              pid,
+            });
+          },
         },
         signal,
         async () => {
@@ -297,7 +313,7 @@ export class CertifiedActionRunner {
       }
       throw error;
     } finally {
-      componentLock?.release();
+      componentLock?.releaseIfProcessGroupDead();
       if (leaseId !== undefined) {
         this.options.leases.release(leaseId, request.component.id);
       }
