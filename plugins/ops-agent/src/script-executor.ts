@@ -15,12 +15,21 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import type { Writable } from "node:stream";
 import type { ScriptRegistry } from "./script-registry.js";
 
 export interface ExecutionRequest {
   actionId: string;
   executorId: string;
   argv: string[];
+  /** Runs synchronously while the child is blocked behind inherited fd 3. */
+  onSpawn?: (pid: number) => void;
+  /**
+   * Runs only after the `go` byte sequence has been flushed into the child's
+   * inherited fd 3. A durable event written here can prove the gated child was
+   * released; `onSpawn` alone proves only lock ownership.
+   */
+  onExecutionReleased?: (pid: number) => void;
 }
 
 export interface ExecutionReceipt {
@@ -106,8 +115,24 @@ export class ScriptExecutor {
         cwd: script.cwd,
         // The COMPLETE environment. Nothing from this process is inherited.
         env: { ...script.environmentProfile },
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", "pipe", "pipe", "pipe"],
       });
+
+      const executionGate = child.stdio[3] as Writable | null | undefined;
+      const childPid = child.pid;
+      if (childPid === undefined || executionGate === null || executionGate === undefined) {
+        child.kill("SIGKILL");
+        reject(new Error("spawned executor has no pid or adoption gate"));
+        return;
+      }
+      try {
+        request.onSpawn?.(childPid);
+      } catch (error) {
+        try { process.kill(-childPid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+        executionGate.destroy();
+        reject(error);
+        return;
+      }
 
       const digest = createHash("sha256");
       let bytes = 0;
@@ -120,8 +145,8 @@ export class ScriptExecutor {
         bytes += chunk.length;
         tail = (tail + chunk.toString()).slice(-script.maxOutputBytes);
       };
-      child.stdout.on("data", (chunk: Buffer) => absorb("stdout", chunk));
-      child.stderr.on("data", (chunk: Buffer) => absorb("stderr", chunk));
+      child.stdout!.on("data", (chunk: Buffer) => absorb("stdout", chunk));
+      child.stderr!.on("data", (chunk: Buffer) => absorb("stderr", chunk));
 
       /**
        * Signal the whole process GROUP. A repair script that spawned helpers
@@ -177,6 +202,25 @@ export class ScriptExecutor {
           startedAt,
           finishedAt: now().toISOString(),
         });
+      });
+
+      let gateWriteFailed = false;
+      executionGate.once("error", () => {
+        // The child can close fd 3 after an abort/timeout races with this
+        // final write.  It has not received the release token, so kill the
+        // group and let the ordinary close receipt drive reconciliation;
+        // never surface an unhandled EPIPE from the inherited pipe.
+        gateWriteFailed = true;
+        killTree("SIGKILL");
+      });
+      executionGate.end("go\n", () => {
+        if (gateWriteFailed) return;
+        try {
+          request.onExecutionReleased?.(childPid);
+        } catch (error) {
+          killTree("SIGKILL");
+          reject(error);
+        }
       });
     });
   }
