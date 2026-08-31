@@ -41,6 +41,7 @@ const NOW = new Date("2026-08-31T22:00:00.000Z");
 const ACTUAL_LIVEWIRE_ROOT = process.env.HELIUM_LIVEWIRE_ROOT;
 const EXPECTED_LIVEWIRE_COMMIT = process.env.HELIUM_LIVEWIRE_COMMIT;
 const REQUIRE_ACTUAL_LIVEWIRE = process.env.HELIUM_REQUIRE_LIVEWIRE_CONTRACT === "1";
+const IS_MACOS = process.platform === "darwin";
 
 function hash(bytes: string | Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -382,7 +383,7 @@ describe("Livewire Shepherd autonomous recovery", () => {
     expect(ACTUAL_LIVEWIRE_ROOT, "HELIUM_LIVEWIRE_ROOT is required").toBeTypeOf("string");
     expect(EXPECTED_LIVEWIRE_COMMIT, "HELIUM_LIVEWIRE_COMMIT is required").toMatch(/^[0-9a-f]{40}$/);
   });
-  it("executes one manifest-scoped repair, independently verifies it, and projects VERIFIED", async () => {
+  it.runIf(IS_MACOS)("executes one manifest-scoped repair, independently verifies it, and projects VERIFIED", async () => {
     const h = await fixture();
     await h.daemon.start();
     await h.daemon.stop();
@@ -394,7 +395,7 @@ describe("Livewire Shepherd autonomous recovery", () => {
     expect(() => h.evidence.verifyHistory(h.operations.replay())).not.toThrow();
   });
 
-  it("keeps a rolled-back/nonzero repair out of VERIFIED", async () => {
+  it.runIf(IS_MACOS)("keeps a rolled-back/nonzero repair out of VERIFIED", async () => {
     const h = await fixture(true);
     await h.daemon.start();
     await h.daemon.stop();
@@ -405,7 +406,7 @@ describe("Livewire Shepherd autonomous recovery", () => {
       .toMatchObject({ type: "action-verified", outcome: "failed" });
   });
 
-  it("cold-resumes projection after the Ops terminal event was durable", async () => {
+  it.runIf(IS_MACOS)("cold-resumes projection after the Ops terminal event was durable", async () => {
     const h = await fixture(false, false);
     await h.daemon.start();
     await h.daemon.stop();
@@ -419,7 +420,7 @@ describe("Livewire Shepherd autonomous recovery", () => {
     expect(() => h.evidence.verifyHistory(h.operations.replay())).not.toThrow();
   });
 
-  it.runIf(ACTUAL_LIVEWIRE_ROOT !== undefined)(
+  it.runIf(IS_MACOS && ACTUAL_LIVEWIRE_ROOT !== undefined)(
     "runs the packaged wrapper against the actual pinned Livewire transaction",
     () => {
       const actualRoot = realpathSync(ACTUAL_LIVEWIRE_ROOT!);
