@@ -6,17 +6,26 @@ command="${1:-}"
 shift || true
 plist="${HOME}/Library/LaunchAgents/com.helium.dsh.plist"
 restart=1
+tenant=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plist) plist="${2:-}"; shift 2 ;;
+    --tenant) tenant="${2:-}"; shift 2 ;;
     --no-restart) restart=0; shift ;;
     *) echo "unknown argument: $1" >&2; exit 64 ;;
   esac
 done
 case "$command" in enable|off|restore|status) ;; *)
-  echo "usage: configure-review-canary.sh enable|off|restore|status [--plist PATH] [--no-restart]" >&2
+  echo "usage: configure-review-canary.sh enable --tenant NAME|off|restore|status [--plist PATH] [--no-restart]" >&2
   exit 64
 esac
+# The canary allow-list names a TENANT directory under plugins/. It used to
+# hardcode the `macro-watch` v1 job, which no longer exists -- a hardcoded name
+# here silently arms nothing once the thing it names is gone.
+if [ "$command" = "enable" ] && [ -z "$tenant" ]; then
+  echo "enable requires --tenant NAME (the plugins/<name> directory to promote)" >&2
+  exit 64
+fi
 
 [ -f "$plist" ] || { echo "missing DSH plist: $plist" >&2; exit 65; }
 plutil -lint "$plist" >/dev/null
@@ -45,9 +54,9 @@ reload_dsh() {
 }
 
 if [ "$command" = "status" ]; then
-  printf '{"mode":"%s","jobs":"%s","dailyCap":"%s","backup":%s}\n' \
+  printf '{"mode":"%s","tenants":"%s","dailyCap":"%s","backup":%s}\n' \
     "$(value HELIUM_TEAM_PROMOTION_MODE)" \
-    "$(value HELIUM_TEAM_CANARY_JOBS)" \
+    "$(value HELIUM_TEAM_CANARY_TENANTS)" \
     "$(value HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY)" \
     "$([ -f "$backup" ] && printf true || printf false)"
   exit 0
@@ -117,7 +126,7 @@ if [ "$command" = "enable" ]; then
   set_string PATH "$current_path"
   set_string CODEX_HOME "$HOME/.codex"
   set_string HELIUM_TEAM_PROMOTION_MODE "review-only"
-  set_string HELIUM_TEAM_CANARY_JOBS "macro-watch"
+  set_string HELIUM_TEAM_CANARY_TENANTS "$tenant"
   set_string HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY "1"
   set_string HELIUM_TEAMS_DIR "$release_current/teams"
   set_string HELIUM_OPS_EVENT_LOG "$HOME/.helium/ops/state/events.jsonl"

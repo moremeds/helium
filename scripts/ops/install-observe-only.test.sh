@@ -205,11 +205,17 @@ test -e "$repo/plugins/fake-tenant/package.json" \
   || { echo "FAIL: the fake-tenant package is gone; the lockfile importer must stay" >&2; exit 1; }
 grep -Fq 'plugins/helium/lib/mcp/server.js' "$repo/scripts/release/rollback.sh" \
   || { echo "FAIL: rollback.sh does not restore the plugins/helium mcp bin" >&2; exit 1; }
-bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist" --no-restart
+# --tenant is required: the allow-list used to hardcode a v1 job name, which
+# silently armed nothing once that job was deleted.
+bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist" --no-restart 2>/dev/null \
+  && { echo "FAIL: canary enable accepted a missing --tenant" >&2; exit 1; }
+bash "$repo/scripts/release/configure-review-canary.sh" enable --tenant fake-tenant --plist "$canary_plist" --no-restart
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "review-only" ] \
   || { echo "FAIL: canary enable did not set the promotion mode to review-only" >&2; exit 1; }
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ] \
   || { echo "FAIL: canary enable did not cap the run at 1 per UTC day" >&2; exit 1; }
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_TENANTS raw -o - "$canary_plist")" = "fake-tenant" ] \
+  || { echo "FAIL: canary enable did not put the named tenant on the allow-list" >&2; exit 1; }
 bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist" --no-restart
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "off" ] \
   || { echo "FAIL: canary restore did not put the promotion mode back to off" >&2; exit 1; }
@@ -243,7 +249,7 @@ HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
 HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
 HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
 PATH="$fake_bin:$PATH" \
-  bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist"
+  bash "$repo/scripts/release/configure-review-canary.sh" enable --tenant fake-tenant --plist "$canary_plist"
 grep -q '^bootout gui/.*/com.helium.dsh$' "$fake_calls"
 grep -Fq "bootstrap gui/$(id -u) $canary_plist" "$fake_calls"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "review-only" ]
