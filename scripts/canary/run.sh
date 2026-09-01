@@ -9,8 +9,8 @@
 set -euo pipefail
 
 release="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-STATE_ROOT="${HELIUM_STATE_ROOT:-/Users/moremeds/.helium/state}"
-ENV_FILE="${HELIUM_ENV_FILE:-/Users/moremeds/.config/helium/helium.env}"
+STATE_ROOT="${HELIUM_STATE_ROOT:-$HOME/.helium/state}"
+ENV_FILE="${HELIUM_ENV_FILE:-$HOME/.config/helium/helium.env}"
 CACHE="${HELIUM_CANARY_CACHE:-$HOME/.helium/canary}"
 REGISTRY="${HELIUM_CANARY_REGISTRY:-https://registry.npmjs.org}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"

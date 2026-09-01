@@ -10,9 +10,9 @@
 #       17 opsd stale+suppressed, 18 opsd stale+alert failed, 2 config.
 set -euo pipefail
 
-STATE_ROOT="${HELIUM_STATE_ROOT:-/Users/moremeds/.helium/state}"
+STATE_ROOT="${HELIUM_STATE_ROOT:-$HOME/.helium/state}"
 NODE_BIN="${HELIUM_NODE_BIN:-node}"
-ENV_FILE="${HELIUM_ENV_FILE:-/Users/moremeds/.config/helium/helium.env}"
+ENV_FILE="${HELIUM_ENV_FILE:-$HOME/.config/helium/helium.env}"
 STALE_S="${HELIUM_DEADMAN_STALE_S:-600}"
 REALERT_S="${HELIUM_DEADMAN_REALERT_S:-21600}"
 OPSD_EXPECTED="${HELIUM_OPSD_EXPECTED:-0}"
@@ -215,8 +215,8 @@ trap 'rm -f "$body_file"' EXIT
   echo "heartbeat file: ${newest:-none}"
   echo "checked at:     $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo
-  echo "Check: ssh macmini 'launchctl print gui/\$(id -u)/com.helium.dsh'"
-  echo "Logs:  /Users/moremeds/.helium/logs/dsh.err.log"
+  echo "Check: ssh ${HELIUM_DEPLOY_HOST:-macmini} 'launchctl print gui/\$(id -u)/com.helium.dsh'"
+  echo "Logs:  $HOME/.helium/logs/dsh.err.log"
 } >"$body_file"
 
 if $ALERT_CMD --env-file "$ENV_FILE" \

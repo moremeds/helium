@@ -1,6 +1,7 @@
 {
   "name": "helium",
   "version": "0.1.11",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "engines": {

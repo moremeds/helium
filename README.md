@@ -124,7 +124,7 @@ Requirements:
 
 - Node.js 22.19 or newer
 - pnpm
-- the exact DSH release candidate pinned by this repository
+- the exact DSH prerelease pinned by this repository
 
 ```bash
 pnpm install --frozen-lockfile
@@ -138,6 +138,32 @@ pnpm test:e2e-local
 Normal CI does not call a live model. Live provider contracts are explicitly
 opt-in and require their own credentials.
 
+### Running it somewhere other than the author's machine
+
+Helium was built against one production host, and the release scripts default
+to it. Nothing is welded to that machine. `deploy.sh` and `rollback.sh` ssh into
+`$HELIUM_DEPLOY_HOST` (default `macmini`) and re-exec themselves there; every
+path they touch -- `~/projects/helium-releases`, `~/.helium`,
+`~/Library/LaunchAgents` -- hangs off that host's own `$HOME`. Set
+`HELIUM_DEPLOY_HOST` and the whole release path follows.
+
+The launchd templates in `launchd/` carry `__PLACEHOLDER__` tokens instead of
+absolute paths. `scripts/ops/install-observe-only.sh` resolves them and refuses
+to install a plist with any left over; the two older labels
+(`com.helium.dsh`, `com.helium.deadman`) have no installer and are substituted
+by hand, so check them yourself before loading:
+
+```bash
+grep -o '__[A-Z0-9_]*__' ~/Library/LaunchAgents/com.helium.dsh.plist   # must print nothing
+```
+
+Paths under `docs/` are a different matter and are deliberately left alone.
+They are dated records of what actually ran on a specific machine -- evidence
+logs, review notes, plans. Rewriting an absolute path inside a recorded
+observation would make the record say something that never happened, which is
+the failure the whole evidence discipline exists to prevent. Read them as
+history, not as configuration examples.
+
 ## Adding a v1 job
 
 Start with an existing file in `jobs/`. A job declares its trigger, approved
@@ -147,6 +173,10 @@ invalid tenant must not take down the rest of the harness.
 The multi-agent design replaces hard-coded engine selection with team roles,
 capability requirements, routing policy, and verification policy. Existing v1
 jobs will continue through a compatibility adapter.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Safety
 

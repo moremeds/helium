@@ -1,6 +1,7 @@
 {
   "name": "senior-isolation",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Execution-boundary conformance fixture: a fake `claude` CLI that reports what argv, cwd, environment and MCP config actually reached the child."

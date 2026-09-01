@@ -2,7 +2,7 @@
 # Deploy a tagged helium release to the mini. Run from the laptop:
 #   scripts/release/deploy.sh v0.1.0
 #
-# Re-execs itself on the mini over stdin (`ssh macmini ... bash -s -- "$VERSION" < "$0"`)
+# Re-execs itself on the deploy host over stdin (`ssh "$HELIUM_HOST" ... bash -s`)
 # so there is exactly one copy of this script to maintain; everything below
 # the HELIUM_REMOTE guard runs on the mini, never on the laptop.
 set -euo pipefail
@@ -10,27 +10,34 @@ set -euo pipefail
 VERSION="${1:-}"
 [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "usage: deploy.sh vX.Y.Z" >&2; exit 64; }
 
-RELEASES=/Users/moremeds/projects/helium-releases
-SRC=/Users/moremeds/projects/helium
-DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
-STATE_ROOT=/Users/moremeds/.helium/state
-OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
-OPSD_CONFIG=/Users/moremeds/.helium/ops/config/opsd.json
-OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl
+# The deploy host is the one thing not derivable, so it is the one knob.
+# Everything else hangs off `$HOME`: these assignments run on both machines but
+# are read only after the re-exec, so they resolve against the DEPLOY HOST's
+# home, not the laptop's. That is the same expansion the ssh line below already
+# depends on (it escapes \$HOME so the remote resolves ~/.local/bin), so no new
+# assumption is introduced here.
+HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
+RELEASES="$HOME/projects/helium-releases"
+SRC="$HOME/projects/helium"
+DSH_HOME_DIR="$HOME/.helium/dsh-home"
+STATE_ROOT="$HOME/.helium/state"
+OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
+OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
+OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
 DSH_PIN=0.1.2-alpha.3
 KEEP=5
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # shellcheck disable=SC2029 # $VERSION deliberately expands client-side: it
   # is the argv the mini's `bash -s --` receives, already validated above.
-  # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
+  # A non-interactive `ssh` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
   # no Homebrew, so no `node` and no `pnpm` (verified on the mini: the 3.5 drill's
   # first deploy died at `pnpm: command not found`, exit 127). Only ~/.local/bin
   # was prepended here, which holds `claude` but not the toolchain. Both Homebrew
   # prefixes are listed so this does not silently depend on the CPU architecture.
   # It fails closed if ever dropped again: this runs before any flip, so a missing
   # toolchain aborts the deploy with `current` still pointing at the old release.
-  ssh macmini "export PATH=\"/Applications/ChatGPT.app/Contents/Resources:/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
+  ssh "$HELIUM_HOST" "export PATH=\"/Applications/ChatGPT.app/Contents/Resources:/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- $VERSION" < "$0"
   exit $?
 fi
 # ---- everything below runs ON the mini ----
@@ -102,7 +109,7 @@ if ! node "$DEST/scripts/release/validate-jobs.mjs" "$DEST"; then
 fi
 
 say "provider smoke (one live Codex gpt-5.6-sol/high read-only call)"
-if ! CODEX_HOME=/Users/moremeds/.codex \
+if ! CODEX_HOME="$HOME/.codex" \
   node "$DEST/scripts/release/codex-preflight.mjs"; then
   echo "Codex provider smoke FAILED — aborting before flip" >&2
   exit 67

@@ -1,6 +1,7 @@
 {
   "name": "mcp-ping",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "description": "Spike B fixture: stdio MCP server that proves a claude -p child can reach a helium tool.",

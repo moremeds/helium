@@ -1,6 +1,7 @@
 {
   "name": "dsh-plugin-helium-live-dispatch",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./lib/index.js",

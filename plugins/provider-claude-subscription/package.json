@@ -1,6 +1,7 @@
 {
   "name": "@helium/provider-claude-subscription",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./lib/catalog.js",

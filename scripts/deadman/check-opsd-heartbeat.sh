@@ -4,12 +4,12 @@
 set -euo pipefail
 umask 077
 
-EVENT_LOG="${HELIUM_OPSD_EVENT_LOG:-/Users/moremeds/.helium/ops/state/events.jsonl}"
-STATE_DIR="${HELIUM_OPSD_DEADMAN_STATE_DIR:-/Users/moremeds/.helium/ops/state/deadman}"
+EVENT_LOG="${HELIUM_OPSD_EVENT_LOG:-$HOME/.helium/ops/state/events.jsonl}"
+STATE_DIR="${HELIUM_OPSD_DEADMAN_STATE_DIR:-$HOME/.helium/ops/state/deadman}"
 STALE_S="${HELIUM_OPSD_STALE_S:-180}"
 REALERT_S="${HELIUM_OPSD_REALERT_S:-3600}"
 ALERT_CMD="${HELIUM_OPSD_ALERT_CMD:-}"
-ENV_FILE="${HELIUM_ENV_FILE:-/Users/moremeds/.config/helium/helium.env}"
+ENV_FILE="${HELIUM_ENV_FILE:-$HOME/.config/helium/helium.env}"
 NODE_BIN="${HELIUM_NODE_BIN:-$(command -v node)}"
 
 for value in "$STALE_S" "$REALERT_S"; do
