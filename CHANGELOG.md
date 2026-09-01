@@ -1,3 +1,47 @@
+## v0.1.12 — 2026-09-01
+
+- feat(release): refuse the flip when the DSH plist names paths the release drops
+- fix(release): finish the canary rename from jobs to tenants
+- chore: drop the session scratch baselines that were committed by mistake
+- docs: describe the tenant lane instead of the retired v1 job lane
+- feat(ops): move release, launchd and deadman onto the tenant directory
+- fix(ops): let the observed fleet be empty now that no tenant is enabled
+- refactor: delete the v1 job lane and @helium/v1-compat
+- refactor: move the livewire-shepherd manifests into its plugin as a disabled tenant
+- test: retarget team-manifest fixtures off teams/macro.yaml
+- test(tenants): prove the tenant seam with plugins/fake-tenant in CI
+- feat(tenants): add the delivered promotion mode behind HELIUM_TENANT_DELIVERY
+- feat(tenants): drive team runs from per-tenant cron triggers
+- feat(tenants): merge per-tenant tool vocabularies and validate team role tools
+- feat(tenants): discover plugins/*/tenant.yaml with per-tenant isolation
+- chore: prepare the repository for public release
+- chore(deps): upgrade dsh to 0.1.2-alpha.3
+- test: await process group reaping
+- ci: run livewire recovery contract on macOS
+- style: normalize deployment gate files
+- feat: package autonomous livewire recovery
+- test: require livewire deployment recovery matrix
+- feat: verify livewire promotion evidence offline
+- fix: retain repair lock for live process groups
+- docs: design offline livewire promotion
+- feat: bound recurring Shepherd repair authority
+- feat: commission exact automatic Ops authority
+- feat: run scoped Shepherd repairs through Ops
+- refactor: expose the certified action transaction
+- test: freeze Ops action boundary behavior
+- docs: tighten Shepherd repair contracts
+- feat: isolate unavailable Livewire sources
+- feat: route Shepherd research by cost and capability
+- feat: define Livewire Shepherd team variants
+- feat: add the Shepherd Livewire bridge
+- feat: schedule Shepherd work without global blockers
+- feat: add durable Shepherd work units
+- refactor: share immutable artifact storage
+- docs: harden Livewire Shepherd execution plan
+- docs: plan Livewire Shepherd implementation
+- docs: design Livewire Shepherd autonomous recovery
+- docs: record P4 suggest-only evidence
+
 ## v0.1.11 — 2026-08-30
 
 - fix(ops): reset attempt budget after recovery
