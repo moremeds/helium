@@ -117,8 +117,14 @@ export function registerEcosystemTools(
   tools: EcosystemTool[],
 ): void {
   for (const tool of tools) {
-    const parameters = DSH_PARAMS[tool.name as keyof typeof DSH_PARAMS] as
-      ParameterSchemaSpec | undefined;
+    // A tenant tool carries its OWN dsh parameter spec: the hardcoded map below
+    // can only ever name tools the host already knows, which no tenant-supplied
+    // tool can satisfy. The map stays as the fallback for core's own tools.
+    const carried = (tool as { dshParams?: ParameterSchemaSpec }).dshParams;
+    const parameters =
+      carried ??
+      (DSH_PARAMS[tool.name as keyof typeof DSH_PARAMS] as
+        ParameterSchemaSpec | undefined);
     if (!parameters)
       throw new Error(`toolkit: no dsh parameter spec for tool "${tool.name}"`);
     ctx.tools.register(

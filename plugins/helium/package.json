@@ -10,7 +10,9 @@
     "./dsh-team-host": "./lib/dsh-team-host.js",
     "./executor-registry": "./lib/executor-registry.js",
     "./output-contract-registry": "./lib/output-contract-registry.js",
-    "./tenants": "./lib/tenants.js"
+    "./tenants": "./lib/tenants.js",
+    "./tenant-tools": "./lib/tenant-tools.js",
+    "./mcp-server": "./lib/mcp/server.js"
   },
   "files": [
     "lib",
@@ -22,7 +24,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && chmod +x lib/mcp/server.js",
     "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "dependencies": {
@@ -31,6 +33,7 @@
     "@helium/provider-claude-subscription": "file:../provider-claude-subscription",
     "@helium/provider-codex-subscription": "file:../provider-codex-subscription",
     "@helium/provider-deepseek-dsh": "file:../provider-deepseek-dsh",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@helium/v1-compat": "file:../../packages/v1-compat",
     "croner": "10.0.1",
     "nodemailer": "9.0.5",
