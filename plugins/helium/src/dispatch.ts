@@ -149,7 +149,7 @@ export class TriageRunner implements TriageLane {
         };
         installModelSelection(agentCtx, selected);
         // restrict() throws on unknown names and on an empty filter, so deny exactly the
-        // registered globals the job does not allow (dsh-tools/lib/index.js:2779-2793).
+        // registered globals the job does not allow (dsh-tools/lib/index.js:2791, re-measured 2026-09-01 on 0.1.2-alpha.3).
         const keep = new Set(job.tools);
         const deny = this.ctx.tools
           .schemas()

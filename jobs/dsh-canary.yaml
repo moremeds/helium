@@ -2,10 +2,16 @@ name: dsh-canary
 enabled: true
 triggers:
   # Sentinel (spec §10): hashes the ENTIRE `versions` map, not the `latest`
-  # dist-tag — @deepseek-ai/dsh is an RC-only developer preview and may
-  # never move `latest`, so dist-tag equality would silently never fire.
+  # dist-tag — @deepseek-ai/dsh ships only prereleases (first `-rc.N`, now
+  # `-alpha.N`) and may never move `latest`, so dist-tag equality would
+  # silently never fire.
   # Verified live 2026-08-24: registry.npmjs.org/@deepseek-ai/dsh resolves
-  # with dist-tags.latest = 0.1.1-rc.2 (the pin), 10 version keys present.
+  # with dist-tags.latest = 0.1.1-rc.2, 10 version keys present.
+  # Re-verified 2026-09-01, and the design paid off: 0.1.2-alpha.2 and
+  # 0.1.2-alpha.3 published under a NEW `alpha` dist-tag while `latest` stayed
+  # on 0.1.1-rc.2. A `dist-tags.latest` watcher would have seen nothing at all;
+  # the `versions` hash saw two new keys (10 -> 12). The pin is now
+  # 0.1.2-alpha.3, so pin != latest — that is expected, not drift.
   - kind: state-change
     url: https://registry.npmjs.org/@deepseek-ai/dsh
     fields: [versions]

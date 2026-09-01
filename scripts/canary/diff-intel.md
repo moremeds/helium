@@ -4,11 +4,12 @@ What `scripts/canary/run.sh` does, and how to act on its report.
 
 ## The seam list
 
-`@deepseek-ai/dsh` is an RC-only developer preview with no changelog — the
-only way to know whether a new release is safe is to check the specific
-surfaces helium actually depends on. The DeepSeek-summary prompt encodes
-that list explicitly so the model is scored against helium's real usage,
-not a generic "what changed":
+Upstream does publish per-tag release notes, bilingual and attributed, at
+<https://github.com/deepseek-ai/deepseek-harness/releases> — read them first.
+They are organised by user-facing feature, not by API surface, so they answer
+"what changed" but not "what changed *for helium*". The seam list below is
+the second question. The DeepSeek-summary prompt encodes it explicitly so the
+model is scored against helium's real usage:
 
 - `cordis` plugin `apply()` — helium's whole runtime is one cordis plugin.
 - `ctx.effect` timers — the harness lifecycle hook (spec §9.1).
@@ -28,8 +29,9 @@ needs a human to read the diff, not just trust the contract suite.
 ## Why dist-tag equality is the wrong sentinel
 
 `jobs/dsh-canary.yaml`'s sensor hashes the packument's entire `versions`
-map (`fields: [versions]`), not `dist-tags.latest`. `@deepseek-ai/dsh` is an
-RC-only preview — every published version so far is an `-rc.N` prerelease,
+map (`fields: [versions]`), not `dist-tags.latest`. `@deepseek-ai/dsh` is a
+prerelease-only preview — every published version is a prerelease (`-rc.N`
+through 0.1.1-rc.2, `-alpha.N` from 0.1.2-alpha.1 on),
 and an npm publish does not have to move the `latest` dist-tag to a
 prerelease at all (npm's default behavior is the opposite: `npm publish`
 without an explicit `--tag` only moves `latest` for a version without a
@@ -55,7 +57,21 @@ The canary never upgrades anything automatically — it only reports. Once a
 human has read the report (contract suite result + change intel + diff) and
 decided the candidate is safe:
 
-1. Edit root `package.json`'s `@deepseek-ai/dsh` entry to the new version.
+1. Edit EVERY pin site to the new version. They must all agree, and missing
+   one is the known failure mode: the 0.1.2-alpha.3 promotion left `DSH_PIN`
+   on the old version while build, typecheck, unit and contracts were all
+   green, so the mini would have installed the previous dsh.
+   - `package.json` — `@deepseek-ai/dsh`
+   - `plugins/helium/package.json` — every `@deepseek-ai/dsh-*` devDependency
+     (including `@deepseek-ai/dsh-tool-todo`), plus `@deepseek-ai/cordis` and
+     `@deepseek-ai/cordis-plugin-loader`, which move on their own numbering
+   - `profile/package.json` — `@deepseek-ai/dsh-web-app`, same exact version
+   - `contracts/fixtures/{plugin-live-dispatch,plugin-restrict-proof,team-host}/package.json`
+   - `contracts/src/dsh.ts` — `PINNED_DSH_VERSION`
+   - `scripts/release/deploy.sh` — `DSH_PIN`. **No test reads this file.**
+   Then grep the tree for the outgoing version string: comments in this repo
+   cite line numbers measured against the installed package, and those rot
+   silently on a bump.
 2. `pnpm install` (updates `pnpm-lock.yaml`).
 3. `HELIUM_LIVE=1 pnpm -F @helium/contracts test` — the real (non-isolated)
    contract suite, against the newly pinned version, with real API calls.
@@ -63,7 +79,10 @@ decided the candidate is safe:
    (`scripts/release/deploy.sh`) — the pin promotion ships like any other
    change, with the same drain/flip/health-window/rollback safety net.
 
-## Known defects in the current pin (0.1.1-rc.2)
+## Known defects, measured on 0.1.1-rc.2 — NOT re-measured on the current pin
+
+The pin is now 0.1.2-alpha.3. Nothing below has been re-checked against it, so
+treat each entry as a dated rc.2 observation and re-measure before citing it.
 
 Recheck these when promoting the pin — a candidate that fixes one of them is a
 reason to upgrade, and a candidate that still carries it is not a regression.

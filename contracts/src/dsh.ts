@@ -11,7 +11,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The dsh version helium pins (plan global constraint; spec §9.1). */
-export const PINNED_DSH_VERSION = "0.1.1-rc.2";
+export const PINNED_DSH_VERSION = "0.1.2-alpha.3";
 
 /** The dsh version this run exercises. */
 export const dshVersion: string =

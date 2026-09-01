@@ -14,6 +14,10 @@ import type { Agent } from "@deepseek-ai/dsh-agent";
 import { SessionId, type SessionHeader } from "@deepseek-ai/dsh-session";
 import type { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
 import type {} from "@deepseek-ai/dsh-session-persistence";
+// Type-only, same erased-at-emit idiom as the line above: 0.1.2 shrank the base
+// SessionEventMap to 12 lifecycle keys and moved `todo/write` into this
+// package's `declare module` merge. See the append() call below.
+import type {} from "@deepseek-ai/dsh-tool-todo";
 import type { ExecutorRegistry } from "./executor-registry.js";
 
 export interface TeamParentHandle {
@@ -365,6 +369,22 @@ export class CordisTeamParentFactory implements TeamParentFactory {
       // A session with no events may be absent from lazy persistence. This
       // harmless, known log-only event materializes the host identity without
       // waking the parent or creating a model turn.
+      //
+      // KNOWN CONSTRAINT, introduced by dsh 0.1.2 — do not read this call as
+      // blessed. @deepseek-ai/dsh-tool-todo now ships a package-owned invariant
+      // that rejects exactly this call:
+      //   if (!trace.open) fail("todo/write appended outside any open turn")
+      // (dsh-tool-todo/lib/invariant.js:43). 0.1.1-rc.2's invariant file had no
+      // turn check at all, so the upgrade is what made this invalid.
+      //
+      // It does not throw today because nothing mounts that invariant:
+      // dsh-base/cordis.patch.yml:411 registers the tool (id `tool-todo`) but no
+      // invariant, and no bundle here mounts @deepseek-ai/dsh-invariants. The
+      // durable log nevertheless now holds an event upstream defines as invalid,
+      // and any future invariant mount turns that into a hard failure. The fix is
+      // a helium-owned log-only event declared in helium's own SessionEventMap
+      // merge; that is a behaviour change, not a version bump, so it is tracked
+      // separately rather than smuggled into this upgrade.
       handle.agent.session.append("todo/write", { todos: [] });
       await this.ctx.sessions.flush(handle.agent.session);
     }

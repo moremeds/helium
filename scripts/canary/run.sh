@@ -112,7 +112,11 @@ if [ -n "$mirror" ]; then
     git clone --filter=blob:none --quiet "$mirror" "$clone" || true
   fi
   resolve_tag() {
-    for cand in "v$1" "$1"; do
+    # Upstream tags the monorepo per-app: `dsh-v0.1.2-alpha.3`, not `v0.1.2-alpha.3`.
+    # Without the `dsh-` form this function never matched a single published tag,
+    # so every canary run since the first one reported "(tags not resolvable)"
+    # instead of a diff. The bare forms stay as fallbacks if upstream ever moves.
+    for cand in "dsh-v$1" "v$1" "$1"; do
       if git -C "$clone" rev-parse -q --verify "refs/tags/$cand" >/dev/null; then
         echo "$cand"
         return
