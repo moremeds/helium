@@ -126,10 +126,15 @@ export const ProductionObservationTargetsSchema = z.object({
     collectorMaxAgeMs: PositiveMsSchema,
     deadManMaxAgeMs: PositiveMsSchema,
     expectedTenantManifestRef: AbsolutePathSchema,
+    // May be EMPTY. Each entry becomes a per-tenant heartbeat-staleness
+    // observation, so a required non-empty list forces a stale entry to be
+    // kept after its tenant is retired -- which raises a permanent STALE
+    // incident for a tenant that cannot heartbeat. An empty fleet is a real,
+    // observable state; a fabricated one is not.
     expectedTenants: z.array(z.object({
       id: z.string().regex(/^[A-Za-z0-9_.-]+$/),
       maxAgeMs: PositiveMsSchema,
-    }).strict()).min(1).max(100),
+    }).strict()).max(100),
   }).strict(),
 }).strict().superRefine((value, ctx) => {
   if (value.livewire.failedAfterMs <= value.livewire.degradedAfterMs) {

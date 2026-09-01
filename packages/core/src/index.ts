@@ -2,7 +2,7 @@
  * `@helium/core` — the single import specifier every downstream package uses.
  *
  * The v1 job contract and the concrete domain toolkits are deliberately absent:
- * they live in `@helium/v1-compat`, so that core carries no provider and no
+ * they live in the host (`plugins/helium`), so that core carries no provider and no
  * business-domain vocabulary (acceptance criterion 14, enforced by
  * `contracts/tests/core-neutrality.contract.spec.ts`).
  * @module @helium/core

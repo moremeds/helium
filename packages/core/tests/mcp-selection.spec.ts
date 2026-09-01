@@ -13,7 +13,7 @@ import type {
 // its own.
 //
 // The catalog here is deliberately synthetic. Task 6 moved catalog
-// construction into `@helium/v1-compat` because building a tool means naming a
+// construction into the host (`plugins/helium`) because building a tool means naming a
 // business domain; this suite tests the generic filter, so it must not name
 // one either. The v1 catalog's own wiring is covered in that package.
 const tool = (name: string, mutating = false): EcosystemTool => ({
@@ -97,6 +97,18 @@ describe("mcp selection", () => {
     expect(result.tools.map((t) => t.name)).toEqual(["alpha_read"]);
     expect(result.degraded).toEqual([
       { tool: "beta_read", reason: "unconfigured: HELIUM_BETA_STORE" },
+    ]);
+  });
+
+  it("treats an EMPTY HELIUM_TOOLS as an explicit allow-list of nothing", () => {
+    // A role declaring `tools: []` writes the empty string. Serving the whole
+    // catalog for it would hand a no-tool role every tool there is.
+    expect(selected(catalog(), env({ HELIUM_TOOLS: "" })).tools).toEqual([]);
+  });
+
+  it("serves the whole non-mutating catalog when HELIUM_TOOLS is UNSET", () => {
+    expect(selected(catalog(), env({})).tools.map((t) => t.name)).toEqual([
+      "alpha_read",
     ]);
   });
 

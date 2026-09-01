@@ -1,7 +1,9 @@
 import { Cron } from "croner";
 import { nowIso } from "@helium/core";
-import { type TriggerCron } from "@helium/v1-compat";
-import type { TriggerEvent } from "./sensor.js";
+import type {
+  TenantTrigger,
+  TenantTriggerEvent,
+} from "./tenant-runtime.js";
 
 /** Pure next-run resolution; the tz is an IANA name, the result is a UTC instant. */
 export function nextCronRun(
@@ -17,29 +19,32 @@ export function nextCronRun(
   }
 }
 
-export function buildCronEvent(job: string, firedAt: Date): TriggerEvent {
+export function buildCronEvent(
+  tenant: string,
+  firedAt: Date,
+): TenantTriggerEvent {
   const minute = firedAt.toISOString().slice(0, 16);
   return {
-    job,
+    tenant,
     kind: "cron",
     firedAt: nowIso(),
-    dedupKey: `${job}:cron:${minute}Z`,
+    dedupKey: `${tenant}:cron:${minute}Z`,
     payload: { scheduledFor: firedAt.toISOString() },
   };
 }
 
 export class CronTrigger {
-  readonly #job: string;
-  readonly #trigger: TriggerCron;
-  readonly #onTrigger: (ev: TriggerEvent) => void | Promise<void>;
+  readonly #tenant: string;
+  readonly #trigger: TenantTrigger;
+  readonly #onTrigger: (ev: TenantTriggerEvent) => void | Promise<void>;
   #cron: Cron | undefined;
 
   constructor(opts: {
-    job: string;
-    trigger: TriggerCron;
-    onTrigger: (ev: TriggerEvent) => void | Promise<void>;
+    tenant: string;
+    trigger: TenantTrigger;
+    onTrigger: (ev: TenantTriggerEvent) => void | Promise<void>;
   }) {
-    this.#job = opts.job;
+    this.#tenant = opts.tenant;
     this.#trigger = opts.trigger;
     this.#onTrigger = opts.onTrigger;
   }
@@ -48,12 +53,12 @@ export class CronTrigger {
     if (this.#cron) return;
     this.#cron = new Cron(
       this.#trigger.schedule,
-      { timezone: this.#trigger.tz, protect: true },
+      { timezone: this.#trigger.timezone, protect: true },
       () => {
         void Promise.resolve(
-          this.#onTrigger(buildCronEvent(this.#job, new Date())),
+          this.#onTrigger(buildCronEvent(this.#tenant, new Date())),
         ).catch((error: unknown) => {
-          console.error(`helium.cron(${this.#job}):`, error);
+          console.error(`helium.cron(${this.#tenant}):`, error);
         });
       },
     );

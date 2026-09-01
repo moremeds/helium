@@ -14,13 +14,13 @@ test("writes a private, bounded controlled-canary request", () => {
     cli,
     "request",
     "--state-root", root,
-    "--job", "macro-watch",
+    "--tenant", "option-wizard",
     "--case-key", "weekend-smoke-1",
     "--operator", "operator-one",
     "--reason", "prove review-only",
   ], { encoding: "utf8" }));
   const saved = JSON.parse(readFileSync(output.path, "utf8"));
-  assert.equal(saved.job, "macro-watch");
+  assert.equal(saved.tenant, "option-wizard");
   assert.equal(saved.caseKey, "weekend-smoke-1");
   assert.match(saved.requestId, /^canary-[0-9a-f]{24}$/);
   assert.ok(Date.parse(saved.expiresAt) - Date.parse(saved.createdAt) <= 30 * 60_000);

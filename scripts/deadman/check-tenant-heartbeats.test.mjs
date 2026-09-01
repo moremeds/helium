@@ -11,39 +11,63 @@ import { test } from "node:test";
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, "check-tenant-heartbeats.mjs");
 
-const JOB = (name, enabled = true) => `name: ${name}
+const TENANT = (name, enabled = true) => `tenant: ${name}
 enabled: ${enabled}
+team: team.yaml
+promotionMode: review-only
 triggers:
   - kind: cron
     schedule: "0 17 * * 1-5"
-    tz: America/New_York
-engine:
-  triage: { engine: deepseek, model: deepseek-v4-flash }
-  senior: { engine: claude-max }
-escalate_when: severity >= material
-session: fresh
-memory: none
-tools: [argon_api]
-allowMutations: false
-max_turns: { triage: 2, senior: 8 }
-timeout: 10m
-budget: { max_triage_per_hour: 30, max_senior_per_day: 12 }
-delivery: { jsonl: true }
-prompt: |
-  Analyze.
+    timezone: America/New_York
+delivery:
+  jsonl: true
 `;
 
-/** A fixture fleet: `jobs` maps tenant -> heartbeat age in seconds, or null for none. */
-function fixture(jobs, extraFiles = {}) {
+const TEAM = `manifestVersion: "1"
+name: fixture
+roles:
+  scribe:
+    responsibility: rendering
+    requires: [render]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: []
+tasks:
+  - id: render
+    role: scribe
+    dependsOn: []
+    requires: [render]
+    inputs: [accepted-claim-ledger]
+    outputSchema: report@1
+crossReference:
+  compareClaims: true
+  materialContradictions: fresh-evidence-work-order
+  requireIndependentEvidence: true
+budgets: { maxAttempts: 1, maxTokens: 1000 }
+acceptance: { allowPartialClaims: true, terminalTasks: [render] }
+`;
+
+/** One tenant DIRECTORY: `plugins/<name>/{tenant.yaml,team.yaml}`. */
+function writeTenant(root, dirName, body) {
+  const dir = join(root, dirName);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "tenant.yaml"), body);
+  writeFileSync(join(dir, "team.yaml"), TEAM);
+}
+
+/** A fixture fleet: `tenants` maps tenant -> heartbeat age in seconds, or null for none. */
+function fixture(tenants, extraFiles = {}) {
   const root = mkdtempSync(join(tmpdir(), "helium-tenant-deadman-"));
-  const jobsDir = join(root, "jobs");
+  const tenantsDir = join(root, "plugins");
   const jsonlDir = join(root, "state", "jsonl");
-  mkdirSync(jobsDir, { recursive: true });
+  mkdirSync(tenantsDir, { recursive: true });
   mkdirSync(jsonlDir, { recursive: true });
 
   const rows = [];
-  for (const [name, ageS] of Object.entries(jobs)) {
-    writeFileSync(join(jobsDir, `${name}.yaml`), JOB(name));
+  for (const [name, ageS] of Object.entries(tenants)) {
+    writeTenant(tenantsDir, name, TENANT(name));
     if (ageS !== null) {
       rows.push(
         JSON.stringify({
@@ -54,21 +78,21 @@ function fixture(jobs, extraFiles = {}) {
       );
     }
   }
-  for (const [file, body] of Object.entries(extraFiles)) {
-    writeFileSync(join(jobsDir, file), body);
+  for (const [dirName, body] of Object.entries(extraFiles)) {
+    writeTenant(tenantsDir, dirName, body);
   }
   const day = new Date().toISOString().slice(0, 10);
   writeFileSync(join(jsonlDir, `heartbeat-${day}.jsonl`), `${rows.join("\n")}\n`);
 
-  return { root, jobsDir, stateRoot: join(root, "state") };
+  return { root, tenantsDir, stateRoot: join(root, "state") };
 }
 
-function run({ jobsDir, stateRoot }, staleS = "600") {
+function run({ tenantsDir, stateRoot }, staleS = "600") {
   const r = spawnSync(process.execPath, [script], {
     encoding: "utf8",
     env: {
       ...process.env,
-      HELIUM_JOBS_DIR: jobsDir,
+      HELIUM_TENANTS_DIR: tenantsDir,
       HELIUM_STATE_ROOT: stateRoot,
       HELIUM_DEADMAN_STALE_S: staleS,
     },
@@ -115,7 +139,7 @@ test("a future heartbeat cannot mask a dead tenant", () => {
 
 test("keeps a malformed tenant visible as invalid instead of dropping it", () => {
   const r = run(
-    fixture({ "macro-watch": 60 }, { "b-broken.yaml": "this: [is not a job" }),
+    fixture({ "macro-watch": 60 }, { "b-broken": "tenant: [\n" }),
   );
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /b-broken/);
@@ -124,7 +148,7 @@ test("keeps a malformed tenant visible as invalid instead of dropping it", () =>
 
 test("a disabled tenant is not required to heartbeat", () => {
   const f = fixture({ "macro-watch": 60 });
-  writeFileSync(join(f.jobsDir, "paused.yaml"), JOB("paused", false));
+  writeTenant(f.tenantsDir, "paused", TENANT("paused", false));
   const r = run(f);
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /paused/);

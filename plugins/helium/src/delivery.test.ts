@@ -10,7 +10,24 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { JsonlWriter } from "@helium/core";
 import { Delivery, smtpFromEnv } from "./delivery.js";
-import { ev, job } from "./testing/fixtures.js";
+
+/** The one tenant every rig delivers for. */
+const TENANT = "macro-watch";
+const EMAIL = {
+  to: "operator",
+  subjectPrefix: "[helium/macro]",
+  maxPerDay: 4,
+} as const;
+const DEDUP = "macro-watch:u:abc";
+const send = (extra: Record<string, unknown> = {}) => ({
+  tenant: TENANT,
+  dedupKey: DEDUP,
+  runId: "r1",
+  subject: "[helium/macro] material — macro-watch",
+  body: "# Macro update\n\nThe long end is repricing.",
+  email: EMAIL,
+  ...extra,
+});
 
 /** The one instant every rig runs at — injected into both the writer and Delivery. */
 const NOW = new Date("2026-08-23T12:00:00.000Z");
@@ -112,14 +129,6 @@ function rig(
   };
 }
 
-const senior = {
-  runId: "r1",
-  tier: "senior" as const,
-  outcome: "run_completed" as const,
-  verdict: { escalate: true, severity: "material" as const, reason: "flip" },
-  analysis: "# Macro update\n\nThe long end is repricing.",
-};
-
 describe("smtpFromEnv", () => {
   it("builds a config from SMTP_* keys and returns null when the host is missing", () => {
     expect(
@@ -146,21 +155,21 @@ describe("smtpFromEnv", () => {
 describe("Delivery", () => {
   it("makes the pending intent durable before the transport is touched", async () => {
     const r = rig();
-    await r.delivery.deliver(job, ev, senior);
+    await r.delivery.deliver(send());
     expect(r.observed).toHaveLength(1);
     expect(r.observed[0]).toMatchObject({
       kind: "delivery-intent",
       deliveryId: expect.any(String),
       job: "macro-watch",
       runId: "r1",
-      dedupKey: ev.dedupKey,
+      dedupKey: DEDUP,
       state: "pending",
     });
   });
 
   it("writes an intent row, then a report, then the email, then the outcome row", async () => {
     const r = rig();
-    await r.delivery.deliver(job, ev, senior);
+    await r.delivery.deliver(send());
     const rows = r.rows("deliveries");
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
@@ -171,7 +180,6 @@ describe("Delivery", () => {
       kind: "delivery-outcome",
       deliveryId: rows[0]!.deliveryId,
       job: "macro-watch",
-      tier: "senior",
       state: "sent",
     });
     const reportPath = rows[1]!.report as string;
@@ -183,17 +191,11 @@ describe("Delivery", () => {
     expect(String(r.sent[0]!.subject)).toContain("[helium/macro]");
   });
 
-  it("writes JSONL but no report or email for a triage-only result", async () => {
+  it("writes JSONL but no email when the tenant declares no email policy", async () => {
     const r = rig();
-    await r.delivery.deliver(job, ev, {
-      runId: "r0",
-      tier: "triage",
-      outcome: "run_completed",
-      verdict: { escalate: false, severity: "noise", reason: "quiet" },
-    });
+    await r.delivery.deliver({ ...send(), runId: "r0", email: undefined });
     expect(r.rows("deliveries").at(-1)).toMatchObject({
       kind: "delivery-outcome",
-      tier: "triage",
       state: "skipped",
     });
     expect(r.sent).toHaveLength(0);
@@ -201,7 +203,7 @@ describe("Delivery", () => {
 
   it("retries a failing send and succeeds on the third attempt", async () => {
     const r = rig({ failures: 2 });
-    await r.delivery.deliver(job, ev, senior);
+    await r.delivery.deliver(send());
     expect(r.sent).toHaveLength(1);
     expect(r.rows("deliveries").at(-1)).toMatchObject({
       kind: "delivery-outcome",
@@ -212,7 +214,7 @@ describe("Delivery", () => {
 
   it("closes the intent as failed and dead-letters it when every attempt fails", async () => {
     const r = rig({ failures: 99 });
-    await r.delivery.deliver(job, ev, senior);
+    await r.delivery.deliver(send());
     const rows = r.rows("deliveries");
     const deliveryId = rows[0]!.deliveryId;
     expect(rows[0]).toMatchObject({
@@ -234,20 +236,53 @@ describe("Delivery", () => {
     expect(r.restart().reconcileDeliveries()).toBe(0);
   });
 
-  it("enforces the per-job hourly email cap from outcome rows, not intents", async () => {
+  it("enforces the per-tenant daily email cap from outcome rows, not intents", async () => {
     const r = rig();
-    for (let i = 0; i < 5; i += 1) await r.delivery.deliver(job, ev, senior);
-    expect(r.sent).toHaveLength(job.delivery.email!.maxPerHour);
+    // Distinct ids: the same deliveryId is deliberately never re-sent.
+    for (let i = 0; i < 5; i += 1) {
+      await r.delivery.deliver(send({ deliveryId: `d-${i}` }));
+    }
+    expect(r.sent).toHaveLength(EMAIL.maxPerDay);
     expect(r.rows("deliveries").at(-1)).toMatchObject({
       kind: "delivery-outcome",
       state: "rate-capped",
     });
   });
 
+  it("never re-sends a deliveryId the trail already closed", async () => {
+    const r = rig();
+    // An intent with no outcome is what a crash leaves behind.
+    await r.delivery.deliver(send({ deliveryId: "shared-id" }));
+    expect(r.sent).toHaveLength(1);
+    // The SAME id, as a crash-recovery retry would present it. The shared id
+    // from recordIntent is what makes this lookup possible; without it a
+    // reconcile could not tell that the email had already gone out.
+    const second = await r.delivery.deliver(send({ deliveryId: "shared-id" }));
+    expect(r.sent).toHaveLength(1);
+    expect(second.state).toBe("sent");
+  });
+
+  it("closes an unresolved intent uncertain, and returns that state on a retry", async () => {
+    const r = rig({ crashAfterAppends: 1 });
+    await expect(
+      r.delivery.deliver(send({ deliveryId: "orphan-id" })),
+    ).rejects.toThrow("crash");
+    const restarted = r.restart();
+    expect(restarted.reconcileDeliveries()).toBe(1);
+    const retry = await restarted.deliver(send({ deliveryId: "orphan-id" }));
+    expect(retry.state).toBe("uncertain");
+    // One send from the crashed attempt, none from the retry.
+    expect(r.sent).toHaveLength(1);
+  });
+
   it("records heartbeats and budget exhaustion as their own rows", async () => {
     const r = rig();
-    r.delivery.heartbeat({ job: "macro-watch", state: "unchanged" });
-    r.delivery.budgetExhausted(job, ev, { tier: "triage", count: 30, cap: 30 });
+    r.delivery.heartbeat({ job: TENANT, state: "unchanged" });
+    r.delivery.budgetExhausted(TENANT, DEDUP, {
+      tier: "triage",
+      count: 30,
+      cap: 30,
+    });
     expect(r.rows("heartbeat")[0]).toMatchObject({ state: "unchanged" });
     expect(r.rows("deliveries")[0]).toMatchObject({
       kind: "budget-exhausted",
@@ -257,11 +292,14 @@ describe("Delivery", () => {
 
   it("summarises the day from the JSONL trail", async () => {
     const r = rig();
-    await r.delivery.deliver(job, ev, senior);
-    r.delivery.budgetExhausted(job, ev, { tier: "senior", count: 12, cap: 12 });
+    await r.delivery.deliver(send());
+    r.delivery.budgetExhausted(TENANT, DEDUP, {
+      tier: "senior",
+      count: 12,
+      cap: 12,
+    });
     await r.delivery.dailySynthesis();
     const body = String(r.sent.at(-1)!.text);
-    expect(body).toContain("senior runs: 1");
     expect(body).toContain("emails sent: 1");
     expect(body).toContain("budget exhaustions: 1");
     expect(body).toContain("dead letters: 0");
@@ -269,13 +307,13 @@ describe("Delivery", () => {
   });
 
   it("leaves the intent unresolved when the report write fails before SMTP", async () => {
-    // reportsDir is a regular file, so the per-job mkdir throws: a failure
+    // reportsDir is a regular file, so the per-tenant mkdir throws: a failure
     // after the intent is durable and before the transport is reached.
     const root = mkdtempSync(join(tmpdir(), "helium-deliver-blocked-"));
     const blocked = join(root, "reports-file");
     writeFileSync(blocked, "not a directory\n");
     const r = rig({ reportsDir: blocked });
-    await expect(r.delivery.deliver(job, ev, senior)).rejects.toThrow();
+    await expect(r.delivery.deliver(send())).rejects.toThrow();
     expect(r.sent).toHaveLength(0);
     expect(r.observed).toHaveLength(0);
     const rows = r.rows("deliveries");
@@ -290,7 +328,7 @@ describe("Delivery", () => {
     // One append lands (the intent), then the process dies — after the
     // transport already accepted the message.
     const r = rig({ crashAfterAppends: 1 });
-    await expect(r.delivery.deliver(job, ev, senior)).rejects.toThrow("crash");
+    await expect(r.delivery.deliver(send())).rejects.toThrow("crash");
     expect(r.sent).toHaveLength(1);
     const afterCrash = r.rows("deliveries");
     expect(afterCrash).toHaveLength(1);
@@ -320,7 +358,7 @@ describe("Delivery", () => {
 
   it("counts an uncertain delivery in the daily synthesis", async () => {
     const r = rig({ crashAfterAppends: 1 });
-    await expect(r.delivery.deliver(job, ev, senior)).rejects.toThrow("crash");
+    await expect(r.delivery.deliver(send())).rejects.toThrow("crash");
     const restarted = r.restart();
     restarted.reconcileDeliveries();
     await restarted.dailySynthesis();

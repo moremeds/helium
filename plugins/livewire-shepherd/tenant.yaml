@@ -1,0 +1,14 @@
+# Disabled on purpose. The shepherd's team manifests name tools no tenant
+# provides (livewire.evidence.read, anysearch.search, opencli.read), which the
+# merged-vocabulary check now rejects honestly instead of ignoring. Enabling it
+# means shipping those tools first.
+tenant: livewire-shepherd
+enabled: false
+team: team-pit.yaml
+promotionMode: review-only
+triggers:
+  - kind: cron
+    schedule: "0 5 * * *"
+    timezone: UTC
+delivery:
+  jsonl: true

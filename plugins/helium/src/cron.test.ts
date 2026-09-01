@@ -38,13 +38,10 @@ describe("nextCronRun", () => {
 
 describe("buildCronEvent", () => {
   it("stamps UTC and derives a per-minute dedup key", () => {
-    const ev = buildCronEvent(
-      "macro-watch",
-      new Date("2026-08-24T21:00:00.000Z"),
-    );
+    const ev = buildCronEvent("alpha", new Date("2026-08-24T21:00:00.000Z"));
     expect(ev.kind).toBe("cron");
-    expect(ev.job).toBe("macro-watch");
-    expect(ev.dedupKey).toBe("macro-watch:cron:2026-08-24T21:00Z");
+    expect(ev.tenant).toBe("alpha");
+    expect(ev.dedupKey).toBe("alpha:cron:2026-08-24T21:00Z");
     expect(ev.payload).toEqual({ scheduledFor: "2026-08-24T21:00:00.000Z" });
   });
 });

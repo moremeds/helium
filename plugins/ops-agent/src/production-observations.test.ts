@@ -213,11 +213,10 @@ describe("production observation probes", () => {
     const path = fileURLToPath(new URL("../../../ops/observation-targets.yaml", import.meta.url));
     const loaded = loadProductionObservationTargets(path);
     expect(loaded.colima.expectedContainers).toContain("argon-api-1");
-    expect(loaded.helium.expectedTenants.map((tenant) => tenant.id)).toEqual([
-      "macro-watch",
-      "apex-health",
-      "dsh-canary",
-    ]);
+    // Empty until a tenant is deliberately shipped `enabled: true`. A stale
+    // entry here is a permanent STALE incident for a tenant that cannot exist.
+    expect(loaded.helium.expectedTenants).toEqual([]);
+    expect(loaded.helium.expectedTenantManifestRef).toMatch(/\/plugins$/);
   });
 
   it("collects every initial application and database adapter through exact read-only argv", async () => {

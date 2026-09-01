@@ -45,6 +45,9 @@ importers:
       '@helium/ops-controller-fixture':
         specifier: file:./fixtures/ops-controller
         version: link:fixtures/ops-controller
+      '@helium/provider-claude-subscription':
+        specifier: file:../plugins/provider-claude-subscription
+        version: link:../plugins/provider-claude-subscription
       '@types/node':
         specifier: ^22
         version: 22.20.1
@@ -262,20 +265,11 @@ importers:
         specifier: ^5
         version: 5.9.3
 
-  packages/v1-compat:
+  plugins/fake-tenant:
     dependencies:
-      '@duckdb/node-api':
-        specifier: 1.5.5-r.4
-        version: 1.5.5-r.4
       '@helium/core':
-        specifier: file:../core
-        version: link:../core
-      '@modelcontextprotocol/sdk':
-        specifier: 1.30.0
-        version: 1.30.0(zod@4.4.3)
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
+        specifier: file:../../packages/core
+        version: link:../../packages/core
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -304,9 +298,9 @@ importers:
       '@helium/provider-sdk':
         specifier: file:../../packages/provider-sdk
         version: link:../../packages/provider-sdk
-      '@helium/v1-compat':
-        specifier: file:../../packages/v1-compat
-        version: link:../../packages/v1-compat
+      '@modelcontextprotocol/sdk':
+        specifier: 1.30.0
+        version: 1.30.0(zod@4.4.3)
       croner:
         specifier: 10.0.1
         version: 10.0.1

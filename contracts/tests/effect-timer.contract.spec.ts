@@ -52,48 +52,68 @@ async function freePort(): Promise<number> {
 describe("contract: ctx.effect interval timers run inside a booted profile", () => {
   let dshHome: string;
   let stateRoot: string;
-  let jobsDir: string;
+  let tenantsDir: string;
 
   beforeAll(() => {
     dshHome = makeDshHome();
     deployHeliumProfile(dshHome);
 
     stateRoot = join(dshHome, "helium-state");
-    jobsDir = join(dshHome, "helium-jobs");
-    mkdirSync(jobsDir, { recursive: true });
-    mkdirSync(join(dshHome, "helium-calendars"), { recursive: true });
+    tenantsDir = join(dshHome, "helium-plugins");
+    mkdirSync(join(tenantsDir, "contract-watch"), { recursive: true });
     writeFileSync(
       join(dshHome, "ecosystem.md"),
       "# ecosystem\ncontract fixture\n",
       "utf8",
     );
-    // A single fast state-change trigger against an address nothing listens
-    // on: StateChangePoller reports "unknown" and the runtime still writes a
-    // heartbeat row every cycle regardless of poll outcome (spec §8) — no
-    // live network dependency, no live LLM call.
+    // One enabled tenant with a daily cron. The heartbeat under observation
+    // is the LIVENESS row `TenantRuntime.start()` arms — a business trigger
+    // would need a real fire, and the dead-man's window is fed by liveness
+    // anyway (a daily tenant is otherwise MISSING for ~23h50m every day).
     writeFileSync(
-      join(jobsDir, "contract.yaml"),
+      join(tenantsDir, "contract-watch", "tenant.yaml"),
       [
-        "name: contract-watch",
+        "tenant: contract-watch",
         "enabled: true",
+        "team: team.yaml",
+        "promotionMode: shadow",
         "triggers:",
-        "  - kind: state-change",
-        "    url: http://127.0.0.1:1/api/snapshot",
-        "    fields: [state]",
-        "    interval: 500ms",
-        "engine:",
-        "  triage: { engine: deepseek, model: deepseek-v4-flash }",
-        "  senior: { engine: claude-max }",
-        "escalate_when: severity >= material",
-        "session: fresh",
-        "memory: none",
-        "tools: []",
-        "max_turns: { triage: 2, senior: 2 }",
-        "timeout: 60s",
-        "budget: { max_triage_per_hour: 60, max_senior_per_day: 60 }",
+        "  - kind: cron",
+        '    schedule: "0 4 * * *"',
+        "    timezone: UTC",
         "delivery:",
         "  jsonl: true",
-        "prompt: contract fixture job",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(tenantsDir, "contract-watch", "team.yaml"),
+      [
+        'manifestVersion: "1"',
+        "name: contract-watch",
+        "roles:",
+        "  scribe:",
+        "    responsibility: rendering",
+        "    requires: [render]",
+        "    permissions:",
+        "      externalResearch: false",
+        "      mutations: forbidden",
+        "      artifactRead: [accepted-claim-ledger]",
+        "      tools: []",
+        "tasks:",
+        "  - id: render",
+        "    role: scribe",
+        "    dependsOn: []",
+        "    requires: [render]",
+        "    inputs: [accepted-claim-ledger]",
+        "    outputSchema: report@1",
+        "crossReference:",
+        "  compareClaims: true",
+        "  materialContradictions: fresh-evidence-work-order",
+        "  requireIndependentEvidence: true",
+        "budgets: { maxAttempts: 1, maxTokens: 1000 }",
+        "acceptance: { allowPartialClaims: true, terminalTasks: [render] }",
         "",
       ].join("\n"),
       "utf8",
@@ -104,7 +124,7 @@ describe("contract: ctx.effect interval timers run inside a booted profile", () 
     rmSync(dshHome, { recursive: true, force: true });
   });
 
-  it("starts the per-job sensor loop and stops cleanly on SIGTERM", async () => {
+  it("starts the per-tenant liveness loop and stops cleanly on SIGTERM", async () => {
     const heartbeatFile = (): string =>
       join(
         stateRoot,
@@ -135,10 +155,10 @@ describe("contract: ctx.effect interval timers run inside a booted profile", () 
         env: {
           ...process.env,
           DSH_HOME: dshHome,
-          HELIUM_JOBS_DIR: jobsDir,
+          HELIUM_TENANTS_DIR: tenantsDir,
+          HELIUM_TENANT_LIVENESS_MS: "500",
           HELIUM_STATE_ROOT: stateRoot,
           HELIUM_CONTEXT_FILE: join(dshHome, "ecosystem.md"),
-          HELIUM_CALENDARS_DIR: join(dshHome, "helium-calendars"),
           HELIUM_ARGON_BASE: "http://127.0.0.1:1",
           HELIUM_APEX_BASE: "http://127.0.0.1:1",
           HELIUM_ENV_FILE: join(dshHome, "helium.env"),

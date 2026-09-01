@@ -13,18 +13,35 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { canonicalJson, type TeamRunProjection } from "@helium/core";
-import type { JobSpec } from "@helium/v1-compat";
 import { z } from "zod";
-import type { TriggerEvent } from "./sensor.js";
 import type { TeamRunInput } from "./team-controller.js";
+import {
+  buildTenantRunInput,
+  type TenantTriggerEvent,
+} from "./tenant-runtime.js";
+import type { LoadedTenant } from "./tenants.js";
 
-export type TeamPromotionMode = "shadow" | "review-only";
+export type TeamPromotionMode = "shadow" | "review-only" | "delivered";
+
+const ORDER = ["off", "shadow", "review-only", "delivered"] as const;
+
+/**
+ * The more restrictive of the host brake (`HELIUM_TEAM_PROMOTION_MODE`) and the
+ * tenant's own request (`tenant.yaml`'s `promotionMode`). The host key can only
+ * ever restrict; the tenant file is a request, never a grant.
+ */
+export function narrower(
+  host: TeamPromotionMode | "off",
+  tenant: TeamPromotionMode,
+): TeamPromotionMode | "off" {
+  return ORDER.indexOf(host) <= ORDER.indexOf(tenant) ? host : tenant;
+}
 
 export const ControlledCanaryRequestSchema = z.strictObject({
   version: z.literal(1),
   requestId: z.string().regex(/^canary-[0-9a-f]{24}$/),
   caseKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/),
-  job: z.string().min(1),
+  tenant: z.string().min(1),
   requestedBy: z.string().min(1),
   reason: z.string().min(1),
   createdAt: z.iso.datetime(),
@@ -275,24 +292,27 @@ class DurableCanaryBudget {
 }
 
 export interface TeamPromotionAdapterOptions {
-  mode: TeamPromotionMode;
-  canaryJobs: string[];
+  mode: TeamPromotionMode | "off";
+  canaryTenants: string[];
   maxPerUtcDay: number;
   stateRoot: string;
-  run(input: TeamRunInput): Promise<TeamRunProjection>;
   providerHealth(): PromotionProviderHealth;
   now?: () => Date;
 }
 
-/** v1-first fan-out whose promoted output can only enter the review queue. */
+/** The single owner of promotion: allow-list, daily budget, review fallback. */
 export class TeamPromotionAdapter {
   readonly #reviews: TeamReviewStore;
   readonly #budget: DurableCanaryBudget;
   readonly #now: () => Date;
 
   constructor(private readonly options: TeamPromotionAdapterOptions) {
-    if (options.mode === "review-only" && options.canaryJobs.length === 0) {
-      throw new Error("review-only promotion requires a canary job allow-list");
+    if (
+      options.mode !== "off"
+      && options.mode !== "shadow"
+      && options.canaryTenants.length === 0
+    ) {
+      throw new Error(`${options.mode} promotion requires a canary tenant allow-list`);
     }
     if (!Number.isSafeInteger(options.maxPerUtcDay) || options.maxPerUtcDay < 1) {
       throw new Error("team canary daily cap must be a positive integer");
@@ -302,38 +322,51 @@ export class TeamPromotionAdapter {
     this.#budget = new DurableCanaryBudget(options.stateRoot, this.#now);
   }
 
-  async handle(job: JobSpec, event: TriggerEvent, continueV1: () => void): Promise<void> {
-    continueV1();
-    if (this.options.mode === "review-only" && !this.options.canaryJobs.includes(job.name)) {
+  async handle(
+    loaded: LoadedTenant,
+    event: TenantTriggerEvent,
+    run: (input: TeamRunInput) => Promise<TeamRunProjection>,
+  ): Promise<void> {
+    const tenant = loaded.spec.tenant;
+    // The effective mode is the MORE RESTRICTIVE of the host brake and the
+    // tenant's own request, ordered off < shadow < review-only < delivered.
+    // One switch, decided in one place.
+    const mode = narrower(this.options.mode, loaded.spec.promotionMode);
+    if (mode === "off") return;
+    if (mode !== "shadow" && !this.options.canaryTenants.includes(tenant)) {
       return;
     }
-    const content = canonicalJson({ job: job.name, event });
-    const digest = hash(content);
-    const caseId = `shadow-${digest.slice(0, 24)}`;
+    // The SAME derivation `TenantRuntime` would use, from the one exported
+    // builder -- two independent copies of the caseId hash is how a budget
+    // claim and the run it is meant to bound come to disagree.
+    const input = buildTenantRunInput(
+      tenant,
+      event,
+      loaded.prompt ?? `${tenant} scheduled run`,
+    );
     if (
-      this.options.mode === "review-only"
-      && !this.#budget.claim(job.name, caseId, this.options.maxPerUtcDay)
+      mode !== "shadow"
+      && !this.#budget.claim(tenant, input.caseId, this.options.maxPerUtcDay)
     ) {
       return;
     }
-    const team = await this.options.run({
-      caseId,
-      subject: `${job.name}:${event.kind}`,
-      prompt: job.prompt,
-      inputArtifacts: [{
-        ref: `artifact://shadow-trigger/${digest}`,
-        hash: `sha256:${digest}`,
-        content,
-      }],
+    const team = await run(input);
+    if (mode === "shadow" || team.state !== "completed") return;
+    // `delivered` still enqueues a review item when nothing actually went out:
+    // a gate failure, a disabled env opt-in and a dead SMTP host all land the
+    // run in the human inbox rather than nowhere. `delivered` ONLY --
+    // `uncertain` (skipped, rate-capped, pending) and `failed` mean the human
+    // still needs to see it.
+    const delivered = Object.values(team.deliveries ?? {}).some(
+      (record) => record.state === "delivered",
+    );
+    if (mode === "delivered" && delivered) return;
+    this.#reviews.enqueue({
+      job: tenant,
+      dedupKey: event.dedupKey,
+      team,
+      providerHealth: this.options.providerHealth(),
     });
-    if (this.options.mode === "review-only" && team.state === "completed") {
-      this.#reviews.enqueue({
-        job: job.name,
-        dedupKey: event.dedupKey,
-        team,
-        providerHealth: this.options.providerHealth(),
-      });
-    }
   }
 
   /**
@@ -341,15 +374,20 @@ export class TeamPromotionAdapter {
    * does not dispatch v1 or deliver anything; its only output is a pending
    * review item. The same caseKey may be retried after a pressure refusal.
    */
-  async handleCanary(job: JobSpec, request: ControlledCanaryRequest): Promise<void> {
-    if (this.options.mode !== "review-only") {
-      throw new Error("controlled canary requires review-only mode");
+  async handleCanary(
+    loaded: LoadedTenant,
+    request: ControlledCanaryRequest,
+    run: (input: TeamRunInput) => Promise<TeamRunProjection>,
+  ): Promise<void> {
+    const tenant = loaded.spec.tenant;
+    if (this.options.mode === "off" || this.options.mode === "shadow") {
+      throw new Error("controlled canary requires review-only or delivered mode");
     }
-    if (request.job !== job.name || !this.options.canaryJobs.includes(job.name)) {
-      throw new Error(`job is not allow-listed for canary: ${request.job}`);
+    if (request.tenant !== tenant || !this.options.canaryTenants.includes(tenant)) {
+      throw new Error(`tenant is not allow-listed for canary: ${request.tenant}`);
     }
-    const budgetCaseId = `canary-${hash(canonicalJson({ job: job.name, caseKey: request.caseKey })).slice(0, 24)}`;
-    if (!this.#budget.claim(job.name, budgetCaseId, this.options.maxPerUtcDay)) {
+    const budgetCaseId = `canary-${hash(canonicalJson({ tenant, caseKey: request.caseKey })).slice(0, 24)}`;
+    if (!this.#budget.claim(tenant, budgetCaseId, this.options.maxPerUtcDay)) {
       throw new Error("team canary daily cap exhausted");
     }
     // A request is one execution attempt of the logical, daily-bounded case.
@@ -358,16 +396,16 @@ export class TeamPromotionAdapter {
     // terminal projection. The stable caseKey above still owns exactly one
     // daily slot; a different logical case remains refused by the cap.
     const caseId = `canary-${hash(canonicalJson({
-      job: job.name,
+      tenant,
       caseKey: request.caseKey,
       requestId: request.requestId,
     })).slice(0, 24)}`;
     const content = canonicalJson(request);
     const digest = hash(content);
-    const team = await this.options.run({
+    const team = await run({
       caseId,
-      subject: `${job.name}:controlled-canary`,
-      prompt: job.prompt,
+      subject: `${tenant}:controlled-canary`,
+      prompt: loaded.prompt ?? `${tenant} controlled canary`,
       inputArtifacts: [{
         ref: `artifact://controlled-canary/${digest}`,
         hash: `sha256:${digest}`,
@@ -378,7 +416,7 @@ export class TeamPromotionAdapter {
       throw new Error(`controlled canary did not complete: ${team.state}`);
     }
     this.#reviews.enqueue({
-      job: job.name,
+      job: tenant,
       dedupKey: request.requestId,
       team,
       providerHealth: this.options.providerHealth(),

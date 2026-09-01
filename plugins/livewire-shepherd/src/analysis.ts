@@ -12,7 +12,9 @@ export function createShepherdOutputContractRegistry() {
 }
 
 export function shepherdManifestPath(variant: ShepherdTeamVariant): string {
-  return resolve(import.meta.dirname, "../../../teams", `livewire-shepherd-${variant}.yaml`);
+  // The manifests live in this plugin, beside the tenant.yaml that declares
+  // them, not in the repo-wide `teams/` directory.
+  return resolve(import.meta.dirname, "..", `team-${variant}.yaml`);
 }
 
 export function loadShepherdTeamManifest(

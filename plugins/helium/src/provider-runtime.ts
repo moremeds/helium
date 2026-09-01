@@ -13,7 +13,6 @@ import type { Context } from "@deepseek-ai/cordis";
 import {
   CapabilityCatalog,
   LeaseStore,
-  WorkOrderSchema,
   type AgentResult,
   type Availability,
   type ConformanceRecord,
@@ -41,7 +40,6 @@ import {
   registerCertifiedDeepSeekTargets,
 } from "@helium/provider-deepseek-dsh/executor";
 import type { DeepSeekDshBoundary } from "@helium/provider-deepseek-dsh/invoke";
-import type { JobSpec } from "@helium/v1-compat";
 import { buildChildEnv } from "./claude.js";
 import {
   CordisTeamParentFactory,
@@ -57,7 +55,6 @@ import {
   type ProviderCertifications,
 } from "./provider-certifications.js";
 import { RoutingService } from "./routing-service.js";
-import type { SeniorLane } from "./dispatch.js";
 import {
   ProviderCircuitBreaker,
   type CircuitProvider,
@@ -579,52 +576,6 @@ export class ProviderRuntime {
     }
   }
 
-  seniorLane(mcpConfigFor: (job: JobSpec, dir: string) => string): SeniorLane {
-    return {
-      dispatch: async (job, _event, prompt, deadlineSignal) => {
-        const ownedController =
-          deadlineSignal === undefined ? new AbortController() : undefined;
-        const signal = deadlineSignal ?? ownedController!.signal;
-        const timeout =
-          ownedController === undefined
-            ? undefined
-            : setTimeout(() => ownedController.abort(), job.timeoutMs);
-        timeout?.unref();
-        const configDir = join(
-          this.#cfg.workspacesDir,
-          "routing-config",
-          randomUUID(),
-        );
-        mkdirSync(configDir, { recursive: true, mode: 0o700 });
-        const work = WorkOrderSchema.parse({
-          id: `v1-senior-${job.name}-${randomUUID()}`,
-          role: "v1-senior",
-          taskClass: "analysis.v1-senior",
-          requires: ["analysis.general"],
-          constraints: {
-            tools: [...job.tools],
-            mutations: "forbidden",
-            minIsolationClass: "in-process",
-            maxLatencyMs: job.timeoutMs,
-          },
-          inputs: { artifacts: [], prompt },
-          acceptance: { outputSchema: "v1-senior-analysis" },
-        });
-        try {
-          return await this.#runSenior(
-            work,
-            job,
-            mcpConfigFor(job, configDir),
-            signal,
-          );
-        } finally {
-          if (timeout !== undefined) clearTimeout(timeout);
-          rmSync(configDir, { recursive: true, force: true });
-        }
-      },
-    };
-  }
-
   async dispose(): Promise<void> {
     for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
     this.#refreshTimers.clear();
@@ -705,50 +656,6 @@ export class ProviderRuntime {
     this.#refreshTimers.set(provider, timer);
   }
 
-  async #runSenior(
-    work: WorkOrder,
-    job: JobSpec,
-    mcpConfigPath: string,
-    signal: AbortSignal,
-  ): Promise<Awaited<ReturnType<SeniorLane["dispatch"]>>> {
-    const tried = new Set<string>();
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      if (signal.aborted) {
-        return { outcome: "timed_out", error: "senior lane exceeded its wall clock" };
-      }
-      const routed = await this.routing.route({
-        work,
-        reservedCost: 0,
-        leaseExpiresAt: new Date(Date.now() + job.timeoutMs + 5_000).toISOString(),
-      });
-      if (routed.lease === undefined) {
-        return {
-          outcome: "run_failed",
-          error: `waiting-for-capacity: ${routed.decision.failure?.reasons.join("; ") ?? "no eligible target"}`,
-        };
-      }
-      if (tried.has(String(routed.lease.targetId))) {
-        return { outcome: "run_failed", error: "waiting-for-capacity: no new target" };
-      }
-      tried.add(String(routed.lease.targetId));
-      const result = await this.host.run(
-        `v1-${job.name}`,
-        work,
-        routed.lease,
-        signal,
-        {
-          env: this.#childEnv(),
-          mcpConfigPath,
-        },
-      );
-      if (signal.aborted) {
-        return { outcome: "timed_out", error: "senior lane exceeded its wall clock" };
-      }
-      if (result.failure?.class === "quota-exhausted") continue;
-      return resultToSenior(result);
-    }
-    return { outcome: "run_failed", error: "waiting-for-capacity" };
-  }
 }
 
 function retryDelayMs(retryAfter: string | undefined, fallbackMs: number): number {
@@ -760,24 +667,4 @@ function retryDelayMs(retryAfter: string | undefined, fallbackMs: number): numbe
     return Math.max(1_000, Math.min(absolute - Date.now(), 2_147_000_000));
   }
   return fallbackMs;
-}
-
-function resultToSenior(result: AgentResult): Awaited<ReturnType<SeniorLane["dispatch"]>> {
-  if (result.outcome === "completed") {
-    const structured = result.structured as { analysis?: unknown } | string | undefined;
-    const analysis =
-      typeof structured === "string"
-        ? structured
-        : typeof structured?.analysis === "string"
-          ? structured.analysis
-          : JSON.stringify(structured ?? {});
-    return { outcome: "run_completed", analysis };
-  }
-  if (result.failure?.class === "timeout") {
-    return { outcome: "timed_out", error: "senior lane exceeded its wall clock" };
-  }
-  return {
-    outcome: "run_failed",
-    error: `${result.failure?.class ?? "provider-error"}${result.failure?.retryAfter ? ` (retry after ${result.failure.retryAfter})` : ""}`,
-  };
 }

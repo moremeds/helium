@@ -31,9 +31,6 @@ import {
 import { join } from "node:path";
 import nodemailer, { type Transporter } from "nodemailer";
 import type { JsonlWriter } from "@helium/core";
-import type { JobSpec } from "@helium/v1-compat";
-import type { DispatchResult } from "./dispatch.js";
-import type { TriggerEvent } from "./sensor.js";
 
 export interface SmtpConfig {
   host: string;
@@ -58,7 +55,7 @@ export function smtpFromEnv(env: Record<string, string>): SmtpConfig | null {
 }
 
 const BACKOFF_MS = [5_000, 25_000];
-const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
 
 /** The stream every delivery row lands in. */
 const DELIVERIES = "deliveries";
@@ -171,54 +168,62 @@ export class Delivery {
 
   /** Budget exhaustion is its own `deliveries` row (spec §5): suppressed dispatch, no email. */
   budgetExhausted(
-    job: JobSpec,
-    ev: TriggerEvent,
+    tenant: string,
+    dedupKey: string,
     info: { tier: string; count: number; cap: number },
   ): void {
     this.opts.jsonl.append(DELIVERIES, {
       kind: "budget-exhausted",
-      job: job.name,
-      dedupKey: ev.dedupKey,
+      job: tenant,
+      dedupKey,
       ...info,
       email: "skipped",
     });
   }
 
   /**
-   * Deliver one dispatch result. The `delivery-intent` row is made durable
-   * first — before the report is written and before SMTP is touched — so no
-   * external side effect can happen that the audit trail has not already
-   * announced. The `delivery-outcome` row then closes that intent, and a
-   * failed send adds a `dead-letter` row under the same id.
+   * Deliver one tenant run. The `delivery-intent` row is made durable first —
+   * before the report is written and before SMTP is touched — so no external
+   * side effect can happen that the audit trail has not already announced. The
+   * `delivery-outcome` row then closes that intent, and a failed send adds a
+   * `dead-letter` row under the same id.
+   *
+   * A `deliveryId` that ALREADY carries a terminal row is never re-sent. That
+   * id is shared with the team's own recovery log, so after a crash the
+   * reconcile pass has closed the intent `uncertain` and this returns that
+   * state instead of mailing the same report twice.
    */
-  async deliver(
-    job: JobSpec,
-    ev: TriggerEvent,
-    result: DispatchResult,
-  ): Promise<void> {
-    const deliveryId = randomUUID();
-    // Write-ahead (spec §3/§8): durable intent before any external side
-    // effect. A crash from here on leaves an unresolved intent that
-    // `reconcileDeliveries()` closes, never a side effect with no record.
+  async deliver(input: {
+    tenant: string;
+    dedupKey: string;
+    runId: string;
+    subject: string;
+    body: string;
+    /**
+     * Supplied by the caller so the JSONL trail and the team recovery log
+     * share ONE id. Defaulted only for callers with no team run.
+     */
+    deliveryId?: string;
+    email?: { to: string; subjectPrefix: string; maxPerDay: number };
+  }): Promise<{ state: DeliveryState; deliveryId: string }> {
+    const deliveryId = input.deliveryId ?? randomUUID();
+    const settled = this.#terminalState(deliveryId);
+    if (settled !== undefined) return { state: settled, deliveryId };
+    // Write-ahead: durable intent before any external side effect. A crash
+    // from here on leaves an unresolved intent that `reconcileDeliveries()`
+    // closes, never a side effect with no record.
     this.opts.jsonl.append(DELIVERIES, {
       kind: "delivery-intent",
       deliveryId,
-      job: job.name,
-      runId: result.runId,
-      dedupKey: ev.dedupKey,
+      job: input.tenant,
+      runId: input.runId,
+      dedupKey: input.dedupKey,
       state: "pending",
     });
 
-    const report =
-      result.tier === "senior" && result.analysis
-        ? this.#writeReport(job, result)
-        : undefined;
-
-    const email = job.delivery.email;
+    const report = this.#writeReport(input.tenant, input.runId, input.body);
     const wanted =
-      result.tier === "senior" &&
-      result.outcome === "run_completed" &&
-      email !== undefined &&
+      input.email !== undefined &&
       this.#transport !== null &&
       this.opts.smtp !== null;
     let state: DeliveryState = "skipped";
@@ -228,32 +233,26 @@ export class Delivery {
     if (wanted) {
       const used = countSentEmails(
         this.opts.jsonlDir,
-        job.name,
-        HOUR_MS,
+        input.tenant,
+        DAY_MS,
         this.#now(),
       );
-      if (used >= email!.maxPerHour) state = "rate-capped";
+      if (used >= input.email!.maxPerDay) state = "rate-capped";
       else {
-        const outcome = await this.#send(job, result, report);
+        const outcome = await this.#send(input, report);
         state = outcome.ok ? "sent" : "failed";
         attempts = outcome.attempts;
         error = outcome.error;
       }
     }
 
-    // The outcome row closes the intent above. It lands whether or not the
-    // email succeeded — the JSONL trail is the audit record, email is best
-    // effort on top of it.
     this.opts.jsonl.append(DELIVERIES, {
       kind: "delivery-outcome",
       deliveryId,
       state,
-      job: job.name,
-      tier: result.tier,
-      runId: result.runId,
-      outcome: result.outcome,
-      dedupKey: ev.dedupKey,
-      severity: result.verdict?.severity,
+      job: input.tenant,
+      runId: input.runId,
+      dedupKey: input.dedupKey,
       report,
       attempts,
     });
@@ -261,12 +260,23 @@ export class Delivery {
       this.opts.jsonl.append(DELIVERIES, {
         kind: "dead-letter",
         deliveryId,
-        job: job.name,
-        runId: result.runId,
+        job: input.tenant,
+        runId: input.runId,
         report,
         error,
       });
     }
+    return { state, deliveryId };
+  }
+
+  /** The terminal state already recorded for `deliveryId`, if any. */
+  #terminalState(deliveryId: string): DeliveryState | undefined {
+    let state: DeliveryState | undefined;
+    for (const row of readAllDeliveryRows(this.opts.jsonlDir)) {
+      if (row.deliveryId !== deliveryId) continue;
+      if (row.kind === "delivery-outcome") state = row.state as DeliveryState;
+    }
+    return state;
   }
 
   /**
@@ -298,21 +308,19 @@ export class Delivery {
     return open.size;
   }
 
-  #writeReport(job: JobSpec, result: DispatchResult): string {
-    const dir = join(this.opts.reportsDir, job.name);
+  #writeReport(tenant: string, runId: string, body: string): string {
+    const dir = join(this.opts.reportsDir, tenant);
     mkdirSync(dir, { recursive: true });
     const stamp = this.#now().toISOString().replace(/[:.]/g, "-");
     const path = join(dir, `${stamp}.md`);
     writeFileSync(
       path,
       [
-        `# ${job.name} — ${this.#now().toISOString()}`,
+        `# ${tenant} — ${this.#now().toISOString()}`,
         "",
-        `- run: ${result.runId}`,
-        `- severity: ${result.verdict?.severity ?? "n/a"}`,
-        `- verdict reason: ${result.verdict?.reason ?? "n/a"}`,
+        `- run: ${runId}`,
         "",
-        result.analysis ?? "",
+        body,
         "",
       ].join("\n"),
     );
@@ -320,21 +328,18 @@ export class Delivery {
   }
 
   async #send(
-    job: JobSpec,
-    result: DispatchResult,
+    input: { subject: string; body: string; email?: { to: string } },
     report: string | undefined,
   ): Promise<{ ok: boolean; attempts: number; error?: string }> {
     const sleep =
       this.opts.sleep ??
       ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-    const email = job.delivery.email!;
+    const email = input.email!;
     const mail = {
       from: this.opts.smtp!.from,
       to: email.to === "operator" ? this.opts.emailTo : email.to,
-      subject: `${email.subjectPrefix} ${result.verdict?.severity ?? "update"} — ${job.name}`,
-      text: [result.analysis ?? "", "", report ? `Report: ${report}` : ""].join(
-        "\n",
-      ),
+      subject: input.subject,
+      text: [input.body, "", report ? `Report: ${report}` : ""].join("\n"),
     };
     let error = "";
     for (let attempt = 1; attempt <= 3; attempt += 1) {

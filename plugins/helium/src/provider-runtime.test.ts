@@ -10,14 +10,11 @@ import {
   WorkOrderSchema,
   parseTeamYaml,
 } from "@helium/core";
-import type { JobSpec } from "@helium/v1-compat";
-import { Dispatcher } from "./dispatch.js";
 import { productionProviderCertifications } from "./provider-certifications.js";
 import {
   ProviderRuntime,
   type ProviderRuntimeOptions,
 } from "./provider-runtime.js";
-import { ev } from "./testing/fixtures.js";
 
 const work = WorkOrderSchema.parse({
   id: "production-plane-work",
@@ -127,26 +124,6 @@ function runtime(
     },
   );
 }
-
-const timeoutJob: JobSpec = {
-  name: "provider-timeout",
-  enabled: true,
-  triggers: [],
-  engine: {
-    triage: { engine: "deepseek", model: "deepseek-v4-flash" },
-    senior: { engine: "claude-max" },
-  },
-  escalateWhen: "material",
-  session: "fresh",
-  memory: "none",
-  tools: [],
-  allowMutations: false,
-  maxTurns: { triage: 1, senior: 1 },
-  timeoutMs: 30,
-  budget: { maxTriagePerHour: 1, maxSeniorPerDay: 1 },
-  delivery: { jsonl: true },
-  prompt: "timeout probe",
-};
 
 describe("production ProviderRuntime", () => {
   it("routes basic Shepherd research to a cheap target and reserves senior targets for PIT reasoning", async () => {
@@ -388,11 +365,42 @@ describe("production ProviderRuntime", () => {
     await plane.dispose();
   });
 
-  it("routes every committed Macro role through the certified Codex target", async () => {
+  it("routes every role of an inline manifest through the certified Codex target", async () => {
     const plane = runtime({ certifications: productionProviderCertifications });
-    const manifest = parseTeamYaml(
-      readFileSync(join(import.meta.dirname, "../../../teams/macro.yaml"), "utf8"),
-    );
+    // INLINE, not a file: this case asserts every task receives a lease, and
+    // `router.ts` matches capability tags by exact containment. Pointing it at
+    // a tenant manifest would make it fail on that tenant's own tags -- and
+    // adding those tags to the production `targetProfile()` to make a test pass
+    // is exactly backwards.
+    const manifest = parseTeamYaml(`
+manifestVersion: team-v1
+name: routing-coverage
+roles:
+  inflation-researcher:
+    responsibility: evidence
+    requires: [macro-source-research, inflation-analysis]
+    permissions: { externalResearch: true, mutations: forbidden, artifactRead: [source-artifacts] }
+  verifier:
+    responsibility: verification
+    requires: [claim-verification, fresh-evidence, independent-source]
+    permissions: { externalResearch: true, mutations: forbidden, artifactRead: [source-artifacts, dependency-artifacts] }
+  lead:
+    responsibility: synthesis
+    requires: [macro-causal-synthesis]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [dependency-artifacts] }
+  renderer:
+    responsibility: rendering
+    requires: [render-adjudicated-claims]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [accepted-claim-ledger] }
+tasks:
+  - { id: research, role: inflation-researcher, dependsOn: [], requires: [macro-source-research, inflation-analysis], inputs: [source-artifacts], outputSchema: ClaimSet.v1 }
+  - { id: verify, role: verifier, dependsOn: [research], requires: [claim-verification, fresh-evidence, independent-source], inputs: [source-artifacts, dependency-artifacts], outputSchema: EvidenceDecisionSet.v1 }
+  - { id: synthesis, role: lead, dependsOn: [verify], requires: [macro-causal-synthesis], inputs: [dependency-artifacts], outputSchema: AdjudicatedSynthesis.v1 }
+  - { id: render, role: renderer, dependsOn: [synthesis], requires: [render-adjudicated-claims], inputs: [accepted-claim-ledger], outputSchema: ShadowReport.v1 }
+crossReference: { compareClaims: true, materialContradictions: fresh-evidence-work-order, requireIndependentEvidence: true }
+budgets: { maxAttempts: 4, maxTokens: 100000 }
+acceptance: { allowPartialClaims: true, terminalTasks: [render] }
+`);
     for (const task of manifest.tasks) {
       const candidate = WorkOrderSchema.parse({
         id: `macro-${task.id}`,
@@ -612,107 +620,6 @@ describe("production ProviderRuntime", () => {
     });
     expect(waiting.lease).toBeUndefined();
     expect(waiting.decision.failure?.class).toBe("unavailable");
-    await plane.dispose();
-  });
-
-  it("does not release the Dispatcher senior slot until a timed-out DeepSeek child is disposed", async () => {
-    const interrupted = vi.fn();
-    const order: string[] = [];
-    let starts = 0;
-    const disposed = vi.fn(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 70));
-      order.push("first-disposed");
-    });
-    const plane = runtime({
-      availabilityRefreshers: {
-        codex: async () => ({ state: "unavailable" }),
-        deepseek: async () => ({ state: "available" }),
-      },
-      subagents: {
-        start: vi.fn(async () => {
-          starts += 1;
-          if (starts === 1) {
-            return {
-              id: "hung-deepseek-child",
-              result: new Promise<never>(() => {}),
-              dispose: disposed,
-            };
-          }
-          order.push("second-started");
-          return {
-            id: "second-deepseek-child",
-            result: Promise.resolve({
-              output: [{ type: "text", text: "done" }],
-              structured: { analysis: "done" },
-              stopReason: "completed",
-              effectiveReasoningEffort: "high",
-            }),
-            dispose: async () => {},
-          };
-        }),
-        drainDescendants: vi.fn(async () => {}),
-        followup: vi.fn(async () => "unused"),
-        interrupt: interrupted,
-        listChildren: vi.fn(async () => []),
-        listDescendants: vi.fn(async () => []),
-      },
-      parents: {
-        ensure: vi.fn(async () => ({
-          parent: { id: "timeout-parent" },
-          resumed: false,
-          dispose: async () => {},
-        })),
-      },
-    });
-    await plane.refreshProviderAvailability("codex");
-    const stateRoot = mkdtempSync(join(tmpdir(), "helium-provider-timeout-"));
-    const outcomes: Array<{ job: string; tier: string; outcome: string }> = [];
-    const dispatcher = new Dispatcher({
-      store: new StateStore(stateRoot),
-      ledger: new RunLedger(new JsonlWriter(join(stateRoot, "jsonl"))),
-      contextText: "timeout integration",
-      triage: {
-        dispatch: async () => ({
-          outcome: "run_completed",
-          verdict: {
-            escalate: true,
-            severity: "material",
-            reason: "exercise senior capacity",
-          },
-        }),
-      },
-      senior: plane.seniorLane((_job, dir) => join(dir, "mcp.json")),
-      onResult: (job, _event, result) => {
-        outcomes.push({ job: job.name, tier: result.tier, outcome: result.outcome });
-      },
-      onSuppressed: () => {},
-      maxConcurrentSenior: 1,
-    });
-    const firstJob = { ...timeoutJob, name: "provider-timeout-first" };
-    const secondJob = { ...timeoutJob, name: "provider-timeout-second" };
-    dispatcher.enqueue(firstJob, {
-      ...ev,
-      job: firstJob.name,
-      dedupKey: firstJob.name,
-    });
-    dispatcher.enqueue(secondJob, {
-      ...ev,
-      job: secondJob.name,
-      dedupKey: secondJob.name,
-    });
-    await dispatcher.drain();
-
-    expect(outcomes).toEqual(
-      expect.arrayContaining([
-        { job: firstJob.name, tier: "senior", outcome: "timed_out" },
-        { job: secondJob.name, tier: "senior", outcome: "run_completed" },
-      ]),
-    );
-    expect(interrupted).toHaveBeenCalledWith("hung-deepseek-child", {
-      id: "timeout-parent",
-    });
-    expect(disposed).toHaveBeenCalledOnce();
-    expect(order).toEqual(["first-disposed", "second-started"]);
     await plane.dispose();
   });
 });

@@ -156,7 +156,11 @@ function executionPort(options: { contradiction?: boolean; invalid?: boolean } =
         });
       }
       if (task === "verifier" || task.startsWith("verify-")) {
-        return result(work, { decisions: [decision(accepted)] });
+        // The DRAFT form is the only one the contract accepts: the verifier
+        // names a key, the host rebuilds the decision from the claim it
+        // extracted itself. A supplied {decisions:[...]} would let a model
+        // author the accepted-claim ledger verbatim.
+        return result(work, { acceptedClaimKeys: [accepted.key] });
       }
       return result(work, {
         report: "shadow only",
@@ -449,7 +453,7 @@ describe("TeamController", () => {
 
   it("runs the committed eight-node macro manifest end to end with a fake executor", async () => {
     const macro = parseTeamYaml(
-      readFileSync(resolve(import.meta.dirname, "../../../teams/macro.yaml"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "../../../evals/fixtures/macro-team/team.yaml"), "utf8"),
     );
     const claimTasks = [
       "inflation-evidence",
@@ -474,7 +478,9 @@ describe("TeamController", () => {
           });
         }
         if (task === "verifier" || task.startsWith("verify-")) {
-          return result(work, { decisions });
+          return result(work, {
+            acceptedClaimKeys: decisions.map((entry) => entry.claim.key),
+          });
         }
         if (task === "lead-synthesis") {
           return result(work, { summary: "adjudicated", acceptedClaimKeys: decisions.map((entry) => entry.claim.key) });
@@ -489,6 +495,38 @@ describe("TeamController", () => {
     expect(state.state).toBe("completed");
     expect(Object.keys(state.tasks)).toHaveLength(8);
     expect(state.tasks.renderer?.state).toBe("completed");
+  });
+
+  it("hands the delivery port each artifact's real bytes, read from THIS case's store", async () => {
+    // The port must not hold a TeamStore: the controller opens one per caseId,
+    // so a store captured at construction time belongs to whichever run was
+    // first. This asserts the controller reads the bodies itself.
+    let seen: Record<string, { content: string; hash: string }> = {};
+    const controller = new TeamController({
+      stateRoot: root(),
+      manifest,
+      routing: routePort(),
+      execution: executionPort(),
+      delivery: {
+        deliver: async (input) => {
+          seen = input.artifacts as typeof seen;
+          const id = input.recordIntent(Object.keys(input.artifacts));
+          input.recordOutcome(id, "delivered");
+        },
+      },
+    });
+    const state = await controller.run({ ...input, caseId: "delivery-bodies" });
+    expect(state.state).toBe("completed");
+    const refs = Object.keys(seen);
+    expect(refs.length).toBeGreaterThan(0);
+    for (const ref of refs) {
+      // Every body is the real published content, hashing to the projection's
+      // own hash — not an empty string and not the metadata.
+      expect(seen[ref]!.hash).toBe(
+        `sha256:${createHash("sha256").update(seen[ref]!.content).digest("hex")}`,
+      );
+      expect(seen[ref]!.hash).toBe(state.artifacts[ref]!.hash);
+    }
   });
 
   it("uses an injected output contract without teaching the generic controller its schema", async () => {

@@ -22,6 +22,7 @@ SRC="$HOME/projects/helium"
 DSH_HOME_DIR="$HOME/.helium/dsh-home"
 STATE_ROOT="$HOME/.helium/state"
 OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
+DSH_PLIST="$HOME/Library/LaunchAgents/com.helium.dsh.plist"
 OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
 OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
 DSH_PIN=0.1.2-alpha.3
@@ -53,7 +54,13 @@ if [ -d "$DEST" ]; then
   say "release dir already exists — reusing (immutable by construction)"
 else
   mkdir -p "$DEST.partial"
-  git -C "$SRC" archive "$VERSION" | tar -x -C "$DEST.partial"
+  # Exclude only the MANIFEST that makes the seam fixture a tenant, never the
+  # directory: plugins/fake-tenant is a workspace package the lockfile lists as
+  # an importer, and dropping it fails `pnpm install --frozen-lockfile` on every
+  # deploy. loadTenants globs plugins/*/tenant.yaml, so the package still
+  # installs and builds while the release contains no such tenant at all.
+  git -C "$SRC" archive "$VERSION" \
+    | tar -x --exclude='plugins/fake-tenant/tenant.yaml' -C "$DEST.partial"
   mv "$DEST.partial" "$DEST"
 fi
 say "installing"
@@ -61,7 +68,7 @@ say "installing"
 installed=$(node -p "require('$DEST/node_modules/@deepseek-ai/dsh/package.json').version")
 [ "$installed" = "$DSH_PIN" ] || { echo "dsh pin drift: $installed" >&2; exit 66; }
 say "dsh pin ok: $installed"
-mcp_bin="$DEST/packages/v1-compat/lib/mcp/server.js"
+mcp_bin="$DEST/plugins/helium/lib/mcp/server.js"
 [ -x "$mcp_bin" ] || {
   echo "release MCP boundary missing or not executable: $mcp_bin" >&2
   exit 76
@@ -96,16 +103,29 @@ if [ -f "$OPSD_PLIST" ]; then
     }
 fi
 
-# Validate every job file BEFORE the flip. loadJobs() throws when called without
-# a handler, which is exactly what is wanted here: a typo fails the deploy with
-# `current` untouched, instead of reaching the daemon. At runtime the plugin
-# passes a handler and degrades gracefully, but a silently skipped tenant is its
-# own hazard -- this is the gate that keeps a bad file from ever getting there.
+# Validate every tenant BEFORE the flip, through loadValidatedTenants() -- the
+# SAME entry point startup uses. At runtime a bad tenant is skipped and the rest
+# keep running, which is right for availability and wrong for a deploy: a
+# silently skipped tenant is its own hazard. Here any skip fails the deploy with
+# `current` untouched, instead of being discovered after the launchd flip.
 # (3.7 AC#2 drill: a stray `dedup_ttl:` key crash-looped the daemon for 2m12s.)
-say "validating job files"
-if ! node "$DEST/scripts/release/validate-jobs.mjs" "$DEST"; then
-  echo "job validation FAILED — aborting before flip" >&2
+say "validating tenant files"
+if ! node "$DEST/scripts/release/validate-tenants.mjs" "$DEST"; then
+  echo "tenant validation FAILED — aborting before flip" >&2
   exit 75
+fi
+
+# The flip repoints `current` but NEVER rewrites the DSH plist, so a release
+# that moves or deletes a path the plist names leaves the daemon pointing at
+# nothing. launchd restarts it, the process looks alive, and it serves zero
+# tools -- silently, which is the worst shape a production failure can take.
+# (v0.1.11 -> the tenant lane: HELIUM_MCP_BIN pointed into packages/v1-compat,
+# which that release deletes.) Refuse the flip and name the keys instead.
+say "checking the installed DSH plist against $VERSION"
+if ! node "$DEST/scripts/release/check-plist-paths.mjs" \
+  "$DSH_PLIST" "$RELEASES" "$DEST"; then
+  echo "DSH plist references paths $VERSION does not ship — aborting before flip" >&2
+  exit 76
 fi
 
 say "provider smoke (one live Codex gpt-5.6-sol/high read-only call)"

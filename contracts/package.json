@@ -13,6 +13,7 @@
     "@helium/fake-flat-rate": "file:../packages/fake-flat-rate",
     "@helium/fake-metered": "file:../packages/fake-metered",
     "@helium/ops-controller-fixture": "file:./fixtures/ops-controller",
+    "@helium/provider-claude-subscription": "file:../plugins/provider-claude-subscription",
     "dsh-plugin-livewire-shepherd": "file:../plugins/livewire-shepherd",
     "dsh-plugin-ops-agent": "file:../plugins/ops-agent",
     "@types/node": "^22",

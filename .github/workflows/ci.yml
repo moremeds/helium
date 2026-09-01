@@ -49,7 +49,8 @@ jobs:
           scripts/ops/export-promotion-input.test.mjs
           scripts/ops/promotion-package.test.mjs
           scripts/review/team-canary.test.mjs
-          scripts/release/validate-jobs.test.mjs
+          scripts/release/validate-tenants.test.mjs
+          scripts/release/check-plist-paths.test.mjs
           scripts/release/opsd-cycle-after.test.mjs
       - name: repeat adversarial ops boundaries 20 times
         run: >-
@@ -62,7 +63,7 @@ jobs:
       # ever checked by hand, and a hash captured on a developer machine is not
       # admissible -- so the drill runs here, last, because it deliberately
       # mutates node_modules and the lockfile.
-      - name: fake executor packages install and remove with no core edit
+      - name: fake executor and fake tenant install and remove with no core edit
         run: |
           set -eu
           for pkg in fake-metered fake-flat-rate; do
@@ -71,6 +72,24 @@ jobs:
             echo "--- @helium/$pkg: add back ---"
             pnpm --filter @helium/contracts add -D "@helium/$pkg@file:../packages/$pkg"
           done
+          # The tenant seam: a whole tenant leaves and returns as a DIRECTORY,
+          # because that is what a tenant is -- there is no registry entry and
+          # no loader list to edit, so the proof is that moving the directory
+          # away and back changes nothing in core or the host.
+          echo "--- plugins/fake-tenant: remove ---"
+          mv plugins/fake-tenant "$RUNNER_TEMP/fake-tenant"
+          pnpm install --no-frozen-lockfile
+          pnpm run build
+          # fake-tenant.test.ts skips itself while the tenant is absent -- it
+          # asserts the tenant is PRESENT, so it would fail for the wrong
+          # reason. `vitest --exclude` is silently ignored for a --project run,
+          # so the guard is in the file, not this flag.
+          pnpm run test
+          echo "--- plugins/fake-tenant: add back ---"
+          mv "$RUNNER_TEMP/fake-tenant" plugins/fake-tenant
+          pnpm install --no-frozen-lockfile
+          pnpm run build
+          pnpm run test
           changed=$(git diff --name-only -- packages/core plugins/helium)
           if [ -n "$changed" ]; then
             echo "FAIL: install/removal edited core or the plugin:"

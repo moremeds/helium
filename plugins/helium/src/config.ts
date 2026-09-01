@@ -1,26 +1,22 @@
 import { join } from "node:path";
 import { z } from "zod";
 
-/**
- * Which path a loaded job takes. `work-order-adapter` routes every job
- * through `adaptV1Job()` and back before the dispatcher sees it, so the v1
- * regression suite becomes a test of the adapter's fidelity. Default stays
- * `legacy-direct` until the adapter has passed that suite.
- */
-export type RuntimeMode = "legacy-direct" | "work-order-adapter";
-
 export interface Config {
-  runtimeMode: RuntimeMode;
-  teamShadowEnabled?: boolean;
-  teamPromotionMode?: "off" | "shadow" | "review-only";
-  teamCanaryJobs?: string[];
+  teamPromotionMode?: "off" | "shadow" | "review-only" | "delivered";
+  teamCanaryTenants?: string[];
   teamCanaryMaxPerUtcDay?: number;
   teamsDir?: string;
   opsEventLog?: string;
-  jobsDir: string;
+  tenantsDir: string;
+  tenantDeliveryEnabled?: boolean;
+  /**
+   * Liveness heartbeat period. The dead-man's stale window
+   * (`HELIUM_DEADMAN_STALE_S`, 600 s) is tunable, so the emitter period has to
+   * be too, or the two can be configured into permanent disagreement.
+   */
+  tenantLivenessMs?: number;
   stateRoot: string;
   contextFile: string;
-  calendarsDir: string;
   argonBase: string;
   apexBase: string;
   livewireDb?: string;
@@ -32,19 +28,18 @@ export interface Config {
 }
 
 export const ConfigSchema = z.object({
-  runtimeMode: z
-    .enum(["legacy-direct", "work-order-adapter"])
-    .default("legacy-direct"),
-  teamShadowEnabled: z.boolean().default(false),
-  teamPromotionMode: z.enum(["off", "shadow", "review-only"]).default("off"),
-  teamCanaryJobs: z.array(z.string().min(1)).default([]),
+  teamPromotionMode: z
+    .enum(["off", "shadow", "review-only", "delivered"])
+    .default("off"),
+  teamCanaryTenants: z.array(z.string().min(1)).default([]),
   teamCanaryMaxPerUtcDay: z.number().int().positive().default(1),
   teamsDir: z.string().min(1).default("teams"),
   opsEventLog: z.string().min(1).optional(),
-  jobsDir: z.string().min(1),
+  tenantsDir: z.string().min(1),
+  tenantDeliveryEnabled: z.boolean().default(false),
+  tenantLivenessMs: z.number().int().positive().max(3_600_000).default(300_000),
   stateRoot: z.string().min(1),
   contextFile: z.string().min(1),
-  calendarsDir: z.string().min(1),
   argonBase: z.string().min(1),
   apexBase: z.string().min(1),
   livewireDb: z.string().min(1).optional(),

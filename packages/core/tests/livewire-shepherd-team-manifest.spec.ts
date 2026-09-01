@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseTeamYaml, type TeamManifest } from "../src/index.js";
 
 const load = (variant: string): TeamManifest => parseTeamYaml(readFileSync(
-  resolve(import.meta.dirname, `../../../teams/livewire-shepherd-${variant}.yaml`),
+  resolve(import.meta.dirname, `../../../plugins/livewire-shepherd/team-${variant}.yaml`),
   "utf8",
 ));
 
