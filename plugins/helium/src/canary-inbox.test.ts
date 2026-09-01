@@ -11,7 +11,7 @@ function request(over: Record<string, unknown> = {}) {
     version: 1,
     requestId: `canary-${"a".repeat(24)}`,
     caseKey: "weekend-smoke-1",
-    job: "macro-watch",
+    tenant: "alpha",
     requestedBy: "weekend-operator",
     reason: "prove the review-only path",
     createdAt: "2026-08-30T00:55:00.000Z",
@@ -31,7 +31,7 @@ describe("controlled canary inbox", () => {
 
     const results = await processCanaryInbox({
       directory: inbox,
-      knownJobs: new Set(["macro-watch"]),
+      knownTenants: new Set(["alpha"]),
       now,
       handle,
     });
@@ -43,12 +43,12 @@ describe("controlled canary inbox", () => {
       .toMatchObject({ requestId: value.requestId, state: "completed" });
   });
 
-  it("quarantines expired, unknown-job, and malformed requests without invoking a team", async () => {
+  it("quarantines expired, unknown-tenant, and malformed requests without invoking a team", async () => {
     const root = mkdtempSync(join(tmpdir(), "helium-canary-inbox-"));
     const inbox = join(root, "requests");
     mkdirSync(inbox, { recursive: true });
     const expired = request({ requestId: `canary-${"b".repeat(24)}`, expiresAt: "2026-08-30T00:59:59.000Z" });
-    const unknown = request({ requestId: `canary-${"c".repeat(24)}`, job: "other" });
+    const unknown = request({ requestId: `canary-${"c".repeat(24)}`, tenant: "other" });
     writeFileSync(join(inbox, `${expired.requestId}.json`), JSON.stringify(expired));
     writeFileSync(join(inbox, `${unknown.requestId}.json`), JSON.stringify(unknown));
     writeFileSync(join(inbox, "bad.json"), "{");
@@ -56,7 +56,7 @@ describe("controlled canary inbox", () => {
 
     const results = await processCanaryInbox({
       directory: inbox,
-      knownJobs: new Set(["macro-watch"]),
+      knownTenants: new Set(["alpha"]),
       now,
       handle,
     });
@@ -75,7 +75,7 @@ describe("controlled canary inbox", () => {
 
     const results = await processCanaryInbox({
       directory: inbox,
-      knownJobs: new Set(["macro-watch"]),
+      knownTenants: new Set(["alpha"]),
       now,
       handle: async () => { throw new Error("host-memory-pressure"); },
     });

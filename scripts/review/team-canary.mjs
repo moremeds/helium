@@ -18,7 +18,7 @@ const command = process.argv[2];
 const args = process.argv.slice(3);
 const allowed = new Set([
   "--state-root",
-  "--job",
+  "--tenant",
   "--case-key",
   "--operator",
   "--reason",
@@ -51,7 +51,7 @@ function syncDirectory(path) {
 }
 
 function writeRequest() {
-  const job = required("--job");
+  const tenant = required("--tenant");
   const caseKey = required("--case-key");
   const requestedBy = required("--operator");
   const reason = required("--reason");
@@ -63,7 +63,7 @@ function writeRequest() {
     version: 1,
     requestId: `canary-${randomBytes(12).toString("hex")}`,
     caseKey,
-    job,
+    tenant,
     requestedBy,
     reason,
     createdAt: now.toISOString(),

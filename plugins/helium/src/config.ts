@@ -10,16 +10,28 @@ import { z } from "zod";
 export type RuntimeMode = "legacy-direct" | "work-order-adapter";
 
 export interface Config {
+  /** v1-only; deleted with the v1 lane. */
   runtimeMode: RuntimeMode;
+  /** v1-only; deleted with the v1 lane. */
   teamShadowEnabled?: boolean;
-  teamPromotionMode?: "off" | "shadow" | "review-only";
-  teamCanaryJobs?: string[];
+  teamPromotionMode?: "off" | "shadow" | "review-only" | "delivered";
+  teamCanaryTenants?: string[];
   teamCanaryMaxPerUtcDay?: number;
   teamsDir?: string;
   opsEventLog?: string;
+  /** v1-only; deleted with the v1 lane. */
   jobsDir: string;
+  tenantsDir: string;
+  tenantDeliveryEnabled?: boolean;
+  /**
+   * Liveness heartbeat period. The dead-man's stale window
+   * (`HELIUM_DEADMAN_STALE_S`, 600 s) is tunable, so the emitter period has to
+   * be too, or the two can be configured into permanent disagreement.
+   */
+  tenantLivenessMs?: number;
   stateRoot: string;
   contextFile: string;
+  /** v1-only; deleted with the v1 lane. */
   calendarsDir: string;
   argonBase: string;
   apexBase: string;
@@ -36,12 +48,17 @@ export const ConfigSchema = z.object({
     .enum(["legacy-direct", "work-order-adapter"])
     .default("legacy-direct"),
   teamShadowEnabled: z.boolean().default(false),
-  teamPromotionMode: z.enum(["off", "shadow", "review-only"]).default("off"),
-  teamCanaryJobs: z.array(z.string().min(1)).default([]),
+  teamPromotionMode: z
+    .enum(["off", "shadow", "review-only", "delivered"])
+    .default("off"),
+  teamCanaryTenants: z.array(z.string().min(1)).default([]),
   teamCanaryMaxPerUtcDay: z.number().int().positive().default(1),
   teamsDir: z.string().min(1).default("teams"),
   opsEventLog: z.string().min(1).optional(),
   jobsDir: z.string().min(1),
+  tenantsDir: z.string().min(1),
+  tenantDeliveryEnabled: z.boolean().default(false),
+  tenantLivenessMs: z.number().int().positive().max(3_600_000).default(300_000),
   stateRoot: z.string().min(1),
   contextFile: z.string().min(1),
   calendarsDir: z.string().min(1),

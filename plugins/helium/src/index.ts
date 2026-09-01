@@ -5,7 +5,7 @@
  * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
@@ -13,22 +13,25 @@ import { Cron } from "croner";
 import {
   JsonlWriter,
   admission,
-  parseTeamYaml,
   type RunOutcome,
   type WorkOrder,
 } from "@helium/core";
-import { buildTools, type JobSpec } from "@helium/v1-compat";
 import type { ClaudeResult } from "./claude.js";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
+import { processCanaryInbox } from "./canary-inbox.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
-import { TriageRunner, type SeniorLane } from "./dispatch.js";
 import { readEnvFile } from "./envfile.js";
-import { HeliumRuntime } from "./runtime.js";
 import { ProviderRuntime } from "./provider-runtime.js";
 import { TeamPromotionAdapter } from "./promotion.js";
 import { TeamController } from "./team-controller.js";
 import { OpsResourcePressureReader } from "./ops-pressure.js";
 import { registerEcosystemTools } from "./toolkit.js";
+import {
+  loadValidatedTenants,
+  TenantRuntime,
+  tenantOutputContracts,
+} from "./tenant-runtime.js";
+import type { LoadedTenant } from "./tenants.js";
 
 export const name = "helium";
 export const inject = [
@@ -108,60 +111,13 @@ export function seniorOutcome(
  * the child has reached quiescence (`runClaude()` resolves only after the
  * process group has closed).
  */
-/**
- * Writes the MCP stdio config for ONE senior attempt, into that attempt's own
- * workspace, derived from the job's declared contract.
- *
- * Previously this was written once at startup to `<stateRoot>/mcp.json` with a
- * hardcoded five-name `HELIUM_TOOLS` string. That made the tool contract a
- * constant rather than a property of the tenant: a job could declare any tool
- * list it liked and the child still received the same fixed set, so a
- * misspelled capability in a job's YAML could never produce a bad
- * `HELIUM_TOOLS` and never trip the job-load validator. Deriving it from
- * `job.tools` — the same list already used to build the `mcp__helium__*`
- * allow-list — is what makes that validator reachable.
- *
- * `HELIUM_ALLOW_MUTATIONS` likewise follows the job rather than a literal `0`.
- * Job load currently refuses `allowMutations: true` outright, so it is always
- * `"0"` today; writing it truthfully means the flag is never a no-op that
- * merely looks like a granted permission.
- *
- * Per-attempt rather than per-daemon because the file now varies by job, and
- * the attempt workspace is already created and removed around the child.
- */
-export function writeMcpConfig(config: Config, job: JobSpec, dir: string): string {
-  const path = join(dir, "mcp.json");
-  writeFileSync(
-    path,
-    JSON.stringify(
-      {
-        mcpServers: {
-          helium: {
-            command: config.mcpBin,
-            args: [],
-            env: {
-              HELIUM_TOOLS: job.tools.join(","),
-              HELIUM_ALLOW_MUTATIONS: job.allowMutations ? "1" : "0",
-              HELIUM_ARGON_BASE: config.argonBase,
-              HELIUM_APEX_BASE: config.apexBase,
-              ...(config.livewireDb
-                ? { HELIUM_LIVEWIRE_DB: config.livewireDb }
-                : {}),
-              HELIUM_STATE_ROOT: config.stateRoot,
-            },
-          },
-        },
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-  return path;
-}
-
 /** Writes one team attempt's MCP allow-list from its provider-neutral WorkOrder. */
-export function writeTeamMcpConfig(config: Config, work: WorkOrder, dir: string): string {
+export function writeTeamMcpConfig(
+  config: Config,
+  work: WorkOrder,
+  dir: string,
+  envKeys: readonly string[] = [],
+): string {
   const path = join(dir, "mcp.json");
   writeFileSync(
     path,
@@ -173,11 +129,31 @@ export function writeTeamMcpConfig(config: Config, work: WorkOrder, dir: string)
             args: [],
             env: {
               HELIUM_TOOLS: work.constraints.tools.join(","),
+              // Stays the literal "0" on every team path. The forwarded keys
+              // below are credentials for READ-ONLY tools and can never change
+              // that; `selection.ts` drops a tool outside the allow-list even
+              // with mutations enabled.
               HELIUM_ALLOW_MUTATIONS: "0",
               HELIUM_ARGON_BASE: config.argonBase,
               HELIUM_APEX_BASE: config.apexBase,
               ...(config.livewireDb ? { HELIUM_LIVEWIRE_DB: config.livewireDb } : {}),
               HELIUM_STATE_ROOT: config.stateRoot,
+              // REQUIRED, ABSOLUTE. The child's cwd is an isolated workspace
+              // under stateRoot/workspaces, so a relative "plugins" resolves to
+              // nothing and every team agent gets zero tools.
+              HELIUM_TENANTS_DIR: config.tenantsDir,
+              // Tenant-declared keys, forwarded by NAME from the daemon
+              // environment (sourced from HELIUM_ENV_FILE by
+              // scripts/launchd/run-dsh.sh). A missing key is omitted, not
+              // blanked, so a tool preflight reports "unset", not "wrong".
+              ...Object.fromEntries(
+                envKeys
+                  .map((key) => [key, process.env[key]] as const)
+                  .filter(
+                    (entry): entry is readonly [string, string] =>
+                      entry[1] !== undefined,
+                  ),
+              ),
             },
           },
         },
@@ -202,22 +178,6 @@ export function apply(ctx: Context, raw: Config): void {
     smtp: smtpFromEnv(readEnvFile(cfg.envFile)),
   });
 
-  // Global in-process registration for dsh agents / the interactive Web UI:
-  // read-only by design (spec §6), regardless of any job's allowMutations. A
-  // job that enables mutations gets those tools only through the senior
-  // lane's MCP server (HELIUM_ALLOW_MUTATIONS=1), keeping the audit boundary
-  // on the child process instead of on every interactive session.
-  const tools = buildTools({
-    argonBase: cfg.argonBase,
-    apexBase: cfg.apexBase,
-    livewireDb: cfg.livewireDb,
-    stateRoot: cfg.stateRoot,
-  });
-  registerEcosystemTools(
-    ctx,
-    tools.filter((t) => !t.mutating),
-  );
-
   const providers = new ProviderRuntime(ctx, {
     stateRoot: paths.state,
     workspacesDir: paths.workspaces,
@@ -226,95 +186,139 @@ export function apply(ctx: Context, raw: Config): void {
     proxy: cfg.proxy,
   });
 
-  const promotionMode = cfg.teamPromotionMode !== "off"
-    ? cfg.teamPromotionMode
-    : cfg.teamShadowEnabled
-      ? "shadow"
-      : "off";
-  const shadow = promotionMode !== "off"
-    ? (() => {
-        const manifest = parseTeamYaml(
-          readFileSync(join(cfg.teamsDir ?? "teams", "macro.yaml"), "utf8"),
-        );
-        const pressure = cfg.opsEventLog === undefined
-          ? undefined
-          : new OpsResourcePressureReader(cfg.opsEventLog);
-        const controller = new TeamController({
-          stateRoot: join(paths.state, "teams"),
-          manifest,
-          routing: {
-            route: async (input) => {
-              const routed = await providers.routing.route(input);
-              return {
-                decision: routed.decision,
-                ...(routed.lease === undefined ? {} : { lease: routed.lease }),
-                catalogVersion: routed.audit.catalogVersion,
-              };
-            },
-          },
-          execution: {
-            run: (teamRunId, work, lease, signal) =>
-              providers.runTeam(
-                teamRunId,
-                work,
-                lease,
-                signal,
-                (candidate, dir) => writeTeamMcpConfig(cfg, candidate, dir),
-              ),
-            closeTeam: (teamRunId) => providers.host.closeTeam(teamRunId),
-            drain: () => providers.host.drain(),
-          },
-          ...(pressure === undefined
-            ? {}
-            : {
-                admission: {
-                  decide: admission.decide,
-                  pressure: () => pressure.read(),
-                  policy: {
-                    sustainedMemoryPressureMs: 5 * 60_000,
-                    sustainedRecoveryMs: 5 * 60_000,
-                  },
-                },
-              }),
-        });
-        return new TeamPromotionAdapter({
-          mode: promotionMode,
-          canaryJobs: cfg.teamCanaryJobs ?? [],
-          maxPerUtcDay: cfg.teamCanaryMaxPerUtcDay ?? 1,
-          stateRoot: paths.state,
-          run: (input) => controller.run(input),
-          providerHealth: () => providers.healthSnapshot(),
-        });
-      })()
-    : undefined;
-
-  const runtime = new HeliumRuntime({
-    config: cfg,
-    engines: {
-      triage: new TriageRunner(ctx),
-      senior: providers.seniorLane((job, dir) => writeMcpConfig(cfg, job, dir)),
-    },
-    delivery: {
-      deliver: (job, ev, result) => delivery.deliver(job, ev, result),
-      budgetExhausted: (job, ev, info) =>
-        delivery.budgetExhausted(job, ev, info),
-      heartbeat: (row) => delivery.heartbeat(row),
-      reconcileDeliveries: () => delivery.reconcileDeliveries(),
-    },
-    ...(shadow === undefined ? {} : { shadow }),
+  // ONE promotion adapter for the whole daemon: it owns the canary allow-list,
+  // the per-UTC-day budget and the review-inbox fallback. The effective mode
+  // per tenant is `narrower(host brake, tenant request)`, decided inside it.
+  const promotionMode = cfg.teamPromotionMode ?? "off";
+  const promotion = new TeamPromotionAdapter({
+    mode: promotionMode,
+    canaryTenants: cfg.teamCanaryTenants ?? [],
+    maxPerUtcDay: cfg.teamCanaryMaxPerUtcDay ?? 1,
+    stateRoot: paths.state,
+    providerHealth: () => providers.healthSnapshot(),
   });
+  const pressure =
+    cfg.opsEventLog === undefined
+      ? undefined
+      : new OpsResourcePressureReader(cfg.opsEventLog);
 
-  // Exported controllers remain model-blind; concrete target selection stays
-  // inside ProviderRuntime's routing boundary.
+  // Tenant discovery is ASYNC (a tenant's tool module and descriptor are
+  // dynamic imports, and `readiness()` is awaited), and cordis `apply` is
+  // synchronous, so the awaited work lives inside the existing effect rather
+  // than racing the plugin lifecycle.
   ctx.effect(async () => {
     await ctx.get("loader")?.await();
+    // ONE load path, shared verbatim with scripts/release/validate-tenants.mjs.
+    // Pre-flip validation that ran a different, shorter check is how a bad
+    // tool module or a failed preflight reached the mini and was discovered
+    // after the launchd flip.
+    const { tenants, skipped, catalog } = await loadValidatedTenants({
+      tenantsDir: cfg.tenantsDir,
+      stateRoot: cfg.stateRoot,
+      env: process.env,
+    });
+    for (const skip of skipped) {
+      console.error(
+        `helium: SKIPPING ${skip.tenant} (${skip.dir}) -- this tenant is NOT running: ${skip.reason}`,
+      );
+    }
+
+    // Global in-process registration for dsh agents / the interactive Web UI:
+    // read-only by design (spec §6). A mutating tool never reaches this
+    // surface, and no tenant tool may declare itself mutating.
+    registerEcosystemTools(
+      ctx,
+      catalog.tools.filter((t) => !t.mutating),
+    );
+
+    const controllers = new Map<string, TeamController>();
+    const controllerFor = (tenant: LoadedTenant): TeamController => {
+      const existing = controllers.get(tenant.spec.tenant);
+      if (existing !== undefined) return existing;
+      const controller = new TeamController({
+        stateRoot: join(paths.state, "teams", tenant.spec.tenant),
+        manifest: tenant.manifest,
+        outputContracts: tenantOutputContracts(tenant),
+        routing: {
+          route: async (input) => {
+            const routed = await providers.routing.route(input);
+            return {
+              decision: routed.decision,
+              ...(routed.lease === undefined ? {} : { lease: routed.lease }),
+              catalogVersion: routed.audit.catalogVersion,
+            };
+          },
+        },
+        execution: {
+          run: (teamRunId, work, lease, signal) =>
+            providers.runTeam(teamRunId, work, lease, signal, (candidate, dir) =>
+              writeTeamMcpConfig(cfg, candidate, dir, tenant.spec.env ?? []),
+            ),
+          closeTeam: (teamRunId) => providers.host.closeTeam(teamRunId),
+          drain: () => providers.host.drain(),
+        },
+        ...(pressure === undefined
+          ? {}
+          : {
+              admission: {
+                decide: admission.decide,
+                pressure: () => pressure.read(),
+                policy: {
+                  sustainedMemoryPressureMs: 5 * 60_000,
+                  sustainedRecoveryMs: 5 * 60_000,
+                },
+              },
+            }),
+      });
+      controllers.set(tenant.spec.tenant, controller);
+      return controller;
+    };
+
+    const byName = new Map(tenants.map((t) => [t.spec.tenant, t]));
+    const tenantRuntime = new TenantRuntime({
+      tenantsDir: cfg.tenantsDir,
+      stateRoot: cfg.stateRoot,
+      tenants,
+      skipped,
+      controllerFor,
+      jsonl,
+      ...(cfg.tenantLivenessMs === undefined
+        ? {}
+        : { livenessMs: cfg.tenantLivenessMs }),
+      promotion: {
+        handle: (tenant, event, run) => promotion.handle(tenant, event, run),
+        processCanaryInbox: async () => {
+          // A controlled canary is an explicit operator action against an
+          // allow-listed tenant; in `off`/`shadow` there is nothing to promote,
+          // so the inbox is not drained rather than draining it into failures.
+          if (promotionMode === "off" || promotionMode === "shadow") return;
+          const results = await processCanaryInbox({
+            directory: join(cfg.stateRoot, "team-canary", "requests"),
+            knownTenants: new Set(byName.keys()),
+            handle: async (request) => {
+              const loaded = byName.get(request.tenant);
+              if (loaded === undefined) {
+                throw new Error(`unknown canary tenant: ${request.tenant}`);
+              }
+              await promotion.handleCanary(loaded, request, (input) =>
+                controllerFor(loaded).run(input),
+              );
+            },
+          });
+          for (const result of results) {
+            console.log("[helium] controlled canary processed", result);
+          }
+        },
+      },
+    });
+
     await providers.start();
-    runtime.start();
+    tenantRuntime.start();
     return async () => {
-      runtime.stop();
+      tenantRuntime.stop();
       await providers.dispose();
     };
-  }, "helium.runtime()");
+  }, "helium.tenants()");
 
   // Daily synthesis (spec §8/§11): the floor, not the product. Also prunes
   // the JSONL trail to the 90-day retention window (controller-pinned

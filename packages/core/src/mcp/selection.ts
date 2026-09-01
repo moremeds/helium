@@ -69,7 +69,8 @@ export function selected(
   env: SelectionEnv = process.env,
 ): Selection {
   const allowMutations = env.HELIUM_ALLOW_MUTATIONS === "1";
-  const names = (env.HELIUM_TOOLS ?? "")
+  const declared = env.HELIUM_TOOLS;
+  const names = (declared ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -102,7 +103,10 @@ export function selected(
   return {
     tools: catalog.tools
       .filter((t) => allowMutations || !t.mutating)
-      .filter((t) => names.length === 0 || names.includes(t.name)),
+      // UNSET means "no allow-list configured" (dev, ops) and serves the
+      // catalog. An EMPTY STRING is a real, explicit allow-list of nothing: a
+      // role that declares `tools: []` must reach no tool at all. Fail closed.
+      .filter((t) => declared === undefined || names.includes(t.name)),
     degraded,
   };
 }

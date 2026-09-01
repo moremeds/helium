@@ -1,4 +1,4 @@
-/** Durable, one-shot operator inbox for review-only P4 canaries. */
+/** Durable, one-shot operator inbox for controlled per-tenant canaries. */
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -48,7 +48,7 @@ function safeStem(name: string): string {
 function validateRequest(
   raw: unknown,
   filename: string,
-  knownJobs: ReadonlySet<string>,
+  knownTenants: ReadonlySet<string>,
   now: Date,
 ): ControlledCanaryRequest {
   const request = ControlledCanaryRequestSchema.parse(raw);
@@ -62,13 +62,15 @@ function validateRequest(
   if (expiresAt - createdAt > 60 * 60_000) {
     throw new Error("canary request lifetime exceeds one hour");
   }
-  if (!knownJobs.has(request.job)) throw new Error(`unknown canary job: ${request.job}`);
+  if (!knownTenants.has(request.tenant)) {
+    throw new Error(`unknown canary tenant: ${request.tenant}`);
+  }
   return request;
 }
 
 export async function processCanaryInbox(options: {
   directory: string;
-  knownJobs: ReadonlySet<string>;
+  knownTenants: ReadonlySet<string>;
   now?: () => Date;
   handle(request: ControlledCanaryRequest): Promise<void>;
 }): Promise<CanaryInboxResult[]> {
@@ -83,7 +85,7 @@ export async function processCanaryInbox(options: {
       request = validateRequest(
         JSON.parse(readFileSync(source, "utf8")),
         name,
-        options.knownJobs,
+        options.knownTenants,
         options.now?.() ?? new Date(),
       );
       try {

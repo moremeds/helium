@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkOrderSchema } from "@helium/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runGuarded, seniorOutcome, writeTeamMcpConfig } from "./index.js";
+import { runGuarded, writeTeamMcpConfig } from "./index.js";
 
 describe("runGuarded", () => {
   afterEach(() => {
@@ -42,45 +42,11 @@ describe("runGuarded", () => {
   });
 });
 
-describe("seniorOutcome", () => {
-  it("reports a quota-exhausted run under its own label with the reset hint, not as a plain error", () => {
-    const out = seniorOutcome({
-      ok: false,
-      classification: "quota-exhausted",
-      retryAfter: "2026-08-29T18:00:00Z",
-      text: "Claude AI usage limit reached",
-    });
-    expect(out.outcome).toBe("run_failed");
-    expect(out.error).toContain("quota-exhausted");
-    expect(out.error).toContain("2026-08-29T18:00:00Z");
-  });
-
-  it("omits the reset hint when the provider gave none, rather than inventing one", () => {
-    const out = seniorOutcome({ ok: false, classification: "quota-exhausted" });
-    expect(out.error).toBe("quota-exhausted");
-  });
-
-  it("keeps the completed, timed-out and generic-failure mappings unchanged", () => {
-    expect(seniorOutcome({ ok: true, text: "analysis" })).toEqual({
-      outcome: "run_completed",
-      analysis: "analysis",
-    });
-    expect(seniorOutcome({ ok: false, classification: "timeout" })).toEqual({
-      outcome: "timed_out",
-      error: "senior lane exceeded its wall clock",
-    });
-    expect(
-      seniorOutcome({ ok: false, classification: "proxy", text: "tunnel down" }),
-    ).toEqual({ outcome: "run_failed", error: "proxy: tunnel down" });
-  });
-});
-
-describe("writeTeamMcpConfig", () => {
-  it("gives a team attempt only its declared read-only MCP tools", () => {
-    const dir = mkdtempSync(join(tmpdir(), "helium-team-mcp-"));
-    const path = writeTeamMcpConfig({
+const teamConfig = () =>
+  ({
       runtimeMode: "legacy-direct",
       jobsDir: "jobs",
+      tenantsDir: "/private/plugins",
       stateRoot: "/private/state",
       contextFile: "context",
       calendarsDir: "calendars",
@@ -90,8 +56,11 @@ describe("writeTeamMcpConfig", () => {
       claudeTokenFile: "claude",
       proxy: "http://proxy",
       mcpBin: "/bin/helium-mcp",
-      emailTo: "operator@example.invalid",
-    }, WorkOrderSchema.parse({
+    emailTo: "operator@example.invalid",
+  }) as Parameters<typeof writeTeamMcpConfig>[0];
+
+const teamWork = () =>
+  WorkOrderSchema.parse({
       id: "team-mcp-boundary",
       role: "inflation-researcher",
       taskClass: "team.inflation-evidence",
@@ -102,14 +71,52 @@ describe("writeTeamMcpConfig", () => {
         minIsolationClass: "process",
       },
       inputs: { artifacts: [], prompt: "read" },
-      acceptance: { outputSchema: "ClaimSet.v1" },
-    }), dir);
+    acceptance: { outputSchema: "ClaimSet.v1" },
+  });
+
+describe("writeTeamMcpConfig", () => {
+  it("gives a team attempt only its declared read-only MCP tools", () => {
+    const dir = mkdtempSync(join(tmpdir(), "helium-team-mcp-"));
+    const path = writeTeamMcpConfig(teamConfig(), teamWork(), dir);
     const parsed = JSON.parse(readFileSync(path, "utf8"));
     expect(parsed.mcpServers.helium.env).toMatchObject({
       HELIUM_TOOLS: "argon_api",
       HELIUM_ALLOW_MUTATIONS: "0",
       HELIUM_ARGON_BASE: "http://argon",
       HELIUM_STATE_ROOT: "/private/state",
+      // REQUIRED and ABSOLUTE: the child's cwd is an isolated workspace, so a
+      // relative path resolves to nothing and the agent gets zero tools.
+      HELIUM_TENANTS_DIR: "/private/plugins",
     });
+    // With no tenant-declared keys the env block is exactly today's set plus
+    // HELIUM_TENANTS_DIR -- forwarding is opt-in per tenant, never ambient.
+    expect(Object.keys(parsed.mcpServers.helium.env).sort()).toEqual([
+      "HELIUM_ALLOW_MUTATIONS",
+      "HELIUM_APEX_BASE",
+      "HELIUM_ARGON_BASE",
+      "HELIUM_STATE_ROOT",
+      "HELIUM_TENANTS_DIR",
+      "HELIUM_TOOLS",
+    ]);
+  });
+
+  it("forwards a tenant's declared env key NAMES and omits an unset one", () => {
+    process.env.OW_TEST_KEY = "value-not-a-secret";
+    delete process.env.OW_ABSENT_KEY;
+    const dir = mkdtempSync(join(tmpdir(), "helium-team-mcp-"));
+    const path = writeTeamMcpConfig(
+      teamConfig(),
+      teamWork(),
+      dir,
+      ["OW_TEST_KEY", "OW_ABSENT_KEY"],
+    );
+    const raw = readFileSync(path, "utf8");
+    expect(JSON.parse(raw).mcpServers.helium.env.OW_TEST_KEY).toBe(
+      "value-not-a-secret",
+    );
+    // A missing key is OMITTED, not blanked, so a tool preflight can report
+    // "unset" rather than "wrong". The name must not appear at all.
+    expect(raw).not.toContain("OW_ABSENT_KEY");
+    delete process.env.OW_TEST_KEY;
   });
 });

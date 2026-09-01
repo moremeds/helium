@@ -100,6 +100,18 @@ describe("mcp selection", () => {
     ]);
   });
 
+  it("treats an EMPTY HELIUM_TOOLS as an explicit allow-list of nothing", () => {
+    // A role declaring `tools: []` writes the empty string. Serving the whole
+    // catalog for it would hand a no-tool role every tool there is.
+    expect(selected(catalog(), env({ HELIUM_TOOLS: "" })).tools).toEqual([]);
+  });
+
+  it("serves the whole non-mutating catalog when HELIUM_TOOLS is UNSET", () => {
+    expect(selected(catalog(), env({})).tools.map((t) => t.name)).toEqual([
+      "alpha_read",
+    ]);
+  });
+
   it("never throws for an unknown name either — the job-load validator is that gate, and the server calls this at import time", () => {
     const e = env({ HELIUM_TOOLS: "alpha_read,not_a_real_tool" });
     expect(() => selected(catalog(), e)).not.toThrow();
