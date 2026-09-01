@@ -50,6 +50,7 @@ jobs:
           scripts/ops/promotion-package.test.mjs
           scripts/review/team-canary.test.mjs
           scripts/release/validate-tenants.test.mjs
+          scripts/release/check-plist-paths.test.mjs
           scripts/release/opsd-cycle-after.test.mjs
       - name: repeat adversarial ops boundaries 20 times
         run: >-

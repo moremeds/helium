@@ -22,6 +22,7 @@ SRC="$HOME/projects/helium"
 DSH_HOME_DIR="$HOME/.helium/dsh-home"
 STATE_ROOT="$HOME/.helium/state"
 OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
+DSH_PLIST="$HOME/Library/LaunchAgents/com.helium.dsh.plist"
 OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
 OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
 DSH_PIN=0.1.2-alpha.3
@@ -112,6 +113,19 @@ say "validating tenant files"
 if ! node "$DEST/scripts/release/validate-tenants.mjs" "$DEST"; then
   echo "tenant validation FAILED — aborting before flip" >&2
   exit 75
+fi
+
+# The flip repoints `current` but NEVER rewrites the DSH plist, so a release
+# that moves or deletes a path the plist names leaves the daemon pointing at
+# nothing. launchd restarts it, the process looks alive, and it serves zero
+# tools -- silently, which is the worst shape a production failure can take.
+# (v0.1.11 -> the tenant lane: HELIUM_MCP_BIN pointed into packages/v1-compat,
+# which that release deletes.) Refuse the flip and name the keys instead.
+say "checking the installed DSH plist against $VERSION"
+if ! node "$DEST/scripts/release/check-plist-paths.mjs" \
+  "$DSH_PLIST" "$RELEASES" "$DEST"; then
+  echo "DSH plist references paths $VERSION does not ship — aborting before flip" >&2
+  exit 76
 fi
 
 say "provider smoke (one live Codex gpt-5.6-sol/high read-only call)"
