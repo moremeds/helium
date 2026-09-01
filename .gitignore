@@ -16,3 +16,6 @@ HANDOFF-*.md
 # checkout and deployment, not the project. Listed so it cannot be committed by
 # accident once the repo is public.
 CLAUDE.md
+
+# session scratch: build/test baselines captured during execution
+.baseline*.txt
