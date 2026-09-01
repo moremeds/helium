@@ -388,11 +388,42 @@ describe("production ProviderRuntime", () => {
     await plane.dispose();
   });
 
-  it("routes every committed Macro role through the certified Codex target", async () => {
+  it("routes every role of an inline manifest through the certified Codex target", async () => {
     const plane = runtime({ certifications: productionProviderCertifications });
-    const manifest = parseTeamYaml(
-      readFileSync(join(import.meta.dirname, "../../../teams/macro.yaml"), "utf8"),
-    );
+    // INLINE, not a file: this case asserts every task receives a lease, and
+    // `router.ts` matches capability tags by exact containment. Pointing it at
+    // a tenant manifest would make it fail on that tenant's own tags -- and
+    // adding those tags to the production `targetProfile()` to make a test pass
+    // is exactly backwards.
+    const manifest = parseTeamYaml(`
+manifestVersion: team-v1
+name: routing-coverage
+roles:
+  inflation-researcher:
+    responsibility: evidence
+    requires: [macro-source-research, inflation-analysis]
+    permissions: { externalResearch: true, mutations: forbidden, artifactRead: [source-artifacts] }
+  verifier:
+    responsibility: verification
+    requires: [claim-verification, fresh-evidence, independent-source]
+    permissions: { externalResearch: true, mutations: forbidden, artifactRead: [source-artifacts, dependency-artifacts] }
+  lead:
+    responsibility: synthesis
+    requires: [macro-causal-synthesis]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [dependency-artifacts] }
+  renderer:
+    responsibility: rendering
+    requires: [render-adjudicated-claims]
+    permissions: { externalResearch: false, mutations: forbidden, artifactRead: [accepted-claim-ledger] }
+tasks:
+  - { id: research, role: inflation-researcher, dependsOn: [], requires: [macro-source-research, inflation-analysis], inputs: [source-artifacts], outputSchema: ClaimSet.v1 }
+  - { id: verify, role: verifier, dependsOn: [research], requires: [claim-verification, fresh-evidence, independent-source], inputs: [source-artifacts, dependency-artifacts], outputSchema: EvidenceDecisionSet.v1 }
+  - { id: synthesis, role: lead, dependsOn: [verify], requires: [macro-causal-synthesis], inputs: [dependency-artifacts], outputSchema: AdjudicatedSynthesis.v1 }
+  - { id: render, role: renderer, dependsOn: [synthesis], requires: [render-adjudicated-claims], inputs: [accepted-claim-ledger], outputSchema: ShadowReport.v1 }
+crossReference: { compareClaims: true, materialContradictions: fresh-evidence-work-order, requireIndependentEvidence: true }
+budgets: { maxAttempts: 4, maxTokens: 100000 }
+acceptance: { allowPartialClaims: true, terminalTasks: [render] }
+`);
     for (const task of manifest.tasks) {
       const candidate = WorkOrderSchema.parse({
         id: `macro-${task.id}`,

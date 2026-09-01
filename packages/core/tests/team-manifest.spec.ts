@@ -92,7 +92,7 @@ describe("parseTeamYaml", () => {
   });
 
   it("loads the committed provider-neutral macro DAG", () => {
-    const path = resolve(import.meta.dirname, "../../../teams/macro.yaml");
+    const path = resolve(import.meta.dirname, "../../../evals/fixtures/macro-team/team.yaml");
     const text = readFileSync(path, "utf8");
     const manifest = parseTeamYaml(text);
     expect(manifest.tasks.map((task) => [task.id, task.dependsOn])).toEqual([

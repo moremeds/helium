@@ -453,7 +453,7 @@ describe("TeamController", () => {
 
   it("runs the committed eight-node macro manifest end to end with a fake executor", async () => {
     const macro = parseTeamYaml(
-      readFileSync(resolve(import.meta.dirname, "../../../teams/macro.yaml"), "utf8"),
+      readFileSync(resolve(import.meta.dirname, "../../../evals/fixtures/macro-team/team.yaml"), "utf8"),
     );
     const claimTasks = [
       "inflation-evidence",

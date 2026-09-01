@@ -122,7 +122,7 @@ export async function replayFrozenCases(fixtureDir: string): Promise<PairedEvalu
   const first = fixtures[0];
   if (first === undefined) throw new Error("macro fixture set is empty");
   const manifest = parseTeamYaml(
-    readFileSync(resolve(repoRoot, "teams/macro.yaml"), "utf8"),
+    readFileSync(resolve(repoRoot, "evals/fixtures/macro-team/team.yaml"), "utf8"),
   );
   const replay = (arm: "control" | "treatment"): EvaluationExecutorAdapter => ({
     execute: async ({ fixture }) => ({ state: "completed", ...fixture[arm] }),
@@ -155,7 +155,7 @@ export async function runOfflineEvaluation(fixtureDir: string): Promise<OfflineE
   ) as AutonomyDecisionInput[];
   const autonomyRecords = autonomyInputs.map(decideAutonomy);
   const manifest = parseTeamYaml(
-    readFileSync(resolve(repoRoot, "teams/macro.yaml"), "utf8"),
+    readFileSync(resolve(repoRoot, "evals/fixtures/macro-team/team.yaml"), "utf8"),
   );
   const taskIds = manifest.tasks.map((task) => task.id).sort();
   const decidedIds = autonomyRecords.map((record) => record.nodeId).sort();
