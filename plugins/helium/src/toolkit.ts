@@ -5,10 +5,12 @@
  * for the exact same tools.
  *
  * dsh-tools API cited against the installed @deepseek-ai/dsh-tools
- * 0.1.1-rc.2 package (plugins/helium/node_modules/@deepseek-ai/dsh-tools):
+ * 0.1.2-alpha.3 package (plugins/helium/node_modules/@deepseek-ai/dsh-tools),
+ * re-measured 2026-09-01 during the version bump — the signatures are
+ * unchanged from 0.1.1-rc.2, only the emitted line numbers moved:
  * - ToolRuntime.register(definition: ToolDefinition): () => void
- *   (lib/types/index.d.ts:603; impl lib/index.js:2762 — throws TypeError
- *   when `output` is missing/malformed, lib/index.js:2765).
+ *   (lib/types/index.d.ts:602; impl lib/index.js:2774 — throws TypeError
+ *   when `output` is missing/malformed, lib/index.js:2777).
  * - defineTool<const S extends ParameterSchemaSpec, const O extends
  *   ValueSchemaSpec>(options): ToolDefinition (lib/types/schema.d.ts:239).
  *   `output` is mandatory on DefineToolOptions (schema.d.ts:186-193) — a

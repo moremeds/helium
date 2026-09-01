@@ -54,6 +54,11 @@ export interface DeepSeekCatalog extends ProviderCatalog {
   };
 }
 
+// The version strings below are NOT pins — they record which dsh the sanitized
+// live preflight actually ran against on 2026-08-25. They deliberately still say
+// 0.1.1-rc.2 after the 0.1.2-alpha.3 promotion: rewriting them would claim a
+// measurement nobody took. Re-run the preflight on the new dsh, then bump both
+// together with a new recordedAt.
 export function createDeepSeekCatalog(targets: ProviderTarget[]): DeepSeekCatalog {
   const parsed = parseProviderCatalog({
     catalogVersion: "deepseek-macmini-2026-08-25-dsh-0.1.1-rc.2",

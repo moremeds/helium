@@ -93,6 +93,11 @@ function localFixtureProvider(ctx: Context, active: Set<string>): SubagentProvid
       depthLimit: true,
       toolFilter: true,
       persona: true,
+      // dsh 0.1.2 made subagent model selection a declared provider capability.
+      // True here because start() below forwards request.agentOptions verbatim
+      // to ctx.agents.create — the behaviour helium used to force with a patch
+      // on dsh-subagent-in-process-driver.
+      agentOptions: true,
     },
     inheritsParentContext: true,
     async start(request: ResolvedSubagentStartRequest): Promise<SubagentRun> {

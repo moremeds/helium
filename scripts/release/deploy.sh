@@ -17,7 +17,7 @@ STATE_ROOT=/Users/moremeds/.helium/state
 OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
 OPSD_CONFIG=/Users/moremeds/.helium/ops/config/opsd.json
 OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl
-DSH_PIN=0.1.1-rc.2
+DSH_PIN=0.1.2-alpha.3
 KEEP=5
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then

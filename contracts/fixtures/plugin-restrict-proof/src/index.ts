@@ -12,11 +12,12 @@
  * API key.
  *
  * dsh-scope API cited against the installed @deepseek-ai/dsh-scope
- * 0.1.1-rc.2 package: `scopeOf(ctx: Context): ScopeKey | undefined`
+ * 0.1.2-alpha.3 package: `scopeOf(ctx: Context): ScopeKey | undefined`
  * (lib/types/index.d.ts) reads the nearest scope tag a context carries --
  * `ToolRuntime.restrict()`/`.schemas()` use the identical `scopeOf(this.ctx)`
- * internally (dsh-tools/lib/index.js:2780, confirmed by reading the
- * installed package directly).
+ * internally (dsh-tools/lib/index.js:2792, confirmed by reading the
+ * installed package directly). The signature is unchanged from
+ * 0.1.1-rc.2; only the minified line number moved (2780 -> 2792).
  * @module dsh-plugin-helium-restrict-proof
  */
 import { randomUUID } from "node:crypto";
