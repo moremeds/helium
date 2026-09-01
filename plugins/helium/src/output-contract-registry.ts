@@ -123,8 +123,10 @@ export function createBuiltinOutputContractRegistry(): OutputContractRegistry {
       "Accept only claim keys whose statement is supported by the supplied immutable evidence. Disagreement requires fresh evidence, never a vote.",
     ].join("\n"),
     validate: (structured, context) => {
-      const supplied = EvidenceDecisionSetSchema.safeParse(structured);
-      if (supplied.success) return supplied.data;
+      // Ledger membership is host-decided. The only accepted form is the draft
+      // {acceptedClaimKeys}; every decision below is rebuilt from a claim THIS
+      // process extracted from a producer artifact, so a model can name a key
+      // but can never supply the claim or its evidence.
       const draft = EvidenceDecisionDraftSchema.parse(structured);
       const candidates = [...context.evidenceInputs.values()].flatMap((input) => {
         let decoded: unknown;

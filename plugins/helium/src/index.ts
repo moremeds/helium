@@ -22,8 +22,9 @@ import { processCanaryInbox } from "./canary-inbox.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
 import { readEnvFile } from "./envfile.js";
 import { ProviderRuntime } from "./provider-runtime.js";
-import { TeamPromotionAdapter } from "./promotion.js";
+import { narrower, TeamPromotionAdapter } from "./promotion.js";
 import { TeamController } from "./team-controller.js";
+import { TenantDelivery } from "./tenant-delivery.js";
 import { OpsResourcePressureReader } from "./ops-pressure.js";
 import { registerEcosystemTools } from "./toolkit.js";
 import {
@@ -239,6 +240,19 @@ export function apply(ctx: Context, raw: Config): void {
         stateRoot: join(paths.state, "teams", tenant.spec.tenant),
         manifest: tenant.manifest,
         outputContracts: tenantOutputContracts(tenant),
+        // `delivered` is a request in tenant.yaml; HELIUM_TENANT_DELIVERY is
+        // the operator saying this host may actually send. Both are required.
+        delivery: new TenantDelivery({
+          tenant: tenant.spec.tenant,
+          policy: tenant.spec.delivery,
+          delivery,
+          enabled:
+            cfg.tenantDeliveryEnabled === true
+            && narrower(promotionMode, tenant.spec.promotionMode) === "delivered",
+          ...(tenant.descriptor?.renderEmail === undefined
+            ? {}
+            : { renderEmail: tenant.descriptor.renderEmail }),
+        }),
         routing: {
           route: async (input) => {
             const routed = await providers.routing.route(input);
@@ -282,6 +296,7 @@ export function apply(ctx: Context, raw: Config): void {
       skipped,
       controllerFor,
       jsonl,
+      reconcileDeliveries: () => delivery.reconcileDeliveries(),
       ...(cfg.tenantLivenessMs === undefined
         ? {}
         : { livenessMs: cfg.tenantLivenessMs }),

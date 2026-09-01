@@ -222,6 +222,13 @@ export interface TenantRuntimeDeps {
     ): Promise<void>;
     processCanaryInbox(): Promise<void>;
   };
+  /**
+   * Closes every delivery intent a crash left unresolved, ONCE, before the
+   * first trigger is armed. Without it a killed daemon leaves an intent that
+   * no later run resolves, and `TenantDelivery` cannot tell an already-sent
+   * report from a new one.
+   */
+  reconcileDeliveries?: () => number;
   /** Runtime liveness heartbeat period; 0 disables it (tests). */
   livenessMs?: number;
   jsonl: JsonlWriter;
@@ -242,6 +249,14 @@ export class TenantRuntime {
   }
 
   start(): void {
+    const orphaned = this.deps.reconcileDeliveries?.();
+    if (orphaned !== undefined && orphaned > 0) {
+      this.deps.jsonl.append("tenant-health", {
+        load: "reconciled",
+        orphanedDeliveries: orphaned,
+        phase: "startup",
+      });
+    }
     for (const skip of this.deps.skipped) {
       this.deps.jsonl.append("tenant-health", {
         tenant: skip.tenant,

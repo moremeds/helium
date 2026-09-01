@@ -1,5 +1,6 @@
 /** Deterministic, event-backed shadow team controller. */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import type { TenantDeliveryPort } from "./tenant-delivery.js";
 import {
   AcceptedClaimLedger,
   AgentResultSchema,
@@ -79,6 +80,12 @@ export interface TeamControllerOptions {
   now?: () => Date;
   leaseMs?: number;
   outputContracts?: OutputContractRegistry;
+  /**
+   * `promotionMode: delivered` only. Invoked immediately BEFORE the terminal
+   * append, because core's reducer routes both delivery events through
+   * `requireRunningTeam` — an intent recorded after `team/completed` throws.
+   */
+  delivery?: TenantDeliveryPort;
   admission?: {
     decide: (
       work: { id: string; workClass: "optional-team" | "subagent-fanout" },
@@ -111,6 +118,7 @@ export class TeamController {
   readonly #leaseMs: number;
   readonly #admission?: NonNullable<TeamControllerOptions["admission"]>;
   readonly #outputContracts: OutputContractRegistry;
+  readonly #delivery?: TenantDeliveryPort;
   readonly #controllers = new Map<string, Set<AbortController>>();
 
   constructor(options: TeamControllerOptions) {
@@ -122,6 +130,7 @@ export class TeamController {
     this.#leaseMs = options.leaseMs ?? 15 * 60_000;
     this.#admission = options.admission;
     this.#outputContracts = options.outputContracts ?? createBuiltinOutputContractRegistry();
+    if (options.delivery !== undefined) this.#delivery = options.delivery;
   }
 
   store(caseId: string): TeamStore {
@@ -162,6 +171,7 @@ export class TeamController {
           return team;
         }
         if (this.#terminalComplete(team)) {
+          await this.#deliverBeforeTerminal(store, teamRunId, team, "completed");
           this.#append(store, teamRunId, "team/completed", {});
           await this.#execution.closeTeam(teamRunId);
           return store.load().teams[teamRunId]!;
@@ -200,11 +210,65 @@ export class TeamController {
 
     const team = store.load().teams[teamRunId]!;
     if (team.state === "running" && this.#terminalComplete(team)) {
+      await this.#deliverBeforeTerminal(store, teamRunId, team, "completed");
       this.#append(store, teamRunId, "team/completed", {});
       await this.#execution.closeTeam(teamRunId);
       return store.load().teams[teamRunId]!;
     }
     return team;
+  }
+
+  /**
+   * Runs the delivery port, if one is configured, immediately before the
+   * terminal append. ONE id spans BOTH stores: the recovery coordinator's event
+   * log and delivery.ts's JSONL trail are reconciled by it. Two independently
+   * generated ids meant a crash-recovery reconcile could not tell that the
+   * email had already gone out, and would send it again.
+   */
+  async #deliverBeforeTerminal(
+    store: TeamStore,
+    teamRunId: string,
+    team: TeamRunProjection,
+    outcome: "completed" | "failed",
+  ): Promise<void> {
+    const port = this.#delivery;
+    if (port === undefined) return;
+    const coordinator = this.#recovery(store, teamRunId);
+    // Artifact BODIES, from the store THIS case owns. `read` is synchronous, so
+    // the port stays synchronous for its renderer. An unreadable artifact must
+    // not lose the email: substitute an empty body and log it.
+    const registry = new ArtifactRegistry(store, teamRunId);
+    const artifacts = Object.fromEntries(
+      Object.entries(team.artifacts).map(([ref, projection]) => {
+        try {
+          return [
+            ref,
+            { ...projection, content: registry.read(ref).toString("utf8") },
+          ] as const;
+        } catch (error: unknown) {
+          console.error("[helium] artifact unreadable", {
+            teamRunId,
+            ref,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return [ref, { ...projection, content: "" }] as const;
+        }
+      }),
+    );
+    await port.deliver({
+      teamRunId,
+      team,
+      outcome,
+      artifacts,
+      recordIntent: (refs) => {
+        const deliveryId = `delivery-${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+        coordinator.recordDeliveryIntent(deliveryId, refs);
+        return deliveryId;
+      },
+      recordOutcome: (deliveryId, deliveryOutcome) => {
+        coordinator.recordDeliveryOutcome(deliveryId, deliveryOutcome);
+      },
+    });
   }
 
   async cancel(caseId: string, reason: string): Promise<TeamRunProjection> {
