@@ -11,22 +11,29 @@ The current production release is `v0.1.11`.
 
 ## What works today
 
-The retained Helium v1 compatibility lane can:
+The Helium tenant lane can:
 
-- watch files, calendars, and schedules;
-- collect evidence through an explicit tool allow-list;
-- use a low-cost model for triage and escalate material events to a senior lane;
+- discover every `plugins/<name>/tenant.yaml`, with no registry and no list to edit;
+- route work by declared capability, never by model or vendor;
+- validate every role's declared tools against the merged tenant vocabulary,
+  refusing a role that names a tool no tenant provides;
+- run deterministic verification gates before anything enters the accepted-claim
+  ledger, which the host builds — a model can name a claim key but never supply
+  the claim or its evidence;
+- record a durable delivery intent before any send, and close it with a real
+  terminal outcome;
 - write reports and append-only JSONL records;
-- send rate-limited email;
+- send rate-limited email, gated on both the tenant's declared mode and an
+  operator env flag;
 - expose heartbeats, canaries, and dead-man monitoring;
 - deploy tagged releases with a tested rollback path; and
 - isolate a malformed tenant so it does not stop the others.
 
-The first production tenant is `macro-watch`. `apex-health` and `dsh-canary`
-exercise the same runtime for service health and harness compatibility.
+The first production tenant is `option-wizard`.
 
 ```text
-Trigger -> triage -> optional senior analysis -> report -> delivery
+Cron trigger -> team controller -> capability routing -> verification gates
+             -> accepted-claim ledger -> delivery intent -> delivery outcome
 ```
 
 Alongside that compatibility lane, the bounded P4 path now runs the Macro
@@ -42,7 +49,7 @@ nothing, and retained the operator's signed alternate decision across a cold
 daemon restart.
 
 This is a working multi-agent and Ops system, not unrestricted autonomy. The
-Macro team cannot deliver automatically, the normal v1 path remains the
+Macro team cannot deliver automatically, the human review inbox is the
 immediate fallback, and Ops currently has no standing approve or automatic
 authority. The five-trading-day window, a real material Macro case, and the
 longer Ops observation window are still accruing P4 evidence.
@@ -56,7 +63,7 @@ from task requirements, safety constraints, budget, latency, evaluations, and
 operator preferences.
 
 The diagram below is the canonical topology now used by the bounded P4 team and
-Ops paths. It does not replace the retained v1 delivery lane. The
+Ops paths. The
 [canonical design](docs/plans/2026-08-25-helium-multi-agent-design.md#55-canonical-agent-and-verification-evidence-topology)
 is normative.
 
@@ -112,7 +119,7 @@ See:
 
 - `packages/core` -- schemas, state, and ecosystem capabilities
 - `plugins/helium` -- DeepSeek Harness integration
-- `jobs` -- declarative v1 tenants
+- `plugins/<tenant>` -- self-contained tenants
 - `profile` -- deployable DSH profile
 - `scripts` -- release, health, canary, and recovery operations
 - `contracts` -- compatibility and runtime contracts
@@ -164,15 +171,26 @@ observation would make the record say something that never happened, which is
 the failure the whole evidence discipline exists to prevent. Read them as
 history, not as configuration examples.
 
-## Adding a v1 job
+## Adding a tenant
 
-Start with an existing file in `jobs/`. A job declares its trigger, approved
-tools, limits, and delivery policy. Job files are validated independently: one
-invalid tenant must not take down the rest of the harness.
+A tenant is a directory, not a registry entry. Create `plugins/<name>/` with
+four files:
 
-The multi-agent design replaces hard-coded engine selection with team roles,
-capability requirements, routing policy, and verification policy. Existing v1
-jobs will continue through a compatibility adapter.
+- `package.json` -- a workspace package, built to `lib/`
+- `tenant.yaml` -- identity, cron triggers, promotion mode, delivery policy,
+  the environment key NAMES its tools need, and one opaque `extensions:` block
+  the host never reads inside
+- `team.yaml` -- roles by required capability and the task DAG; never a model
+  or a vendor
+- `tools/index.ts` -- `VOCABULARY` plus `buildTools(cfg)`, each tool carrying
+  its own dsh parameter spec
+
+Discovery is a glob over `plugins/*/tenant.yaml`; there is nothing else to
+edit. Tenants are validated independently and in isolation: a malformed
+manifest, a tool module that throws, a role naming an unknown tool, or a failed
+readiness probe skips exactly that tenant with a recorded reason, and the
+others keep running. A duplicate tenant NAME is the one exception and fails the
+whole load, because every per-tenant record downstream keys on that name.
 
 ## License
 
