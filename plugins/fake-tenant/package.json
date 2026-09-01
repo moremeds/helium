@@ -1,0 +1,22 @@
+{
+  "name": "dsh-plugin-tenant-fake",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": { ".": "./lib/index.js", "./tools": "./lib/tools/index.js" },
+  "files": ["lib", "tools", "tenant.yaml", "team.yaml"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@helium/core": "file:../../packages/core",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

@@ -218,7 +218,7 @@ export interface TenantRuntimeDeps {
     handle(
       tenant: LoadedTenant,
       event: TenantTriggerEvent,
-      run: () => Promise<TeamRunProjection>,
+      run: (input: TeamRunInput) => Promise<TeamRunProjection>,
     ): Promise<void>;
     processCanaryInbox(): Promise<void>;
   };

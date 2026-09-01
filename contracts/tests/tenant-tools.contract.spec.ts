@@ -54,6 +54,31 @@ describe("contract: the MCP server resolves tenants from an absolute env path", 
     expect(child.stdout).toContain("thesis_read");
   });
 
+  it("serves a TENANT tool from the real plugins directory, foreign cwd", () => {
+    // The half that proves a tenant tool -- not just core's own -- resolves
+    // through an absolute HELIUM_TENANTS_DIR. plugins/fake-tenant ships
+    // `fake_probe` and is `enabled: false`, which does not hide its tools:
+    // the catalog is built from every discovered tenant.
+    const child = spawnSync(
+      process.execPath,
+      [join(repoRoot, "plugins", "helium", "lib", "mcp", "server.js")],
+      {
+        cwd: mkdtempSync(join(tmpdir(), "helium-foreign-cwd-")),
+        env: {
+          ...process.env,
+          HELIUM_TENANTS_DIR: resolve(repoRoot, "plugins"),
+          HELIUM_STATE_ROOT: mkdtempSync(join(tmpdir(), "helium-state-")),
+          HELIUM_TOOLS: "fake_probe",
+        },
+        input: handshake,
+        encoding: "utf8",
+        timeout: 30_000,
+      },
+    );
+    expect(child.stderr).not.toMatch(/must be set to an absolute path/);
+    expect(child.stdout).toContain("fake_probe");
+  });
+
   it("degrades to the thesis-only catalog when the env path is relative", () => {
     const child = spawnSync(
       process.execPath,

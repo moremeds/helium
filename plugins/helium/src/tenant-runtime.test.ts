@@ -64,8 +64,10 @@ function tenant(name: string, enabled = true): LoadedTenant {
  * optional.
  */
 const passthrough: TenantRuntimeDeps["promotion"] = {
-  handle: async (_tenant, _event, run) => {
-    await run();
+  handle: async (tenant, event, run) => {
+    await run(
+      buildTenantRunInput(tenant.spec.tenant, event, tenant.prompt ?? "run"),
+    );
   },
   processCanaryInbox: async () => {},
 };

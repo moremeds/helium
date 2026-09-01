@@ -1,0 +1,67 @@
+manifestVersion: "1"
+name: fake-tenant
+roles:
+  prober:
+    responsibility: evidence
+    requires: [fake-probe-evidence]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [source-artifacts]
+      tools: [fake_probe]
+  checker:
+    responsibility: verification
+    requires: [fake-verification]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [source-artifacts, dependency-artifacts]
+      tools: []
+  scribe:
+    responsibility: rendering
+    requires: [fake-rendering]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: []
+# Two independent producers, then a verifier, then a renderer. Fewer nodes
+# would not exercise the seam honestly: `requireIndependentEvidence` needs two
+# producers, and the renderer's `acceptedClaimKeys` can only resolve against a
+# ledger some verifier actually populated.
+tasks:
+  - id: probe-a
+    role: prober
+    dependsOn: []
+    requires: [fake-probe-evidence]
+    inputs: [source-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: probe-b
+    role: prober
+    dependsOn: []
+    requires: [fake-probe-evidence]
+    inputs: [source-artifacts]
+    outputSchema: ClaimSet.v1
+  - id: checker
+    role: checker
+    dependsOn: [probe-a, probe-b]
+    requires: [fake-verification]
+    inputs: [source-artifacts, dependency-artifacts]
+    outputSchema: EvidenceDecisionSet.v1
+  - id: render
+    role: scribe
+    dependsOn: [checker]
+    requires: [fake-rendering]
+    inputs: [accepted-claim-ledger]
+    # A BUILTIN id. The registry throws `unknown team output schema: <id>` for
+    # anything unregistered, and this tenant deliberately ships no descriptor,
+    # so it has no way to register one of its own. A tenant-owned schema and
+    # "a tenant with no descriptor" are mutually exclusive; this file is the
+    # second.
+    outputSchema: AdjudicatedSynthesis.v1
+crossReference:
+  compareClaims: true
+  materialContradictions: fresh-evidence-work-order
+  requireIndependentEvidence: true
+budgets: { maxAttempts: 4, maxTokens: 100000 }
+acceptance: { allowPartialClaims: true, terminalTasks: [render] }
