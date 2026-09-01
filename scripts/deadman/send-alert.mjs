@@ -2,6 +2,7 @@
 // Minimal alert mailer. Reads SMTP config from a 0600 env file; never prints
 // a secret value. Exit: 0 sent, 2 config error, 3 send failed.
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import nodemailer from "nodemailer";
 
 // --dry-run takes no value, so it is special-cased before the flag/value
@@ -18,7 +19,7 @@ for (let i = 0; i < rest.length; i++) {
   i += 1;
 }
 const envFile =
-  args.get("--env-file") ?? "/Users/moremeds/.config/helium/helium.env";
+  args.get("--env-file") ?? `${homedir()}/.config/helium/helium.env`;
 const subject = args.get("--subject") ?? "helium alert";
 const body = args.get("--body-file")
   ? readFileSync(args.get("--body-file"), "utf8")

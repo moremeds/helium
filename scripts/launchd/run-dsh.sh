@@ -11,7 +11,7 @@
 set -euo pipefail
 
 release="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-env_file="${HELIUM_ENV_FILE:-/Users/moremeds/.config/helium/helium.env}"
+env_file="${HELIUM_ENV_FILE:-$HOME/.config/helium/helium.env}"
 
 if [ -r "$env_file" ]; then
   set -a

@@ -75,7 +75,8 @@ if [ "$command" = "enable" ] && [ ! -f "$backup" ]; then
   cp -p "$plist" "$backup"
 fi
 
-mcp_bin="/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js"
+release_current="$HOME/projects/helium-releases/current"
+mcp_bin="$release_current/packages/v1-compat/lib/mcp/server.js"
 if [ "$command" = "enable" ]; then
   # P2 moved the v1 MCP boundary out of core. Migrate the retained baseline as
   # well as the active canary plist so a later restore cannot resurrect the
@@ -114,12 +115,12 @@ if [ "$command" = "enable" ]; then
     *) current_path="/Applications/ChatGPT.app/Contents/Resources:$current_path" ;;
   esac
   set_string PATH "$current_path"
-  set_string CODEX_HOME "/Users/moremeds/.codex"
+  set_string CODEX_HOME "$HOME/.codex"
   set_string HELIUM_TEAM_PROMOTION_MODE "review-only"
   set_string HELIUM_TEAM_CANARY_JOBS "macro-watch"
   set_string HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY "1"
-  set_string HELIUM_TEAMS_DIR "/Users/moremeds/projects/helium-releases/current/teams"
-  set_string HELIUM_OPS_EVENT_LOG "/Users/moremeds/.helium/ops/state/events.jsonl"
+  set_string HELIUM_TEAMS_DIR "$release_current/teams"
+  set_string HELIUM_OPS_EVENT_LOG "$HOME/.helium/ops/state/events.jsonl"
   set_string HELIUM_MCP_BIN "$mcp_bin"
 else
   set_string HELIUM_TEAM_PROMOTION_MODE "off"

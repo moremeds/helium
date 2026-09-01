@@ -2,10 +2,11 @@
 // Prints the number of runs that have a run_started row with no terminal row.
 // Used by deploy.sh's drain gate before an atomic flip (Task 3.5, spec §9).
 import { readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 const dir = join(
-  process.env.HELIUM_STATE_ROOT ?? "/Users/moremeds/.helium/state",
+  process.env.HELIUM_STATE_ROOT ?? join(homedir(), ".helium", "state"),
   "jsonl",
 );
 const files = readdirSync(dir)

@@ -1,6 +1,7 @@
 {
   "name": "@helium/provider-codex-subscription",
   "version": "0.0.0",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "main": "./lib/catalog.js",

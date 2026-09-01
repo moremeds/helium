@@ -8,6 +8,7 @@
 //
 // Env: HELIUM_JOBS_DIR, HELIUM_STATE_ROOT, HELIUM_DEADMAN_STALE_S (default 600).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,7 +27,7 @@ const { parseJobYaml } = await import(
 
 const jobsDir = process.env.HELIUM_JOBS_DIR ?? join(here, "..", "..", "jobs");
 const stateRoot =
-  process.env.HELIUM_STATE_ROOT ?? "/Users/moremeds/.helium/state";
+  process.env.HELIUM_STATE_ROOT ?? join(homedir(), ".helium", "state");
 const staleS = Number(process.env.HELIUM_DEADMAN_STALE_S ?? "600");
 
 if (!existsSync(jobsDir)) {

@@ -179,7 +179,16 @@ fi
 echo "case 5b: review-only canary switch is exact and reversible"
 canary_plist="$tmp/com.helium.dsh.plist"
 cp "$repo/launchd/com.helium.dsh.plist.template" "$canary_plist"
-sed -i '' 's|__NODE_BIN_DIR__|/opt/homebrew/bin|' "$canary_plist"
+# Resolve every placeholder, the way an operator installing this label by hand
+# must: the fixture is only a faithful stand-in for a loaded plist if nothing
+# is left unsubstituted.
+sed -i '' \
+  -e 's|__NODE_BIN_DIR__|/opt/homebrew/bin|g' \
+  -e "s|__RELEASE__|$HOME/projects/helium-releases/current|g" \
+  -e "s|__HOME__|$HOME|g" \
+  -e 's|__EMAIL_TO__|ops@example.invalid|g' \
+  "$canary_plist"
+grep -q '__[A-Z0-9_]*__' "$canary_plist" && { echo "FAIL: unresolved placeholder in canary fixture" >&2; exit 1; }
 grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$canary_plist"
 grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/deploy.sh"
 grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/rollback.sh"
@@ -221,14 +230,14 @@ PATH="$fake_bin:$PATH" \
 grep -q '^bootout gui/.*/com.helium.dsh$' "$fake_calls"
 grep -Fq "bootstrap gui/$(id -u) $canary_plist" "$fake_calls"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "review-only" ]
-[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
 HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
 HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
 HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
 PATH="$fake_bin:$PATH" \
   bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "off" ]
-[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "/Users/moremeds/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
 [ ! -e "${canary_plist}.pre-p4-review-canary" ]
 
 echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"

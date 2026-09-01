@@ -4,21 +4,25 @@
 # Same self-ssh re-exec trick as deploy.sh. Measures and prints its own wall
 # time because AC#6 is a stopwatch criterion (< 60s laptop-observed).
 set -euo pipefail
-RELEASES=/Users/moremeds/projects/helium-releases
-DSH_HOME_DIR=/Users/moremeds/.helium/dsh-home
-OPSD_PLIST=/Users/moremeds/Library/LaunchAgents/com.helium.opsd.plist
-OPSD_CONFIG=/Users/moremeds/.helium/ops/config/opsd.json
-OPSD_EVENT_LOG=/Users/moremeds/.helium/ops/state/events.jsonl
+# Same overrides as deploy.sh, same defaults. Keep the two in step: a rollback
+# that resolves different paths than the deploy it is undoing is worse than no
+# rollback at all.
+HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
+RELEASES="$HOME/projects/helium-releases"
+DSH_HOME_DIR="$HOME/.helium/dsh-home"
+OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
+OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
+OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
-  # A non-interactive `ssh macmini` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
+  # A non-interactive `ssh` gets PATH=/usr/bin:/bin:/usr/sbin:/sbin —
   # no Homebrew, so no `node` and no `pnpm` (verified on the mini: the 3.5 drill's
   # first deploy died at `pnpm: command not found`, exit 127). Only ~/.local/bin
   # was prepended here, which holds `claude` but not the toolchain. Both Homebrew
   # prefixes are listed so this does not silently depend on the CPU architecture.
   # It fails closed if ever dropped again: this runs before any flip, so a missing
   # toolchain aborts the deploy with `current` still pointing at the old release.
-  ssh macmini 'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"; HELIUM_REMOTE=1 bash -s' < "$0"
+  ssh "$HELIUM_HOST" 'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"; HELIUM_REMOTE=1 bash -s' < "$0"
   exit $?
 fi
 started=$(date -u +%s)

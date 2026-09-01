@@ -1,5 +1,6 @@
 {
   "name": "dsh-profile-helium",
+  "license": "MIT",
   "private": true,
   "dsh": {
     "profile": {

@@ -12,3 +12,7 @@ evals/runs/
 .playwright-mcp/
 # Point-in-time operator handoff notes — working docs, not repo history
 HANDOFF-*.md
+# Local agent instructions. Deliberately untracked: it describes THIS machine's
+# checkout and deployment, not the project. Listed so it cannot be committed by
+# accident once the repo is public.
+CLAUDE.md
