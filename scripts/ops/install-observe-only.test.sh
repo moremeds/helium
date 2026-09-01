@@ -169,8 +169,8 @@ if grep -Fq 'HELIUM_LIVE=1' "$repo/scripts/release/deploy.sh"; then
   exit 1
 fi
 node --check "$repo/scripts/release/codex-preflight.mjs"
-node --test "$repo/scripts/release/validate-jobs.test.mjs"
-grep -Fq 'scripts/release/validate-jobs.mjs' "$repo/scripts/release/deploy.sh"
+node --test "$repo/scripts/release/validate-tenants.test.mjs"
+grep -Fq 'scripts/release/validate-tenants.mjs' "$repo/scripts/release/deploy.sh"
 if grep -Fq 'packages/core/lib/job.js' "$repo/scripts/release/deploy.sh"; then
   echo "FAIL: deploy still validates jobs through the removed core boundary"
   exit 1
@@ -189,15 +189,32 @@ sed -i '' \
   -e 's|__EMAIL_TO__|ops@example.invalid|g' \
   "$canary_plist"
 grep -q '__[A-Z0-9_]*__' "$canary_plist" && { echo "FAIL: unresolved placeholder in canary fixture" >&2; exit 1; }
-grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$canary_plist"
-grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/deploy.sh"
-grep -Fq 'packages/v1-compat/lib/mcp/server.js' "$repo/scripts/release/rollback.sh"
+grep -Fq 'plugins/helium/lib/mcp/server.js' "$canary_plist" \
+  || { echo "FAIL: canary plist does not point HELIUM_MCP_BIN at plugins/helium" >&2; exit 1; }
+grep -Fq 'plugins/helium/lib/mcp/server.js' "$repo/scripts/release/deploy.sh" \
+  || { echo "FAIL: deploy.sh does not install the plugins/helium mcp bin" >&2; exit 1; }
+# The seam fixture is excluded from a release by its MANIFEST, never by its
+# directory: the package is a lockfile importer, so dropping the directory
+# fails `pnpm install --frozen-lockfile` on every deploy. Two independent
+# boundaries -- `enabled: false` in the file and no manifest in the release.
+# -e, not a bare pattern: `--exclude=GLOB` is a real grep option, so without it
+# grep eats the pattern as a flag and silently reads stdin instead of the file.
+grep -Fq -e "--exclude='plugins/fake-tenant/tenant.yaml'" "$repo/scripts/release/deploy.sh" \
+  || { echo "FAIL: deploy.sh no longer excludes the fake-tenant manifest from a release" >&2; exit 1; }
+test -e "$repo/plugins/fake-tenant/package.json" \
+  || { echo "FAIL: the fake-tenant package is gone; the lockfile importer must stay" >&2; exit 1; }
+grep -Fq 'plugins/helium/lib/mcp/server.js' "$repo/scripts/release/rollback.sh" \
+  || { echo "FAIL: rollback.sh does not restore the plugins/helium mcp bin" >&2; exit 1; }
 bash "$repo/scripts/release/configure-review-canary.sh" enable --plist "$canary_plist" --no-restart
-[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "review-only" ]
-[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "review-only" ] \
+  || { echo "FAIL: canary enable did not set the promotion mode to review-only" >&2; exit 1; }
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY raw -o - "$canary_plist")" = "1" ] \
+  || { echo "FAIL: canary enable did not cap the run at 1 per UTC day" >&2; exit 1; }
 bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist" --no-restart
-[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "off" ]
-[ ! -e "${canary_plist}.pre-p4-review-canary" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$canary_plist")" = "off" ] \
+  || { echo "FAIL: canary restore did not put the promotion mode back to off" >&2; exit 1; }
+[ ! -e "${canary_plist}.pre-p4-review-canary" ] \
+  || { echo "FAIL: canary restore left its backup plist behind" >&2; exit 1; }
 
 echo "case 5c: canary switch reloads launchd so the new environment is active"
 fake_bin="$tmp/fake-launchctl-bin"
@@ -230,14 +247,14 @@ PATH="$fake_bin:$PATH" \
 grep -q '^bootout gui/.*/com.helium.dsh$' "$fake_calls"
 grep -Fq "bootstrap gui/$(id -u) $canary_plist" "$fake_calls"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "review-only" ]
-[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/plugins/helium/lib/mcp/server.js" ]
 HELIUM_FAKE_LAUNCHCTL_CALLS="$fake_calls" \
 HELIUM_FAKE_LAUNCHCTL_STATE="$fake_state" \
 HELIUM_FAKE_LAUNCHCTL_LOADED="$fake_loaded" \
 PATH="$fake_bin:$PATH" \
   bash "$repo/scripts/release/configure-review-canary.sh" restore --plist "$canary_plist"
 [ "$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$fake_loaded")" = "off" ]
-[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/packages/v1-compat/lib/mcp/server.js" ]
+[ "$(plutil -extract EnvironmentVariables.HELIUM_MCP_BIN raw -o - "$fake_loaded")" = "$HOME/projects/helium-releases/current/plugins/helium/lib/mcp/server.js" ]
 [ ! -e "${canary_plist}.pre-p4-review-canary" ]
 
 echo "case 6: a fresh DSH heartbeat does not hide stale opsd observations"
@@ -255,7 +272,7 @@ exit 0
 MAIL
 chmod +x "$tmp/fake-mailer"
 set +e
-deadman_out=$(HELIUM_STATE_ROOT="$state" HELIUM_JOBS_DIR="$tmp/empty-jobs" \
+deadman_out=$(HELIUM_STATE_ROOT="$state" HELIUM_TENANTS_DIR="$tmp/empty-plugins" \
   HELIUM_OPSD_EXPECTED=1 HELIUM_DEADMAN_ALERT_CMD="$tmp/fake-mailer" \
   HELIUM_ENV_FILE="$tmp/empty.env" \
   bash "$repo/scripts/deadman/check-heartbeat.sh" 2>&1)

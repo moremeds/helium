@@ -5,21 +5,43 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-const helper = new URL("./validate-jobs.mjs", import.meta.url).pathname;
+const helper = new URL("./validate-tenants.mjs", import.meta.url).pathname;
 
-test("validates a clean release through the v1-compat job boundary", () => {
-  const release = mkdtempSync(join(tmpdir(), "helium-release-jobs-"));
-  mkdirSync(join(release, "packages/v1-compat/lib"), { recursive: true });
-  mkdirSync(join(release, "jobs"), { recursive: true });
-  writeFileSync(join(release, "packages/v1-compat/package.json"), JSON.stringify({ type: "module" }));
-  writeFileSync(join(release, "packages/v1-compat/lib/job.js"), `
-    export function loadJobs(directory) {
-      if (!directory.endsWith("/jobs")) throw new Error("wrong jobs directory");
-      return [{ name: "fixture-job" }];
-    }
-  `);
-  writeFileSync(join(release, "jobs/fixture.yaml"), "name: fixture-job\n");
+function release() {
+  const root = mkdtempSync(join(tmpdir(), "helium-release-tenants-"));
+  mkdirSync(join(root, "plugins/helium/lib"), { recursive: true });
+  mkdirSync(join(root, "plugins/alpha"), { recursive: true });
+  writeFileSync(
+    join(root, "plugins/helium/package.json"),
+    JSON.stringify({ type: "module" }),
+  );
+  return root;
+}
 
-  const output = execFileSync(process.execPath, [helper, release], { encoding: "utf8" });
-  assert.match(output, /1 job file\(s\) parse cleanly: fixture-job/);
+test("validates a clean release through the host tenant loader", () => {
+  const root = release();
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenant-runtime.js"),
+    `export async function loadValidatedTenants({ tenantsDir: directory }) {
+      if (!directory.endsWith("/plugins")) throw new Error("wrong tenants directory");
+      return { tenants: [{ spec: { tenant: "alpha" } }], skipped: [] };
+    }`,
+  );
+  const output = execFileSync(process.execPath, [helper, root], {
+    encoding: "utf8",
+  });
+  assert.match(output, /1 tenant file\(s\) parse cleanly: alpha/);
+});
+
+test("fails the release when any tenant is skipped", () => {
+  const root = release();
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenant-runtime.js"),
+    `export async function loadValidatedTenants() {
+      return { tenants: [], skipped: [{ tenant: "alpha", reason: "bad team.yaml" }] };
+    }`,
+  );
+  assert.throws(() =>
+    execFileSync(process.execPath, [helper, root], { stdio: "pipe" }),
+  );
 });

@@ -76,7 +76,7 @@ if [ "$command" = "enable" ] && [ ! -f "$backup" ]; then
 fi
 
 release_current="$HOME/projects/helium-releases/current"
-mcp_bin="$release_current/packages/v1-compat/lib/mcp/server.js"
+mcp_bin="$release_current/plugins/helium/lib/mcp/server.js"
 if [ "$command" = "enable" ]; then
   # P2 moved the v1 MCP boundary out of core. Migrate the retained baseline as
   # well as the active canary plist so a later restore cannot resurrect the

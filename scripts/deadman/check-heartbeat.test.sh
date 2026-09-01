@@ -16,37 +16,54 @@ export HELIUM_STATE_ROOT="$tmp/state" HELIUM_DEADMAN_ALERT_CMD="$tmp/fake-mailer
 export HELIUM_ENV_FILE="$tmp/helium.env"
 : >"$tmp/helium.env"
 
-# The wrapper now runs a per-tenant check too, and it defaults JOBS_DIR to the
-# repository's real jobs/. Point it at a controlled fixture instead, so this
+# The wrapper now runs a per-tenant check too, and it defaults TENANTS_DIR to the
+# repository's real plugins/. Point it at a controlled fixture instead, so this
 # drill keeps testing the wrapper rather than whatever tenants happen to be
 # deployed. One tenant here; case 6 adds a second to exercise the tenant path.
-export HELIUM_JOBS_DIR="$tmp/jobs"
-mkdir -p "$HELIUM_JOBS_DIR"
-write_job() {
-  cat >"$HELIUM_JOBS_DIR/$1.yaml" <<EOJ
-name: $1
+export HELIUM_TENANTS_DIR="$tmp/plugins"
+mkdir -p "$HELIUM_TENANTS_DIR"
+write_tenant() {
+  mkdir -p "$HELIUM_TENANTS_DIR/$1"
+  cat >"$HELIUM_TENANTS_DIR/$1/tenant.yaml" <<EOJ
+tenant: $1
 enabled: true
+team: team.yaml
+promotionMode: review-only
 triggers:
   - kind: cron
     schedule: "0 17 * * 1-5"
-    tz: America/New_York
-engine:
-  triage: { engine: deepseek, model: deepseek-v4-flash }
-  senior: { engine: claude-max }
-escalate_when: severity >= material
-session: fresh
-memory: none
-tools: [argon_api]
-allowMutations: false
-max_turns: { triage: 2, senior: 8 }
-timeout: 10m
-budget: { max_triage_per_hour: 30, max_senior_per_day: 12 }
-delivery: { jsonl: true }
-prompt: |
-  Analyze.
+    timezone: America/New_York
+delivery:
+  jsonl: true
 EOJ
+  cat >"$HELIUM_TENANTS_DIR/$1/team.yaml" <<'EOT'
+manifestVersion: "1"
+name: fixture
+roles:
+  scribe:
+    responsibility: rendering
+    requires: [render]
+    permissions:
+      externalResearch: false
+      mutations: forbidden
+      artifactRead: [accepted-claim-ledger]
+      tools: []
+tasks:
+  - id: render
+    role: scribe
+    dependsOn: []
+    requires: [render]
+    inputs: [accepted-claim-ledger]
+    outputSchema: report@1
+crossReference:
+  compareClaims: true
+  materialContradictions: fresh-evidence-work-order
+  requireIndependentEvidence: true
+budgets: { maxAttempts: 1, maxTokens: 1000 }
+acceptance: { allowPartialClaims: true, terminalTasks: [render] }
+EOT
 }
-write_job macro-watch
+write_tenant macro-watch
 
 # `date -v` is BSD-only and this drill now runs in CI on Linux, where GNU date
 # has no such flag. node is already a hard dependency of the script under test,
@@ -134,7 +151,7 @@ rm -rf "$tmp5"
 echo "case 6: process alive but a SECOND tenant silent -> 13, naming only that tenant"
 # This is the blind spot the tenant check exists for: the global check is green
 # (macro-watch heartbeat is fresh), yet apex-health has never heartbeat at all.
-write_job apex-health
+write_tenant apex-health
 printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
@@ -177,9 +194,10 @@ case "$out7" in
 esac
 
 echo "case 8: a malformed tenant stays visible as invalid rather than vanishing"
-printf 'this: [is not a job\n' >"$HELIUM_JOBS_DIR/b-broken.yaml"
+mkdir -p "$HELIUM_TENANTS_DIR/b-broken"
+printf 'tenant: [\n' >"$HELIUM_TENANTS_DIR/b-broken/tenant.yaml"
 rm -f "$tmp/state/deadman/tenant-alerted-at"
-write_job apex-health
+write_tenant apex-health
 printf '{"ts":"%s","job":"macro-watch","status":"ok"}\n{"ts":"%s","job":"apex-health","status":"ok"}\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   >"$tmp/state/jsonl/heartbeat-$(date -u +%F).jsonl"
@@ -195,7 +213,8 @@ printf '%s\n' "$out8" | grep -qi 'b-broken.*invalid' || {
 }
 
 echo "case 9: fresh DSH and tenant heartbeats do not hide stale opsd -> 16"
-rm -f "$HELIUM_JOBS_DIR/b-broken.yaml" "$tmp/state/deadman/opsd-alerted-at"
+rm -rf "$HELIUM_TENANTS_DIR/b-broken"
+rm -f "$tmp/state/deadman/opsd-alerted-at"
 mkdir -p "$tmp/state/opsd"
 stale_opsd="$(iso_ago 3600)"
 printf '{"v":1,"seq":1,"hash":"fixture","record":{"v":1,"id":"event-1","at":"%s","type":"observation-recorded","observation":{"observedAt":"%s"}}}\n' \

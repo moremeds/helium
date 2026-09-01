@@ -61,7 +61,6 @@ describe("contract: ctx.effect interval timers run inside a booted profile", () 
     stateRoot = join(dshHome, "helium-state");
     tenantsDir = join(dshHome, "helium-plugins");
     mkdirSync(join(tenantsDir, "contract-watch"), { recursive: true });
-    mkdirSync(join(dshHome, "helium-calendars"), { recursive: true });
     writeFileSync(
       join(dshHome, "ecosystem.md"),
       "# ecosystem\ncontract fixture\n",
@@ -156,12 +155,10 @@ describe("contract: ctx.effect interval timers run inside a booted profile", () 
         env: {
           ...process.env,
           DSH_HOME: dshHome,
-          HELIUM_JOBS_DIR: join(dshHome, "helium-jobs"),
           HELIUM_TENANTS_DIR: tenantsDir,
           HELIUM_TENANT_LIVENESS_MS: "500",
           HELIUM_STATE_ROOT: stateRoot,
           HELIUM_CONTEXT_FILE: join(dshHome, "ecosystem.md"),
-          HELIUM_CALENDARS_DIR: join(dshHome, "helium-calendars"),
           HELIUM_ARGON_BASE: "http://127.0.0.1:1",
           HELIUM_APEX_BASE: "http://127.0.0.1:1",
           HELIUM_ENV_FILE: join(dshHome, "helium.env"),

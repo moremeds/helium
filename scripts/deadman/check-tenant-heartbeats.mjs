@@ -6,7 +6,7 @@
 //
 // Exit: 0 every expected tenant accounted for, 10 at least one is not, 2 config.
 //
-// Env: HELIUM_JOBS_DIR, HELIUM_STATE_ROOT, HELIUM_DEADMAN_STALE_S (default 600).
+// Env: HELIUM_TENANTS_DIR, HELIUM_STATE_ROOT, HELIUM_DEADMAN_STALE_S (default 600).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -15,29 +15,30 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 // Relative, not a bare `@helium/core` specifier: scripts/ is not a workspace
 // package, so a bare import does not resolve from here (ERR_MODULE_NOT_FOUND).
-const { inventoryTenants, tenantHealth } = await import(
+const { tenantHealth } = await import(
   join(here, "..", "..", "packages", "core", "lib", "tenant-health.js")
 );
-// The tenant parser is injected (Task 6): parsing a tenant file is v1
-// job-spec knowledge and lives in the compatibility package, so core's
-// inventory takes it as an argument rather than importing it.
-const { parseJobYaml } = await import(
-  join(here, "..", "..", "packages", "v1-compat", "lib", "job.js")
+// The inventory now lives in the HOST, because a tenant is a plugin directory
+// shape rather than a flat `*.yaml` file, and knowing that shape is host
+// knowledge core does not carry.
+const { inventoryTenantPlugins } = await import(
+  join(here, "..", "..", "plugins", "helium", "lib", "tenants.js")
 );
 
-const jobsDir = process.env.HELIUM_JOBS_DIR ?? join(here, "..", "..", "jobs");
+const tenantsDir =
+  process.env.HELIUM_TENANTS_DIR ?? join(here, "..", "..", "plugins");
 const stateRoot =
   process.env.HELIUM_STATE_ROOT ?? join(homedir(), ".helium", "state");
 const staleS = Number(process.env.HELIUM_DEADMAN_STALE_S ?? "600");
 
-if (!existsSync(jobsDir)) {
-  console.error(`no jobs directory at ${jobsDir}`);
+if (!existsSync(tenantsDir)) {
+  console.error(`no tenants directory at ${tenantsDir}`);
   process.exit(2);
 }
 
-const expected = inventoryTenants(jobsDir, parseJobYaml);
+const expected = inventoryTenantPlugins(tenantsDir);
 if (expected.length === 0) {
-  console.error(`no *.yaml tenants in ${jobsDir}`);
+  console.error(`no plugins/*/tenant.yaml in ${tenantsDir}`);
   process.exit(2);
 }
 

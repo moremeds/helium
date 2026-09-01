@@ -20,7 +20,7 @@ OPSD_STALE_S="${HELIUM_OPSD_STALE_S:-$STALE_S}"
 OPSD_EVENT_LOG="${HELIUM_OPSD_EVENT_LOG:-$STATE_ROOT/opsd/events.jsonl}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 ALERT_CMD="${HELIUM_DEADMAN_ALERT_CMD:-$NODE_BIN $script_dir/send-alert.mjs}"
-JOBS_DIR="${HELIUM_JOBS_DIR:-$script_dir/../../jobs}"
+TENANTS_DIR="${HELIUM_TENANTS_DIR:-$script_dir/../../plugins}"
 
 command -v "${NODE_BIN%% *}" >/dev/null 2>&1 || {
   echo "no node at $NODE_BIN" >&2
@@ -63,13 +63,13 @@ fi
 # check cannot express that. Same alert/dedup discipline as the global path,
 # with its own sentinel so one episode does not suppress the other.
 check_tenants() {
-  if [ ! -d "$JOBS_DIR" ]; then
-    echo "tenant check: SKIPPED — no jobs directory at $JOBS_DIR" >&2
+  if [ ! -d "$TENANTS_DIR" ]; then
+    echo "tenant check: SKIPPED — no tenants directory at $TENANTS_DIR" >&2
     return 0
   fi
   set +e
   tenant_out=$(
-    HELIUM_JOBS_DIR="$JOBS_DIR" \
+    HELIUM_TENANTS_DIR="$TENANTS_DIR" \
       HELIUM_STATE_ROOT="$STATE_ROOT" \
       HELIUM_DEADMAN_STALE_S="$STALE_S" \
       "$NODE_BIN" "$script_dir/check-tenant-heartbeats.mjs" 2>&1
@@ -97,7 +97,7 @@ check_tenants() {
     echo "$tenant_out"
     echo
     echo "checked at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "jobs dir:   $JOBS_DIR"
+    echo "tenants dir: $TENANTS_DIR"
   } >"$tbody"
   if $ALERT_CMD --env-file "$ENV_FILE" \
     --subject "[helium] tenant heartbeat missing" \
