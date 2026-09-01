@@ -94,8 +94,10 @@ helium:
   globalMaxAgeMs: 180000
   collectorMaxAgeMs: 180000
   deadManMaxAgeMs: 2400000
-  expectedTenantManifestRef: /Users/moremeds/projects/helium-releases/v0.1.5/jobs
-  expectedTenants:
-    - { id: macro-watch, maxAgeMs: 180000 }
-    - { id: apex-health, maxAgeMs: 180000 }
-    - { id: dsh-canary, maxAgeMs: 46800000 }
+  expectedTenantManifestRef: /Users/moremeds/projects/helium-releases/current/plugins
+  # Empty on purpose. The three v1 tenants are retired, and every per-entry row
+  # becomes a heartbeat-staleness observation -- leaving them here raises a
+  # permanent STALE incident for tenants that no longer exist, against a
+  # manifest ref that is a deleted directory. Nothing in this repo ships
+  # `enabled: true`; the first real tenant adds its own row.
+  expectedTenants: []
