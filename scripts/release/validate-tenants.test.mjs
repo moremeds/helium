@@ -15,7 +15,16 @@ function release() {
     join(root, "plugins/helium/package.json"),
     JSON.stringify({ type: "module" }),
   );
+  inventory(root, []);
   return root;
+}
+
+/** Stub the host's own enabled/disabled inventory for this release. */
+function inventory(root, entries) {
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenants.js"),
+    `export function inventoryTenantPlugins() { return ${JSON.stringify(entries)}; }`,
+  );
 }
 
 test("validates a clean release through the host tenant loader", () => {
@@ -43,5 +52,60 @@ test("fails the release when any tenant is skipped", () => {
   );
   assert.throws(() =>
     execFileSync(process.execPath, [helper, root], { stdio: "pipe" }),
+  );
+});
+
+test("does not fail the release for a tenant that ships disabled", () => {
+  // plugins/livewire-shepherd ships `enabled: false` with team manifests naming
+  // tools no tenant provides yet. It cannot run, so it is not a deploy hazard --
+  // but failing on it would make shipping any disabled tenant impossible.
+  const root = release();
+  inventory(root, [{ tenant: "shepherd", load: "disabled" }]);
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenant-runtime.js"),
+    `export async function loadValidatedTenants() {
+      return { tenants: [], skipped: [{ tenant: "shepherd", reason: "unknown tools: a, b" }] };
+    }`,
+  );
+  const output = execFileSync(process.execPath, [helper, root], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  assert.match(output, /0 tenant file\(s\) parse cleanly/);
+});
+
+test("still fails the release for an ENABLED tenant that is skipped", () => {
+  const root = release();
+  inventory(root, [
+    { tenant: "shepherd", load: "disabled" },
+    { tenant: "alpha", load: "loaded" },
+  ]);
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenant-runtime.js"),
+    `export async function loadValidatedTenants() {
+      return { tenants: [], skipped: [
+        { tenant: "shepherd", reason: "unknown tools: a, b" },
+        { tenant: "alpha", reason: "unknown tools: c" },
+      ] };
+    }`,
+  );
+  assert.throws(
+    () => execFileSync(process.execPath, [helper, root], { stdio: "pipe" }),
+    /1 enabled tenant\(s\) failed validation/,
+  );
+});
+
+test("an unparseable manifest is `invalid`, never `disabled`, so it blocks", () => {
+  const root = release();
+  inventory(root, [{ tenant: "broken", load: "invalid" }]);
+  writeFileSync(
+    join(root, "plugins/helium/lib/tenant-runtime.js"),
+    `export async function loadValidatedTenants() {
+      return { tenants: [], skipped: [{ tenant: "broken", reason: "invalid tenant.yaml" }] };
+    }`,
+  );
+  assert.throws(
+    () => execFileSync(process.execPath, [helper, root], { stdio: "pipe" }),
+    /1 enabled tenant\(s\) failed validation/,
   );
 });
