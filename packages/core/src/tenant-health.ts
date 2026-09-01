@@ -21,7 +21,7 @@ export interface ParsedTenant {
 
 /**
  * How a tenant file becomes a tenant. Injected rather than imported: parsing a
- * tenant file is v1 job-spec knowledge and lives in `@helium/v1-compat`, while
+ * tenant file is host knowledge and lives in the host (`plugins/helium`), while
  * per-tenant liveness is a domain-neutral concern that stays here. Core may not
  * depend on the compatibility package, so the caller supplies the parser.
  */

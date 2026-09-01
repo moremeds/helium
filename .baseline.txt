@@ -1,0 +1,17 @@
+Baseline on feat/tenant-lane-retire-v1 @ a6b2b076f1330c73540709d2efda008e837d7eab (== master)
+recorded 2026-09-01
+
+pnpm build       : rc=0   (see .baseline-1.txt)
+pnpm typecheck   : rc=0   9.44s wall
+pnpm test        : rc=1   33.56s wall  -- 147 files, 1191 tests, 5 FAILED
+pnpm test:contracts: rc=0 24.20s wall  -- 21 files (20 pass/1 skip), 124 tests (121 pass/3 skip)
+
+The 5 unit failures are pre-existing LOAD FLAKES on master, not this plan's doing.
+All five spawn real child processes and time out at 5s / 1.5s poll budgets:
+  plugins/helium/src/claude.test.ts                  "still fails a streamed array whose terminal envelope reports is_error"
+  plugins/provider-claude-subscription/src/invoke.test.ts "passes exact model and effort ..."
+  plugins/provider-codex-subscription/src/invoke.test.ts  "isolates settings and exposes only the declared MCP tools"
+  plugins/ops-agent/src/script-executor.test.ts      "gives the child the registered cwd, never the daemon's"
+  plugins/ops-agent/src/script-executor.test.ts      "escalates an abort to SIGKILL when the process group ignores TERM"
+Evidence: re-running the 4 files alone -> 42/43 pass; re-running the last one alone 3x -> 3/3 pass.
+Treat these five names as the known flake set for every later gate in this plan.

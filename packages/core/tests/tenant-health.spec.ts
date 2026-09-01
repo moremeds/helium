@@ -13,7 +13,7 @@ import {
  * parser an injected dependency — parsing a tenant file is v1 job-spec
  * knowledge that core may not import — so this suite tests the inventory
  * ordering rule and the injection seam, not the v1 schema. The v1 parser has
- * its own tests in `@helium/v1-compat`.
+ * its own tests in the host (`plugins/helium`).
  */
 const parse: TenantParser = (text, source) => {
   const name = /^name: (\S+)$/m.exec(text);

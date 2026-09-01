@@ -4,7 +4,7 @@
  * no business domain.
  *
  * The concrete domain toolkits and the `buildTools()` aggregate that
- * constructs them live in `@helium/v1-compat`. Constructing a tool means
+ * constructs them live in the host (`plugins/helium`). Constructing a tool means
  * knowing a business domain, and acceptance criterion 14 bans that knowledge
  * from core.
  * @module @helium/core/tools

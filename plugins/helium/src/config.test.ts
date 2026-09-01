@@ -2,12 +2,9 @@ import { describe, expect, it } from "vitest";
 import { ConfigSchema } from "./config.js";
 
 const base = {
-  runtimeMode: "legacy-direct" as const,
-  jobsDir: "jobs",
   tenantsDir: "/private/plugins",
   stateRoot: "/private/state",
   contextFile: "context",
-  calendarsDir: "calendars",
   argonBase: "http://argon",
   apexBase: "http://apex",
   envFile: "env",

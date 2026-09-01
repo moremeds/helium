@@ -34,7 +34,6 @@
     "@helium/provider-codex-subscription": "file:../provider-codex-subscription",
     "@helium/provider-deepseek-dsh": "file:../provider-deepseek-dsh",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@helium/v1-compat": "file:../../packages/v1-compat",
     "croner": "10.0.1",
     "nodemailer": "9.0.5",
     "yaml": "2.9.0",

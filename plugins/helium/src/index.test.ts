@@ -44,12 +44,9 @@ describe("runGuarded", () => {
 
 const teamConfig = () =>
   ({
-      runtimeMode: "legacy-direct",
-      jobsDir: "jobs",
       tenantsDir: "/private/plugins",
       stateRoot: "/private/state",
       contextFile: "context",
-      calendarsDir: "calendars",
       argonBase: "http://argon",
       apexBase: "http://apex",
       envFile: "env",

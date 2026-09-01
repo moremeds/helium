@@ -1,8 +1,8 @@
 /**
- * dsh in-process tool registration: bridges the buildTools() ecosystem
- * toolkit onto ctx.tools for dsh agents / interactive Web UI sessions.
- * MCP stdio (packages/core/src/mcp/server.ts) is the other exposure surface
- * for the exact same tools.
+ * dsh in-process tool registration: bridges the merged tenant tool catalog
+ * onto ctx.tools for dsh agents / interactive Web UI sessions. MCP stdio
+ * (plugins/helium/src/mcp/server.ts) is the other exposure surface for the
+ * exact same tools.
  *
  * dsh-tools API cited against the installed @deepseek-ai/dsh-tools
  * 0.1.2-alpha.3 package (plugins/helium/node_modules/@deepseek-ai/dsh-tools),
@@ -26,65 +26,6 @@ import type { ParameterSchemaSpec } from "@deepseek-ai/dsh-tools";
 import type { Context } from "@deepseek-ai/cordis";
 import type { EcosystemTool } from "@helium/core";
 
-const argonApiParams = {
-  path: {
-    type: "string",
-    required: true,
-    description: "Read-only argon path, e.g. /api/rates/snapshot",
-  },
-  query: {
-    type: "object",
-    additionalProperties: true,
-    description: "Optional query parameters",
-  },
-} satisfies ParameterSchemaSpec;
-
-const argonRescanParams = {
-  path: {
-    type: "string",
-    required: true,
-    description: "Allow-listed argon rescan path",
-  },
-} satisfies ParameterSchemaSpec;
-
-const argonAiAnalysisParams = {
-  path: {
-    type: "string",
-    required: true,
-    description: "Allow-listed argon ai-analysis path",
-  },
-} satisfies ParameterSchemaSpec;
-
-const apexApiParams = {
-  path: {
-    type: "string",
-    required: true,
-    description: "apex path: /health or /v1/...",
-  },
-  query: {
-    type: "object",
-    additionalProperties: true,
-    description: "Optional query parameters",
-  },
-} satisfies ParameterSchemaSpec;
-
-const apexComputeParams = {
-  path: {
-    type: "string",
-    required: true,
-    description: "Allow-listed apex compute path",
-  },
-} satisfies ParameterSchemaSpec;
-
-const livewireSqlParams = {
-  sql: {
-    type: "string",
-    required: true,
-    description: "A single read-only SELECT or WITH statement",
-  },
-  maxRows: { type: "integer", description: "Row cap, default 200" },
-} satisfies ParameterSchemaSpec;
-
 const thesisReadParams = {
   job: { type: "string", required: true, description: "Job name" },
 } satisfies ParameterSchemaSpec;
@@ -98,14 +39,12 @@ const thesisWriteParams = {
   },
 } satisfies ParameterSchemaSpec;
 
-/** dsh parameter specs, one per tool name. Kept in lockstep with buildTools() by a test. */
+/**
+ * The two tools CORE owns. Every other tool is supplied by a tenant and
+ * carries its own `dshParams`, which is what makes the plug-in contract
+ * closed: a hardcoded map can only name tools the host already knows.
+ */
 const DSH_PARAMS = {
-  argon_api: argonApiParams,
-  argon_rescan: argonRescanParams,
-  argon_ai_analysis: argonAiAnalysisParams,
-  apex_api: apexApiParams,
-  apex_compute: apexComputeParams,
-  livewire_sql: livewireSqlParams,
   thesis_read: thesisReadParams,
   thesis_write: thesisWriteParams,
 } as const satisfies Record<string, ParameterSchemaSpec>;

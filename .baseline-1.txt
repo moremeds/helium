@@ -1,0 +1,70 @@
+=== build ===
+$ pnpm -r --if-present run build
+Scope: 19 of 20 workspace projects
+packages/core build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-restrict-proof build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-live-dispatch build$ tsc -p tsconfig.json
+contracts/fixtures/plugin-live-dispatch build: Done
+packages/core build: Done
+contracts/fixtures/plugin-restrict-proof build: Done
+packages/evals build$ tsc -p tsconfig.json
+packages/fake-flat-rate build$ tsc -p tsconfig.json
+packages/fake-metered build$ tsc -p tsconfig.json
+packages/provider-sdk build$ tsc -p tsconfig.json
+packages/evals build: Done
+packages/v1-compat build$ tsc -p tsconfig.json && chmod +x lib/mcp/server.js
+packages/fake-metered build: Done
+plugins/ops-agent build$ tsc -p tsconfig.json
+packages/provider-sdk build: Done
+packages/fake-flat-rate build: Done
+packages/v1-compat build: Done
+plugins/ops-agent build: Done
+plugins/provider-claude-subscription build$ tsc -p tsconfig.json
+contracts/fixtures/ops-controller build$ tsc -p tsconfig.json
+plugins/provider-codex-subscription build$ tsc -p tsconfig.json
+plugins/provider-deepseek-dsh build$ tsc -p tsconfig.json
+plugins/provider-codex-subscription build: Done
+plugins/provider-claude-subscription build: Done
+contracts/fixtures/ops-controller build: Done
+plugins/provider-deepseek-dsh build: Done
+plugins/helium build$ tsc -p tsconfig.json
+plugins/helium build: Done
+contracts/fixtures/team-host build$ tsc -p tsconfig.json
+plugins/livewire-shepherd build$ tsc -p tsconfig.json && chmod +x lib/bin/shepherdd.js lib/bin/shepherdctl.js lib/bin/livewire-opsd.js
+plugins/livewire-shepherd build: Done
+contracts/fixtures/team-host build: Done
+pnpm build  15.63s user 1.70s system 132% cpu 13.083 total
+build rc=0
+=== typecheck ===
+$ pnpm -r --if-present run typecheck
+Scope: 19 of 20 workspace projects
+packages/core typecheck$ tsc -p tsconfig.json --noEmit
+packages/core typecheck: Done
+packages/evals typecheck$ tsc -p tsconfig.json --noEmit
+packages/provider-sdk typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-flat-rate typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-metered typecheck$ tsc -p tsconfig.json --noEmit
+packages/fake-metered typecheck: Done
+packages/fake-flat-rate typecheck: Done
+packages/v1-compat typecheck$ tsc -p tsconfig.json --noEmit
+plugins/ops-agent typecheck$ tsc -p tsconfig.typecheck.json
+packages/provider-sdk typecheck: Done
+packages/evals typecheck: Done
+packages/v1-compat typecheck: Done
+plugins/ops-agent typecheck: Done
+plugins/provider-deepseek-dsh typecheck$ tsc -p tsconfig.json --noEmit
+contracts/fixtures/ops-controller typecheck$ tsc -p tsconfig.json --noEmit
+plugins/provider-claude-subscription typecheck$ tsc -p tsconfig.json --noEmit
+plugins/provider-codex-subscription typecheck$ tsc -p tsconfig.json --noEmit
+contracts/fixtures/ops-controller typecheck: Done
+plugins/provider-deepseek-dsh typecheck: Done
+plugins/provider-claude-subscription typecheck: Done
+plugins/provider-codex-subscription typecheck: Done
+plugins/helium typecheck$ tsc -p tsconfig.typecheck.json
+plugins/helium typecheck: Done
+plugins/livewire-shepherd typecheck$ tsc -p tsconfig.typecheck.json
+plugins/livewire-shepherd typecheck: Done
+contracts typecheck$ tsc -p tsconfig.json --noEmit
+contracts typecheck: Done
+pnpm typecheck  14.80s user 1.61s system 173% cpu 9.441 total
+typecheck rc=0

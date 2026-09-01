@@ -13,7 +13,7 @@ import type {
 // its own.
 //
 // The catalog here is deliberately synthetic. Task 6 moved catalog
-// construction into `@helium/v1-compat` because building a tool means naming a
+// construction into the host (`plugins/helium`) because building a tool means naming a
 // business domain; this suite tests the generic filter, so it must not name
 // one either. The v1 catalog's own wiring is covered in that package.
 const tool = (name: string, mutating = false): EcosystemTool => ({

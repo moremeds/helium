@@ -1,12 +1,12 @@
 /**
- * Registers the senior lane against the shared execution-boundary conformance
- * suite. The subject is a thin adapter over the SAME two functions
- * `buildSeniorLane()` calls — `buildChildEnv()` then `runClaude()` — and
- * nothing else: a subject that composed its own argv would prove things about
- * the test, not about production.
+ * Registers the provider edge against the shared execution-boundary
+ * conformance suite. The subject is a thin adapter over the SAME two functions
+ * the TEAM path calls — `buildChildEnv()` (`provider-runtime.ts`) then
+ * `invokeClaude()` — and nothing else: a subject that composed its own argv
+ * would prove things about the test, not about production.
  *
  * Non-live. `claude` resolves to the harness's fake binary because
- * `runClaude()` spawns with the environment it is handed, and the harness
+ * `invokeClaude()` spawns with the environment it is handed, and the harness
  * narrows PATH to a directory containing only that shim. No real CLI, no
  * model, no token.
  */
@@ -14,7 +14,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll } from "vitest";
-import { buildChildEnv, runClaude } from "../../plugins/helium/src/claude.js";
+import { buildChildEnv } from "../../plugins/helium/src/claude.js";
+import { invokeClaude } from "@helium/provider-claude-subscription/invoke";
 import { runExecutionBoundaryConformance } from "../harness/execution-boundary.js";
 
 /**
@@ -26,7 +27,7 @@ import { runExecutionBoundaryConformance } from "../harness/execution-boundary.j
 const secretsRoot = mkdtempSync(join(tmpdir(), "helium-boundary-secrets-"));
 
 runExecutionBoundaryConformance({
-  name: "senior-lane-runClaude",
+  name: "provider-edge-invokeClaude",
   // A separate OS process with its own cwd, process group and environment.
   // NOT "sandboxed": nothing confines its filesystem access, and the harness
   // would fail the declaration if it were raised.
@@ -40,7 +41,7 @@ runExecutionBoundaryConformance({
       },
       input.env,
     );
-    return await runClaude({
+    return await invokeClaude({
       model: "claude-sonnet-5",
       effort: "high",
       prompt: input.prompt,

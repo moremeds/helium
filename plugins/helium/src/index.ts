@@ -1,8 +1,8 @@
 /**
  * helium — thin cordis adapter. Reads the pinned env contract into `Config`,
- * builds the two dsh-aware engine ports (triage via a dsh agent, senior via
- * the host `claude -p` binary) and the delivery port, then hands them to the
- * pure {@link HeliumRuntime} orchestrator on a single `ctx.effect` lifecycle.
+ * discovers every `plugins/<name>/tenant.yaml`, builds one `TeamController` and
+ * one `TenantDelivery` per tenant, and hands them to {@link TenantRuntime} on a
+ * single `ctx.effect` lifecycle.
  * @module dsh-plugin-helium
  */
 import { writeFileSync } from "node:fs";
@@ -10,13 +10,7 @@ import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import {
-  JsonlWriter,
-  admission,
-  type RunOutcome,
-  type WorkOrder,
-} from "@helium/core";
-import type { ClaudeResult } from "./claude.js";
+import { JsonlWriter, admission, type WorkOrder } from "@helium/core";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { processCanaryInbox } from "./canary-inbox.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
@@ -44,7 +38,6 @@ export const inject = [
   "tools",
 ];
 export { type Config } from "./config.js";
-export { ShadowAdapter } from "./shadow.js";
 export { TeamPromotionAdapter, TeamReviewStore } from "./promotion.js";
 export { TeamController } from "./team-controller.js";
 
@@ -63,55 +56,6 @@ export function runGuarded(label: string, fn: () => void): void {
   }
 }
 
-/**
- * Translates one `runClaude()` result into the `SeniorLane` outcome shape
- * {@link HeliumRuntime}'s `Dispatcher` expects. `quota-exhausted` is reported
- * under its own label with the provider's opaque reset hint attached — never
- * as a plain `error` — because it is dynamic provider-availability state, not
- * a capability change and not a budget: the target is simply unavailable until
- * `retryAfter`.
- */
-export function seniorOutcome(
-  result: Pick<ClaudeResult, "ok" | "text" | "classification" | "retryAfter">,
-): {
-  outcome: RunOutcome;
-  analysis?: string;
-  error?: string;
-} {
-  if (result.ok) return { outcome: "run_completed", analysis: result.text };
-  if (result.classification === "timeout") {
-    return {
-      outcome: "timed_out",
-      error: "senior lane exceeded its wall clock",
-    };
-  }
-  if (result.classification === "quota-exhausted") {
-    const until = result.retryAfter ? ` (retry after ${result.retryAfter})` : "";
-    return {
-      outcome: "run_failed",
-      error: `quota-exhausted${until}${result.text ? `: ${result.text}` : ""}`,
-    };
-  }
-  return {
-    outcome: "run_failed",
-    error: `${result.classification ?? "error"}${result.text ? `: ${result.text}` : ""}`,
-  };
-}
-
-/**
- * Senior lane: spawns the host `claude -p` binary and translates its result
- * into the `SeniorLane` outcome shape {@link HeliumRuntime}'s `Dispatcher`
- * expects. The MCP stdio config the child reads (spec §4) is written per
- * attempt, into that attempt's workspace, from the job's own declared tool
- * contract — see {@link writeMcpConfig}.
- *
- * Each attempt runs in its OWN empty directory below
- * `<stateRoot>/workspaces/<job>/`, never `process.cwd()`: the senior child is
- * the least-trusted thing this daemon starts, and handing it the daemon's
- * working directory hands it the whole checkout. The directory is removed once
- * the child has reached quiescence (`runClaude()` resolves only after the
- * process group has closed).
- */
 /** Writes one team attempt's MCP allow-list from its provider-neutral WorkOrder. */
 export function writeTeamMcpConfig(
   config: Config,

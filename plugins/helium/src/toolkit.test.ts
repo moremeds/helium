@@ -1,37 +1,53 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildTools } from "@helium/v1-compat";
 import { registerEcosystemTools } from "./toolkit.js";
+import type { TenantTool } from "./tenant-tools.js";
 
-const tools = () =>
-  buildTools({
-    argonBase: "http://127.0.0.1:8400",
-    apexBase: "http://127.0.0.1:8322",
-    livewireDb: "/tmp/livewire.duckdb",
-    stateRoot: mkdtempSync(join(tmpdir(), "helium-tk-")),
-  });
+/**
+ * A tenant tool carries its OWN dsh parameter spec. `DSH_PARAMS` is now just
+ * the two tools core owns, so a fixture built from the host's map could never
+ * exercise the path a real tenant takes.
+ */
+const tenantTools = (): TenantTool[] => [
+  {
+    name: "alpha_probe",
+    description: "probe",
+    paramsSchema: { parse: (v: unknown) => v } as never,
+    mutating: false,
+    dshParams: { q: { type: "string", required: true, description: "q" } },
+    run: async () => JSON.stringify({ ok: true }),
+  },
+  {
+    name: "beta_probe",
+    description: "probe",
+    paramsSchema: { parse: (v: unknown) => v } as never,
+    mutating: false,
+    dshParams: { n: { type: "number", required: true, description: "n" } },
+    run: async () => JSON.stringify({ ok: true }),
+  },
+];
 
 describe("registerEcosystemTools", () => {
-  it("registers every tool buildTools produces", () => {
-    const registered: { name: string }[] = [];
+  it("registers a tenant tool from the spec the tool itself carries", () => {
+    const registered: { name: string; parameters: unknown }[] = [];
     registerEcosystemTools(
       {
         tools: {
-          register: (d: { name: string }) => {
+          register: (d: { name: string; parameters: unknown }) => {
             registered.push(d);
             return () => {};
           },
         },
       } as never,
-      tools(),
+      tenantTools(),
     );
-    expect(registered.map((d) => d.name).sort()).toEqual(
-      tools()
-        .map((t) => t.name)
-        .sort(),
-    );
+    expect(registered.map((d) => d.name).sort()).toEqual([
+      "alpha_probe",
+      "beta_probe",
+    ]);
+    // `defineTool` compiles the spec into a JSON schema, so assert the
+    // property the tenant declared survived rather than object identity.
+    expect(JSON.stringify(registered[0]!.parameters)).toContain("q");
+    expect(JSON.stringify(registered[1]!.parameters)).toContain("n");
   });
 
   it("fails loudly when a tool has no dsh parameter spec", () => {

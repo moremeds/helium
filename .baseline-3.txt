@@ -1,0 +1,46 @@
+=== test:contracts ===
+$ vitest run --project contracts
+
+ RUN  v3.2.7 /Users/chenxi/projects/helium/.worktrees/feat-tenant-lane-retire-v1
+
+ ✓ |contracts| contracts/tests/topology-structure.contract.spec.ts (10 tests) 8ms
+ ✓ |contracts| contracts/tests/claims-register.contract.spec.ts (11 tests) 13ms
+ ✓ |contracts| contracts/tests/topology-boundary.contract.spec.ts (3 tests) 202ms
+ ✓ |contracts| contracts/tests/provider-runtime.contract.spec.ts (2 tests) 197ms
+ ✓ |contracts| contracts/tests/ops-action-boundary.contract.spec.ts (16 tests) 102ms
+ ✓ |contracts| contracts/tests/ops-controller.contract.spec.ts (14 tests) 241ms
+ ↓ |contracts| contracts/tests/agent-dispatch.live.contract.spec.ts (1 test | 1 skipped)
+ ✓ |contracts| contracts/tests/core-neutrality.contract.spec.ts (4 tests) 14ms
+ ✓ |contracts| contracts/tests/pin-consistency.contract.spec.ts (2 tests) 2ms
+ ✓ |contracts| contracts/tests/livewire-shepherd-auto-authority.contract.spec.ts (3 tests) 12ms
+ ✓ |contracts| contracts/tests/senior-isolation.contract.spec.ts (10 tests) 1638ms
+ ✓ |contracts| contracts/tests/executor-conformance.contract.spec.ts (16 tests) 3441ms
+   ✓ billing models stay distinct > reports tokens and cost for a metered run  2589ms
+ ✓ |contracts| contracts/tests/version.contract.spec.ts (1 test) 1203ms
+   ✓ contract: dsh installation identity > runs the version this suite claims to cover  1201ms
+ ✓ |contracts| contracts/tests/provider-executor-conformance.contract.spec.ts (20 tests) 3623ms
+ ✓ |contracts| contracts/tests/provider-process-recovery.contract.spec.ts (1 test) 6508ms
+   ✓ provider process crash recovery > kills the controller during execution and reaps the exact orphan process group  590ms
+ ✓ |contracts| contracts/tests/livewire-shepherd-recovery.contract.spec.ts (5 tests | 2 skipped) 8229ms
+   ✓ Livewire Shepherd autonomous recovery > executes one manifest-scoped repair, independently verifies it, and projects VERIFIED  3892ms
+   ✓ Livewire Shepherd autonomous recovery > keeps a rolled-back/nonzero repair out of VERIFIED  2609ms
+   ✓ Livewire Shepherd autonomous recovery > cold-resumes projection after the Ops terminal event was durable  1725ms
+dsh: initialized profile heliumadd at /var/folders/p8/31vp59256fs2l6jg8gb79zz40000gn/T/helium-dsh-home-hFq5kN/profiles/heliumadd
+ ✓ |contracts| contracts/tests/plugin-add.contract.spec.ts (1 test) 12405ms
+   ✓ contract: dsh plugin add file: installs helium into a fresh profile > adds the package and joins it to the profile bundle stack  6462ms
+ ✓ |contracts| contracts/tests/profile-mount.contract.spec.ts (1 test) 13290ms
+   ✓ contract: the helium profile mounts in an isolated $DSH_HOME > composes the tree with the helium row in it  500ms
+ ✓ |contracts| contracts/tests/tool-restriction.contract.spec.ts (1 test) 20677ms
+   ✓ contract: agentCtx.tools.restrict() denies a tool in the agent's own scoped view > keeps the allow-listed tool visible and removes the denied one  3052ms
+ ✓ |contracts| contracts/tests/team-host.contract.spec.ts (1 test) 22750ms
+   ✓ contract: Helium dispatches team siblings through the real DSH lifecycle seam > isolates sibling cancellation, dispatches the process target, drains, and cold-resumes its parent  3783ms
+ ✓ |contracts| contracts/tests/effect-timer.contract.spec.ts (1 test) 23258ms
+   ✓ contract: ctx.effect interval timers run inside a booted profile > starts the per-job sensor loop and stops cleanly on SIGTERM  6906ms
+
+ Test Files  20 passed | 1 skipped (21)
+      Tests  121 passed | 3 skipped (124)
+   Start at  22:16:40
+   Duration  23.62s (transform 1.22s, setup 0ms, collect 5.35s, tests 117.81s, environment 2ms, prepare 1.38s)
+
+pnpm test:contracts  43.29s user 28.09s system 294% cpu 24.200 total
+contracts rc=0
