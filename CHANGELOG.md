@@ -1,3 +1,7 @@
+## v0.1.13 — 2026-09-01
+
+- fix(release): let a deliberately disabled tenant ship
+
 ## v0.1.12 — 2026-09-01
 
 - feat(release): refuse the flip when the DSH plist names paths the release drops
