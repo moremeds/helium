@@ -5,12 +5,12 @@
        __HOME__          the operator account's home directory
        __NODE_BIN_DIR__  the directory holding `node`, e.g. /opt/homebrew/bin
        __EMAIL_TO__      where alerts are delivered
-     Substitution is BY HAND here, unlike the opsd templates: no script installs
-     this label, so nothing enforces that every placeholder was resolved.
-     (scripts/ops/install-observe-only.sh has such a guard — it throws on any
-     remaining /__[A-Z0-9_]+__/ — but it only installs com.helium.opsd and
-     com.helium.opsd-deadman.) Before `launchctl bootstrap`, check yourself:
-       grep -o '__[A-Z0-9_]*__' com.helium.dsh.plist   # must print nothing
+     scripts/release/install-dsh-plist.sh renders this file on every deploy and
+     rollback; it refuses any unresolved placeholder, and validates the result
+     with BOTH plutil -lint and plistlib (plutil alone accepts files launchd
+     rejects). It also carries the operator-state keys below over from the
+     installed plist. Do not hand-edit the installed plist: the next deploy
+     re-renders it, and launchd only re-reads it on bootout + bootstrap.
 
      A tenant may declare `env:` key NAMES it needs forwarded to its MCP child.
      Those are CREDENTIALS and are read from HELIUM_ENV_FILE by run-dsh.sh; they

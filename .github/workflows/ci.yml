@@ -135,3 +135,7 @@ jobs:
       # Redirected temporary roots only: this renders and removes packaging,
       # but never loads launchd or touches a live host installation.
       - run: bash scripts/ops/install-observe-only.test.sh
+      # Same shape, for the DSH plist the deploy now renders and installs
+      # itself. plutil AND plistlib, because plutil alone accepts files
+      # launchd rejects.
+      - run: bash scripts/release/install-dsh-plist.test.sh

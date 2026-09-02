@@ -182,13 +182,44 @@ describe("TenantRuntime", () => {
     vi.advanceTimersByTime(35);
     runtime.stop();
     const liveness = rows.filter((r) => r.trigger === "liveness");
-    expect(liveness.length).toBeGreaterThanOrEqual(3);
+    expect(liveness.filter((r) => r.job === "alpha").length).toBeGreaterThanOrEqual(3);
     // `tenantHealth()` reads `row.job`; renaming it would silently break the
     // dead-man check against the retained 90-day trail.
-    expect(liveness[0]!.job).toBe("alpha");
+    expect(liveness[1]!.job).toBe("alpha");
+    // Every beat also carries one runtime-level row, ahead of the tenant rows.
+    expect(liveness[0]!.job).toBe("tenant-runtime");
     // 10 ms << the 600 s HELIUM_DEADMAN_STALE_S default, so the dead-man's
     // window accepts a tenant whose only cron fire is daily.
     expect(10).toBeLessThan(600_000);
+  });
+
+  it("still heartbeats at runtime level with zero enabled tenants", () => {
+    vi.useFakeTimers();
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-tenant-runtime-"));
+    const jsonl = new JsonlWriter(join(stateRoot, "jsonl"));
+    const rows: Record<string, unknown>[] = [];
+    vi.spyOn(jsonl, "append").mockImplementation((_stream, row) => {
+      rows.push(row as Record<string, unknown>);
+    });
+    const runtime = new TenantRuntime({
+      tenantsDir: stateRoot,
+      stateRoot,
+      tenants: [tenant("alpha", false)],
+      skipped: [],
+      controllerFor: () => ({ run: async () => ({}) as never }),
+      promotion: passthrough,
+      jsonl,
+      livenessMs: 10,
+    });
+    runtime.start();
+    vi.advanceTimersByTime(35);
+    runtime.stop();
+    // The mini's current shape: no tenant enabled. deploy.sh's post-flip health
+    // window reads these rows as proof the runtime started at all.
+    expect(runtime.tenantNames).toEqual([]);
+    const liveness = rows.filter((r) => r.trigger === "liveness");
+    expect(liveness.length).toBeGreaterThanOrEqual(3);
+    expect(liveness.every((r) => r.job === "tenant-runtime")).toBe(true);
   });
 });
 

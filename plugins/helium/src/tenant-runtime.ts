@@ -294,9 +294,22 @@ export class TenantRuntime {
     // Runtime liveness, not a business event. `trigger: "liveness"` keeps the
     // two distinguishable in the 90-day trail; the dead-man only needs a row
     // inside its window, and a tenant whose process is gone stops writing them.
+    //
+    // The runtime-level row is written unconditionally, INCLUDING when zero
+    // tenants are enabled -- which is the mini's current state. It is the only
+    // proof that the plugin parsed its config and this runtime started, and
+    // deploy.sh's post-flip health window is built on exactly that. `job` is a
+    // fixed non-tenant name; every consumer selects rows by an expected tenant
+    // name (tenantHealth, read-latest-heartbeats) or ignores `job` entirely
+    // (check-heartbeat.sh), so no consumer mistakes it for a tenant.
     const livenessMs = this.deps.livenessMs ?? 300_000;
-    if (livenessMs > 0 && this.#enabled.length > 0) {
+    if (livenessMs > 0) {
       const beat = (): void => {
+        this.deps.jsonl.append("heartbeat", {
+          job: "tenant-runtime",
+          trigger: "liveness",
+          at: nowIso(),
+        });
         for (const tenant of this.#enabled) {
           this.deps.jsonl.append("heartbeat", {
             job: tenant.spec.tenant,
