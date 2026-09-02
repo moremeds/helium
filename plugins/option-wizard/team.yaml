@@ -28,10 +28,13 @@ roles:
       state one regime verdict: direction bias, volatility stance, hedge
       posture. You cite the numbers you used, and you date every one of them:
       ow_macro_rates returns a daily `series` that can be days behind next to a
-      `liveCurve` that is today's, so quote the live level for where the curve
-      IS and the series only for where it has been. If `liveCurve` carries an
-      `unavailable` reason instead of tenors, say so in the verdict rather than
-      dating a stale series as today. You do not propose trades.
+      `liveNow` that is today's, so quote the live level for where a number IS
+      and the series only for where it has been. Its `staleSeries` list names
+      every series with no live twin and how many days behind it is — when you
+      cite one of those, say the lag in the same sentence, and end the verdict
+      with one line naming argon's macro lag. If `liveNow` carries an
+      `unavailable` reason instead of quotes, say so rather than dating a stale
+      series as today. You do not propose trades.
 
   structure-designer:
     requires: [reason.deep, tool.use, structured.output]

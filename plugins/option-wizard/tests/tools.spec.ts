@@ -4,7 +4,7 @@
  * would put an invented number in a trading email.
  */
 import { describe, expect, it } from "vitest";
-import { VOCABULARY, buildTools, symbolLiteral, tvYieldCurve } from "../tools/index.js";
+import { VOCABULARY, buildTools, symbolLiteral, staleSeries, tvLiveLevels } from "../tools/index.js";
 
 const EMPTY_ENV: Record<string, string | undefined> = {};
 
@@ -163,7 +163,7 @@ describe("symbolLiteral", () => {
   });
 });
 
-describe("tvYieldCurve", () => {
+describe("tvLiveLevels", () => {
   // The overlay is an ADDITION to argon's daily path, so a broken TradingView
   // must cost the caller the intraday level and nothing else. It also must not
   // go quiet: an absent curve that reported nothing would let a regime read
@@ -175,9 +175,34 @@ describe("tvYieldCurve", () => {
       { OW_TV_ENABLED: "1" },
       { OW_TV_ENABLED: "1", OPENCLI_BIN: "/nonexistent/opencli" },
     ]) {
-      const result = await tvYieldCurve(env, "ow_macro_rates");
+      const result = await tvLiveLevels(env, "ow_macro_rates");
       expect(result).toHaveProperty("unavailable");
       expect((result as { unavailable: string }).unavailable).not.toBe("");
     }
+  });
+});
+
+describe("staleSeries", () => {
+  const rows = [
+    { series_id: "DGS10", obs_date: "2026-08-25" },
+    { series_id: "VIXCLS", obs_date: "2026-08-25" },
+    { series_id: "BAMLH0A0HYM2", obs_date: "2026-08-25" },
+    { series_id: "DTWEXBGS", obs_date: "2026-08-21" },
+    { series_id: "T10YIE", obs_date: "2026-09-02" },
+  ];
+  const now = new Date("2026-09-02T10:00:00Z");
+
+  it("names only the series TradingView cannot replace, oldest first", () => {
+    // DGS10 and VIXCLS have live twins, so their daily age is not a caveat —
+    // the report quotes the live level for both. Reporting them anyway would
+    // train a reader to skip the list.
+    expect(staleSeries(rows, now)).toEqual([
+      { seriesId: "DTWEXBGS", latestObs: "2026-08-21", ageDays: 12 },
+      { seriesId: "BAMLH0A0HYM2", latestObs: "2026-08-25", ageDays: 8 },
+    ]);
+  });
+
+  it("says nothing when argon has caught up", () => {
+    expect(staleSeries([{ series_id: "T10YIE", obs_date: "2026-09-02" }], now)).toEqual([]);
   });
 });

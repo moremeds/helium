@@ -167,36 +167,60 @@ const DEFAULT_MACRO_SERIES = [
 ] as const;
 
 /**
- * The live yield curve, and the FRED series each tenor is the intraday twin of.
+ * What TradingView can quote live, and the FRED series each one is the
+ * intraday twin of.
  *
- * argon's macro store is a DAILY FRED mirror and its scanner runs behind: on
- * 2026-09-02 its newest DGS10 observation was 2026-08-25 at 4.64, while the
- * curve had already moved to 4.812 — 17bp of a rates read that a report dated
- * today would have got wrong. So the daily series stays as the HISTORY (it is
- * the only thing that can carry a 30-day path) and today's level comes off
- * TradingView instead.
+ * argon's macro store is a DAILY FRED mirror and its scanner runs behind. On
+ * 2026-09-02 its newest DGS10 was 2026-08-25 at 4.64 while the curve was at
+ * 4.812, and its newest VIXCLS was 15.45 while VIX was at 16.72 — a rates read
+ * and a vol read that a report dated today would both have got wrong. So the
+ * daily series stays as the HISTORY (only it can carry a 30-day path) and
+ * today's level comes off TradingView.
  *
- * DGS2 and DGS5 are listed even though argon ingests neither: the mapping is
- * what the two halves are joined on, and naming a series argon lacks is how a
- * reader sees there is no daily path behind that tenor.
+ * DGS2, DGS5 and DGS30 are named even though argon ingests none of them: the
+ * mapping is what the two halves join on, and naming a series argon lacks is
+ * how a reader sees there is no daily path behind that tenor.
  *
- * Exchange is TVC — TradingView's own index feed, verified 2026-09-02.
+ * DXY deliberately carries NO `fredId`. TVC:DXY is the ICE dollar index
+ * against six currencies; DTWEXBGS is the Fed's broad trade-weighted index
+ * against twenty-six, and on 2026-09-02 they read 99.84 and 118.06. They move
+ * together and are not the same number — presenting one as the other's live
+ * value would be the stale-data error again with an extra step. It is offered
+ * as its own index, and `note` says so.
+ *
+ * Everything else in the default set — breakevens, the 10y real yield, HY OAS,
+ * financial conditions — has no TradingView ticker at all. Those stay daily,
+ * and `staleSeries` names them with their age rather than letting a reader
+ * assume the whole payload is as live as its liveliest field.
  */
-const TV_YIELD_TENORS: ReadonlyArray<{ ticker: string; fredId: string; label: string }> = [
-  { ticker: "US02Y", fredId: "DGS2", label: "2y" },
-  { ticker: "US05Y", fredId: "DGS5", label: "5y" },
-  { ticker: "US10Y", fredId: "DGS10", label: "10y" },
-  { ticker: "US30Y", fredId: "DGS30", label: "30y" },
+const TV_LIVE: ReadonlyArray<{
+  ticker: string;
+  exchange: string;
+  label: string;
+  fredId?: string;
+  note?: string;
+}> = [
+  { ticker: "US02Y", exchange: "TVC", label: "2y", fredId: "DGS2" },
+  { ticker: "US05Y", exchange: "TVC", label: "5y", fredId: "DGS5" },
+  { ticker: "US10Y", exchange: "TVC", label: "10y", fredId: "DGS10" },
+  { ticker: "US30Y", exchange: "TVC", label: "30y", fredId: "DGS30" },
+  { ticker: "VIX", exchange: "TVC", label: "VIX", fredId: "VIXCLS" },
+  {
+    ticker: "DXY",
+    exchange: "TVC",
+    label: "DXY",
+    note: "ICE dollar index (6 currencies). NOT the live value of DTWEXBGS, which is the Fed broad index over 26 and reads on a different scale.",
+  },
 ];
 
 /**
- * One TVC quote per tenor, or the reason there are none.
+ * One TVC quote per instrument, or the reason there are none.
  *
  * It does NOT throw: argon's daily history is the primary result and losing the
  * intraday overlay must not cost the caller the path as well. It never returns
- * silence either — a missing overlay comes back as a `unavailable` string, so
- * the difference between "the curve did not move" and "we could not read the
- * curve" survives into the report.
+ * silence either — a missing overlay comes back as an `unavailable` string, so
+ * the difference between "nothing moved" and "we could not read it" survives
+ * into the report.
  *
  * `fetchedAt` is deliberately not called a quote time. opencli's `time` field
  * moves with the REQUEST (two calls a minute apart returned the same 4.812 at
@@ -204,26 +228,26 @@ const TV_YIELD_TENORS: ReadonlyArray<{ ticker: string; fredId: string; label: st
  * nothing about the feed's own age. TradingView does not expose that age here;
  * treat the level as intraday but not as tick-fresh.
  */
-export async function tvYieldCurve(
+export async function tvLiveLevels(
   env: Env,
   tool: string,
-): Promise<{ tenors: unknown[]; fetchedAt: string } | { unavailable: string }> {
+): Promise<{ quotes: unknown[]; fetchedAt: string } | { unavailable: string }> {
   if (env.OW_TV_ENABLED !== "1") {
-    return { unavailable: 'OW_TV_ENABLED is not "1"; no intraday curve, daily series only' };
+    return { unavailable: 'OW_TV_ENABLED is not "1"; no live levels, daily series only' };
   }
   const bin = env.OPENCLI_BIN;
   if (bin === undefined || bin.trim() === "") {
-    return { unavailable: "OPENCLI_BIN is unset; no intraday curve, daily series only" };
+    return { unavailable: "OPENCLI_BIN is unset; no live levels, daily series only" };
   }
-  const tenors: unknown[] = [];
-  for (const tenor of TV_YIELD_TENORS) {
+  const quotes: unknown[] = [];
+  for (const entry of TV_LIVE) {
     const argv = [
       "tradingview",
       "quote",
       "--ticker",
-      symbolLiteral(tenor.ticker, tool),
+      symbolLiteral(entry.ticker, tool),
       "--exchange",
-      "TVC",
+      entry.exchange,
       "-f",
       "json",
     ];
@@ -242,21 +266,56 @@ export async function tvYieldCurve(
       | { close?: unknown; change_abs?: unknown }
       | undefined;
     const close = row?.close;
-    // A tenor that answers without a number is dropped rather than reported as
-    // zero — a 0.00% yield reads as a real and catastrophic level.
+    // An instrument that answers without a number is dropped rather than
+    // reported as zero — a 0.00 VIX or a 0.00% yield reads as a real and
+    // catastrophic level.
     if (typeof close !== "number") continue;
-    tenors.push({
-      tenor: tenor.label,
-      symbol: `TVC:${tenor.ticker}`,
-      fredId: tenor.fredId,
-      yieldPct: close,
-      ...(typeof row?.change_abs === "number" ? { changeAbsPct: row.change_abs } : {}),
+    quotes.push({
+      name: entry.label,
+      symbol: `${entry.exchange}:${entry.ticker}`,
+      ...(entry.fredId === undefined ? {} : { fredId: entry.fredId }),
+      last: close,
+      ...(typeof row?.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
+      ...(entry.note === undefined ? {} : { note: entry.note }),
     });
   }
-  if (tenors.length === 0) {
-    return { unavailable: "every TVC tenor answered without a numeric close" };
+  if (quotes.length === 0) {
+    return { unavailable: "every TradingView symbol answered without a numeric close" };
   }
-  return { tenors, fetchedAt: new Date().toISOString() };
+  return { quotes, fetchedAt: new Date().toISOString() };
+}
+
+/**
+ * The series that have NO live twin, with how far behind each one is.
+ *
+ * argon's scanner falls behind and says nothing when it does. Without this a
+ * reader sees a payload whose liveliest field is minutes old and assumes the
+ * rest of it is too. Naming the lag costs one line and is the difference
+ * between "credit is calm" and "credit was calm eight sessions ago".
+ */
+export function staleSeries(
+  rows: ReadonlyArray<{ series_id?: unknown; obs_date?: unknown }>,
+  now = new Date(),
+): Array<{ seriesId: string; latestObs: string; ageDays: number }> {
+  const live = new Set(TV_LIVE.flatMap((e) => (e.fredId === undefined ? [] : [e.fredId])));
+  const newest = new Map<string, string>();
+  for (const row of rows) {
+    const id = row.series_id;
+    const obs = row.obs_date;
+    if (typeof id !== "string" || typeof obs !== "string") continue;
+    if (live.has(id)) continue;
+    const seen = newest.get(id);
+    if (seen === undefined || obs > seen) newest.set(id, obs);
+  }
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return [...newest]
+    .map(([seriesId, latestObs]) => ({
+      seriesId,
+      latestObs,
+      ageDays: Math.round((today - Date.parse(`${latestObs}T00:00:00Z`)) / 86_400_000),
+    }))
+    .filter((entry) => entry.ageDays >= 1)
+    .sort((a, b) => b.ageDays - a.ageDays || a.seriesId.localeCompare(b.seriesId, "en"));
 }
 
 /** Verified 2026-09-02 against argon's own client: base
@@ -647,7 +706,7 @@ export function buildTools(cfg: {
       // NFCI (financial conditions), BAMLH0A0HYM2 (HY OAS), DTWEXBGS (dollar).
       name: "ow_macro_rates",
       description:
-        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date, plus today's 2y/5y/10y/30y Treasury curve live from TradingView. `series` is the daily path; `liveCurve` is the current level — quote the live level for today and the series for the trend.",
+        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date, plus today's live levels from TradingView for the 2y/5y/10y/30y curve, VIX and DXY. `series` is the daily path; `liveNow` is the current level; `staleSeries` names the series that have no live twin and how many days behind each one is. Quote `liveNow` for today, `series` for the trend, and `staleSeries` whenever you cite a series listed there.",
       paramsSchema: MacroParams,
       mutating: false,
       dshParams: {
@@ -682,9 +741,15 @@ export function buildTools(cfg: {
         // today's level. A single blended field would let a caller quote an
         // 8-day-old 10y as this morning's, which is exactly the mistake this
         // overlay exists to remove.
+        // Three keys, never merged: `series` is the daily path with its own
+        // observation dates, `liveNow` is today's level, and `staleSeries`
+        // names what has neither. A single blended field would let a caller
+        // quote an 8-day-old 10y as this morning's, which is exactly what this
+        // overlay exists to remove.
         return JSON.stringify({
           series: { source: "argon.uw_scan.macro_series_daily", rows },
-          liveCurve: { source: "tradingview:TVC", ...(await tvYieldCurve(env, "ow_macro_rates")) },
+          liveNow: { source: "tradingview", ...(await tvLiveLevels(env, "ow_macro_rates")) },
+          staleSeries: staleSeries(rows as Array<{ series_id?: unknown; obs_date?: unknown }>),
         });
       },
     },
