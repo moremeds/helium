@@ -23,3 +23,4 @@ export * from "./audit.js";
 export * from "./fold.js";
 export * from "./budget.js";
 export * from "./config.js";
+export * from "./report.js";

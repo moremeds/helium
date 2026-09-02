@@ -938,3 +938,64 @@ describe("a model step that reached no model says so", () => {
     audit.close();
   });
 });
+
+describe("tenant renderer", () => {
+  function capturing(seen: Array<Record<string, unknown>>): Channel {
+    return {
+      id: "capture",
+      external: false,
+      async deliver(payload) {
+        seen.push(payload as unknown as Record<string, unknown>);
+        return { state: "sent" };
+      },
+    };
+  }
+
+  it("puts the tenant's rendered form on the payload, leaving body the transcript", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const report = await runTenant({
+      tenant: tenant(1, "delivery:\n  - channel: capture\n    config: {}\n"),
+      audit: new AuditStore(":memory:"),
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      tools: [echo],
+      channels: [capturing(seen)],
+      renderer: (run) => ({
+        subject: `brief ${run.tenant}`,
+        text: "plain",
+        html: "<p>rich</p>",
+      }),
+    });
+    expect(report.delivery[0]?.state).toBe("sent");
+    expect(seen[0]?.rendered).toEqual({
+      subject: "brief demo",
+      text: "plain",
+      html: "<p>rich</p>",
+    });
+    // The transcript is still there. It is the durable record, and it is the
+    // only place the run metadata lives once the email stops carrying it.
+    expect(String(seen[0]?.body)).toContain("**Outcome:**");
+  });
+
+  it("falls back to the transcript and records the reason when the renderer throws", async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const report = await runTenant({
+      tenant: tenant(1, "delivery:\n  - channel: capture\n    config: {}\n"),
+      audit: new AuditStore(":memory:"),
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      tools: [echo],
+      channels: [capturing(seen)],
+      renderer: () => {
+        throw new Error("render blew up");
+      },
+    });
+    expect(seen[0]?.rendered).toBeUndefined();
+    // Its own field, never a row in gatesSkipped: a formatting failure must not
+    // read like a safety gate that stopped guarding.
+    expect(report.rendererSkipped?.reason).toContain("render blew up");
+    expect(report.gatesSkipped).toEqual([]);
+    // And the transcript that DID go out says why the pretty form is missing.
+    expect(String(seen[0]?.body)).toContain("**renderer failed to load:**");
+  });
+});

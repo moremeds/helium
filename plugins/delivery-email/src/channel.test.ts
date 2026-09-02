@@ -108,4 +108,37 @@ describe("EmailChannel", () => {
     await expect(c.deliver(payload(), { maxPerDay: 1 })).resolves.toMatchObject({ state: "sent" });
     expect(sendMail.mock.calls[0]?.[0]).toMatchObject({ to: "desk@example.test" });
   });
+
+  it("prefers the tenant's rendered subject, text and html over the transcript", async () => {
+    const sendMail = vi.fn().mockResolvedValue({});
+    const outcome = await channel(sendMail).deliver(
+      {
+        ...payload(),
+        rendered: {
+          subject: "option-wizard 2026-09-02",
+          text: "今日候选 5 个",
+          html: "<table><tr><td>候选</td></tr></table>",
+        },
+      },
+      CONFIG,
+    );
+    expect(outcome.state).toBe("sent");
+    expect(sendMail.mock.calls[0]?.[0]).toMatchObject({
+      subject: "[helium] option-wizard 2026-09-02",
+      text: "今日候选 5 个",
+      html: "<table><tr><td>候选</td></tr></table>",
+    });
+  });
+
+  it("sends text-only when the rendered form carries no html", async () => {
+    const sendMail = vi.fn().mockResolvedValue({});
+    await channel(sendMail).deliver(
+      { ...payload(), rendered: { subject: "s", text: "plain only" } },
+      CONFIG,
+    );
+    // An `html: undefined` key would still make nodemailer build a multipart
+    // with an empty alternative; the key must be absent, not empty.
+    expect(sendMail.mock.calls[0]?.[0]).not.toHaveProperty("html");
+    expect(sendMail.mock.calls[0]?.[0]).toMatchObject({ text: "plain only" });
+  });
 });

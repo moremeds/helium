@@ -63,4 +63,28 @@ describe("markdown channel", () => {
     const result = await new MarkdownChannel({ now, stateRoot }).deliver(payload, { dir: 7 });
     expect(result).toEqual({ state: "failed", detail: "markdown channel `dir` must be a string" });
   });
+
+  it("ignores `rendered` and keeps writing the transcript body", async () => {
+    // The markdown file is the durable record. If it followed the email into
+    // the rendered form, the run's own metadata would exist nowhere on disk.
+    const dir = mkdtempSync(join(tmpdir(), "helium-md-"));
+    const outcome = await new MarkdownChannel({
+      stateRoot: dir,
+      now: () => new Date("2026-09-02T12:00:00Z"),
+    }).deliver(
+      {
+        tenant: "demo",
+        runId: "r1",
+        subject: "generic subject",
+        body: "**Outcome:** completed, 4 steps.",
+        rendered: { subject: "pretty", text: "pretty text", html: "<p>x</p>" },
+      },
+      {},
+    );
+    expect(outcome.state).toBe("sent");
+    const written = readFileSync(String(outcome.detail), "utf8");
+    expect(written).toContain("# generic subject");
+    expect(written).toContain("**Outcome:** completed, 4 steps.");
+    expect(written).not.toContain("pretty");
+  });
 });

@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   discoverProviders,
+  loadRenderer,
   loadTenantTools,
   tenantToolGaps,
   pluginsDir,
@@ -144,5 +145,53 @@ describe("tenant and plugin roots are separate knobs", () => {
     symlinkSync(real, join(root, "provider-linked"));
     const found = await discoverProviders(root);
     expect(found.live.map((p) => p.id)).toContain("linked");
+  });
+});
+
+describe("loadRenderer", () => {
+  /** A tenant directory with a built `lib/render/index.js` holding `body`. */
+  function tenantWithRender(body: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "helium-render-"));
+    mkdirSync(join(dir, "lib", "render"), { recursive: true });
+    writeFileSync(join(dir, "lib", "render", "index.js"), body);
+    return dir;
+  }
+
+  it("returns null for a tenant that ships no renderer", async () => {
+    const found = await loadRenderer(mkdtempSync(join(tmpdir(), "t-")));
+    expect(found).toEqual({ renderer: null, skipped: [] });
+  });
+
+  it("loads a default-exported render function", async () => {
+    const dir = tenantWithRender(
+      `export default (report) => ({ subject: "s:" + report.tenant, text: "t" });`,
+    );
+    const { renderer, skipped } = await loadRenderer(dir);
+    expect(skipped).toEqual([]);
+    expect(renderer?.({ tenant: "demo" } as never, {} as never)).toEqual({
+      subject: "s:demo",
+      text: "t",
+    });
+  });
+
+  it("skips a module that throws on import, with its reason", async () => {
+    const { renderer, skipped } = await loadRenderer(
+      tenantWithRender("throw new Error('bad render');"),
+    );
+    // A renderer that cannot load must not take the run down and must not go
+    // unmentioned: the run falls back to the generic transcript and says why.
+    expect(renderer).toBeNull();
+    expect(skipped[0]?.id).toBe("render");
+    expect(skipped[0]?.reason).toContain("bad render");
+  });
+
+  it("skips a module whose default export is not a function", async () => {
+    const { renderer, skipped } = await loadRenderer(
+      tenantWithRender("export default { subject: 'oops' };"),
+    );
+    expect(renderer).toBeNull();
+    expect(skipped).toEqual([
+      { id: "render", reason: "default export is not a render function" },
+    ]);
   });
 });

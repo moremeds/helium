@@ -8,6 +8,7 @@
  */
 import type { ExecutionTargetId } from "./capabilities.js";
 import type { LogEvent } from "./fold.js";
+import type { RenderedReport } from "./report.js";
 import type { WorkOrder } from "./work.js";
 
 /** What a role asks of a model, with no vendor or model name in it. */
@@ -142,6 +143,13 @@ export interface DeliveryPayload {
   body: string;
   /** Absolute paths of files the channel may attach or reference. */
   artifacts?: string[];
+  /**
+   * What the tenant's own renderer produced, when it ships one. `subject`/
+   * `body` above stay the generic transcript -- that is the durable record and
+   * it keeps every piece of run metadata -- so a channel that wants the
+   * readable form opts in, and one that wants the record does nothing.
+   */
+  rendered?: RenderedReport;
 }
 
 export interface DeliveryOutcome {
