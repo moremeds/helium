@@ -855,3 +855,62 @@ describe("a throwing tool degrades its step, not the run", () => {
     audit.close();
   });
 });
+
+describe("steps hand their output to the steps that depend on them", () => {
+  const CHAIN = `manifestVersion: "2"
+name: demo
+roles:
+  prober:
+    requires: [tool.use, cheap.bulk]
+    permissions: { tools: [echo] }
+  scribe:
+    requires: [tool.use, cheap.bulk]
+    permissions: { tools: [] }
+tasks:
+  - id: one
+    role: prober
+    requires: [tool.use]
+    prompt: say hello
+  - id: two
+    role: scribe
+    dependsOn: [one]
+    requires: [tool.use]
+    prompt: summarise step one
+`;
+
+  function chainTenant(): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-chain-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      "tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n",
+    );
+    writeFileSync(join(dir, "demo", "team.yaml"), CHAIN);
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("puts the dependency's output in the dependent's prompt", async () => {
+    const audit = new AuditStore(":memory:");
+    const prompts: string[] = [];
+    await runTenant({
+      tenant: chainTenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor: {
+        run: async (order, sel, sig) => {
+          prompts.push(order.inputs.prompt ?? "");
+          return modelExecutor.run(order, sel, sig);
+        },
+      },
+    });
+    // Step one's own prompt names no dependency; step two carries step one's
+    // output, which is what makes dependsOn mean more than an ordering.
+    expect(prompts[0]).not.toContain("### one");
+    expect(prompts[1]).toContain("### one");
+    audit.close();
+  });
+});

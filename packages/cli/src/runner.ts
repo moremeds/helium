@@ -211,6 +211,31 @@ function singleStringParam(tool: EcosystemTool): string | undefined {
 }
 
 /**
+ * What a step's declared dependencies produced.
+ *
+ * `dependsOn` used to order the DAG and pass NOTHING: every step ran as an
+ * independent subagent with no memory of the run, so a summarising role
+ * answered "I don't have access to the prior steps" — verified in a real run.
+ * A team lane whose steps cannot hand off is a sequence, not a team.
+ *
+ * ponytail: whole prior outputs, verbatim. Design §5 wants large tool outputs
+ * summarised before they enter a context; when a hand-off first blows a
+ * context window, that summariser is where this belongs.
+ */
+function handoff(
+  task: { dependsOn: readonly string[] },
+  produced: ReadonlyMap<string, string>,
+): string {
+  const parts = task.dependsOn
+    .map((id) => {
+      const text = produced.get(id);
+      return text === undefined || text === "" ? undefined : `### ${id}\n${text}`;
+    })
+    .filter((part) => part !== undefined);
+  return parts.length === 0 ? "" : `Output of the steps this one depends on:\n\n${parts.join("\n\n")}`;
+}
+
+/**
  * A gate is its own audited step (design §3): it runs BEFORE the model call it
  * guards, so a refusal costs one zero-token span instead of a whole call. The
  * span carries `toolName: "gate:<id>"` so the §5 query separates gate cost from
@@ -327,6 +352,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
 
   const signal = options.signal ?? new AbortController().signal;
   let stepNo = 0;
+  /** Each completed step's output, for the steps that declared they need it. */
+  const produced = new Map<string, string>();
 
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
@@ -357,8 +384,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         minIsolationClass: "in-process",
       },
       inputs: {
-        artifacts: [],
-        prompt: [line, role.persona ?? "", task.prompt ?? taskId]
+        artifacts: task.dependsOn.map((id) => `step:${id}`),
+        prompt: [line, role.persona ?? "", handoff(task, produced), task.prompt ?? taskId]
           .filter((part) => part !== "")
           .join("\n\n"),
       },
@@ -456,6 +483,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         remainingUsd: budget.usd,
       });
       if (out.ran > 0) stepNo += 1;
+      produced.set(taskId, text);
       report.steps.push({
         task: taskId,
         role: task.role,
@@ -588,6 +616,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         remainingUsd: budget.usd,
       });
       if (out.ran > 0) stepNo += 1;
+      produced.set(taskId, result.text);
       report.steps.push({
         task: taskId,
         role: task.role,
