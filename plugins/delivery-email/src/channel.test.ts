@@ -86,6 +86,19 @@ describe("EmailChannel", () => {
     await expect(c.deliver(payload(), { to: "x@y.test" })).rejects.toThrow(/maxPerDay/);
   });
 
+  it("lets the environment lift the daily cap, which is how a laptop run is not rationed", async () => {
+    // The manifest carries the production cap (the mini runs on a cron with
+    // nobody watching); a laptop run is driven by hand, so it sets 0 and sends
+    // as often as it is told to. Uncapped has to be SET, never the result of
+    // forgetting to configure a cap.
+    const sendMail = vi.fn().mockResolvedValue({});
+    const c = channel(sendMail, { HELIUM_EMAIL_MAX_PER_DAY: "0" });
+    for (let i = 0; i < 4; i += 1) {
+      await expect(c.deliver(payload(`r${i}`), CONFIG)).resolves.toMatchObject({ state: "sent" });
+    }
+    expect(sendMail).toHaveBeenCalledTimes(4);
+  });
+
   it("takes the recipient from the environment when the manifest names none", async () => {
     // option-wizard's tenant.yaml deliberately carries no address: the same
     // manifest is read on a laptop and on the mini, and only one of them should

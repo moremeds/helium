@@ -57,12 +57,23 @@ function readConfig(config: Record<string, unknown>, env: NodeJS.ProcessEnv): Em
   // person. So `to` falls back to the environment and the manifest can stay
   // free of anyone's inbox.
   const to = config.to ?? env.HELIUM_EMAIL_TO;
-  const maxPerDay = config.maxPerDay ?? config.max_per_day;
   if (typeof to !== "string" || to.trim() === "") {
     throw new Error("email channel config needs a `to` address, or HELIUM_EMAIL_TO set");
   }
-  if (typeof maxPerDay !== "number" || maxPerDay <= 0) {
-    throw new Error("email channel config needs a positive `maxPerDay`");
+  // The cap is a deployment fact like the address: a cron on the mini must not
+  // be able to mail sixty times overnight, while a laptop run being iterated on
+  // has an operator watching every send. So the environment overrides the
+  // manifest, and `0` there means uncapped — set deliberately, per machine,
+  // never by forgetting to configure it.
+  const override = env.HELIUM_EMAIL_MAX_PER_DAY;
+  const maxPerDay =
+    override === undefined || override.trim() === ""
+      ? (config.maxPerDay ?? config.max_per_day)
+      : Number(override) === 0
+        ? Number.POSITIVE_INFINITY
+        : Number(override);
+  if (typeof maxPerDay !== "number" || Number.isNaN(maxPerDay) || maxPerDay <= 0) {
+    throw new Error("email channel config needs a positive `maxPerDay`, or HELIUM_EMAIL_MAX_PER_DAY");
   }
   const prefix = config.subjectPrefix ?? config.subject_prefix;
   return {

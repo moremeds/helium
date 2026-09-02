@@ -4,7 +4,15 @@
  * would put an invented number in a trading email.
  */
 import { describe, expect, it } from "vitest";
-import { VOCABULARY, buildTools, symbolLiteral, staleSeries, tvLiveLevels } from "../tools/index.js";
+import {
+  VOCABULARY,
+  buildTools,
+  dteOf,
+  parseOcc,
+  symbolLiteral,
+  staleSeries,
+  tvLiveLevels,
+} from "../tools/index.js";
 
 const EMPTY_ENV: Record<string, string | undefined> = {};
 
@@ -34,8 +42,6 @@ describe("vocabulary", () => {
 describe("absent environment", () => {
   it.each([
     ["ow_ib_positions", {}, "OW_IB_API_BASE is unset"],
-    ["ow_ib_chain", { ticker: "AAPL", minDte: 21, maxDte: 60 }, "OW_IB_API_BASE is unset"],
-    ["ow_ib_quote", { ticker: "AAPL", conIds: [265598] }, "OW_IB_API_BASE is unset"],
     ["ow_argon_metrics", { tickers: ["SPY"] }, "OW_ARGON_PG_URL is unset"],
     ["ow_apex_bars", { symbol: "SPY" }, "OW_APEX_API_BASE is unset"],
     ["ow_uw_ticker_metrics", { tickers: ["AAPL"] }, "OW_UW_API_KEY is unset"],
@@ -58,6 +64,26 @@ describe("absent environment", () => {
         tickers: ["SPY"],
       }),
     ).rejects.toThrow("no price for any of SPY");
+  });
+
+  it("ow_uw_chain asks for the spot before the chain, and stops when there is none", async () => {
+    // The spot is not decoration on a chain — it is what makes a strike mean
+    // anything. So the ordering is load-bearing: TradingView is consulted
+    // first, and a chain with no price to sit against is refused outright
+    // rather than handed over as a list of unanchored numbers.
+    await expect(
+      tool("ow_uw_chain").run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
+    ).rejects.toThrow("OW_TV_ENABLED");
+    await expect(
+      tool("ow_uw_chain", { OW_TV_ENABLED: "1" }).run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
+    ).rejects.toThrow("OPENCLI_BIN is unset");
+    await expect(
+      tool("ow_uw_chain", {
+        OW_TV_ENABLED: "1",
+        OPENCLI_BIN: "/nonexistent/opencli",
+        OW_UW_API_KEY: "k",
+      }).run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
+    ).rejects.toThrow("no spot for SPY");
   });
 
   it("ow_tv_watchlist refuses while disabled rather than returning an empty universe", async () => {
@@ -174,6 +200,45 @@ describe("symbolLiteral", () => {
     // from a model's tool call — the one input here that is nobody's contract.
     for (const bad of ["SPY'; DROP TABLE x --", "../../etc", "SPY OR 1=1", ""]) {
       expect(() => symbolLiteral(bad, "t")).toThrow("is not a symbol this tool will pass on");
+    }
+  });
+});
+
+describe("dteOf", () => {
+  const now = new Date("2026-09-02T10:00:00Z");
+
+  it("reads both the dashed and the compact spelling as the same day", () => {
+    // Fixed-offset slicing of "2026-10-16" reads a month of "-1" and yields
+    // NaN, which compares false against every DTE bound — so a whole chain
+    // silently reports no expiries in band. That is what the first live UW call
+    // did.
+    expect(dteOf("2026-10-16", now)).toBe(44);
+    expect(dteOf("20261016", now)).toBe(44);
+  });
+});
+
+describe("parseOcc", () => {
+  // Unusual Whales returns no strike field at all: on a live
+  // /api/stock/SPY/option-contracts?expiry=2026-10-16 response (2026-09-02,
+  // 442 rows) the strike exists only inside option_symbol. Every strike this
+  // tenant reads from UW is produced here, so a wrong split here is a wrong
+  // strike in a proposal.
+  it("splits a real OCC symbol from the right", () => {
+    expect(parseOcc("SPY261016P00725000")).toEqual({
+      root: "SPY",
+      expiry: "2026-10-16",
+      right: "P",
+      strike: 725,
+    });
+  });
+
+  it("handles a fractional strike and a longer root", () => {
+    expect(parseOcc("NVDA261016C00217500")).toMatchObject({ root: "NVDA", strike: 217.5 });
+  });
+
+  it("returns undefined rather than a guess on anything else", () => {
+    for (const bad of ["", "SPY", "SPY261016X00725000", "SPY2610161P00725000"]) {
+      expect(parseOcc(bad)).toBeUndefined();
     }
   });
 });

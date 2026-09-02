@@ -40,7 +40,7 @@ roles:
     requires: [reason.deep, tool.use, structured.output]
     permissions:
       mutations: forbidden
-      tools: [ow_spot, ow_argon_metrics, ow_uw_ticker_metrics, ow_apex_bars, ow_ib_chain, ow_ib_quote]
+      tools: [ow_spot, ow_uw_chain, ow_argon_metrics, ow_uw_ticker_metrics, ow_apex_bars]
     persona: >-
       You turn a ticker plus its IV, skew and gamma state plus the regime
       verdict into concrete DEFINED-RISK proposals — legs, quantity, limit
@@ -52,8 +52,17 @@ roles:
       real spot is a made-up number, and one has already shipped: a QQQ 420/410
       spread with QQQ at 707. If ow_spot reports a ticker under `noPrice`, drop
       it and say why in `reason` — never carry it with a guessed strike.
+      ow_uw_chain gives you the strikes, NBBO bid/ask, open interest and greeks
+      for a ticker, already trimmed to the strikes around today's spot and
+      carrying that spot with them. Before the open those quotes are the
+      previous session's last NBBO — that is not a fault to route around, it is
+      what a premarket quote IS, and it is enough to price a defined-risk
+      spread. There is no IB path any more: it cost sixty to ninety seconds a
+      ticker and then answered 502, which cost a whole run its proposals.
       Your tickers come from the universe forwarded to you; if it is large,
-      pick from it rather than asking for a shorter list.
+      pick from it rather than asking for a shorter list. An unreachable data
+      source is a reason to name fewer proposals, never a reason to return none
+      while the spot and the chain are both in front of you.
       Your whole reply is ONE JSON object and nothing else — no prose before
       or after it, no markdown fence:
       {"proposals":[{"ticker","strategy","legs":[{"right":"call"|"put",

@@ -28,8 +28,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
-  ["ow_ib_chain", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
-  ["ow_ib_quote", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
+  ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_macro_rates", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
@@ -96,12 +95,23 @@ async function ibGet(
   return response.json();
 }
 
-/** `20260918` -> whole days from today, the unit every DTE threshold uses. */
-function dteOf(expiry: string, now: Date): number {
+/**
+ * `2026-09-18` or `20260918` -> whole days from today, the unit every DTE
+ * threshold uses.
+ *
+ * Both spellings, because the separator is the vendor's choice and getting it
+ * wrong fails SILENTLY: slicing `2026-10-16` by fixed offsets reads a month of
+ * `"-1"`, `Number` gives NaN, the comparison is false, and every expiry drops
+ * out of the band as if the ticker listed none. That is exactly what happened
+ * on the first live call after the chain moved from IB (compact) to Unusual
+ * Whales (dashed).
+ */
+export function dteOf(expiry: string, now: Date): number {
+  const digits = expiry.replace(/\D/gu, "");
   const parsed = Date.UTC(
-    Number(expiry.slice(0, 4)),
-    Number(expiry.slice(4, 6)) - 1,
-    Number(expiry.slice(6, 8)),
+    Number(digits.slice(0, 4)),
+    Number(digits.slice(4, 6)) - 1,
+    Number(digits.slice(6, 8)),
   );
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return Math.round((parsed - today) / 86_400_000);
@@ -345,19 +355,105 @@ async function uwGet(
 }
 
 
+/**
+ * One TradingView quote, trying the exchanges a US listing can be on. There is
+ * no lookup table: `search` answers with a display name ("NYSE Arca") while
+ * `quote` wants a code ("AMEX"), so a resolver would be a translation table
+ * that rots. Trying in order costs one extra subprocess on the miss.
+ *
+ * Shared by ow_spot and ow_uw_chain. A chain without the spot it sits against
+ * is exactly the shape that shipped a 420/410 spread on a 707 underlying.
+ */
+export async function tvLast(
+  env: Env,
+  tool: string,
+  raw: string,
+): Promise<{ exchange: string; close: number; changeAbs?: number } | undefined> {
+  if (env.OW_TV_ENABLED !== "1") throw new Error(`OW_TV_ENABLED is not "1"; ${tool} is disabled`);
+  const bin = need(env, "OPENCLI_BIN", tool);
+  const ticker = symbolLiteral(raw, tool);
+  for (const exchange of ["NASDAQ", "AMEX", "NYSE"]) {
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync(
+        bin,
+        ["tradingview", "quote", "--ticker", ticker, "--exchange", exchange, "-f", "json"],
+        { timeout: 30_000 },
+      ));
+    } catch {
+      continue;
+    }
+    const parsed: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
+    const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
+      | { close?: unknown; change_abs?: unknown }
+      | undefined;
+    if (typeof row?.close !== "number") continue;
+    return {
+      exchange,
+      close: row.close,
+      ...(typeof row.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
+    };
+  }
+  return undefined;
+}
+
+/**
+ * OCC option symbol -> its parts. `SPY261016P00725000` is SPY, 2026-10-16, put,
+ * strike 725. The root is variable length and the strike is fixed at 8 digits
+ * in thousandths, which is what makes the split unambiguous from the right.
+ *
+ * Unusual Whales returns no `strike` field at all — the strike exists only
+ * inside this symbol — so every strike this tenant reads from UW comes through
+ * here. Verified 2026-09-02 against a live
+ * `/api/stock/SPY/option-contracts?expiry=2026-10-16` response.
+ */
+export function parseOcc(
+  symbol: string,
+): { root: string; expiry: string; right: "C" | "P"; strike: number } | undefined {
+  const match = /^([A-Z0-9.]+?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/u.exec(symbol);
+  if (match === null) return undefined;
+  const [, root, yy, mm, dd, right, strike] = match;
+  // The root is variable length, so without a calendar check the match can
+  // simply eat a stray digit into the root and read a date of month 61 —
+  // "SPY2610161P00725000" does exactly that. A symbol that does not name a real
+  // day is not an option symbol.
+  const month = Number(mm);
+  const day = Number(dd);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  return {
+    root: root!,
+    expiry: `20${yy!}-${mm!}-${dd!}`,
+    right: right as "C" | "P",
+    strike: Number(strike) / 1000,
+  };
+}
+
+/** UW returns some numbers as JSON strings ("5.09") and some as numbers, and
+ *  leaves others null on untraded contracts. One reader for all three, and a
+ *  missing number stays missing rather than becoming a zero that reads as a
+ *  real bid of nothing. */
+function round4(value: number | undefined): number | undefined {
+  return value === undefined ? undefined : Number(value.toFixed(4));
+}
+
+function numeric(value: unknown): number | undefined {
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value !== "string") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 const TvParams = z.object({
   flagColors: z.array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"])).optional(),
 });
 const SpotParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(24) });
 const NoParams = z.object({});
-const ChainParams = z.object({
+const UwChainParams = z.object({
   ticker: z.string().min(1),
   minDte: z.number().int().nonnegative(),
   maxDte: z.number().int().positive(),
-});
-const QuoteParams = z.object({
-  ticker: z.string().min(1),
-  conIds: z.array(z.number().int().positive()).min(1).max(20),
+  strikeWindowPct: z.number().positive().max(50).optional(),
+  minOpenInterest: z.number().int().nonnegative().optional(),
 });
 const TickerMetricsParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(25) });
 // sector and etf are REQUIRED: the tide endpoints are per-sector and per-ETF,
@@ -490,38 +586,11 @@ export function buildTools(cfg: {
       async run(args: Record<string, unknown>): Promise<string> {
         const { tickers } = SpotParams.parse(args);
         const tool = "ow_spot";
-        if (env.OW_TV_ENABLED !== "1") {
-          throw new Error('OW_TV_ENABLED is not "1"; ow_spot is disabled');
-        }
-        const bin = need(env, "OPENCLI_BIN", tool);
         const quotes: unknown[] = [];
         const missing: string[] = [];
         for (const raw of tickers) {
           const ticker = symbolLiteral(raw, tool);
-          let hit: { exchange: string; close: number; changeAbs?: number } | undefined;
-          for (const exchange of ["NASDAQ", "AMEX", "NYSE"]) {
-            let stdout: string;
-            try {
-              ({ stdout } = await execFileAsync(
-                bin,
-                ["tradingview", "quote", "--ticker", ticker, "--exchange", exchange, "-f", "json"],
-                { timeout: 30_000 },
-              ));
-            } catch {
-              continue;
-            }
-            const parsed: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
-            const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
-              | { close?: unknown; change_abs?: unknown }
-              | undefined;
-            if (typeof row?.close !== "number") continue;
-            hit = {
-              exchange,
-              close: row.close,
-              ...(typeof row.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
-            };
-            break;
-          }
+          const hit = await tvLast(env, tool, ticker);
           // A ticker with no price is NAMED, never dropped and never guessed at.
           // Silence here is what produced the 420 strike on a 707 underlying.
           if (hit === undefined) missing.push(ticker);
@@ -638,75 +707,160 @@ export function buildTools(cfg: {
       },
     },
     {
-      name: "ow_ib_chain",
-      description: "Listed expiries and strikes for a ticker within a DTE band, from IB Gateway.",
-      paramsSchema: ChainParams,
+      // Replaces ow_ib_chain + ow_ib_quote, which were one tool's worth of data
+      // behind two IB round trips: a chain call, then one quote call per
+      // contract id. Measured over four live runs that path cost 60-91s and
+      // then returned 502 Bad Gateway, which cost a whole run its proposals —
+      // and it was reaching for a live quote before the open, when there is no
+      // live quote to reach for. One UW call per expiry carries the strikes AND
+      // the NBBO AND open interest AND the greeks.
+      //
+      // Verified 2026-09-02 against live responses:
+      //   GET /api/stock/SPY/expiry-breakdown
+      //     -> data[]: { expires, open_interest, volume, chains }
+      //   GET /api/stock/SPY/option-contracts?expiry=2026-10-16
+      //     -> data[] (442 rows): { option_symbol, nbbo_bid, nbbo_ask,
+      //        open_interest, volume, implied_volatility, delta, gamma, theta,
+      //        vega, rho, last_price, last_tape_time, ... }
+      // There is NO strike field: the strike lives in option_symbol (parseOcc).
+      // implied_volatility is null on 181 of those 442 rows — the untraded
+      // wings — which the open-interest floor removes rather than reporting as
+      // a zero.
+      name: "ow_uw_chain",
+      description:
+        "Option chain for a ticker within a DTE band, from Unusual Whales: strike, NBBO bid/ask, open interest, IV and greeks, trimmed to the strikes around today's spot. The spot it was trimmed against is returned with it.",
+      paramsSchema: UwChainParams,
       mutating: false,
       dshParams: {
         ticker: { type: "string", required: true, description: "Underlying symbol" },
         minDte: { type: "number", required: true, description: "Minimum days to expiry" },
         maxDte: { type: "number", required: true, description: "Maximum days to expiry" },
+        strikeWindowPct: {
+          type: "number",
+          required: false,
+          description: "Keep strikes within this percent of spot (default 8)",
+        },
+        minOpenInterest: {
+          type: "number",
+          required: false,
+          description: "Drop contracts below this open interest (default 250)",
+        },
       },
       async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const { ticker, minDte, maxDte } = ChainParams.parse(args);
-        const tool = "ow_ib_chain";
-        const listed = (await ibGet(env, tool, "/options/expirations", { symbol: ticker }, ctx)) as {
-          expirations?: unknown;
-        };
-        const all = Array.isArray(listed.expirations) ? listed.expirations : [];
-        const now = new Date();
-        const inBand = all
-          .filter((value): value is string => typeof value === "string")
-          .filter((expiry) => {
-            const dte = dteOf(expiry, now);
-            return dte >= minDte && dte <= maxDte;
-          });
-        const expiries = [];
-        for (const expiry of inBand) {
-          const chain = (await ibGet(
-            env,
-            tool,
-            "/options/chain",
-            { symbol: ticker, expiry },
-            ctx,
-          )) as { strikes?: unknown; exchange?: unknown };
-          expiries.push({
-            expiry,
-            dte: dteOf(expiry, now),
-            exchange: chain.exchange,
-            strikes: chain.strikes,
-          });
-        }
-        // An empty band is a FACT, not a failure: a ticker can genuinely list
-        // no expiry between minDte and maxDte. The count of what was listed is
-        // reported alongside so the caller can tell that apart from a bad symbol.
-        return JSON.stringify({ ticker, minDte, maxDte, listedExpiries: all.length, expiries });
-      },
-    },
-    {
-      name: "ow_ib_quote",
-      description: "Bid, ask, mid, open interest and greeks for contract ids, from IB Gateway.",
-      paramsSchema: QuoteParams,
-      mutating: false,
-      dshParams: {
-        ticker: { type: "string", required: true, description: "Underlying symbol" },
-        conIds: { type: "array", required: true, description: "IB contract ids" },
-      },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const { ticker, conIds } = QuoteParams.parse(args);
-        const quotes = [];
-        for (const conId of conIds) {
-          quotes.push(
-            await ibGet(
-              env,
-              "ow_ib_quote",
-              "/orders/quote",
-              { ticker, con_id: String(conId) },
-              ctx,
-            ),
+        const { ticker, minDte, maxDte, strikeWindowPct, minOpenInterest } =
+          UwChainParams.parse(args);
+        const tool = "ow_uw_chain";
+        const window = (strikeWindowPct ?? 8) / 100;
+        const oiFloor = minOpenInterest ?? 250;
+
+        // The spot comes FIRST and its absence is fatal. A chain trimmed around
+        // nothing is a list of numbers with no anchor, and handing one to a
+        // designer is how the 420/410 spread on a 707 underlying happened.
+        const spot = await tvLast(env, tool, ticker);
+        if (spot === undefined) {
+          throw new Error(
+            `${tool}: no spot for ${ticker} on NASDAQ, AMEX or NYSE, so there is nothing to ` +
+              "centre a strike window on. Refusing to return a chain that cannot be read " +
+              "against a price.",
           );
         }
-        return JSON.stringify({ ticker, quotes });
+
+        const encoded = encodeURIComponent(symbolLiteral(ticker, tool));
+        const breakdown = (await uwGet(
+          env,
+          tool,
+          `/api/stock/${encoded}/expiry-breakdown`,
+          {},
+          ctx,
+        )) as { data?: unknown };
+        const listed = Array.isArray(breakdown.data) ? breakdown.data : [];
+        const now = new Date();
+        const inBand = listed
+          .map((row) => row as { expires?: unknown; open_interest?: unknown; volume?: unknown })
+          .filter((row): row is { expires: string } & typeof row => typeof row.expires === "string")
+          .map((row) => ({ ...row, dte: dteOf(row.expires, now) }))
+          .filter((row) => row.dte >= minDte && row.dte <= maxDte)
+          .sort((a, b) => a.dte - b.dte)
+          .slice(0, 3);
+
+        const expiries = [];
+        for (const row of inBand) {
+          const page = (await uwGet(
+            env,
+            tool,
+            `/api/stock/${encoded}/option-contracts`,
+            { expiry: row.expires },
+            ctx,
+          )) as { data?: unknown };
+          const raw = Array.isArray(page.data) ? page.data : [];
+          const contracts = raw
+            .map((entry) => entry as Record<string, unknown>)
+            .flatMap((entry) => {
+              const parsed =
+                typeof entry.option_symbol === "string" ? parseOcc(entry.option_symbol) : undefined;
+              if (parsed === undefined) return [];
+              const oi = typeof entry.open_interest === "number" ? entry.open_interest : 0;
+              if (oi < oiFloor) return [];
+              if (Math.abs(parsed.strike - spot.close) / spot.close > window) return [];
+              const bid = numeric(entry.nbbo_bid);
+              const ask = numeric(entry.nbbo_ask);
+              return [
+                {
+                  right: parsed.right,
+                  strike: parsed.strike,
+                  bid,
+                  ask,
+                  ...(bid === undefined || ask === undefined
+                    ? {}
+                    : { mid: Number(((bid + ask) / 2).toFixed(2)) }),
+                  openInterest: oi,
+                  volume: typeof entry.volume === "number" ? entry.volume : undefined,
+                  // Rounded to four places on the way out. UW answers with
+                  // seventeen significant digits of float noise per greek, and
+                  // five greeks across three expiries of chain is most of the
+                  // payload — 65KB became 34KB for nothing anyone can trade on.
+                  iv: round4(numeric(entry.implied_volatility)),
+                  delta: round4(numeric(entry.delta)),
+                  gamma: round4(numeric(entry.gamma)),
+                  theta: round4(numeric(entry.theta)),
+                  vega: round4(numeric(entry.vega)),
+                },
+              ];
+            })
+            .sort(
+              (a, b) =>
+                Math.abs(a.strike - spot.close) - Math.abs(b.strike - spot.close) ||
+                a.right.localeCompare(b.right, "en"),
+            )
+            .slice(0, 60);
+          expiries.push({
+            expiry: row.expires,
+            dte: row.dte,
+            chainOpenInterest: row.open_interest,
+            chainVolume: row.volume,
+            contracts,
+          });
+        }
+
+        // An empty band is a FACT, not a failure: a ticker can genuinely list no
+        // expiry between minDte and maxDte. The count of what WAS listed travels
+        // with it so the caller can tell that apart from a bad symbol.
+        return JSON.stringify({
+          source: "unusualwhales",
+          ticker,
+          spot: spot.close,
+          spotSource: `tradingview ${spot.exchange}`,
+          strikeWindowPct: window * 100,
+          minOpenInterest: oiFloor,
+          minDte,
+          maxDte,
+          listedExpiries: listed.length,
+          expiries,
+          note:
+            "Quotes are the last NBBO Unusual Whales recorded, not a live book. Before the open " +
+            "that is the previous session's close — there is no live quote to have.",
+          fetchedAt: new Date().toISOString(),
+        });
       },
     },
     {
