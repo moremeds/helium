@@ -19,12 +19,8 @@ import {
   auditDbPath,
   loadOperatorEnv,
 } from "@helium/core";
-import { discoverProviders } from "./discovery.js";
+import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
-
-function pluginsDir(env: NodeJS.ProcessEnv): string {
-  return env.HELIUM_TENANTS_DIR ?? resolve(process.cwd(), "plugins");
-}
 
 function stateRoot(env: NodeJS.ProcessEnv): string {
   return env.HELIUM_STATE_ROOT ?? resolve(process.cwd(), ".helium-state");
@@ -124,15 +120,16 @@ async function main(argv: string[]): Promise<number> {
       console.error("usage: helium run <tenant>");
       return 2;
     }
-    const dir = pluginsDir(env);
-    const { tenants, skipped } = loadTenants(dir);
+    const tenantsRoot = tenantsDir(env);
+    const pluginsRoot = pluginsDir(env);
+    const { tenants, skipped } = loadTenants(tenantsRoot);
     for (const skip of skipped) {
       console.error(`tenant skipped: ${skip.tenant} — ${skip.reason}`);
     }
     const tenant = tenants.find((entry) => entry.spec.tenant === argument);
     if (tenant === undefined) {
       console.error(
-        `no tenant named ${argument} under ${dir}; found: ${tenants.map((t) => t.spec.tenant).join(", ") || "(none)"}`,
+        `no tenant named ${argument} under ${tenantsRoot}; found: ${tenants.map((t) => t.spec.tenant).join(", ") || "(none)"}`,
       );
       return 1;
     }
@@ -141,7 +138,7 @@ async function main(argv: string[]): Promise<number> {
       return 1;
     }
 
-    const providers = await discoverProviders(dir);
+    const providers = await discoverProviders(pluginsRoot);
     const catalog = new CapabilityCatalog();
     registerProviders(catalog, providers.live);
 
@@ -150,7 +147,7 @@ async function main(argv: string[]): Promise<number> {
       const report = await runTenant({
         tenant,
         audit: store,
-        pluginsDir: dir,
+        pluginsDir: pluginsRoot,
         stateRoot: stateRoot(env),
         env,
         providers: providers.live,
@@ -171,7 +168,8 @@ async function main(argv: string[]): Promise<number> {
       "  helium audit <run-id>   per-step cost and token rows for a run",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,
-      `tenants:  ${pluginsDir(env)} (override with HELIUM_TENANTS_DIR)`,
+      `tenants:  ${tenantsDir(env)} (override with HELIUM_TENANTS_DIR)`,
+      `plugins:  ${pluginsDir(env)} (override with HELIUM_PLUGINS_DIR)`,
     ].join("\n"),
   );
   return command === undefined ? 2 : 2;

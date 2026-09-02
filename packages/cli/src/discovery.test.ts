@@ -1,8 +1,13 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { discoverProviders, loadTenantTools } from "./discovery.js";
+import {
+  discoverProviders,
+  loadTenantTools,
+  pluginsDir,
+  tenantsDir,
+} from "./discovery.js";
 
 function plugins(entries: Record<string, string | null>): string {
   const dir = mkdtempSync(join(tmpdir(), "helium-plugins-"));
@@ -74,5 +79,28 @@ describe("discoverProviders", () => {
     await expect(
       loadTenantTools(mkdtempSync(join(tmpdir(), "t-")), { stateRoot: "/tmp", env: {} }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("tenant and plugin roots are separate knobs", () => {
+  it("HELIUM_TENANTS_DIR moves tenants without moving providers", () => {
+    const env = { HELIUM_TENANTS_DIR: "/elsewhere/tenants" } as NodeJS.ProcessEnv;
+    // The bug this pins: one variable used to move both, so pointing it at a
+    // scratch tenant left the run with zero providers and no error saying so.
+    expect(tenantsDir(env)).toBe("/elsewhere/tenants");
+    expect(pluginsDir(env)).toBe(resolve(process.cwd(), "plugins"));
+  });
+
+  it("finds a provider reached through a symlink", async () => {
+    const root = mkdtempSync(join(tmpdir(), "helium-symlink-"));
+    const real = join(root, "real");
+    mkdirSync(join(real, "lib"), { recursive: true });
+    writeFileSync(
+      join(real, "lib", "provider.js"),
+      LIVE.replace('id: "live"', 'id: "linked"'),
+    );
+    symlinkSync(real, join(root, "provider-linked"));
+    const found = await discoverProviders(root);
+    expect(found.live.map((p) => p.id)).toContain("linked");
   });
 });

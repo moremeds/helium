@@ -7,9 +7,27 @@
  * @module @helium/cli/discovery
  */
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { EcosystemTool, Provider } from "@helium/core";
+
+/**
+ * Tenants are CONFIGURATION: which teams this install runs. Relocatable, so a
+ * tenant can be developed or run from outside the checkout.
+ */
+export function tenantsDir(env: NodeJS.ProcessEnv): string {
+  return env.HELIUM_TENANTS_DIR ?? resolve(process.cwd(), "plugins");
+}
+
+/**
+ * Providers, gates and delivery channels are CODE: discovered next to the
+ * build that imports their `lib/*.js`. Relocating tenants must not take these
+ * with it — before the split, `HELIUM_TENANTS_DIR` moved both, so pointing it
+ * at a scratch tenant silently left the run with no providers at all.
+ */
+export function pluginsDir(env: NodeJS.ProcessEnv): string {
+  return env.HELIUM_PLUGINS_DIR ?? resolve(process.cwd(), "plugins");
+}
 
 export interface Skipped {
   id: string;
@@ -33,7 +51,13 @@ export async function discoverProviders(
   const skipped: Skipped[] = [];
   if (!existsSync(pluginsDir)) return { live, skipped };
   const names = readdirSync(pluginsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("provider-"))
+    // isDirectory() is false for a symlink, so a symlinked plugin would be
+    // invisible with no error. Follow them.
+    .filter(
+      (entry) =>
+        (entry.isDirectory() || entry.isSymbolicLink()) &&
+        entry.name.startsWith("provider-"),
+    )
     .map((entry) => entry.name)
     .sort();
   for (const name of names) {

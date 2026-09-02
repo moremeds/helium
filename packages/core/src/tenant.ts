@@ -177,7 +177,9 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
 export function tenantDirs(dir: string): string[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    // A symlinked tenant directory is a directory for our purposes; without
+    // this it is skipped silently (isDirectory() does not follow links).
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
     .map((entry) => entry.name)
     .sort()
     .filter((name) => existsSync(join(dir, name, "tenant.yaml")));
