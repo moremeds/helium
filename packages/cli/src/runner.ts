@@ -196,7 +196,10 @@ export interface RunOptions {
  * and total: the tools that need no input are exactly the tools a universe
  * step exists to call.
  */
-function toolArgs(tool: EcosystemTool, text: string): Record<string, unknown> | undefined {
+function toolArgs(
+  tool: EcosystemTool,
+  text: string,
+): Record<string, unknown> | undefined {
   const schema = tool.paramsSchema as unknown as {
     safeParse?: (value: unknown) => { success: boolean };
   };
@@ -218,7 +221,10 @@ function toolArgs(tool: EcosystemTool, text: string): Record<string, unknown> | 
 function singleStringParam(tool: EcosystemTool): string | undefined {
   const shape = (
     tool.paramsSchema as unknown as {
-      shape?: Record<string, { safeParse?: (value: unknown) => { success: boolean } }>;
+      shape?: Record<
+        string,
+        { safeParse?: (value: unknown) => { success: boolean } }
+      >;
     }
   ).shape;
   if (shape === undefined) return undefined;
@@ -251,10 +257,14 @@ function handoff(
   const parts = task.dependsOn
     .map((id) => {
       const text = produced.get(id);
-      return text === undefined || text === "" ? undefined : `### ${id}\n${text}`;
+      return text === undefined || text === ""
+        ? undefined
+        : `### ${id}\n${text}`;
     })
     .filter((part) => part !== undefined);
-  return parts.length === 0 ? "" : `Output of the steps this one depends on:\n\n${parts.join("\n\n")}`;
+  return parts.length === 0
+    ? ""
+    : `Output of the steps this one depends on:\n\n${parts.join("\n\n")}`;
 }
 
 /**
@@ -263,6 +273,28 @@ function handoff(
  * span carries `toolName: "gate:<id>"` so the §5 query separates gate cost from
  * model cost without a second table.
  */
+/**
+ * The raw strings a model step's tools returned, read out of the same
+ * `tool/result` events the fold measures into `toolOutputBytes`. The tool is
+ * never re-run to obtain them, and nothing is summarised: a gate comparing the
+ * model's text against a paraphrase would pass what it exists to catch.
+ */
+function toolResultTexts(
+  events: readonly { type: string; data: unknown }[],
+): string[] {
+  const texts: string[] = [];
+  for (const event of events) {
+    if (event.type !== "tool/result") continue;
+    const data = event.data as Record<string, unknown>;
+    const message = data.message as Record<string, unknown> | undefined;
+    const content = message?.content;
+    texts.push(
+      typeof content === "string" ? content : JSON.stringify(content ?? null),
+    );
+  }
+  return texts;
+}
+
 async function runGates(
   gates: readonly Gate[],
   phase: "input" | "output",
@@ -275,6 +307,7 @@ async function runGates(
     taskId: string;
     stepNo: number;
     remainingUsd: number;
+    toolOutputs?: string[];
   },
 ): Promise<{ ran: number; refusals: Array<{ id: string; reason: string }> }> {
   const refusals: Array<{ id: string; reason: string }> = [];
@@ -293,6 +326,9 @@ async function runGates(
         runId: ctx.runId,
         role: ctx.role,
         remainingUsd: ctx.remainingUsd,
+        ...(ctx.toolOutputs === undefined
+          ? {}
+          : { toolOutputs: ctx.toolOutputs }),
       });
     } catch (error: unknown) {
       verdict = {
@@ -392,7 +428,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   const loadedChannels =
     options.channels === undefined && spec.delivery.length > 0
       ? await discoverChannels(options.pluginsDir)
-      : { channels: options.channels ?? [], skipped: [] as Array<{ id: string; reason: string }> };
+      : {
+          channels: options.channels ?? [],
+          skipped: [] as Array<{ id: string; reason: string }>,
+        };
   const channels = loadedChannels.channels;
   // Loaded once per run, not once per channel: two channels must not disagree
   // about what today's report says.
@@ -401,8 +440,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       ? await loadRenderer(options.tenant.dir)
       : { renderer: options.renderer, skipped: [] as Skipped[] };
 
-  const catalog = options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
-  if (options.catalog === undefined) registerProviders(catalog, discovered.live);
+  const catalog =
+    options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
+  if (options.catalog === undefined)
+    registerProviders(catalog, discovered.live);
 
   // A live provider knows how to execute (discovery drops the ones that do
   // not), so model mode no longer waits for an injected executor. The option
@@ -425,13 +466,20 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       : { rendererSkipped: { reason: loadedRenderer.skipped[0].reason } }),
     delivery: [],
     toolsUnconfigured:
-      options.tools === undefined ? await tenantToolGaps(options.tenant.dir, env) : [],
+      options.tools === undefined
+        ? await tenantToolGaps(options.tenant.dir, env)
+        : [],
   };
 
   const signal = options.signal ?? new AbortController().signal;
   let stepNo = 0;
   /** Each completed step's output, for the steps that declared they need it. */
   const produced = new Map<string, string>();
+  /** Raw tool returns, in call order, for gates that check the model's text
+   *  against what it was actually given. Strings only — no summarising here,
+   *  because a gate comparing against a summary would pass a hallucination
+   *  that the summary happened to paraphrase. */
+  const toolOutputs: string[] = [];
 
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
@@ -470,7 +518,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       },
       inputs: {
         artifacts: task.dependsOn.map((id) => `step:${id}`),
-        prompt: [clock, line, role.persona ?? "", handoff(task, produced), task.prompt ?? taskId]
+        prompt: [
+          clock,
+          line,
+          role.persona ?? "",
+          handoff(task, produced),
+          task.prompt ?? taskId,
+        ]
           .filter((part) => part !== "")
           .join("\n\n"),
       },
@@ -517,7 +571,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         }
         const args = toolArgs(tool, task.prompt ?? taskId);
         if (args === undefined) {
-          outputs.push(`${name}: skipped, needs parameters this step cannot supply`);
+          outputs.push(
+            `${name}: skipped, needs parameters this step cannot supply`,
+          );
           continue;
         }
         const startedAt = Date.now();
@@ -553,6 +609,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         };
         options.audit.append(span);
         outputs.push(`${name} -> ${value}`);
+        toolOutputs.push(value);
       }
       // A step that ran no tool has nothing OF ITS OWN to say — but it is still
       // in the chain, and its output is what every dependent receives instead
@@ -568,15 +625,21 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           : inherited === ""
             ? "(no tools declared for this role, and nothing upstream to forward)"
             : `(no tools declared for this role; forwarding its input unchanged)\n\n${inherited}`;
-      const out = await runGates(loadedGates.gates, "output", { text }, {
-        audit: options.audit,
-        runId,
-        tenant: spec.tenant,
-        role: task.role,
-        taskId,
-        stepNo: stepNo + 1,
-        remainingUsd: budget.usd,
-      });
+      const out = await runGates(
+        loadedGates.gates,
+        "output",
+        { text },
+        {
+          audit: options.audit,
+          runId,
+          tenant: spec.tenant,
+          role: task.role,
+          taskId,
+          stepNo: stepNo + 1,
+          remainingUsd: budget.usd,
+          toolOutputs,
+        },
+      );
       if (out.ran > 0) stepNo += 1;
       produced.set(taskId, text);
       report.steps.push({
@@ -626,7 +689,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
 
       const [providerId, ...rest] = String(decision.selected).split(":");
       const routedModel = rest.join(":");
-      const provider = discovered.live.find((entry) => entry.id === providerId)!;
+      const provider = discovered.live.find(
+        (entry) => entry.id === providerId,
+      )!;
       // The provider decides effort and its own runtime options; the MODEL is
       // the router's, not a second choice made without the catalog. Letting
       // `select` re-pick here would re-offer a model this run already retired.
@@ -656,19 +721,19 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
               }),
         },
       };
-      const model = provider.models.find((entry) => entry.id === selection.model);
+      const model = provider.models.find(
+        (entry) => entry.id === selection.model,
+      );
 
-      const executor: ModelExecutor =
-        options.modelExecutor ?? {
-          run: async (order, sel, sig) => provider.run!(order, sel, sig),
-        };
+      const executor: ModelExecutor = options.modelExecutor ?? {
+        run: async (order, sel, sig) => provider.run!(order, sel, sig),
+      };
 
       let result: Awaited<ReturnType<ModelExecutor["run"]>>;
       try {
         result = await executor.run(work, selection, signal);
       } catch (error: unknown) {
-        const failure =
-          error instanceof ProviderRunFailure ? error : undefined;
+        const failure = error instanceof ProviderRunFailure ? error : undefined;
         const retired =
           failure?.quotaDomain === undefined
             ? 0
@@ -709,6 +774,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           : { price: { usdIn: model.usdIn, usdOut: model.usdOut } }),
       });
       options.audit.appendAll(spans);
+      toolOutputs.push(...toolResultTexts(result.events));
       stepNo += spans.filter((span) => span.toolName === undefined).length;
 
       // A model step whose session log reported NO usage did not reach a
@@ -737,6 +803,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         taskId,
         stepNo: stepNo + 1,
         remainingUsd: budget.usd,
+        toolOutputs,
       });
       if (out.ran > 0) stepNo += 1;
       produced.set(taskId, result.text);
@@ -775,7 +842,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     // a second row for the same task. Counting rows would report a run as
     // failed precisely because the re-route worked.
     const succeeded = new Set(
-      report.steps.filter((step) => step.failure === undefined).map((step) => step.task),
+      report.steps
+        .filter((step) => step.failure === undefined)
+        .map((step) => step.task),
     );
     const failed = report.steps.filter(
       (step) => step.failure !== undefined && !succeeded.has(step.task),
@@ -816,7 +885,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
 
   const brake = env.HELIUM_TENANT_DELIVERY === "1";
   for (const entry of spec.delivery) {
-    const channel = channels.find((candidate) => candidate.id === entry.channel);
+    const channel = channels.find(
+      (candidate) => candidate.id === entry.channel,
+    );
     if (channel === undefined) {
       const why = loadedChannels.skipped.find(
         (skip) => skip.id === `delivery-${entry.channel}`,
@@ -878,7 +949,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       latencyMs: Math.max(0, Date.now() - startedAt),
       costUsd: 0,
       toolName: `delivery:${entry.channel}`,
-      toolOutputBytes: Buffer.byteLength(outcome.detail ?? outcome.state, "utf8"),
+      toolOutputBytes: Buffer.byteLength(
+        outcome.detail ?? outcome.state,
+        "utf8",
+      ),
       summarised: false,
       ts: new Date().toISOString(),
     });
@@ -928,24 +1002,37 @@ function deliveryBody(report: RunReport): string {
       : `**Outcome:** FAILED — ${report.failure?.class ?? "unknown"}: ${report.failure?.detail ?? ""}`,
   );
   if (report.mode === "tool-only") {
-    lines.push("", "_No live provider: no model ran, so nothing below was reasoned about._");
+    lines.push(
+      "",
+      "_No live provider: no model ran, so nothing below was reasoned about._",
+    );
   }
-  for (const skip of report.providersSkipped) lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
-  for (const skip of report.gatesSkipped) lines.push(`- **gate failed to load:** ${skip.id} — ${skip.reason}`);
+  for (const skip of report.providersSkipped)
+    lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
+  for (const skip of report.gatesSkipped)
+    lines.push(`- **gate failed to load:** ${skip.id} — ${skip.reason}`);
   if (report.rendererSkipped !== undefined) {
-    lines.push(`- **renderer failed to load:** ${report.rendererSkipped.reason}`);
+    lines.push(
+      `- **renderer failed to load:** ${report.rendererSkipped.reason}`,
+    );
   }
-  for (const gap of report.toolsUnconfigured) lines.push(`- **tool unconfigured:** ${gap}`);
-  for (const refusal of failures) lines.push(`- gate \`${refusal.id}\` refused: ${refusal.reason}`);
+  for (const gap of report.toolsUnconfigured)
+    lines.push(`- **tool unconfigured:** ${gap}`);
+  for (const refusal of failures)
+    lines.push(`- gate \`${refusal.id}\` refused: ${refusal.reason}`);
 
   for (const step of report.steps) {
     lines.push("", `## ${step.task} — ${step.role}`);
     if (step.targetId !== undefined) lines.push(`\`${step.targetId}\``, "");
-    if (step.downgradeReason !== undefined) lines.push(`> ${step.downgradeReason}`, "");
+    if (step.downgradeReason !== undefined)
+      lines.push(`> ${step.downgradeReason}`, "");
     const summarised = summariseToolLines(step.text);
     if (summarised !== "") lines.push(summarised);
   }
-  lines.push("", `Full per-step tokens and cost: \`helium audit ${report.runId}\``);
+  lines.push(
+    "",
+    `Full per-step tokens and cost: \`helium audit ${report.runId}\``,
+  );
   return lines.join("\n");
 }
 

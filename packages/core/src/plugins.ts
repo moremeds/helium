@@ -118,6 +118,12 @@ export interface GateCtx {
   role: string;
   /** Remaining budget at the moment the gate runs. */
   remainingUsd?: number;
+  /**
+   * Everything the tools in this run returned, as raw strings, in order. Core
+   * does not read inside them: it is the tenant's gate that decides what "the
+   * output must be supported by what a tool said" means for its own domain.
+   */
+  toolOutputs?: string[];
 }
 
 /**
