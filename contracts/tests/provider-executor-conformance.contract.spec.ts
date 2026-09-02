@@ -11,12 +11,14 @@
  *     containing nothing but the secret-header variables (`curl.test.ts`)
  *   - credentials must not be visible to `ps`    -> `curl.test.ts`
  *   - undeclared tools cannot reach the model    -> no `tools` is ever sent, and
- *     an executor asked for one refuses (`executor.test.ts` in both plugins)
+ *     both the executor and `Provider.run` refuse a work order that asks for
+ *     one (`executor.test.ts` and `provider.test.ts` in both plugins)
  *   - workspace access                           -> no workspace is passed at all
  *
- * `provider-deepseek-dsh` runs in-process through dsh and was never a subject
- * here. Keeping an empty suite would be the ceremony doctrine 6 forbids, so the
- * conformance harness (`contracts/harness/execution-boundary.ts`) and its
+ * The only other subject, `provider-deepseek-dsh`, ran in-process through dsh
+ * and was never graded here; it was deleted 2026-09-02 as a duplicate of
+ * `provider-dsh`. Keeping an empty suite would be the ceremony doctrine 6
+ * forbids, so the harness (`contracts/harness/execution-boundary.ts`) and its
  * fixtures are retired with this file.
  */
 import { describe, it } from "vitest";

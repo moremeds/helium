@@ -7,6 +7,7 @@
  * @module @helium/core/plugins
  */
 import type { ExecutionTargetId } from "./capabilities.js";
+import type { LogEvent } from "./fold.js";
 import type { WorkOrder } from "./work.js";
 
 /** What a role asks of a model, with no vendor or model name in it. */
@@ -32,10 +33,25 @@ export interface ModelSelection {
 export interface ProviderModel {
   id: string;
   caps: string[];
-  /** USD per token, not per million. */
+  /** USD per token, not per million. Ignored when `unmetered`. */
   usdIn: number;
   usdOut: number;
   maxContextTokens?: number;
+  /**
+   * A flat-rate route: a subscription bills a month, not a token. Such a
+   * target is registered with NO price, so the router ranks it last rather
+   * than treating it as measured-zero and preferring it over every metered
+   * model. Its token columns are still real — unmetered is not free.
+   */
+  unmetered?: boolean;
+}
+
+/** One executed step, in the only shape the audit fold reads. */
+export interface ModelRun {
+  text: string;
+  structured?: unknown;
+  /** Append-only session log; `foldSessionLog` turns it into spans. */
+  events: LogEvent[];
 }
 
 /**
@@ -48,10 +64,28 @@ export interface Provider {
   id: string;
   capabilities: string[];
   models: ProviderModel[];
+  /**
+   * Tokens this provider spends before our prompt is counted — its own system
+   * preamble or identity block. MEASURED against the wire, never estimated
+   * (design §3.1): the router adds it to every candidate's projection, so a
+   * model with a cheap per-token rate and a fat preamble loses to a dearer one
+   * without. Zero is a legitimate value and must still be stated.
+   */
+  overheadTokens: number;
   probe(): Promise<boolean>;
   /** Why a failed probe said no. Recorded as the skip reason; never a secret. */
   probeReason?(): string;
   select(request: AgentRequest): ModelSelection;
+  /**
+   * Execute one routed step. A provider that can route but not yet execute
+   * omits this and is skipped at discovery with that reason — better than
+   * being selectable and then failing every step it wins.
+   */
+  run?(
+    work: WorkOrder,
+    selection: ModelSelection,
+    signal: AbortSignal,
+  ): Promise<ModelRun>;
 }
 
 export interface GateCtx {

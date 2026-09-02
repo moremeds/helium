@@ -91,8 +91,11 @@ function projectedUsd(
   budget: BudgetProjection | undefined,
 ): number | undefined {
   if (target.price === undefined || budget === undefined) return undefined;
+  // The preamble is input the caller never wrote but always pays for.
+  const input =
+    budget.projectedInputTokens + (target.price.overheadInputTokens ?? 0);
   return (
-    target.price.usdIn * budget.projectedInputTokens +
+    target.price.usdIn * input +
     target.price.usdOut * budget.projectedOutputTokens
   );
 }

@@ -50,6 +50,7 @@ const echo: EcosystemTool = {
 const provider: Provider = {
   id: "fake",
   capabilities: ["tool.use", "cheap.bulk"],
+  overheadTokens: 0,
   models: [
     { id: "cheap", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-6, usdOut: 2e-6 },
   ],
@@ -183,5 +184,64 @@ describe("runTenant", () => {
     expect(seen).toContain("[helium budget] remaining 1.0000 USD of 1.00 (100%)");
     expect(seen).toContain("say hello");
     audit.close();
+  });
+
+  it("executes through the provider itself when no executor is injected", async () => {
+    // The seam M2 needs: a discovered provider owns both routing and running,
+    // so adding a vendor is a directory and never a core edit.
+    const audit = new AuditStore(":memory:");
+    const selfRunning: Provider = {
+      ...provider,
+      id: "selfrun",
+      select: () => ({ targetId: "selfrun:cheap" as never, model: "cheap" }),
+      run: async () => ({
+        text: "ran in the provider",
+        events: [
+          { type: "step/start", seq: 1, time: 1_000, data: { turn: 1, step: 1 } },
+          {
+            type: "assistant/message",
+            seq: 2,
+            time: 1_400,
+            data: { turn: 1, step: 1, usage: { inputTokens: 40, outputTokens: 4 } },
+          },
+        ],
+      }),
+    };
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [selfRunning],
+      tools: [echo],
+      catalog: catalogFor([selfRunning]),
+    });
+
+    expect(report.mode).toBe("model");
+    expect(report.steps[0]?.text).toBe("ran in the provider");
+    const rows = audit.runCost(report.runId);
+    expect(rows[0]).toMatchObject({ provider: "selfrun", inputTokens: 40, outputTokens: 4 });
+    audit.close();
+  });
+
+  it("registers a flat-rate model unpriced and charges the metered one for its preamble", () => {
+    // Unmetered must not read as zero-priced: the router ranks an unpriced
+    // target LAST, which is the honest place for a subscription.
+    const catalog = catalogFor([
+      {
+        ...provider,
+        id: "sub",
+        overheadTokens: 21,
+        models: [
+          { id: "flat", caps: ["tool.use"], usdIn: 0, usdOut: 0, unmetered: true },
+        ],
+      },
+      { ...provider, id: "metered", overheadTokens: 500 },
+    ]);
+    const targets = catalog.snapshot().targets;
+    expect(targets.find((t) => String(t.targetId) === "sub:flat")?.price).toBeUndefined();
+    expect(
+      targets.find((t) => String(t.targetId) === "metered:cheap")?.price,
+    ).toEqual({ usdIn: 1e-6, usdOut: 2e-6, overheadInputTokens: 500 });
   });
 });

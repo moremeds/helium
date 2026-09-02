@@ -245,6 +245,13 @@ milestone:
    sending an unauthenticated control request: a 403 where 401 is expected is a
    network fault, and must not be reported as an auth fault.
 3. `overheadTokens` is measured by a live test, not declared by hand.
+   Landed as `contracts/tests/provider-overhead.live.contract.spec.ts`
+   (`HELIUM_EVAL_LIVE=1`), which sends a one-character prompt and compares what
+   the wire bills against the constant the plugin declares. Measured 2026-09-02:
+   **Claude 21**, **Codex 16**. A subscription is registered UNPRICED, so the
+   router ranks it last rather than reading 0/token as the cheapest thing on the
+   menu; the overhead is added to the projected input of every *metered*
+   candidate.
 
 ---
 
@@ -431,7 +438,7 @@ v1's version works.
 | `scripts/release/*` (1,490)                 | **delete**          | 6 tags in 2 days all fixing `deploy.sh`; 3 lines of ssh replace them (§9).                   |
 | `packages/fake-{flat-rate,metered}` (443)   | keep-trim → 1       | One fake provider proves the add/remove seam.                                                |
 | `plugins/fake-tenant` (150)                 | **keep verbatim**   | The seam proof; domain- and network-free.                                                    |
-| `plugins/provider-{claude,codex}-subscription`, `provider-deepseek-dsh` (2,512) | **keep verbatim** | All three work today (9 files / 25 unit tests green, 2026-09-02). No-regression asset: §12. |
+| `plugins/provider-{claude,codex}-subscription` (2,512) | keep-trim | Both work today (8 files / 40 unit tests green, 2026-09-02). No-regression asset: §12. `provider-deepseek-dsh` was deleted as a duplicate of `provider-dsh`. |
 | `packages/provider-sdk` (542)               | keep-trim           | The executor/receipt seam the three providers implement; trim only what names v1 nouns.      |
 | `plugins/livewire-shepherd` (7,772)         | **delete**          | Never ran; §7.2 replaces it with ~300 lines of wrappers.                                     |
 
@@ -473,7 +480,7 @@ time exceeds edit time for a month, the next finding is the process itself.
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | **M0** | Delete everything §8 marks delete; one plist; CI down to unit + 4 contracts. v1 is not kept running — it produced no useful output and is not a fallback. Green: `pnpm build`, the 4 contracts, and the §12 provider baseline (25 tests) all pass on the trimmed tree.                                                                                                                                                                                                                                                                                                                       | < 1 day |
 | **M1** | **First, confirm the dsh version actually installed on the mini**: `dsh-team-host.ts` comments target `0.1.2-alpha.3`, the lockfile pins `0.1.1-rc.2`, npm `latest` is `0.1.1-rc.2`, and the GitHub `0.1.2-alpha.*` tags were never published — the comments describe a build we cannot install. Pin one version, record it (§11.4). Then core nouns + `provider-dsh` + `fake-tenant` tool + the `span` table folded from the session log + `helium run <tenant>`. Green: `helium run fake-tenant` prints a result and the §5 query returns rows. | < 1 day |
-| **M1.5** ✅ | **Provider transport (§3.1) — landed 2026-09-02.** Rewrote `provider-claude-subscription` onto Node `fetch` and `provider-codex-subscription` onto `curl`; add `proxy` and a measured `overheadTokens`; `probe()` tells *blocked* from *unauthenticated*. Blocks M2: option-wizard cannot send a real email from the mini until a provider can reach a model there. Green: a live call from **the mini** for all three providers, and the §12 baseline still 25 tests. | < 1 day |
+| **M1.5** ✅ | **Provider transport + the routable provider seam (§3.1) — landed 2026-09-02.** Both subscription providers speak HTTP through one `curl` helper; `HELIUM_PROXY` is read from `~/.config/helium/helium.env`; each ships a `provider.ts` the runner discovers, with a MEASURED `overheadTokens` and a `probe()` that tells *blocked* (403 unauthenticated) from *unauthenticated* (401). A provider that can route but not execute is skipped by name rather than left to win and fail. Green (all verified 2026-09-02): `helium run` reaches a real model and writes real token rows; `HELIUM_EVAL_LIVE=1` re-measures the declared overhead against the wire; §12 baseline 40 tests. | < 1 day |
 | **M2** | option-wizard end-to-end: roles, read-only tools, preflight gate, `delivery-email`. Green: one real daily email on the mini.                                                                                                                                                                                                                                                                                                                                                                                                                      | ~3 days |
 | **M3** | Sandbox kinds + the inputs/workspace/outputs convention + `guard.ts` + contract #3; livewire read-only **gap report**.                                                                                                                                                                                                                                                                                                                                                                                                                            | ~2 days |
 | **M4** | livewire fix-in-worktree + `delivery-github-pr`. Green: one merged livewire PR authored by a run.                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ~2 days |
@@ -517,46 +524,39 @@ install was work with no consumer. M0 and M1 landed 2026-09-02 in PR #60
 
 ---
 
-## 12. No-regression asset: the three working providers
+## 12. No-regression asset: the two subscription providers
 
-The one thing v1 produced that works is the provider edge:
-`provider-claude-subscription`, `provider-codex-subscription` and
-`provider-deepseek-dsh`, each a `catalog` + `invoke` + `executor` triple over
-`packages/provider-sdk`.
+The one thing v1 produced that works is the provider edge. It is now **two**
+directories, not three: `provider-deepseek-dsh` was deleted 2026-09-02 as a
+duplicate — `plugins/provider-dsh` is the v2 face on the same vendor, and
+keeping a second one meant maintaining two answers to "how do we reach
+DeepSeek".
 
-**What "working" means, precisely** (corrected 2026-09-02 — the earlier
-"three working providers" was untested on the machine that matters). All three
-sets of *credentials* are valid. Reachability is not uniform:
+**What "working" means, precisely.** Both sets of credentials are valid, and
+neither machine reaches a vendor unproxied — the laptop only appeared to,
+because its shell exported `HTTPS_PROXY`:
 
-| provider | laptop (SG egress) | mini (prod, HK egress) |
-| --- | --- | --- |
-| `deepseek-dsh` | live-verified | **live-verified**, no proxy needed |
-| `codex-subscription` | live-verified | blocked without proxy |
-| `claude-subscription` | live-verified | blocked without proxy; **verified working through it** |
+| provider | laptop | mini (prod) | routed by `helium run` |
+| --- | --- | --- | --- |
+| `claude-subscription` | live-verified | via `HELIUM_PROXY` (401 vs 403 control) | **yes** |
+| `codex-subscription` | live-verified | via `HELIUM_PROXY` (401 vs 403 control) | **yes** |
+| `dsh` (DeepSeek) | key-gated | key-gated | no — routes but cannot execute yet |
 
-So the asset being protected is the `provider-sdk` seam and the 25 tests, not a
-claim that all three run unattended in production today. They do not, and will
-not until `proxy` is plumbed (§3.1). Baseline measured 2026-09-02 on `master`:
+Baseline, 2026-09-02, after the transport rewrite and the `Provider` seam:
 
 ```
 pnpm vitest run --project unit plugins/provider-claude-subscription \
-  plugins/provider-codex-subscription plugins/provider-deepseek-dsh
-# 9 files, 25 tests, ~5s
+  plugins/provider-codex-subscription
+# 8 files, 40 tests, ~1s   (was 9 files / 25 tests across three directories)
 ```
 
-Rules for every milestone, M0 included:
+Rules for every milestone:
 
-1. These three directories and `packages/provider-sdk` are **not** in the
-   delete set. M0 must leave the baseline command green with the same 25 tests.
-2. `contracts/tests/provider-executor-conformance.contract.spec.ts` is kept as
-   the fourth contract for exactly this reason — it is the only surviving test
-   that all three implementations must satisfy together.
-3. No fourth provider lands before M5, and no provider package is taken as a
-   dependency (§0, §11.6). Provider breadth is not a doctrine goal; the three
-   cover DeepSeek, Claude and Codex already. Rewriting the *transport* of the
-   existing three (§3.1) is not a fourth provider — but it must keep the 25
-   tests green, per rule 4.
-4. If a milestone must change `provider-sdk`, run the baseline before and after
+1. These two directories and `packages/provider-sdk` are **not** in the delete
+   set, and the baseline command stays green at 40 tests or better.
+2. No fourth provider lands before M5, and no provider package is taken as a
+   dependency (§0, §11.6). Provider breadth is not a doctrine goal.
+3. If a milestone must change `provider-sdk`, run the baseline before and after
    in the same commit and put both counts in the commit message.
 
 ## Doctrine trace

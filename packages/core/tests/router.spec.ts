@@ -11,7 +11,7 @@ import {
 function target(
   id: string,
   capabilities: string[],
-  price?: { usdIn: number; usdOut: number },
+  price?: { usdIn: number; usdOut: number; overheadInputTokens?: number },
 ): TargetProfile {
   return {
     targetId: ExecutionTargetId(id),
@@ -95,5 +95,30 @@ describe("select", () => {
     const decision = select(work(), catalog.snapshot());
     expect(decision.failure?.class).toBe("unavailable");
     expect(decision.candidates[0]?.reasons).toEqual(["quota-exhausted"]);
+  });
+
+  it("charges a target for its own preamble, so a fat one loses its price edge", () => {
+    // Design §3.1: a model with a cheap per-token rate and a large mandatory
+    // preamble is not the cheap option. The overhead is input the caller never
+    // wrote and always pays for, so it belongs in the projection.
+    const catalog = new CapabilityCatalog();
+    catalog.register(
+      target("verbose", ["reason.deep"], {
+        usdIn: 1e-6,
+        usdOut: 1e-6,
+        overheadInputTokens: 18_000,
+      }),
+    );
+    const budget = {
+      remainingUsd: 1,
+      projectedInputTokens: 2_000,
+      projectedOutputTokens: 100,
+    };
+    const decision = select(work(), catalog.snapshot(), { budget });
+    const projected = decision.candidates.find(
+      (c) => c.targetId === "verbose",
+    )?.projectedUsd;
+    // (2,000 prompt + 18,000 preamble) * 1e-6 + 100 * 1e-6
+    expect(projected).toBeCloseTo(0.0201, 10);
   });
 });

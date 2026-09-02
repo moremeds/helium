@@ -11,7 +11,8 @@
     "./registration": "./lib/registration.js",
     "./curl": "./lib/curl.js",
     "./process-receipt": "./lib/process-receipt.js",
-    "./boundary": "./lib/boundary.js"
+    "./boundary": "./lib/boundary.js",
+    "./probe": "./lib/probe.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -42,6 +42,9 @@ importers:
       '@helium/provider-claude-subscription':
         specifier: file:../plugins/provider-claude-subscription
         version: link:../plugins/provider-claude-subscription
+      '@helium/provider-codex-subscription':
+        specifier: file:../plugins/provider-codex-subscription
+        version: link:../plugins/provider-codex-subscription
       '@types/node':
         specifier: ^22
         version: 22.20.1
@@ -198,22 +201,6 @@ importers:
         version: 5.9.3
 
   plugins/provider-codex-subscription:
-    dependencies:
-      '@helium/core':
-        specifier: file:../../packages/core
-        version: link:../../packages/core
-      '@helium/provider-sdk':
-        specifier: file:../../packages/provider-sdk
-        version: link:../../packages/provider-sdk
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
-  plugins/provider-deepseek-dsh:
     dependencies:
       '@helium/core':
         specifier: file:../../packages/core

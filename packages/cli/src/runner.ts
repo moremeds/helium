@@ -78,7 +78,19 @@ export function registerProviders(
       const profile: TargetProfile = {
         targetId: ExecutionTargetId(`${provider.id}:${model.id}`),
         capabilities: [...model.caps],
-        price: { usdIn: model.usdIn, usdOut: model.usdOut },
+        // A flat-rate route registers UNPRICED, so the router ranks it last
+        // instead of reading 0/token as the cheapest thing on the menu.
+        ...(model.unmetered === true
+          ? {}
+          : {
+              price: {
+                usdIn: model.usdIn,
+                usdOut: model.usdOut,
+                ...(provider.overheadTokens === 0
+                  ? {}
+                  : { overheadInputTokens: provider.overheadTokens }),
+              },
+            }),
         operations:
           model.maxContextTokens === undefined
             ? {}
@@ -153,10 +165,11 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   const catalog = options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
   if (options.catalog === undefined) registerProviders(catalog, discovered.live);
 
+  // A live provider knows how to execute (discovery drops the ones that do
+  // not), so model mode no longer waits for an injected executor. The option
+  // stays as an override, which is how the tests drive this without a network.
   const mode: "model" | "tool-only" =
-    discovered.live.length > 0 && options.modelExecutor !== undefined
-      ? "model"
-      : "tool-only";
+    discovered.live.length > 0 ? "model" : "tool-only";
 
   const report: RunReport = {
     runId,
@@ -280,7 +293,11 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     });
     const model = provider.models.find((entry) => entry.id === selection.model);
 
-    const result = await options.modelExecutor!.run(work, selection, signal);
+    const executor: ModelExecutor =
+      options.modelExecutor ?? {
+        run: async (order, sel, sig) => provider.run!(order, sel, sig),
+      };
+    const result = await executor.run(work, selection, signal);
     const spans = foldSessionLog(result.events, {
       runId,
       tenant: spec.tenant,

@@ -64,6 +64,13 @@ export type Availability = z.infer<typeof AvailabilitySchema>;
 export const PriceSchema = z.strictObject({
   usdIn: z.number().nonnegative(),
   usdOut: z.number().nonnegative(),
+  /**
+   * Input tokens this route spends on its own preamble before the caller's
+   * prompt is counted. Charged on top of the projected prompt, so a fat
+   * preamble shows up as money at selection time rather than as a surprise in
+   * the audit table. Measured by the owning plugin, never estimated (§3.1).
+   */
+  overheadInputTokens: z.number().int().nonnegative().optional(),
 });
 export type Price = z.infer<typeof PriceSchema>;
 

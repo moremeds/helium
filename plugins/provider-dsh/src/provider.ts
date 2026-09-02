@@ -55,6 +55,15 @@ export class DshProvider implements Provider {
   readonly id = "dsh";
   readonly models = DSH_MODELS;
 
+  /**
+   * UNMEASURED, and declared 0 only because there is nothing to measure yet:
+   * this provider has no `run()`, so discovery skips it and no step is ever
+   * routed here. Measure it against the wire in the same pass that wires
+   * `DshHost.run` into `Provider.run` — before then, a number here would be a
+   * guess, which §3.1 rule 3 forbids.
+   */
+  readonly overheadTokens = 0;
+
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
     private readonly models_ = DSH_MODELS,

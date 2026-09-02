@@ -23,8 +23,8 @@ export interface DiscoveredProviders {
 
 /**
  * Every `plugins/provider-*` whose built `lib/provider.js` default-exports a
- * `Provider` AND whose `probe()` says it is live. A dead provider is skipped
- * with its reason, exactly as design §3 requires.
+ * `Provider` that can EXECUTE a step and whose `probe()` says it is live. A
+ * dead one is skipped with its reason, exactly as design §3 requires.
  */
 export async function discoverProviders(
   pluginsDir: string,
@@ -49,6 +49,16 @@ export async function discoverProviders(
       const provider = module.default;
       if (provider === undefined || typeof provider.probe !== "function") {
         skipped.push({ id: name, reason: "default export is not a Provider" });
+        continue;
+      }
+      if (typeof provider.run !== "function") {
+        // Routable but not executable. Keeping it would put a target in the
+        // catalog that fails every step it wins — and it would win, being the
+        // cheapest. Skipping says so once, in the run output.
+        skipped.push({
+          id: provider.id,
+          reason: "no run(): this provider can route a step but not execute one",
+        });
         continue;
       }
       if (!(await provider.probe())) {

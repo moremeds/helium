@@ -12,6 +12,7 @@
     "@helium/core": "file:../packages/core",
     "@helium/fake-flat-rate": "file:../packages/fake-flat-rate",
     "@helium/provider-claude-subscription": "file:../plugins/provider-claude-subscription",
+    "@helium/provider-codex-subscription": "file:../plugins/provider-codex-subscription",
     "@types/node": "^22",
     "typescript": "^5",
     "yaml": "^2.9.0"
