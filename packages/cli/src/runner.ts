@@ -547,6 +547,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         provider: provider.id,
         model: selection.model,
         stepOffset: stepNo,
+        // Span ids repeat across sessions; the task is what makes them unique
+        // within a run. Without this the audit table silently drops every step
+        // after the first.
+        scope: taskId,
         ...(model === undefined
           ? {}
           : { price: { usdIn: model.usdIn, usdOut: model.usdOut } }),

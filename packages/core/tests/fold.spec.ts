@@ -34,7 +34,7 @@ describe("foldSessionLog", () => {
     const model = spans.filter((s) => s.toolName === undefined);
     expect(model).toHaveLength(2);
     expect(model[0]).toMatchObject({
-      spanId: "step:1:1",
+      spanId: "step:0:1:1",
       stepNo: 1,
       provider: "route-a",
       model: "model-a",
@@ -46,7 +46,7 @@ describe("foldSessionLog", () => {
     });
     // 4321 * 1e-6 + 210 * 4e-6
     expect(model[0]!.costUsd).toBeCloseTo(0.005161, 9);
-    expect(model[1]).toMatchObject({ spanId: "step:1:2", inputTokens: 5000, outputTokens: 90, latencyMs: 600 });
+    expect(model[1]).toMatchObject({ spanId: "step:0:1:2", inputTokens: 5000, outputTokens: 90, latencyMs: 600 });
   });
 
   it("records one tool span with its output bytes and latency", () => {
@@ -55,7 +55,7 @@ describe("foldSessionLog", () => {
     });
     const tool = spans.find((s) => s.toolName === "fake_probe")!;
     expect(tool).toMatchObject({
-      spanId: "tool:c1", toolOutputBytes: 10, latencyMs: 300, inputTokens: 0, costUsd: 0,
+      spanId: "tool:0:c1", toolOutputBytes: 10, latencyMs: 300, inputTokens: 0, costUsd: 0,
     });
   });
 
@@ -65,7 +65,7 @@ describe("foldSessionLog", () => {
       { type: "assistant/message", seq: 12, time: 1_950, data: { turn: 1, step: 1, message: {}, usage: { inputTokens: 4321, outputTokens: 215 } } },
     ];
     const spans = foldSessionLog(doubled, { runId: "r1", tenant: "t", role: "r", provider: "p", model: "m" });
-    const first = spans.filter((s) => s.spanId === "step:1:1");
+    const first = spans.filter((s) => s.spanId === "step:0:1:1");
     expect(first).toHaveLength(1);
     // The assembled message supersedes the streamed chunk for the same step.
     expect(first[0]!.outputTokens).toBe(215);
@@ -81,5 +81,60 @@ describe("foldSessionLog", () => {
       { runId: "r1", tenant: "t", role: "r", provider: "p", model: "m" },
     );
     expect(spans).toEqual([]);
+  });
+});
+
+describe("span ids are unique across the steps of one run", () => {
+  it("does not collide when two steps both start at turn 1", () => {
+    // Every child session numbers its own turns from 1, so two steps of the
+    // same run both report step 1:1. The audit store keys on span id, so
+    // before `scope` the second silently overwrote the first and a three-step
+    // run reported two rows — doctrine 4 failing quietly.
+    const one = foldSessionLog(log, {
+      runId: "r1", tenant: "t", role: "r", provider: "p", model: "m", scope: "probe",
+    });
+    const two = foldSessionLog(log, {
+      runId: "r1", tenant: "t", role: "r", provider: "p", model: "m", scope: "count",
+    });
+    expect(one).not.toHaveLength(0);
+    const ids = new Set([...one, ...two].map((span) => span.spanId));
+    expect(ids.size).toBe(one.length + two.length);
+  });
+});
+
+describe("tool spans survive the real dsh event shape", () => {
+  it("reads the call id from message.source.callId", () => {
+    // Verified against a real session.jsonl on 2026-09-02: tool/result puts
+    // the id at message.source.callId. Fold read only message.callId and
+    // data.callId, so the id resolved to "" and every tool span was dropped —
+    // tool calls executed, the audit table showed none of them.
+    const events: LogEvent[] = [
+      {
+        type: "tool/call",
+        seq: 1,
+        time: 1_000,
+        data: { turn: 1, step: 1, callId: "toolu_abc", name: "fake_count", arguments: "{}" },
+      },
+      {
+        type: "tool/result",
+        seq: 2,
+        time: 1_300,
+        data: {
+          turn: 1,
+          step: 1,
+          message: {
+            source: { kind: "tool", callId: "toolu_abc" },
+            content: [{ type: "tool-result", text: '{"words":2}' }],
+          },
+        },
+      },
+    ];
+    const spans = foldSessionLog(events, {
+      runId: "r1", tenant: "t", role: "prober", provider: "dsh", model: "m", scope: "count",
+    });
+    const tools = spans.filter((span) => span.toolName !== undefined);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({ toolName: "fake_count", latencyMs: 300 });
+    expect(tools[0]!.toolOutputBytes).toBeGreaterThan(0);
   });
 });
