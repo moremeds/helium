@@ -9,7 +9,13 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Channel, EcosystemTool, Gate, Provider } from "@helium/core";
+import type {
+  Channel,
+  EcosystemTool,
+  Gate,
+  Provider,
+  TenantRenderer,
+} from "@helium/core";
 
 /**
  * Tenants are CONFIGURATION: which teams this install runs. Relocatable, so a
@@ -183,6 +189,47 @@ export async function loadGates(
     }
   }
   return { gates, skipped };
+}
+
+/**
+ * A tenant's own renderer: `<tenant>/render/index.ts`, built to
+ * `lib/render/index.js`, `export default` a `TenantRenderer`.
+ *
+ * Optional by construction. A tenant that ships none gets the runner's generic
+ * transcript, which is what every tenant got before this existed. A renderer
+ * that throws on import is a SKIP with a reason, exactly like a gate: the run
+ * still delivers, in the plain form, and the reason travels in the report
+ * rather than into a silence.
+ */
+export async function loadRenderer(
+  tenantDir: string,
+): Promise<{ renderer: TenantRenderer | null; skipped: Skipped[] }> {
+  const entry = join(tenantDir, "lib", "render", "index.js");
+  if (!existsSync(entry)) return { renderer: null, skipped: [] };
+  try {
+    const module = (await import(pathToFileURL(entry).href)) as {
+      default?: TenantRenderer;
+    };
+    if (typeof module.default !== "function") {
+      return {
+        renderer: null,
+        skipped: [
+          { id: "render", reason: "default export is not a render function" },
+        ],
+      };
+    }
+    return { renderer: module.default, skipped: [] };
+  } catch (error: unknown) {
+    return {
+      renderer: null,
+      skipped: [
+        {
+          id: "render",
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
 }
 
 /**

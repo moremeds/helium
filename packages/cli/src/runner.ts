@@ -38,7 +38,9 @@ import {
   type LoadedTenant,
   type ModelSelection,
   type Provider,
+  type RenderedReport,
   type RunReport,
+  type TenantRenderer,
   type Span,
   type TargetProfile,
   type WorkOrder,
@@ -47,8 +49,10 @@ import {
   discoverChannels,
   discoverProviders,
   loadGates,
+  loadRenderer,
   loadTenantTools,
   tenantToolGaps,
+  type Skipped,
 } from "./discovery.js";
 
 // These moved to `@helium/core` so a tenant's own renderer can name them
@@ -168,6 +172,10 @@ export interface RunOptions {
   gates?: Gate[];
   /** Injected in tests; discovered from `plugins/delivery-*` when absent. */
   channels?: Channel[];
+  /** Injected in tests; loaded from the tenant's `lib/render/` when absent.
+   *  `null` means "explicitly none", which is how a test asks for the
+   *  generic transcript without putting a file on disk. */
+  renderer?: TenantRenderer | null;
   modelExecutor?: ModelExecutor;
   catalog?: CapabilityCatalog;
   signal?: AbortSignal;
@@ -339,6 +347,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       ? await discoverChannels(options.pluginsDir)
       : { channels: options.channels ?? [], skipped: [] as Array<{ id: string; reason: string }> };
   const channels = loadedChannels.channels;
+  // Loaded once per run, not once per channel: two channels must not disagree
+  // about what today's report says.
+  const loadedRenderer =
+    options.renderer === undefined
+      ? await loadRenderer(options.tenant.dir)
+      : { renderer: options.renderer, skipped: [] as Skipped[] };
 
   const catalog = options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
   if (options.catalog === undefined) registerProviders(catalog, discovered.live);
@@ -358,6 +372,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     steps: [],
     outcome: "completed",
     gatesSkipped: loadedGates.skipped,
+    ...(loadedRenderer.skipped[0] === undefined
+      ? {}
+      : { rendererSkipped: { reason: loadedRenderer.skipped[0].reason } }),
     delivery: [],
     toolsUnconfigured:
       options.tools === undefined ? await tenantToolGaps(options.tenant.dir, env) : [],
@@ -727,6 +744,21 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // meant an operator must arm outbound mail to get a report written to their
   // own disk — and a channel that never declares itself is treated as external,
   // so forgetting the flag brakes rather than sends.
+  // Rendering happens ONCE, before the delivery loop, and a renderer that
+  // throws costs the run its rich email and nothing else: delivery still
+  // happens with the generic transcript. Losing the send because the pretty
+  // version failed would trade a readable email for no email at all.
+  let rendered: RenderedReport | undefined;
+  if (loadedRenderer.renderer !== null) {
+    try {
+      rendered = loadedRenderer.renderer(report, spec);
+    } catch (error: unknown) {
+      report.rendererSkipped = {
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   const brake = env.HELIUM_TENANT_DELIVERY === "1";
   for (const entry of spec.delivery) {
     const channel = channels.find((candidate) => candidate.id === entry.channel);
@@ -758,6 +790,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           runId,
           subject: deliverySubject(report),
           body: deliveryBody(report),
+          ...(rendered === undefined ? {} : { rendered }),
         },
         entry.config,
       );
@@ -839,6 +872,9 @@ function deliveryBody(report: RunReport): string {
   }
   for (const skip of report.providersSkipped) lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
   for (const skip of report.gatesSkipped) lines.push(`- **gate failed to load:** ${skip.id} — ${skip.reason}`);
+  if (report.rendererSkipped !== undefined) {
+    lines.push(`- **renderer failed to load:** ${report.rendererSkipped.reason}`);
+  }
   for (const gap of report.toolsUnconfigured) lines.push(`- **tool unconfigured:** ${gap}`);
   for (const refusal of failures) lines.push(`- gate \`${refusal.id}\` refused: ${refusal.reason}`);
 
