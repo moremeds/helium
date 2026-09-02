@@ -32,6 +32,22 @@ describe("vocabulary", () => {
     expect(built.sort()).toEqual([...VOCABULARY.keys()].sort());
   });
 
+  it("declares no optional dsh parameter, which the runtime refuses", () => {
+    // dsh rejects the whole role with "unsupported JSON schema:
+    // parameters.X.required must be true when present" — and it rejects it at
+    // ROUTING time, so a run gets as far as burning a regime step before dying.
+    // One live run was lost to exactly that. A knob a role should not be
+    // turning belongs in the zod schema only.
+    for (const t of buildTools({ stateRoot: "/nonexistent", env: EMPTY_ENV })) {
+      for (const [name, spec] of Object.entries(t.dshParams ?? {})) {
+        // Omitting the key is fine — the runtime's complaint is specifically
+        // about `required: false`, and ow_tv_watchlist.flagColors has shipped
+        // for weeks with no `required` at all.
+        expect(spec.required, `${t.name}.${name}`).not.toBe(false);
+      }
+    }
+  });
+
   it("registers no tool with order semantics", () => {
     for (const name of VOCABULARY.keys()) {
       expect(name).not.toMatch(/order|place|submit|cancel|amend/u);

@@ -735,16 +735,11 @@ export function buildTools(cfg: {
         ticker: { type: "string", required: true, description: "Underlying symbol" },
         minDte: { type: "number", required: true, description: "Minimum days to expiry" },
         maxDte: { type: "number", required: true, description: "Maximum days to expiry" },
-        strikeWindowPct: {
-          type: "number",
-          required: false,
-          description: "Keep strikes within this percent of spot (default 8)",
-        },
-        minOpenInterest: {
-          type: "number",
-          required: false,
-          description: "Drop contracts below this open interest (default 250)",
-        },
+        // strikeWindowPct and minOpenInterest stay OUT of the model-facing
+        // spec: dsh rejects a parameter declared `required: false`
+        // ("unsupported JSON schema: parameters.X.required must be true when
+        // present"), and a trimming knob is not a decision a role should be
+        // making anyway. The zod schema still accepts both for direct callers.
       },
       async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
         const { ticker, minDte, maxDte, strikeWindowPct, minOpenInterest } =
