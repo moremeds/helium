@@ -68,19 +68,45 @@ describe("absent environment", () => {
     await expect(tool(name).run(args as Record<string, unknown>)).rejects.toThrow(message);
   });
 
-  it("ow_spot refuses while disabled rather than letting a strike go unchecked", async () => {
+  it("ow_spot refuses with a price it cannot get, and says which source failed", async () => {
     // A run that completed cleanly proposed QQQ 420/410 with QQQ at 707.64,
     // because no role had a price. An ow_spot that returned nothing quietly
-    // would put that back.
-    await expect(tool("ow_spot").run({ tickers: ["SPY"] })).rejects.toThrow("OW_TV_ENABLED");
-    await expect(
-      tool("ow_spot", { OW_TV_ENABLED: "1" }).run({ tickers: ["SPY"] }),
-    ).rejects.toThrow("OPENCLI_BIN is unset");
+    // would put that back. The REASON is part of the refusal: on the mini the
+    // answer is "no UW credential", not "SPY has no price".
+    await expect(tool("ow_spot").run({ tickers: ["SPY"] })).rejects.toThrow(
+      "OW_UW_API_KEY is unset",
+    );
+    // TradingView enabled but opencli absent — the mini's exact shape — falls
+    // through to Unusual Whales rather than failing on the desktop app.
     await expect(
       tool("ow_spot", { OW_TV_ENABLED: "1", OPENCLI_BIN: "/nonexistent/opencli" }).run({
         tickers: ["SPY"],
       }),
-    ).rejects.toThrow("no price for any of SPY");
+    ).rejects.toThrow("OW_UW_API_KEY is unset");
+  });
+
+  it("ow_spot reads the spot from Unusual Whales when TradingView is not on this machine", async () => {
+    // Frozen from the live endpoint on 2026-09-02, SPY: every price is a
+    // STRING and `market_time` names the session the close came from.
+    const body = {
+      data: {
+        close: "761.21",
+        high: "761.85",
+        low: "759.29",
+        open: "760.86",
+        volume: 329841,
+        market_time: "premarket",
+        tape_time: "2026-09-02T11:52:58Z",
+        prev_close: "761.78",
+      },
+    };
+    const json = await tool("ow_spot", { OW_UW_API_KEY: "k" }).run(
+      { tickers: ["SPY"] },
+      { fetchImpl: (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch },
+    );
+    expect(JSON.parse(json).quotes).toEqual([
+      { ticker: "SPY", source: "unusualwhales", last: 761.21, marketTime: "premarket" },
+    ]);
   });
 
   it("ow_uw_chain asks for the spot before the chain, and stops when there is none", async () => {
@@ -90,16 +116,18 @@ describe("absent environment", () => {
     // rather than handed over as a list of unanchored numbers.
     await expect(
       tool("ow_uw_chain").run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
-    ).rejects.toThrow("OW_TV_ENABLED");
+    ).rejects.toThrow("OW_UW_API_KEY is unset");
+    // A stock-state row with no close and no prev_close: the source answered,
+    // it just has no price. The chain is refused rather than trimmed around
+    // nothing — the failure mode that produced a 420 strike on a 707 underlying.
     await expect(
-      tool("ow_uw_chain", { OW_TV_ENABLED: "1" }).run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
-    ).rejects.toThrow("OPENCLI_BIN is unset");
-    await expect(
-      tool("ow_uw_chain", {
-        OW_TV_ENABLED: "1",
-        OPENCLI_BIN: "/nonexistent/opencli",
-        OW_UW_API_KEY: "k",
-      }).run({ ticker: "SPY", minDte: 21, maxDte: 60 }),
+      tool("ow_uw_chain", { OW_UW_API_KEY: "k" }).run(
+        { ticker: "SPY", minDte: 21, maxDte: 60 },
+        {
+          fetchImpl: (async () =>
+            new Response(JSON.stringify({ data: {} }))) as unknown as typeof fetch,
+        },
+      ),
     ).rejects.toThrow("no spot for SPY");
   });
 

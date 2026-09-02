@@ -398,6 +398,69 @@ export async function tvLast(
 }
 
 /**
+ * The spot, from whichever source THIS MACHINE actually has.
+ *
+ * TradingView is a desktop app driven over CDP by opencli. That is a laptop
+ * fact, not a deployment one: the mini has neither opencli nor a logged-in
+ * chart (`ssh macmini command -v opencli` -> nothing, 2026-09-02). A price
+ * path through it therefore leaves the mini with no spot, no chain — since
+ * ow_uw_chain refuses to trim strikes around nothing — and a designer that
+ * correctly returns no proposals every single day. Unusual Whales answers the
+ * same question over the credential the chain already requires, so the fallback
+ * costs no new secret and no new dependency.
+ *
+ * TradingView stays FIRST where it exists: it is the live regular-session last,
+ * and it is what every strike shipped so far was checked against. UW's
+ * `market_time` names which session its close came from, which the caller
+ * reports rather than hiding.
+ *
+ * Verified 2026-09-02 against the live endpoint, SPY:
+ *   {"data":{"close":"761.21","high":"761.85","low":"759.29","open":"760.86",
+ *    "volume":329841,"total_volume":329841,"market_time":"premarket",
+ *    "tape_time":"2026-09-02T11:52:58Z","prev_close":"761.78"}}
+ * Every price is a STRING, hence `numeric`. `prev_close` is the backstop for a
+ * ticker whose session has not printed yet — a stale price that says it is
+ * stale beats no price at all, because no price is what silences a whole run.
+ */
+export async function spotOf(
+  env: Env,
+  tool: string,
+  raw: string,
+  ctx?: ToolRunContext,
+): Promise<{ source: string; close: number; changeAbs?: number; marketTime?: string } | undefined> {
+  if (env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "") {
+    const hit = await tvLast(env, tool, raw);
+    if (hit !== undefined) {
+      return {
+        source: hit.exchange,
+        close: hit.close,
+        ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }),
+      };
+    }
+  }
+  const ticker = symbolLiteral(raw, tool);
+  const state = (await uwGet(
+    env,
+    tool,
+    `/api/stock/${encodeURIComponent(ticker)}/stock-state`,
+    {},
+    ctx,
+  )) as { data?: unknown };
+  const row = (state.data ?? {}) as {
+    close?: unknown;
+    prev_close?: unknown;
+    market_time?: unknown;
+  };
+  const close = numeric(row.close) ?? numeric(row.prev_close);
+  if (close === undefined) return undefined;
+  return {
+    source: "unusualwhales",
+    close,
+    ...(typeof row.market_time === "string" ? { marketTime: row.market_time } : {}),
+  };
+}
+
+/**
  * OCC option symbol -> its parts. `SPY261016P00725000` is SPY, 2026-10-16, put,
  * strike 725. The root is variable length and the strike is fixed at 8 digits
  * in thousandths, which is what makes the split unambiguous from the right.
@@ -569,7 +632,11 @@ export function buildTools(cfg: {
           );
         }
         return JSON.stringify({
-          source: "tradingview",
+          // Named per quote, not once for the list: on a machine with no
+          // TradingView every price comes from UW, and on one with both the
+          // list can legitimately mix the two.
+          sourceNote:
+            "`source` on each quote is the exchange when the price came from TradingView, or `unusualwhales`. A UW quote carries `marketTime` naming the session its close is from.",
           tickers: [...symbols].sort(),
           asOf: new Date().toISOString(),
         });
@@ -596,29 +663,42 @@ export function buildTools(cfg: {
       // about its own vocabulary.
       name: "ow_spot",
       description:
-        "Last regular-session price for each ticker, from TradingView. Call this before naming any strike: a strike is only meaningful next to the spot it sits against.",
+        "Last price for each ticker, from TradingView where this machine has it and from Unusual Whales otherwise. Call this before naming any strike: a strike is only meaningful next to the spot it sits against.",
       paramsSchema: SpotParams,
       mutating: false,
       dshParams: {
         tickers: { type: "array", required: true, description: "Ticker symbols, at most 24" },
       },
-      async run(args: Record<string, unknown>): Promise<string> {
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
         const { tickers } = SpotParams.parse(args);
         const tool = "ow_spot";
         const quotes: unknown[] = [];
-        const missing: string[] = [];
+        // The REASON travels with the name. "no price for SPY" and "no price
+        // for SPY because this machine has no UW credential" are the same
+        // sentence to a reader and different facts to an operator.
+        const missing: Array<{ ticker: string; reason: string }> = [];
         for (const raw of tickers) {
           const ticker = symbolLiteral(raw, tool);
-          const hit = await tvLast(env, tool, ticker);
+          let hit: Awaited<ReturnType<typeof spotOf>>;
+          let why = "no quote from TradingView or Unusual Whales";
+          try {
+            hit = await spotOf(env, tool, ticker, ctx);
+          } catch (error: unknown) {
+            // One unreachable ticker must not take the other twenty-three with
+            // it: it goes on the noPrice list like any other unpriced name.
+            hit = undefined;
+            why = error instanceof Error ? error.message : String(error);
+          }
           // A ticker with no price is NAMED, never dropped and never guessed at.
           // Silence here is what produced the 420 strike on a 707 underlying.
-          if (hit === undefined) missing.push(ticker);
-          else quotes.push({ ticker, symbol: `${hit.exchange}:${ticker}`, last: hit.close, ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }) });
+          if (hit === undefined) missing.push({ ticker, reason: why });
+          else quotes.push({ ticker, source: hit.source, last: hit.close, ...(hit.marketTime === undefined ? {} : { marketTime: hit.marketTime }), ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }) });
         }
         if (quotes.length === 0) {
           throw new Error(
-            `ow_spot: no price for any of ${tickers.join(", ")}; refusing to return an empty ` +
-              "price list, which reads as a set of tickers that are all worth nothing",
+            `ow_spot: no price for any of ${tickers.join(", ")} — ${missing[0]?.reason ?? ""}; ` +
+              "refusing to return an empty price list, which reads as a set of tickers that " +
+              "are all worth nothing",
           );
         }
         return JSON.stringify({
@@ -770,10 +850,10 @@ export function buildTools(cfg: {
         // The spot comes FIRST and its absence is fatal. A chain trimmed around
         // nothing is a list of numbers with no anchor, and handing one to a
         // designer is how the 420/410 spread on a 707 underlying happened.
-        const spot = await tvLast(env, tool, ticker);
+        const spot = await spotOf(env, tool, ticker, ctx);
         if (spot === undefined) {
           throw new Error(
-            `${tool}: no spot for ${ticker} on NASDAQ, AMEX or NYSE, so there is nothing to ` +
+            `${tool}: no spot for ${ticker} from TradingView or Unusual Whales, so there is nothing to ` +
               "centre a strike window on. Refusing to return a chain that cannot be read " +
               "against a price.",
           );
@@ -862,7 +942,10 @@ export function buildTools(cfg: {
           source: "unusualwhales",
           ticker,
           spot: spot.close,
-          spotSource: `tradingview ${spot.exchange}`,
+          spotSource:
+            spot.source === "unusualwhales"
+              ? `unusualwhales${spot.marketTime === undefined ? "" : ` (${spot.marketTime})`}`
+              : `tradingview ${spot.source}`,
           strikeWindowPct: window * 100,
           minOpenInterest: oiFloor,
           minDte,
