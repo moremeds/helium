@@ -28,19 +28,21 @@ accepted proposals; nobody wrote it. Consequences seen in the 2026-09-02 runs:
 ### 1. Core seam (domain-neutral, ~30 lines)
 
 - A tenant MAY ship `plugins/<tenant>/render/index.ts` with
-  `export default function renderReport(report: RunReport, cfg: TenantConfig): { subject: string; text: string; html?: string }`.
-  Discovered the same way `tools/` and `gates/` are; a throwing module skips the renderer with a recorded reason and falls back to `deliveryBody()`.
+  `export default function renderReport(report: RunReport, cfg: TenantSpec): { subject: string; text: string; html?: string }`.
+  Discovered the same way `tools/` and `gates/` are — which is `packages/cli/src/discovery.ts`, beside `loadTenantTools` and `loadGates`, NOT `packages/core/src/tenant.ts` (that file only parses `tenant.yaml`/`team.yaml`). A throwing module skips the renderer with a recorded reason and falls back to `deliveryBody()`.
+  Core's whole share of this seam is two things: the report types below, and `rendered?` on `DeliveryPayload`.
 - `DeliveryPayload` gains optional `rendered?: { subject: string; text: string; html?: string }`. `subject`/`body` stay the generic transcript (`deliverySubject/deliveryBody`) — that is the durable record and keeps every piece of run metadata.
 - runner: renderer present → fills `rendered`; absent → leaves it undefined.
 - `delivery-email`: uses `rendered` when present (subject, text part, html part), else `subject`/`body` as today. `delivery-markdown` ignores `rendered` and writes `body`, so the stored report is unchanged.
 - `RunReport` and `StepReport` move (or are re-exported) from `packages/cli` to `packages/core` so a plugin can import the type without depending on the CLI.
+- `RunReport` gains `rendererSkipped?: { reason: string }` — its own field, never a row in `gatesSkipped`. A gate that stops loading stops GUARDING; a renderer that stops loading only costs the reader the pretty form, and folding them together would make a formatting bug read like a missing safety check. `deliveryBody()` prints one line for it, `- **renderer failed to load:** <reason>`, on the transcript branch only.
 - Core never parses the report body. Doctrine 2 holds: core learns only that a tenant may render its own delivery.
 
 ### 2. Tenant renderer `plugins/option-wizard/render/`
 
 Files: `index.ts` (entry + parse), `math.ts` (pure), `html.ts` (template), `text.ts` (plain-text part).
 
-**Parse.** From the `review` step: `{proposals, riskList, reason?}`. From the `regime` step: the role's prose (first paragraph = verdict). Designer JSON schema gains one field per leg: `mid` (NBBO mid the designer read from `ow_uw_chain`). A proposal missing `mid` on any leg renders as "未定价" — never estimated.
+**Parse.** From the `review` step: `{proposals, riskList, reason?}`. From the `regime` step: the role's prose (first paragraph = verdict). Designer JSON schema gains one field per leg — `mid`, the NBBO mid the designer read from `ow_uw_chain` — and LOSES `quantity` and `limitPrice`: the renderer computes the net from the mids, and position size is the reader's. The parser ignores both fields when an older proposal still carries them. A proposal missing `mid` on any leg renders as "未定价" — never estimated.
 Parse failure, `outcome: failed`, or `mode: tool-only` → a short "今日无候选" email stating the reason, not a transcript.
 
 **math.ts.** Per contract, from legs `{right, action, strike, expiry, ratio, mid}`:
