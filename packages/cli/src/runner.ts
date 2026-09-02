@@ -602,6 +602,20 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       options.audit.appendAll(spans);
       stepNo += spans.filter((span) => span.toolName === undefined).length;
 
+      // A model step whose session log reported NO usage did not reach a
+      // model. Recording it as completed would put an empty step in the report
+      // and nothing in the audit table — the run would look cheap because it
+      // silently did less, which is the one thing the audit must never do.
+      // Zero tokens is the tell, not the absence of a span: a route that did
+      // not serve the request still emits a step span, it just has nothing in
+      // it. `spans.some(...)` alone therefore matched a step that never ran.
+      const billed = spans.some(
+        (span) =>
+          span.toolName === undefined &&
+          span.inputTokens + span.outputTokens > 0,
+      );
+      const emptyRun = !billed && result.text.trim() === "";
+
       // Output gates see what the model produced. A refusal here does NOT
       // discard the text — the step ran and was paid for; it marks it so the
       // tenant's renderer can route it (design §7: a failed gate is normal
@@ -626,6 +640,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           ? {}
           : { downgradeReason: decision.downgradeReason }),
         text: result.text,
+        ...(emptyRun
+          ? {
+              failure: "no-model-output",
+              downgradeReason:
+                "the session log reported no usage and no text: this step did not reach a model",
+            }
+          : {}),
         ...(out.refusals.length === 0
           ? {}
           : { failure: "gate-refused", gateRefusals: out.refusals }),

@@ -914,3 +914,25 @@ tasks:
     audit.close();
   });
 });
+
+describe("a model step that reached no model says so", () => {
+  it("does not report an empty, unbilled step as completed work", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      // A provider that returns cleanly having done nothing: no text, and a
+      // session log with no usage in it. Observed live from a model id the
+      // route did not actually serve.
+      modelExecutor: { run: async () => ({ text: "", events: [] }) },
+    });
+    expect(report.steps[0]?.failure).toBe("no-model-output");
+    expect(report.steps[0]?.downgradeReason).toContain("did not reach a model");
+    audit.close();
+  });
+});
