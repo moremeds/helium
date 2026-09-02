@@ -24,6 +24,7 @@ const execFileAsync = promisify(execFile);
 
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_tv_watchlist", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
+  ["ow_spot", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
@@ -347,6 +348,7 @@ async function uwGet(
 const TvParams = z.object({
   flagColors: z.array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"])).optional(),
 });
+const SpotParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(24) });
 const NoParams = z.object({});
 const ChainParams = z.object({
   ticker: z.string().min(1),
@@ -455,6 +457,93 @@ export function buildTools(cfg: {
           source: "tradingview",
           tickers: [...symbols].sort(),
           asOf: new Date().toISOString(),
+        });
+      },
+    },
+    {
+      // The strike sanity floor.
+      //
+      // Run 846e96ff completed cleanly and proposed a QQQ 420/410 put spread
+      // with QQQ at 707.64, and NVDA 130/120 with NVDA at 217.44 — strikes 40%
+      // away from spot, invented because no role in that run had a price for
+      // either name. `defined_risk` passed them, correctly: the STRUCTURE was
+      // sound. A gate that checks shape cannot catch a fabricated level, so the
+      // fix belongs upstream, in giving the roles a real one.
+      //
+      // TradingView rather than IB: IB's quote route answered 3 calls in 602s
+      // and this is premarket, where there is no live trade to wait for anyway.
+      // `close` here is the last regular-session print.
+      //
+      // Exchange is resolved by TRYING, not by looking up. `search` answers
+      // with a display name ("NYSE Arca") and `quote` wants a code ("AMEX"), so
+      // a resolver would be a translation table that rots. Three attempts in a
+      // fixed order cost about a second and cannot disagree with the quote API
+      // about its own vocabulary.
+      name: "ow_spot",
+      description:
+        "Last regular-session price for each ticker, from TradingView. Call this before naming any strike: a strike is only meaningful next to the spot it sits against.",
+      paramsSchema: SpotParams,
+      mutating: false,
+      dshParams: {
+        tickers: { type: "array", required: true, description: "Ticker symbols, at most 24" },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { tickers } = SpotParams.parse(args);
+        const tool = "ow_spot";
+        if (env.OW_TV_ENABLED !== "1") {
+          throw new Error('OW_TV_ENABLED is not "1"; ow_spot is disabled');
+        }
+        const bin = need(env, "OPENCLI_BIN", tool);
+        const quotes: unknown[] = [];
+        const missing: string[] = [];
+        for (const raw of tickers) {
+          const ticker = symbolLiteral(raw, tool);
+          let hit: { exchange: string; close: number; changeAbs?: number } | undefined;
+          for (const exchange of ["NASDAQ", "AMEX", "NYSE"]) {
+            let stdout: string;
+            try {
+              ({ stdout } = await execFileAsync(
+                bin,
+                ["tradingview", "quote", "--ticker", ticker, "--exchange", exchange, "-f", "json"],
+                { timeout: 30_000 },
+              ));
+            } catch {
+              continue;
+            }
+            const parsed: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
+            const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
+              | { close?: unknown; change_abs?: unknown }
+              | undefined;
+            if (typeof row?.close !== "number") continue;
+            hit = {
+              exchange,
+              close: row.close,
+              ...(typeof row.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
+            };
+            break;
+          }
+          // A ticker with no price is NAMED, never dropped and never guessed at.
+          // Silence here is what produced the 420 strike on a 707 underlying.
+          if (hit === undefined) missing.push(ticker);
+          else quotes.push({ ticker, symbol: `${hit.exchange}:${ticker}`, last: hit.close, ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }) });
+        }
+        if (quotes.length === 0) {
+          throw new Error(
+            `ow_spot: no price for any of ${tickers.join(", ")}; refusing to return an empty ` +
+              "price list, which reads as a set of tickers that are all worth nothing",
+          );
+        }
+        return JSON.stringify({
+          source: "tradingview",
+          quotes,
+          ...(missing.length === 0
+            ? {}
+            : {
+                noPrice: missing,
+                noPriceNote:
+                  "No price was found for these. Do not name a strike on them — say they were unpriced.",
+              }),
+          fetchedAt: new Date().toISOString(),
         });
       },
     },

@@ -16,7 +16,7 @@ roles:
     requires: []
     permissions:
       mutations: forbidden
-      tools: [ow_tv_watchlist, ow_ib_positions]
+      tools: [ow_tv_watchlist, ow_spot, ow_ib_positions]
 
   regime-analyst:
     requires: [reason.deep, tool.use]
@@ -40,12 +40,18 @@ roles:
     requires: [reason.deep, tool.use, structured.output]
     permissions:
       mutations: forbidden
-      tools: [ow_argon_metrics, ow_uw_ticker_metrics, ow_apex_bars, ow_ib_chain, ow_ib_quote]
+      tools: [ow_spot, ow_argon_metrics, ow_uw_ticker_metrics, ow_apex_bars, ow_ib_chain, ow_ib_quote]
     persona: >-
       You turn a ticker plus its IV, skew and gamma state plus the regime
       verdict into concrete DEFINED-RISK proposals — legs, quantity, limit
       price. Every short leg is covered by a long leg of the same right and
       expiry. You never propose a naked short. You propose at most eight.
+      Before you name a single strike you call ow_spot on every ticker you
+      intend to propose, and every strike you write sits within a sensible
+      distance of the price it returns. A strike you did not check against a
+      real spot is a made-up number, and one has already shipped: a QQQ 420/410
+      spread with QQQ at 707. If ow_spot reports a ticker under `noPrice`, drop
+      it and say why in `reason` — never carry it with a guessed strike.
       Your tickers come from the universe forwarded to you; if it is large,
       pick from it rather than asking for a shorter list.
       Your whole reply is ONE JSON object and nothing else — no prose before
@@ -59,11 +65,16 @@ roles:
     requires: [reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_argon_metrics, ow_ib_positions]
+      tools: [ow_spot, ow_argon_metrics, ow_ib_positions]
     persona: >-
       You are the adversarial second pass. You keep at most five proposals and
       move the rest to a risk list, naming for each the specific reason it was
       dropped. The risk list is an output in its own right, not a leftover.
+      Your first check is arithmetic, not judgement: call ow_spot on every
+      ticker you were handed and drop any proposal whose strikes do not sit
+      near that spot. The preflight gate checks a structure, not a level, so a
+      strike 40% away from the underlying passes it and reaches the reader
+      looking exactly like a real trade. You are the only thing between the two.
       Your whole reply is ONE JSON object and nothing else — no prose before or
       after it, no markdown fence:
       {"proposals":[...kept, same shape you were given...],

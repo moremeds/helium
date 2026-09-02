@@ -45,6 +45,21 @@ describe("absent environment", () => {
     await expect(tool(name).run(args as Record<string, unknown>)).rejects.toThrow(message);
   });
 
+  it("ow_spot refuses while disabled rather than letting a strike go unchecked", async () => {
+    // A run that completed cleanly proposed QQQ 420/410 with QQQ at 707.64,
+    // because no role had a price. An ow_spot that returned nothing quietly
+    // would put that back.
+    await expect(tool("ow_spot").run({ tickers: ["SPY"] })).rejects.toThrow("OW_TV_ENABLED");
+    await expect(
+      tool("ow_spot", { OW_TV_ENABLED: "1" }).run({ tickers: ["SPY"] }),
+    ).rejects.toThrow("OPENCLI_BIN is unset");
+    await expect(
+      tool("ow_spot", { OW_TV_ENABLED: "1", OPENCLI_BIN: "/nonexistent/opencli" }).run({
+        tickers: ["SPY"],
+      }),
+    ).rejects.toThrow("no price for any of SPY");
+  });
+
   it("ow_tv_watchlist refuses while disabled rather than returning an empty universe", async () => {
     await expect(tool("ow_tv_watchlist").run({})).rejects.toThrow("OW_TV_ENABLED");
     await expect(
