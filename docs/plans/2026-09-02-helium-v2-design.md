@@ -626,6 +626,19 @@ because its shell exported `HTTPS_PROXY`:
 | `codex-subscription` | live-verified | via `HELIUM_PROXY` (401 vs 403 control) | **yes** |
 | `dsh` (DeepSeek) | key-gated | key-gated | no — routes but cannot execute yet |
 
+**`tool.use`, 2026-09-02.** All three providers now declare it, and both
+subscription providers have a real tool loop (`invoke.ts`, `MAX_TOOL_TURNS`
+turns; Messages API tool blocks on one, Responses API function calls on the
+other). Before this, exactly one provider in the tree could execute a role
+that declares tools — and nothing in the router checked, because `runner.ts`
+hardcodes `toolIsolation: true` and routing filters on the TASK's `requires`,
+which is routinely written without `tool.use` while the role it names holds
+five tools. dsh won those steps by price, not by capability. The router now
+excludes a target that cannot call a tool from any step that carries one
+(`tool-capability`), and the unpriced-sorts-last rule is unchanged: the two
+subscription providers are the FALLBACK for tool-using steps, not the new
+default.
+
 Baseline, 2026-09-02, after the transport rewrite and the `Provider` seam:
 
 ```

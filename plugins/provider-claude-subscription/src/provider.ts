@@ -20,8 +20,9 @@ import type {
 } from "@helium/core";
 import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
+import { selectedTools } from "@helium/provider-sdk/tool-loop";
 import type { ClaudeEffort } from "./catalog.js";
-import { invokeClaude } from "./invoke.js";
+import { invokeClaude, turnEvents } from "./invoke.js";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 
@@ -48,17 +49,20 @@ const POOL = "claude-subscription-session";
  */
 /**
  * A model's caps describe what THIS PLUGIN can execute, not what the vendor's
- * API is capable of. `tool.use` is deliberately absent: the wire call here is
- * single-shot inference with no tool loop, and `run()` below refuses a work
- * order that declares tools.
+ * API is capable of.
  *
- * It used to be listed, and that was a lie the router believed. Every model
- * here is `unmetered`, so this provider is always the cheapest capable target
- * — it therefore WON every tool-using step and then failed it at execution
- * with "performs inference only". Declaring the capability honestly turns that
- * runtime failure into a routing decision: a tool-using role now goes to a
- * provider that can actually run one, or fails as `capability-shortage`, which
- * names the real problem. Put `tool.use` back only together with a tool loop.
+ * `tool.use` was removed once and that removal was correct at the time: it was
+ * listed while `run()` refused any work order carrying tools, and since every
+ * model here is `unmetered` this provider is always the cheapest capable
+ * target — so it WON every tool-using step and then failed it at execution
+ * with "performs inference only". The rule that came out of it is the one
+ * being honoured now, not overturned: the tag goes back only together with a
+ * tool loop. `invoke.ts` has one (`MAX_TOOL_TURNS` turns of the Messages API
+ * tool protocol, tool spans folded into the audit), so the tag is true again.
+ *
+ * `cheap.bulk` on haiku still does NOT claim it: a chore tier exists to be
+ * chosen for extraction and formatting, and letting it win tool-using steps
+ * would route real work to the smallest model in the list.
  */
 export const CLAUDE_MODELS: ProviderModel[] = [
   {
@@ -74,7 +78,7 @@ export const CLAUDE_MODELS: ProviderModel[] = [
   {
     // The labour tier: writing and editing code, reviewing a diff.
     id: "claude-sonnet-5",
-    caps: ["reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
+    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -84,7 +88,7 @@ export const CLAUDE_MODELS: ProviderModel[] = [
   {
     // Reserved for work that genuinely needs it; `reason.deep` lives only here.
     id: "claude-opus-5",
-    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -185,13 +189,22 @@ export class ClaudeSubscriptionProvider implements Provider {
     selection: ModelSelection,
     signal: AbortSignal,
   ): Promise<ModelRun> {
-    // Pure inference: the request carries no `tools`, so the model cannot call
-    // one. A role that asked for tools would silently get a model with none, so
-    // refuse rather than quietly narrow what was ordered (doctrine 4).
-    if (work.constraints.tools.length > 0) {
+    // The work order carries tool NAMES; the runner puts the IMPLEMENTATIONS
+    // in `selection.options.tools`. Intersecting the two is what keeps the
+    // role's declared permissions authoritative — an implementation that
+    // arrived but was not named in the order is not offered to the model.
+    const wanted = new Set(work.constraints.tools);
+    const tools = selectedTools(selection.options).filter((tool) =>
+      wanted.has(tool.name),
+    );
+    if (tools.length < wanted.size) {
+      // Silently running with fewer tools than the role declared is the first
+      // failure shape this tenant paid for: the step still "completes" and its
+      // empty answer reads as a considered one.
       throw new ProviderRunFailure(
-        "provider-error",
-        `claude-subscription performs inference only; ${String(work.constraints.tools.length)} tool(s) requested by role ${work.role}`,
+        "capability-shortage",
+        `claude-subscription: role ${work.role} declares ${String(wanted.size)} tool(s), ` +
+          `${String(tools.length)} implementation(s) reached the provider`,
       );
     }
     const startedAt = Date.now();
@@ -204,6 +217,7 @@ export class ClaudeSubscriptionProvider implements Provider {
       timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
       env: this.env as Record<string, string>,
       signal,
+      ...(tools.length === 0 ? {} : { tools }),
     });
     if (!result.ok) {
       const failure = result.classification ?? "error";
@@ -215,39 +229,26 @@ export class ClaudeSubscriptionProvider implements Provider {
     }
     return {
       text: result.text ?? "",
-      events: sessionLog(startedAt, result.runtimeSnapshot.modelUsage),
+      // The loop already emitted one turn's events per model turn plus a span
+      // per tool call; `sessionLog` is the fallback for a result shape that
+      // predates it.
+      events:
+        result.events ??
+        sessionLog(startedAt, result.runtimeSnapshot.modelUsage),
     };
   }
 }
 
 /**
- * One request, one step. The Messages API answers once with its own accounting,
- * so the log is the two events the audit fold needs and nothing invented: what
+ * One request, one step: the first turn's events and nothing invented — what
  * the wire reported for tokens, and the wall time we measured around it.
+ * `invoke.ts` owns the general form now; this is the single-turn case.
  */
 export function sessionLog(
   startedAt: number,
   usage: Record<string, unknown>,
 ): LogEvent[] {
-  const num = (key: string): number =>
-    typeof usage[key] === "number" ? (usage[key] as number) : 0;
-  return [
-    { type: "step/start", seq: 0, time: startedAt, data: { turn: 1, step: 1 } },
-    {
-      type: "assistant/message",
-      seq: 1,
-      time: Date.now(),
-      data: {
-        turn: 1,
-        step: 1,
-        usage: {
-          inputTokens: num("input_tokens"),
-          outputTokens: num("output_tokens"),
-          cacheReadTokens: num("cache_read_input_tokens"),
-        },
-      },
-    },
-  ];
+  return turnEvents(0, 1, startedAt, usage);
 }
 
 export default new ClaudeSubscriptionProvider();

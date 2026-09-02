@@ -122,3 +122,26 @@ describe("select", () => {
     expect(projected).toBeCloseTo(0.0201, 10);
   });
 });
+
+describe("a step that carries tools", () => {
+  it("excludes a target that cannot call one, whatever the task declared", () => {
+    // The task requires `reason.deep` only — no `tool.use` — but the role's
+    // permissions put tools in the work order. Routing to a target with no
+    // tool loop produces a step that fails at execution, or worse a model
+    // politely explaining it has no tools, in a report that reads as an answer.
+    const catalog = new CapabilityCatalog();
+    catalog.register(target("inference-only", ["reason.deep"], { usdIn: 1e-9, usdOut: 1e-9 }));
+    catalog.register(target("has-tools", ["reason.deep", "tool.use"], { usdIn: 1e-4, usdOut: 1e-4 }));
+
+    const decision = select(
+      work({ constraints: { tools: ["ow_spot"], mutations: "forbidden", minIsolationClass: "in-process" } }),
+      catalog.snapshot(),
+    );
+
+    // The dearer target wins, because the cheaper one cannot do the job.
+    expect(decision.selected).toBe("has-tools");
+    expect(
+      decision.candidates.find((entry) => entry.targetId === "inference-only")!.reasons,
+    ).toContain("tool-capability");
+  });
+});

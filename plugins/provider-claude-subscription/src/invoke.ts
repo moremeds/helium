@@ -1,4 +1,13 @@
 import { curlPostJson } from "@helium/provider-sdk/curl";
+import {
+  MAX_TOOL_TURNS,
+  parseToolArgs,
+  runToolCall,
+  toolCallEvents,
+  toolSpecs,
+} from "@helium/provider-sdk/tool-loop";
+import type { ToolSpec } from "@helium/provider-sdk/tool-loop";
+import type { EcosystemTool, LogEvent } from "@helium/core";
 import type { ClaudeEffort } from "./catalog.js";
 
 export type ClaudeClassification =
@@ -19,6 +28,14 @@ export interface ClaudeInvocationResult {
   retryAfter?: string;
   raw?: unknown;
   runtimeSnapshot: ClaudeRuntimeSnapshot;
+  /**
+   * Every turn's usage plus every tool call, already in the shape
+   * `foldSessionLog` bills. Present on success; a tool-free call yields the
+   * one turn it always did.
+   */
+  events?: LogEvent[];
+  /** How many model turns the loop took. 1 unless a tool was called. */
+  turns?: number;
 }
 
 export interface ClaudeInvocation {
@@ -37,6 +54,12 @@ export interface ClaudeInvocation {
    */
   env: Record<string, string>;
   signal?: AbortSignal;
+  /**
+   * Tool IMPLEMENTATIONS this step may call, handed down by the runner in
+   * `selection.options.tools`. Empty or absent means single-shot inference,
+   * which is exactly what this provider did before the loop existed.
+   */
+  tools?: readonly EcosystemTool[];
 }
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -77,22 +100,66 @@ function classify(status: number): ClaudeClassification {
   return "error";
 }
 
+/**
+ * One turn's accounting, in the shape `foldSessionLog` reads.
+ *
+ * A tool loop is several model turns, and each is billed separately by the
+ * vendor — folding them into one event would hide every turn but the last, so
+ * the cost of a chatty tool loop would read as the cost of a single answer.
+ */
+export function turnEvents(
+  seq: number,
+  turn: number,
+  startedAt: number,
+  usage: Record<string, unknown>,
+): LogEvent[] {
+  const num = (key: string): number =>
+    typeof usage[key] === "number" ? (usage[key] as number) : 0;
+  return [
+    { type: "step/start", seq, time: startedAt, data: { turn, step: 1 } },
+    {
+      type: "assistant/message",
+      seq: seq + 1,
+      time: Date.now(),
+      data: {
+        turn,
+        step: 1,
+        usage: {
+          inputTokens: num("input_tokens"),
+          outputTokens: num("output_tokens"),
+          cacheReadTokens: num("cache_read_input_tokens"),
+        },
+      },
+    },
+  ];
+}
+
+interface ClaudeContentBlock {
+  type?: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: unknown;
+}
+
+/**
+ * Single-shot inference, or a tool loop when the step was handed tools.
+ *
+ * The two are one function on purpose: a tool-free call is just the loop that
+ * exits after its first turn, so there is no second code path to keep in step
+ * and no way for the tool-free case to drift from the tool-using one.
+ */
 export async function invokeClaude(
   input: ClaudeInvocation,
 ): Promise<ClaudeInvocationResult> {
-  const runtime = (
-    usage?: unknown,
-    reported?: string,
-  ): ClaudeRuntimeSnapshot => ({
+  const totals: Record<string, number> = {};
+  const runtime = (reported?: string): ClaudeRuntimeSnapshot => ({
     requestedModel: input.model,
     ...(input.effort === undefined
       ? {}
       : { requestedEffort: input.effort, effectiveEffort: input.effort }),
     ...(reported === undefined ? {} : { providerReportedEffort: reported }),
-    modelUsage:
-      typeof usage === "object" && usage !== null
-        ? (usage as Record<string, unknown>)
-        : {},
+    modelUsage: { ...totals },
   });
 
   const token =
@@ -110,85 +177,177 @@ export async function invokeClaude(
   }
 
   const budget = input.effort === undefined ? 0 : THINKING_BUDGET[input.effort];
-  const body: Record<string, unknown> = {
-    model: input.model,
-    max_tokens: budget + REPLY_HEADROOM,
-    system: [
-      { type: "text", text: CLAUDE_CODE_IDENTITY },
-      ...(input.systemPrompt === undefined
-        ? []
-        : [{ type: "text", text: input.systemPrompt }]),
-    ],
-    messages: [{ role: "user", content: input.prompt }],
-  };
-  if (budget > 0) {
-    body.thinking = { type: "enabled", budget_tokens: budget };
-  }
+  const tools = input.tools ?? [];
+  const declared = toolSpecs(tools).map((spec: ToolSpec) => ({
+    name: spec.name,
+    description: spec.description,
+    input_schema: spec.parameters,
+  }));
 
-  const res = await curlPostJson({
-    url: ENDPOINT,
-    secretHeaders: { authorization: { prefix: "Bearer ", value: token } },
-    headers: {
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
-      "user-agent": "claude-cli/2.1.258",
-      "x-app": "cli",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-    timeoutMs: input.timeoutMs,
-    ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
-      ? {}
-      : { proxy: input.env.HELIUM_PROXY }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-
-  if (res.terminal === "timeout") {
-    return { ok: false, classification: "timeout", runtimeSnapshot: runtime() };
-  }
-  if (res.terminal === "cancelled") {
-    return { ok: false, classification: "cancelled", runtimeSnapshot: runtime() };
-  }
-  if (res.terminal === "transport") {
-    // Never reached Anthropic, so it cannot be an auth fault; calling it one is
-    // the mistake documented above.
-    return {
-      ok: false,
-      classification: "proxy",
-      raw: { error: res.error },
-      runtimeSnapshot: runtime(),
-    };
-  }
-
+  const messages: unknown[] = [{ role: "user", content: input.prompt }];
+  const events: LogEvent[] = [];
+  const said: string[] = [];
+  let seq = 0;
   let raw: unknown;
-  try {
-    raw = JSON.parse(res.body);
-  } catch {
-    raw = { body: res.body.slice(0, 2_000) };
-  }
 
-  if (res.status < 200 || res.status >= 300) {
-    const retryAfter = (raw as { error?: { retry_after?: string } })?.error?.retry_after;
-    return {
-      ok: false,
-      classification: classify(res.status),
-      ...(retryAfter === undefined ? {} : { retryAfter }),
-      raw,
-      runtimeSnapshot: runtime(),
+  for (let turn = 1; turn <= MAX_TOOL_TURNS; turn += 1) {
+    const startedAt = Date.now();
+    const body: Record<string, unknown> = {
+      model: input.model,
+      max_tokens: budget + REPLY_HEADROOM,
+      system: [
+        { type: "text", text: CLAUDE_CODE_IDENTITY },
+        ...(input.systemPrompt === undefined
+          ? []
+          : [{ type: "text", text: input.systemPrompt }]),
+      ],
+      messages,
     };
+    if (budget > 0) {
+      body.thinking = { type: "enabled", budget_tokens: budget };
+    }
+    if (declared.length > 0) body.tools = declared;
+
+    const res = await curlPostJson({
+      url: ENDPOINT,
+      secretHeaders: { authorization: { prefix: "Bearer ", value: token } },
+      headers: {
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+        "user-agent": "claude-cli/2.1.258",
+        "x-app": "cli",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      timeoutMs: input.timeoutMs,
+      ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+        ? {}
+        : { proxy: input.env.HELIUM_PROXY }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+
+    if (res.terminal === "timeout") {
+      return { ok: false, classification: "timeout", runtimeSnapshot: runtime() };
+    }
+    if (res.terminal === "cancelled") {
+      return {
+        ok: false,
+        classification: "cancelled",
+        runtimeSnapshot: runtime(),
+      };
+    }
+    if (res.terminal === "transport") {
+      // Never reached Anthropic, so it cannot be an auth fault; calling it one
+      // is the mistake documented above.
+      return {
+        ok: false,
+        classification: "proxy",
+        raw: { error: res.error },
+        runtimeSnapshot: runtime(),
+      };
+    }
+
+    try {
+      raw = JSON.parse(res.body);
+    } catch {
+      raw = { body: res.body.slice(0, 2_000) };
+    }
+
+    if (res.status < 200 || res.status >= 300) {
+      const retryAfter = (raw as { error?: { retry_after?: string } })?.error
+        ?.retry_after;
+      return {
+        ok: false,
+        classification: classify(res.status),
+        ...(retryAfter === undefined ? {} : { retryAfter }),
+        raw,
+        runtimeSnapshot: runtime(),
+      };
+    }
+
+    const envelope = raw as
+      | {
+          content?: ClaudeContentBlock[];
+          usage?: Record<string, unknown>;
+          stop_reason?: string;
+        }
+      | undefined;
+    const usage = envelope?.usage ?? {};
+    for (const [key, value] of Object.entries(usage)) {
+      if (typeof value === "number") totals[key] = (totals[key] ?? 0) + value;
+    }
+    events.push(...turnEvents(seq, turn, startedAt, usage));
+    seq += 2;
+
+    const content = envelope?.content ?? [];
+    const spoken = content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text ?? "")
+      .join("");
+    if (spoken !== "") said.push(spoken);
+
+    const calls = content.filter(
+      (block) => block.type === "tool_use" && typeof block.id === "string",
+    );
+    if (calls.length === 0) {
+      return {
+        ok: true,
+        text: said.join("\n"),
+        raw,
+        runtimeSnapshot: runtime(),
+        events,
+        turns: turn,
+      };
+    }
+
+    // The assistant turn goes back VERBATIM. With extended thinking on, the
+    // content array carries signed thinking blocks the API requires unchanged
+    // alongside the tool_use it is answering — rebuilding it from the parts we
+    // happen to care about is how a tool loop starts getting 400s under
+    // `reason.deep` and not otherwise.
+    messages.push({ role: "assistant", content });
+    const results: unknown[] = [];
+    for (const call of calls) {
+      const callStarted = Date.now();
+      const outcome = await runToolCall(
+        tools,
+        call.name ?? "",
+        parseToolArgs(call.input),
+      );
+      events.push(
+        ...toolCallEvents(
+          seq,
+          turn,
+          call.id!,
+          call.name ?? "unknown",
+          callStarted,
+          outcome,
+        ),
+      );
+      seq += 2;
+      results.push({
+        type: "tool_result",
+        tool_use_id: call.id,
+        content: outcome.content,
+        ...(outcome.isError ? { is_error: true } : {}),
+      });
+    }
+    messages.push({ role: "user", content: results });
   }
 
-  const envelope = raw as
-    | { content?: Array<{ type?: string; text?: string }>; usage?: unknown }
-    | undefined;
-  const text = envelope?.content
-    ?.filter((block) => block.type === "text")
-    .map((block) => block.text ?? "")
-    .join("");
+  // The ceiling was reached with the model still asking for tools. Returning
+  // what it has said so far is right — the turns were paid for and the partial
+  // answer is real — but the reader must be told it is partial, or a truncated
+  // reply reads as a considered short one.
+  said.push(
+    `[helium: stopped after ${String(MAX_TOOL_TURNS)} tool turns; the model was still calling tools]`,
+  );
   return {
     ok: true,
-    ...(text === undefined ? {} : { text }),
+    text: said.join("\n"),
     raw,
-    runtimeSnapshot: runtime(envelope?.usage),
+    runtimeSnapshot: runtime(),
+    events,
+    turns: MAX_TOOL_TURNS,
   };
 }
