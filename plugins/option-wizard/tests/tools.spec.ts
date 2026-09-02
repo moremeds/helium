@@ -9,6 +9,7 @@ import {
   buildTools,
   dteOf,
   parseOcc,
+  thinAcross,
   symbolLiteral,
   staleSeries,
   tvLiveLevels,
@@ -230,6 +231,25 @@ describe("dteOf", () => {
     // did.
     expect(dteOf("2026-10-16", now)).toBe(44);
     expect(dteOf("20261016", now)).toBe(44);
+  });
+});
+
+describe("thinAcross", () => {
+  it("keeps both ends, so the wings survive the trim", () => {
+    // The first trim kept the N contracts NEAREST spot, which collapsed a SPY
+    // put chain to strikes 738-780 around a 761.78 spot. The designer then
+    // wrote a 746/724 spread whose 724 leg was never in the chain it saw — an
+    // unanchored strike, reintroduced by the trimming that was meant to make
+    // the chain readable.
+    const strikes = Array.from({ length: 100 }, (_, i) => 700 + i);
+    const kept = thinAcross(strikes, 10);
+    expect(kept.length).toBeLessThanOrEqual(10);
+    expect(kept[0]).toBe(700);
+    expect(kept[kept.length - 1]).toBe(799);
+  });
+
+  it("passes a short list through untouched", () => {
+    expect(thinAcross([1, 2, 3], 10)).toEqual([1, 2, 3]);
   });
 });
 

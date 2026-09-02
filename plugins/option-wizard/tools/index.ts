@@ -432,6 +432,25 @@ export function parseOcc(
  *  leaves others null on untraded contracts. One reader for all three, and a
  *  missing number stays missing rather than becoming a zero that reads as a
  *  real bid of nothing. */
+/**
+ * Keep at most `cap` entries SPANNING the list, not the `cap` nearest its
+ * middle. The difference is the whole point: a defined-risk spread needs a long
+ * wing several percent out, and the first version of this trim kept the 60
+ * contracts nearest spot — which collapsed a SPY put chain to strikes 738-780
+ * around a 761.78 spot. The designer then wrote a 746/724 spread whose 724 leg
+ * was never in the chain it was shown, which is precisely the unanchored strike
+ * ow_spot exists to prevent, reintroduced by the trimming.
+ *
+ * Both ends are always kept, so the caller can see how far the window reaches.
+ */
+export function thinAcross<T>(rows: readonly T[], cap: number): T[] {
+  if (rows.length <= cap || cap < 2) return rows.slice(0, Math.max(cap, 0));
+  const step = (rows.length - 1) / (cap - 1);
+  const kept: T[] = [];
+  for (let i = 0; i < cap; i += 1) kept.push(rows[Math.round(i * step)]!);
+  return [...new Set(kept)];
+}
+
 function round4(value: number | undefined): number | undefined {
   return value === undefined ? undefined : Number(value.toFixed(4));
 }
@@ -822,18 +841,17 @@ export function buildTools(cfg: {
                 },
               ];
             })
-            .sort(
-              (a, b) =>
-                Math.abs(a.strike - spot.close) - Math.abs(b.strike - spot.close) ||
-                a.right.localeCompare(b.right, "en"),
-            )
-            .slice(0, 60);
+            .sort((a, b) => a.strike - b.strike || a.right.localeCompare(b.right, "en"));
+          const trimmed = [
+            ...thinAcross(contracts.filter((c) => c.right === "P"), 40),
+            ...thinAcross(contracts.filter((c) => c.right === "C"), 40),
+          ];
           expiries.push({
             expiry: row.expires,
             dte: row.dte,
             chainOpenInterest: row.open_interest,
             chainVolume: row.volume,
-            contracts,
+            contracts: trimmed,
           });
         }
 
