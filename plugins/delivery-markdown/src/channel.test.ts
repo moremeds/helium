@@ -33,6 +33,7 @@ describe("markdown channel", () => {
     const written = readFileSync(result.detail!, "utf8");
     expect(written).toContain("# helium option-wizard 2026-09-02");
     expect(written).toContain("line two");
+    expect(written).not.toContain("```");
     expect(written).toContain("helium audit run-1");
   });
 

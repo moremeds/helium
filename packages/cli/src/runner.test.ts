@@ -720,7 +720,9 @@ describe("delivery", () => {
     });
     expect(report.delivery[0]?.state).toBe("sent");
     expect(sent[0]?.subject).toContain("helium demo");
-    expect(sent[0]?.body).toContain("outcome: completed");
+    expect(sent[0]?.body).toContain("**Outcome:** completed");
+    // The body is a report, not a transcript: the role's own words survive.
+    expect(sent[0]?.body).toContain("hello");
     expect(
       audit.spans(report.runId).some((s) => s.toolName === "delivery:fake-mail"),
     ).toBe(true);

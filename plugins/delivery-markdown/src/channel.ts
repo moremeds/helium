@@ -62,9 +62,7 @@ export class MarkdownChannel implements Channel {
       `- tenant: \`${payload.tenant}\``,
       `- audit: \`helium audit ${payload.runId}\``,
       "",
-      "```",
       payload.body,
-      "```",
     ];
     for (const artifact of payload.artifacts ?? []) lines.push("", `Artifact: \`${artifact}\``);
     lines.push("");

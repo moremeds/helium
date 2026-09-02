@@ -825,26 +825,78 @@ function deliverySubject(report: RunReport): string {
   return `${tag}helium ${report.tenant} ${day}`;
 }
 
+/**
+ * What a person reads. Not a transcript of the run.
+ *
+ * The first version pasted every tool's raw output into the body, so a report
+ * opened with a 190-element ticker array and an entire IB portfolio in JSON,
+ * and the one thing worth reading — what the roles concluded — was somewhere
+ * below the fold. A tool that SUCCEEDED gets one line saying so and its size;
+ * a tool that FAILED gets its message in full, because that message is the
+ * reason a number is missing further down. The raw payloads are not lost: the
+ * audit table records every span, and `helium audit <run>` is one line away.
+ */
 function deliveryBody(report: RunReport): string {
-  const lines = [`run ${report.runId}  tenant ${report.tenant}  mode ${report.mode}`];
-  for (const skip of report.providersSkipped) {
-    lines.push(`provider skipped: ${skip.id} — ${skip.reason}`);
-  }
-  for (const skip of report.gatesSkipped) {
-    lines.push(`gate failed to load: ${skip.id} — ${skip.reason}`);
-  }
-  for (const step of report.steps) {
-    lines.push("", `── ${step.task} (${step.role})`);
-    for (const refusal of step.gateRefusals ?? []) {
-      lines.push(`   gate ${refusal.id} refused: ${refusal.reason}`);
-    }
-    if (step.text !== "") lines.push(step.text);
-  }
-  lines.push("");
+  const lines: string[] = [];
+  const failures = report.steps.flatMap((step) => step.gateRefusals ?? []);
   lines.push(
     report.outcome === "completed"
-      ? `outcome: completed (${report.steps.length} steps)`
-      : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
+      ? `**Outcome:** completed, ${String(report.steps.length)} steps.`
+      : `**Outcome:** FAILED — ${report.failure?.class ?? "unknown"}: ${report.failure?.detail ?? ""}`,
   );
+  if (report.mode === "tool-only") {
+    lines.push("", "_No live provider: no model ran, so nothing below was reasoned about._");
+  }
+  for (const skip of report.providersSkipped) lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
+  for (const skip of report.gatesSkipped) lines.push(`- **gate failed to load:** ${skip.id} — ${skip.reason}`);
+  for (const refusal of failures) lines.push(`- gate \`${refusal.id}\` refused: ${refusal.reason}`);
+
+  for (const step of report.steps) {
+    lines.push("", `## ${step.task} — ${step.role}`);
+    if (step.targetId !== undefined) lines.push(`\`${step.targetId}\``, "");
+    if (step.downgradeReason !== undefined) lines.push(`> ${step.downgradeReason}`, "");
+    const summarised = summariseToolLines(step.text);
+    if (summarised !== "") lines.push(summarised);
+  }
+  lines.push("", `Full per-step tokens and cost: \`helium audit ${report.runId}\``);
   return lines.join("\n");
+}
+
+/**
+ * Collapse the `name -> payload` lines a deterministic step emits.
+ *
+ * A step that ran no model has no prose of its own — its text IS the tool
+ * output — so this is where a report either stays readable or turns into a
+ * JSON dump. Anything that is not one of those lines is a role's own writing
+ * and passes through untouched.
+ */
+function summariseToolLines(text: string): string {
+  // A role that was asked to answer in JSON answers in JSON, and a bare JSON
+  // object pasted into markdown renders as broken prose. Fencing it is the
+  // whole fix — core must not know what the object MEANS (doctrine 2), only
+  // that it is structured.
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      JSON.parse(trimmed);
+      return ["```json", trimmed, "```"].join("\n");
+    } catch {
+      /* not JSON after all; fall through to the tool-line pass */
+    }
+  }
+  const out: string[] = [];
+  for (const line of text.split("\n")) {
+    const match = /^(\w+) -> (.*)$/s.exec(line);
+    if (match === null) {
+      out.push(line);
+      continue;
+    }
+    const [, name, payload] = match as unknown as [string, string, string];
+    out.push(
+      payload.startsWith("FAILED:")
+        ? `- **${name}** — ${payload.slice("FAILED:".length).trim()}`
+        : `- ${name} — ok, ${String(Buffer.byteLength(payload, "utf8"))} bytes`,
+    );
+  }
+  return out.join("\n").trim();
 }
