@@ -6,7 +6,6 @@ export interface Config {
   teamCanaryTenants?: string[];
   teamCanaryMaxPerUtcDay?: number;
   teamsDir?: string;
-  opsEventLog?: string;
   tenantsDir: string;
   tenantDeliveryEnabled?: boolean;
   /**
@@ -34,7 +33,6 @@ export const ConfigSchema = z.object({
   teamCanaryTenants: z.array(z.string().min(1)).default([]),
   teamCanaryMaxPerUtcDay: z.number().int().positive().default(1),
   teamsDir: z.string().min(1).default("teams"),
-  opsEventLog: z.string().min(1).optional(),
   tenantsDir: z.string().min(1),
   tenantDeliveryEnabled: z.boolean().default(false),
   tenantLivenessMs: z.number().int().positive().max(3_600_000).default(300_000),

@@ -10,7 +10,9 @@ import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
 import { Cron } from "croner";
-import { JsonlWriter, admission, type WorkOrder } from "@helium/core";
+import { defineTool } from "@deepseek-ai/dsh-tools";
+import type { ParameterSchemaSpec } from "@deepseek-ai/dsh-tools";
+import { JsonlWriter, type WorkOrder } from "@helium/core";
 import { ConfigSchema, statePaths, type Config } from "./config.js";
 import { processCanaryInbox } from "./canary-inbox.js";
 import { Delivery, smtpFromEnv } from "./delivery.js";
@@ -19,8 +21,6 @@ import { ProviderRuntime } from "./provider-runtime.js";
 import { narrower, TeamPromotionAdapter } from "./promotion.js";
 import { TeamController } from "./team-controller.js";
 import { TenantDelivery } from "./tenant-delivery.js";
-import { OpsResourcePressureReader } from "./ops-pressure.js";
-import { registerEcosystemTools } from "./toolkit.js";
 import {
   loadValidatedTenants,
   TenantRuntime,
@@ -142,18 +142,13 @@ export function apply(ctx: Context, raw: Config): void {
     stateRoot: paths.state,
     providerHealth: () => providers.healthSnapshot(),
   });
-  const pressure =
-    cfg.opsEventLog === undefined
-      ? undefined
-      : new OpsResourcePressureReader(cfg.opsEventLog);
-
   // Tenant discovery is ASYNC (a tenant's tool module and descriptor are
   // dynamic imports, and `readiness()` is awaited), and cordis `apply` is
   // synchronous, so the awaited work lives inside the existing effect rather
   // than racing the plugin lifecycle.
   ctx.effect(async () => {
     await ctx.get("loader")?.await();
-    // ONE load path, shared verbatim with scripts/release/validate-tenants.mjs.
+    // ONE load path for tenant discovery, validation and tool loading.
     // Pre-flip validation that ran a different, shorter check is how a bad
     // tool module or a failed preflight reached the mini and was discovered
     // after the launchd flip.
@@ -171,10 +166,23 @@ export function apply(ctx: Context, raw: Config): void {
     // Global in-process registration for dsh agents / the interactive Web UI:
     // read-only by design (spec §6). A mutating tool never reaches this
     // surface, and no tenant tool may declare itself mutating.
-    registerEcosystemTools(
-      ctx,
-      catalog.tools.filter((t) => !t.mutating),
-    );
+    // Every tool -- core's own and every tenant's -- carries its own dsh
+    // parameter spec, so registration is a direct `defineTool` call with no
+    // host-side name map to keep in step.
+    for (const tool of catalog.tools.filter((t) => !t.mutating)) {
+      ctx.tools.register(
+        defineTool({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.dshParams as ParameterSchemaSpec,
+          output: {
+            schema: { type: "string" },
+            render: (_args, value) => [{ type: "text", text: String(value) }],
+          },
+          execute: async (args) => await tool.run(args as Record<string, unknown>),
+        }),
+      );
+    }
 
     const controllers = new Map<string, TeamController>();
     const controllerFor = (tenant: LoadedTenant): TeamController => {
@@ -215,18 +223,6 @@ export function apply(ctx: Context, raw: Config): void {
           closeTeam: (teamRunId) => providers.host.closeTeam(teamRunId),
           drain: () => providers.host.drain(),
         },
-        ...(pressure === undefined
-          ? {}
-          : {
-              admission: {
-                decide: admission.decide,
-                pressure: () => pressure.read(),
-                policy: {
-                  sustainedMemoryPressureMs: 5 * 60_000,
-                  sustainedRecoveryMs: 5 * 60_000,
-                },
-              },
-            }),
       });
       controllers.set(tenant.spec.tenant, controller);
       return controller;

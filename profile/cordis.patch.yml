@@ -11,7 +11,6 @@
     teamCanaryTenants: !!js (process.env.HELIUM_TEAM_CANARY_TENANTS || '').split(',').filter(Boolean)
     teamCanaryMaxPerUtcDay: !!js Number(process.env.HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY || '1')
     teamsDir: !!js process.env.HELIUM_TEAMS_DIR
-    opsEventLog: !!js process.env.HELIUM_OPS_EVENT_LOG
     stateRoot: !!js process.env.HELIUM_STATE_ROOT
     contextFile: !!js process.env.HELIUM_CONTEXT_FILE
     argonBase: !!js process.env.HELIUM_ARGON_BASE
