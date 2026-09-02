@@ -73,6 +73,8 @@ type Counters = Record<string, Record<string, number>>;
 
 export class EmailChannel implements Channel {
   readonly id = "email";
+  /** Mail leaves the machine, so the operator brake applies. */
+  readonly external = true;
   #transport: Transporter | null = null;
 
   constructor(

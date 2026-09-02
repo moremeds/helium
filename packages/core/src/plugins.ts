@@ -149,9 +149,19 @@ export interface DeliveryOutcome {
   detail?: string;
 }
 
-/** `plugins/delivery-<id>/channel.ts`, `export default`. */
+/** `plugins/delivery-<id>/channel.ts`, `export default` — an INSTANCE. */
 export interface Channel {
   id: string;
+  /**
+   * Whether delivering sends the report OFF this machine.
+   *
+   * The `HELIUM_TENANT_DELIVERY` brake exists for exactly one hazard: a run
+   * that mails a stranger. A channel that writes a local file carries no such
+   * hazard, and holding it behind the same brake would mean an operator has to
+   * arm egress to read their own report. Absent is treated as EXTERNAL, so a
+   * channel that has not thought about the question stays braked.
+   */
+  external?: boolean;
   deliver(
     payload: DeliveryPayload,
     config: Record<string, unknown>,
