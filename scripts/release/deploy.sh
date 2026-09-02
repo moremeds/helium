@@ -319,9 +319,14 @@ fi
 # ONE row is the whole signal: the tenant runtime writes a runtime-level
 # liveness row at start-up even with zero enabled tenants, so its presence proves
 # the plugin loaded its config and the runtime started on the new plist.
+# opsd runs its own release and sweeps every 60s, but a RESTARTED opsd needs
+# about five minutes to finish its first full sweep -- measured on the mini:
+# cycles at 02:04:35, 02:05:35, 02:06:35, then nothing until 02:11:33 after the
+# restart. 180s is right for the release under test; it is far too short for
+# opsd, so opsd gets its own longer deadline rather than failing a good deploy.
 say "post-flip health window (up to 180s for the start-up liveness row)"
-ok=0; end=$((SECONDS + 180))
-while [ $SECONDS -lt $end ]; do
+ok=0; end=$((SECONDS + 180)); opsd_end=$((SECONDS + 600))
+while [ $SECONDS -lt $end ] || { [ "$ok" = "2" ] && [ $SECONDS -lt $opsd_end ]; }; do
   sleep 15
   fresh=$(HELIUM_STATE_ROOT="$STATE_ROOT" node -e '
     const {readFileSync,readdirSync}=require("node:fs");const {join}=require("node:path");
@@ -337,11 +342,19 @@ while [ $SECONDS -lt $end ]; do
     opsd_fresh=$(opsd_cycle_after "$DEST" "$flip_start_ms")
     say "  opsd target-release observation cycle: $opsd_fresh"
   fi
-  if [ "$fresh" -ge 1 ] && [ "$opsd_fresh" = "1" ]; then
-    ok=1
-    break
+  if [ "$fresh" -ge 1 ]; then
+    if [ "$opsd_fresh" = "1" ]; then
+      ok=1
+      break
+    fi
+    # The release itself is healthy; only opsd has not swept yet. Keep waiting
+    # on the longer opsd deadline instead of rolling a good release back.
+    ok=2
   fi
 done
+if [ "$ok" = "2" ]; then
+  say "release healthy but opsd recorded no observation cycle within 600s"
+fi
 if [ "$ok" != "1" ]; then
   say "HEALTH WINDOW FAILED"
   # fix round 1, IMPORTANT 1: on a bootstrap/first-ever deploy `current` had
@@ -392,7 +405,9 @@ if [ "$ok" != "1" ]; then
     exit 76
   fi
   if [ "$opsd_required" = "1" ]; then
-    restored=0; restore_end=$((SECONDS + 90))
+    # 90s could not cover a restarted opsd's first sweep (~5 min, measured), so
+    # a healthy flip-back reported FATAL. Same deadline as the forward gate.
+    restored=0; restore_end=$((SECONDS + 600))
     while [ $SECONDS -lt $restore_end ]; do
       sleep 10
       if [ "$(opsd_cycle_after "$prev_target" "$flip_back_start_ms")" = "1" ]; then
