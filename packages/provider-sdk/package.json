@@ -9,6 +9,7 @@
     ".": "./lib/catalog.js",
     "./catalog": "./lib/catalog.js",
     "./registration": "./lib/registration.js",
+    "./curl": "./lib/curl.js",
     "./process-receipt": "./lib/process-receipt.js",
     "./boundary": "./lib/boundary.js"
   },

@@ -1,251 +1,177 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { PROCESS_RECEIPT_FILE } from "@helium/provider-sdk/process-receipt";
-import { invokeCodex } from "./invoke.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CurlRequest, CurlResponse } from "@helium/provider-sdk/curl";
 
-function fakeCodex(message = "CODEX_OK"): { dir: string; capture: string } {
-  const dir = mkdtempSync(join(tmpdir(), "helium-codex-bin-"));
-  const capture = join(dir, "argv.json");
-  const bin = join(dir, "codex");
-  writeFileSync(
-    bin,
-    [
-      "#!/bin/sh",
-      `printf '%s\\n' \"$@\" > \"${capture}\"`,
-      `echo '${JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: message } })}'`,
-      `echo '{"type":"turn.completed","usage":{"input_tokens":11,"output_tokens":3}}'`,
-    ].join("\n"),
-  );
-  chmodSync(bin, 0o755);
-  return { dir, capture };
+const curl = vi.hoisted(() =>
+  vi.fn<(r: CurlRequest) => Promise<CurlResponse>>(),
+);
+vi.mock("@helium/provider-sdk/curl", () => ({ curlPostJson: curl }));
+
+const { invokeCodex } = await import("./invoke.js");
+
+/** A structurally real JWT with no signature: only the claim is read. */
+function jwt(accountId: string | undefined): string {
+  const claims =
+    accountId === undefined
+      ? {}
+      : { "https://api.openai.com/auth": { chatgpt_account_id: accountId } };
+  return `header.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
 }
 
-function stubbornCodex(): { dir: string; ready: string } {
-  const dir = mkdtempSync(join(tmpdir(), "helium-codex-stubborn-"));
-  const ready = join(dir, "ready");
-  const bin = join(dir, "codex");
-  writeFileSync(
-    bin,
-    [
-      "#!/bin/sh",
-      "trap '' TERM",
-      'printf ready > "$HELIUM_PROVIDER_READY"',
-      "while true; do /bin/sleep 1; done",
-    ].join("\n"),
-  );
-  chmodSync(bin, 0o755);
-  return { dir, ready };
+const ENV = { CODEX_ACCESS_TOKEN: jwt("acct-0191") };
+const CALL = {
+  model: "gpt-5.6-sol",
+  effort: "low" as const,
+  prompt: "hi",
+  timeoutMs: 5_000,
+  env: ENV,
+};
+
+function sse(...events: unknown[]): string {
+  return events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join("");
+}
+function stream(body: string, status = 200) {
+  curl.mockResolvedValue({ status, body });
+}
+function sent(): CurlRequest {
+  const req = curl.mock.calls[0]?.[0];
+  if (req === undefined) throw new Error("curl was never called");
+  return req;
 }
 
-async function waitFor(path: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!existsSync(path) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect(existsSync(path)).toBe(true);
-}
+afterEach(() => curl.mockReset());
 
 describe("invokeCodex", () => {
-  it("returns a normalized provider error when the Codex executable is unavailable", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const out = await invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      prompt: "NO BINARY",
-      cwd: workspace,
-      timeoutMs: 5_000,
-      sandbox: "read-only",
-      env: { PATH: mkdtempSync(join(tmpdir(), "helium-empty-path-")) },
-      allowedTools: [],
-    });
-    expect(out).toMatchObject({ ok: false, classification: "error" });
-  });
-
-  it("invokes the exact native model and reasoning effort in an owned workspace", async () => {
-    const { dir, capture } = fakeCodex();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const out = await invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "xhigh",
-      prompt: "PROMPTBODY",
-      cwd: workspace,
-      timeoutMs: 5_000,
-      sandbox: "read-only",
-      env: { PATH: dir },
-      allowedTools: [],
-    });
-    const argv = readFileSync(capture, "utf8").trim().split("\n");
-    expect(argv).toEqual(
-      expect.arrayContaining([
-        "exec",
-        "--model",
-        "gpt-5.6-sol",
-        "model_reasoning_effort=\"xhigh\"",
-        "--cd",
-        workspace,
-        "--sandbox",
-        "read-only",
-        "--skip-git-repo-check",
-        "--ephemeral",
-        "--json",
-        "PROMPTBODY",
-      ]),
-    );
-    expect(out.ok).toBe(true);
-    expect(out.text).toBe("CODEX_OK");
-    expect(out.runtimeSnapshot).toMatchObject({
-      requestedModel: "gpt-5.6-sol",
-      requestedEffort: "xhigh",
-      effectiveEffort: "xhigh",
-      usage: { inputTokens: 11, outputTokens: 3 },
-    });
-  });
-
-  it("isolates settings and exposes only the declared MCP tools", async () => {
-    const { dir, capture } = fakeCodex();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const mcpConfigPath = join(workspace, "mcp.json");
-    writeFileSync(
-      mcpConfigPath,
-      JSON.stringify({
-        mcpServers: {
-          helium: {
-            command: "/usr/bin/env",
-            args: ["node", "server.mjs"],
-            env: { HELIUM_SCOPE: "fixture" },
-          },
-        },
-      }),
+  it("posts to the ChatGPT backend with the account id taken from the token", async () => {
+    stream(
+      sse(
+        { type: "response.output_text.delta", delta: "REA" },
+        { type: "response.output_text.delta", delta: "DY" },
+        { response: { usage: { input_tokens: 30, output_tokens: 2 } } },
+      ),
     );
 
-    await invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      prompt: "BOUNDARY",
-      cwd: workspace,
-      timeoutMs: 5_000,
-      sandbox: "read-only",
-      env: { PATH: dir },
-      allowedTools: ["mcp__helium__thesis_read"],
-      mcpConfigPath,
-    });
+    const out = await invokeCodex(CALL);
 
-    const argv = readFileSync(capture, "utf8").trim().split("\n");
-    expect(argv).toEqual(
-      expect.arrayContaining([
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--strict-config",
-        "features.shell_tool=false",
-        "features.unified_exec=false",
-        "tools.web_search=false",
-        "features.multi_agent=false",
-        'mcp_servers.helium.command="/usr/bin/env"',
-        'mcp_servers.helium.args=["node","server.mjs"]',
-        'mcp_servers.helium.env={ HELIUM_SCOPE = "fixture" }',
-        'mcp_servers.helium.enabled_tools=["thesis_read"]',
-        "mcp_servers.helium.required=true",
-      ]),
+    expect(out).toMatchObject({ ok: true, text: "READY" });
+    expect(out.runtimeSnapshot.usage).toEqual({
+      inputTokens: 30,
+      outputTokens: 2,
+    });
+    expect(sent().url).toBe("https://chatgpt.com/backend-api/codex/responses");
+    // Subscription billing lives on this backend; api.openai.com would bill the
+    // API account instead, which is the cost this provider exists to avoid.
+    expect(sent().secretHeaders?.["chatgpt-account-id"]?.value).toBe(
+      "acct-0191",
+    );
+    expect(sent().secretHeaders?.authorization?.value).toBe(
+      ENV.CODEX_ACCESS_TOKEN,
+    );
+
+    const body = JSON.parse(sent().body);
+    expect(body).toMatchObject({
+      model: "gpt-5.6-sol",
+      store: false,
+      stream: true,
+      reasoning: { effort: "low" },
+    });
+    expect(body.input[0].content[0].text).toBe("hi");
+  });
+
+  it("survives the in-progress events that carry a null usage", async () => {
+    // Found by a live call: the stream sends `response.usage: null` while the
+    // response is still in progress, which an `!== undefined` guard lets past.
+    stream(
+      sse(
+        { type: "response.created", response: { usage: null } },
+        { type: "response.output_text.delta", delta: "READY" },
+        { response: { usage: { input_tokens: 30, output_tokens: 2 } } },
+      ),
+    );
+    const out = await invokeCodex(CALL);
+    expect(out).toMatchObject({ ok: true, text: "READY" });
+    expect(out.runtimeSnapshot.usage).toEqual({
+      inputTokens: 30,
+      outputTokens: 2,
+    });
+  });
+
+  it("keeps the secret out of plain headers", async () => {
+    stream(sse());
+    await invokeCodex(CALL);
+    expect(JSON.stringify(sent().headers)).not.toContain(
+      ENV.CODEX_ACCESS_TOKEN,
     );
   });
 
-  it("keeps every configured MCP server disabled when the tool list is empty", async () => {
-    const { dir, capture } = fakeCodex();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const mcpConfigPath = join(workspace, "mcp.json");
-    writeFileSync(
-      mcpConfigPath,
-      JSON.stringify({
-        mcpServers: {
-          helium: { command: "/usr/bin/env", args: ["node", "server.mjs"] },
-        },
-      }),
-    );
-
-    await invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      prompt: "BOUNDARY",
-      cwd: workspace,
-      timeoutMs: 5_000,
-      sandbox: "read-only",
-      env: { PATH: dir },
-      allowedTools: [],
-      mcpConfigPath,
-    });
-
-    const argv = readFileSync(capture, "utf8").trim().split("\n");
-    expect(argv).toContain("mcp_servers.helium.enabled_tools=[]");
-  });
-
-  it("rejects a declared tool that is not addressed to a configured MCP server", async () => {
-    const { dir } = fakeCodex();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const mcpConfigPath = join(workspace, "mcp.json");
-    writeFileSync(
-      mcpConfigPath,
-      JSON.stringify({
-        mcpServers: { helium: { command: "/usr/bin/env" } },
-      }),
-    );
-
-    await expect(
-      invokeCodex({
-        model: "gpt-5.6-sol",
-        effort: "high",
-        prompt: "BOUNDARY",
-        cwd: workspace,
-        timeoutMs: 5_000,
-        sandbox: "read-only",
-        env: { PATH: dir },
-        allowedTools: ["mcp__other__undeclared"],
-        mcpConfigPath,
-      }),
-    ).rejects.toThrow(/configured MCP server/i);
-  });
-
-  it("does not classify successful answer text about quotas as provider exhaustion", async () => {
-    const { dir } = fakeCodex("The quota and rate-limit policy is documented here.");
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const out = await invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      prompt: "EXPLAIN",
-      cwd: workspace,
-      timeoutMs: 5_000,
-      sandbox: "read-only",
-      env: { PATH: dir },
-      allowedTools: [],
-    });
-    expect(out).toMatchObject({
-      ok: true,
-      text: "The quota and rate-limit policy is documented here.",
-    });
-  });
-
-  it("escalates cancellation when the provider ignores TERM and clears its receipt", async () => {
-    const { dir, ready } = stubbornCodex();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-codex-workspace-"));
-    const controller = new AbortController();
-    const pending = invokeCodex({
-      model: "gpt-5.6-sol",
-      effort: "high",
-      prompt: "WAIT",
-      cwd: workspace,
-      timeoutMs: 30_000,
-      sandbox: "read-only",
-      env: { PATH: dir, HELIUM_PROVIDER_READY: ready },
-      allowedTools: [],
-      signal: controller.signal,
-    });
-    await waitFor(ready);
-    controller.abort();
-    await expect(pending).resolves.toMatchObject({
+  it("classifies 403 as proxy and 401 as auth", async () => {
+    stream("", 403);
+    await expect(invokeCodex(CALL)).resolves.toMatchObject({
       ok: false,
-      classification: "cancelled",
+      classification: "proxy",
     });
-    expect(existsSync(join(workspace, PROCESS_RECEIPT_FILE))).toBe(false);
-  }, 10_000);
+
+    curl.mockReset();
+    stream("", 401);
+    await expect(invokeCodex(CALL)).resolves.toMatchObject({
+      ok: false,
+      classification: "auth",
+    });
+  });
+
+  it("fails as auth, unsent, when the token is missing or carries no account", async () => {
+    await expect(invokeCodex({ ...CALL, env: {} })).resolves.toMatchObject({
+      ok: false,
+      classification: "auth",
+    });
+    await expect(
+      invokeCodex({ ...CALL, env: { CODEX_ACCESS_TOKEN: jwt(undefined) } }),
+    ).resolves.toMatchObject({ ok: false, classification: "auth" });
+    expect(curl).not.toHaveBeenCalled();
+  });
+
+  it("does not read quota exhaustion out of successful answer text", async () => {
+    // Kept from the CLI-era suite: the old implementation regexed the whole
+    // output blob, so a model explaining rate limits looked like a rate limit.
+    stream(
+      sse({
+        type: "response.output_text.delta",
+        delta: "A 429 means your quota is exhausted; usage limit applies.",
+      }),
+    );
+    await expect(invokeCodex(CALL)).resolves.toMatchObject({ ok: true });
+  });
+
+  it("treats a rate-limit error inside a 200 stream as quota exhaustion", async () => {
+    stream(sse({ type: "error", error: { message: "rate limit reached" } }));
+    await expect(invokeCodex(CALL)).resolves.toMatchObject({
+      ok: false,
+      classification: "quota-exhausted",
+    });
+  });
+
+  it("passes the declared proxy through and never inherits one", async () => {
+    stream(sse());
+    await invokeCodex({ ...CALL, proxy: "http://127.0.0.1:7897" });
+    expect(sent().proxy).toBe("http://127.0.0.1:7897");
+
+    curl.mockReset();
+    stream(sse());
+    await invokeCodex(CALL);
+    expect(sent().proxy).toBeUndefined();
+  });
+
+  it("reports transport, timeout and cancellation distinctly", async () => {
+    for (const [terminal, expected] of [
+      ["transport", "proxy"],
+      ["timeout", "timeout"],
+      ["cancelled", "cancelled"],
+    ] as const) {
+      curl.mockReset();
+      curl.mockResolvedValue({ status: 0, body: "", terminal });
+      await expect(invokeCodex(CALL)).resolves.toMatchObject({
+        ok: false,
+        classification: expected,
+      });
+    }
+  });
 });

@@ -1,18 +1,8 @@
-import { type ChildProcess } from "node:child_process";
-import {
-  ProviderProcessExitedBeforeReceiptError,
-  spawnSupervisedProviderProcess,
-  writeProviderProcessReceipt,
-} from "@helium/provider-sdk/process-receipt";
+import { curlPostJson } from "@helium/provider-sdk/curl";
 import type { ClaudeEffort } from "./catalog.js";
 
 export type ClaudeClassification =
-  | "proxy"
-  | "auth"
-  | "timeout"
-  | "cancelled"
-  | "quota-exhausted"
-  | "error";
+  "proxy" | "auth" | "timeout" | "cancelled" | "quota-exhausted" | "error";
 
 export interface ClaudeRuntimeSnapshot {
   requestedModel: string;
@@ -35,252 +25,168 @@ export interface ClaudeInvocation {
   model: string;
   effort?: ClaudeEffort;
   prompt: string;
-  cwd: string;
-  maxTurns: number;
+  /** System prompt appended after the mandatory Claude Code identity block. */
+  systemPrompt?: string;
   timeoutMs: number;
-  allowedTools: string[];
-  mcpConfigPath?: string;
+  /**
+   * The provider's declared environment. Only two keys are read, in this order:
+   * `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` credential) then
+   * `ANTHROPIC_API_KEY`. Nothing is inherited from the ambient process.
+   */
   env: Record<string, string>;
+  /** Explicit egress proxy; the mini needs one, the laptop does not (§3.1). */
+  proxy?: string;
   signal?: AbortSignal;
 }
 
-const QUOTA_RE =
-  /\b429\b|rate[_\s-]?limit|usage limit|session limit|quota[_\s-]?(?:exceeded|exhausted)/i;
-const RETRY_AFTER_RE =
-  /"(?:retry[_-]?after|resets?[_-]?at)"\s*:\s*"([^"]+)"|\bretry-after:\s*([^\s,;}\"]+)/i;
+const ENDPOINT = "https://api.anthropic.com/v1/messages";
 
-function classify(stderr: string, stdout: string) {
-  const blob = `${stderr}\n${stdout}`;
-  if (QUOTA_RE.test(blob)) {
-    const hit = RETRY_AFTER_RE.exec(blob);
-    const retryAfter = hit?.[1] ?? hit?.[2];
-    return retryAfter === undefined
-      ? ({ classification: "quota-exhausted" } as const)
-      : ({ classification: "quota-exhausted", retryAfter } as const);
-  }
-  if (/\b401\b|unauthorized|invalid[_ ]?api[_ ]?key|authentication/i.test(blob)) {
-    return { classification: "auth" } as const;
-  }
-  if (/\b403\b|ECONNREFUSED|ECONNRESET|EAI_AGAIN|proxy|tunnel/i.test(blob)) {
-    return { classification: "proxy" } as const;
-  }
-  return { classification: "error" } as const;
-}
+/**
+ * The subscription entitlement check: the Messages API refuses an OAuth token
+ * unless the first system block is exactly this string. Our own system prompt
+ * goes in a second block. Verified live 2026-09-02; see design §3.1.
+ */
+const CLAUDE_CODE_IDENTITY =
+  "You are Claude Code, Anthropic's official CLI for Claude.";
 
-function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Fall through when the process group is gone.
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch {
-    // Already gone.
-  }
+/**
+ * Our policy, not a vendor mapping: the API takes a thinking budget in tokens,
+ * the catalog speaks in effort names. `low` means no extended thinking at all.
+ */
+const THINKING_BUDGET: Record<ClaudeEffort, number> = {
+  low: 0,
+  medium: 4_000,
+  high: 10_000,
+  xhigh: 20_000,
+  max: 32_000,
+};
+
+const REPLY_HEADROOM = 4_096;
+
+/**
+ * Status is the whole signal here — unlike the CLI, which forced us to regex
+ * prose. The 403 case is why this exists: Anthropic returns it *before*
+ * evaluating auth when the caller's egress is blocked, and the old CLI wording
+ * ("Failed to authenticate…403") matched an auth regex first, so a network
+ * fault was reported for months as "Not logged in". Status 403 is never auth.
+ */
+function classify(status: number): ClaudeClassification {
+  if (status === 401) return "auth";
+  if (status === 403) return "proxy";
+  if (status === 429) return "quota-exhausted";
+  return "error";
 }
 
 export async function invokeClaude(
   input: ClaudeInvocation,
 ): Promise<ClaudeInvocationResult> {
-  const args = [
-    "-p",
-    input.prompt,
-    "--output-format",
-    "json",
-    "--max-turns",
-    String(input.maxTurns),
-    "--tools",
-    "",
-    "--allowedTools",
-    input.allowedTools.join(","),
-    "--setting-sources",
-    "",
-    "--model",
-    input.model,
-  ];
-  if (input.effort !== undefined) args.push("--effort", input.effort);
-  if (input.mcpConfigPath !== undefined) {
-    args.push("--mcp-config", input.mcpConfigPath, "--strict-mcp-config");
+  const runtime = (
+    usage?: unknown,
+    reported?: string,
+  ): ClaudeRuntimeSnapshot => ({
+    requestedModel: input.model,
+    ...(input.effort === undefined
+      ? {}
+      : { requestedEffort: input.effort, effectiveEffort: input.effort }),
+    ...(reported === undefined ? {} : { providerReportedEffort: reported }),
+    modelUsage:
+      typeof usage === "object" && usage !== null
+        ? (usage as Record<string, unknown>)
+        : {},
+  });
+
+  const token =
+    input.env.CLAUDE_CODE_OAUTH_TOKEN ?? input.env.ANTHROPIC_API_KEY;
+  if (token === undefined || token === "") {
+    return {
+      ok: false,
+      classification: "auth",
+      raw: {
+        error:
+          "no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in the declared env",
+      },
+      runtimeSnapshot: runtime(),
+    };
   }
 
-  return await new Promise<ClaudeInvocationResult>((resolve) => {
-    const child = spawnSupervisedProviderProcess("claude", args, {
-      cwd: input.cwd,
-      env: input.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.on("error", () => {});
-    if (child.pid === undefined) {
-      resolve({
-        ok: false,
-        classification: "error",
-        raw: { spawnError: "Claude child has no pid" },
-        runtimeSnapshot: {
-          requestedModel: input.model,
-          ...(input.effort === undefined ? {} : { requestedEffort: input.effort, effectiveEffort: input.effort }),
-          modelUsage: {},
-        },
-      });
-      return;
-    }
-    let receipt: { clear(): void } = { clear() {} };
-    try {
-      receipt = writeProviderProcessReceipt({
-        workspace: input.cwd,
-        pid: child.pid,
-        provider: "claude-subscription",
-      });
-    } catch (error) {
-      if (error instanceof ProviderProcessExitedBeforeReceiptError) {
-        // The close handler still owns the already-buffered provider result.
-      } else {
-        child.on("error", () => {});
-        killTree(child, "SIGKILL");
-        resolve({
-          ok: false,
-          classification: "error",
-          raw: {
-            receiptError: error instanceof Error ? error.message : String(error),
-          },
-          runtimeSnapshot: {
-            requestedModel: input.model,
-            ...(input.effort === undefined
-              ? {}
-              : {
-                  requestedEffort: input.effort,
-                  effectiveEffort: input.effort,
-                }),
-            modelUsage: {},
-          },
-        });
-        return;
-      }
-    }
-    let stdout = "";
-    let stderr = "";
-    let terminal: "timeout" | "cancelled" | undefined;
-    let settled = false;
-    let killTimer: NodeJS.Timeout | undefined;
-    const stopChild = () => {
-      killTree(child, "SIGTERM");
-      if (killTimer === undefined) {
-        killTimer = setTimeout(() => killTree(child, "SIGKILL"), 1_000);
-        killTimer.unref();
-      }
-    };
-    const runtime = (envelope?: unknown): ClaudeRuntimeSnapshot => {
-      const body = envelope as
-        | { modelUsage?: unknown; model_usage?: unknown; effort?: unknown }
-        | undefined;
-      const usage = body?.modelUsage ?? body?.model_usage;
-      return {
-        requestedModel: input.model,
-        ...(input.effort === undefined
-          ? {}
-          : {
-              requestedEffort: input.effort,
-              effectiveEffort: input.effort,
-            }),
-        ...(typeof body?.effort === "string"
-          ? { providerReportedEffort: body.effort }
-          : {}),
-        modelUsage:
-          typeof usage === "object" && usage !== null
-            ? (usage as Record<string, unknown>)
-            : {},
-      };
-    };
-    const finish = (result: ClaudeInvocationResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (killTimer !== undefined) clearTimeout(killTimer);
-      input.signal?.removeEventListener("abort", abort);
-      try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
-      resolve(result);
-    };
-    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    const timer = setTimeout(() => {
-      terminal = "timeout";
-      stopChild();
-    }, input.timeoutMs);
-    const abort = () => {
-      terminal = "cancelled";
-      stopChild();
-    };
-    if (input.signal?.aborted) abort();
-    else input.signal?.addEventListener("abort", abort, { once: true });
+  const budget = input.effort === undefined ? 0 : THINKING_BUDGET[input.effort];
+  const body: Record<string, unknown> = {
+    model: input.model,
+    max_tokens: budget + REPLY_HEADROOM,
+    system: [
+      { type: "text", text: CLAUDE_CODE_IDENTITY },
+      ...(input.systemPrompt === undefined
+        ? []
+        : [{ type: "text", text: input.systemPrompt }]),
+    ],
+    messages: [{ role: "user", content: input.prompt }],
+  };
+  if (budget > 0) {
+    body.thinking = { type: "enabled", budget_tokens: budget };
+  }
 
-    child.on("error", (error) => {
-      finish({
-        ok: false,
-        classification: "error",
-        raw: { spawnError: error.message },
-        runtimeSnapshot: runtime(),
-      });
-    });
-    child.on("close", () => {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(stdout.trim());
-      } catch {
-        const failure =
-          terminal === undefined
-            ? classify(stderr, stdout)
-            : { classification: terminal };
-        finish({
-          ok: false,
-          ...failure,
-          raw: { stdout, stderr },
-          runtimeSnapshot: runtime(),
-        });
-        return;
-      }
-      const envelope = Array.isArray(parsed)
-        ? (parsed.findLast(
-            (entry) => (entry as { type?: string } | null)?.type === "result",
-          ) ?? parsed.at(-1))
-        : parsed;
-      if (terminal !== undefined) {
-        finish({
-          ok: false,
-          classification: terminal,
-          raw: envelope,
-          runtimeSnapshot: runtime(envelope),
-        });
-        return;
-      }
-      if (typeof envelope !== "object" || envelope === null) {
-        finish({
-          ok: false,
-          ...classify(stderr, stdout),
-          raw: { stdout, stderr },
-          runtimeSnapshot: runtime(),
-        });
-        return;
-      }
-      const body = envelope as { result?: string; is_error?: boolean };
-      if (body.is_error === true) {
-        finish({
-          ok: false,
-          text: body.result,
-          ...classify(stderr, stdout),
-          raw: envelope,
-          runtimeSnapshot: runtime(envelope),
-        });
-        return;
-      }
-      finish({
-        ok: true,
-        text: body.result,
-        raw: envelope,
-        runtimeSnapshot: runtime(envelope),
-      });
-    });
+  const res = await curlPostJson({
+    url: ENDPOINT,
+    secretHeaders: { authorization: { prefix: "Bearer ", value: token } },
+    headers: {
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+      "user-agent": "claude-cli/2.1.258",
+      "x-app": "cli",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+    timeoutMs: input.timeoutMs,
+    ...(input.proxy === undefined ? {} : { proxy: input.proxy }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
+
+  if (res.terminal === "timeout") {
+    return { ok: false, classification: "timeout", runtimeSnapshot: runtime() };
+  }
+  if (res.terminal === "cancelled") {
+    return { ok: false, classification: "cancelled", runtimeSnapshot: runtime() };
+  }
+  if (res.terminal === "transport") {
+    // Never reached Anthropic, so it cannot be an auth fault; calling it one is
+    // the mistake documented above.
+    return {
+      ok: false,
+      classification: "proxy",
+      raw: { error: res.error },
+      runtimeSnapshot: runtime(),
+    };
+  }
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse(res.body);
+  } catch {
+    raw = { body: res.body.slice(0, 2_000) };
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    const retryAfter = (raw as { error?: { retry_after?: string } })?.error?.retry_after;
+    return {
+      ok: false,
+      classification: classify(res.status),
+      ...(retryAfter === undefined ? {} : { retryAfter }),
+      raw,
+      runtimeSnapshot: runtime(),
+    };
+  }
+
+  const envelope = raw as
+    | { content?: Array<{ type?: string; text?: string }>; usage?: unknown }
+    | undefined;
+  const text = envelope?.content
+    ?.filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("");
+  return {
+    ok: true,
+    ...(text === undefined ? {} : { text }),
+    raw,
+    runtimeSnapshot: runtime(envelope?.usage),
+  };
 }

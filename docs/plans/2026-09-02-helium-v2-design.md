@@ -153,13 +153,16 @@ directory and no core edit; CI's add/remove-a-package drill proves the seam
 
 Measured 2026-09-02, one minimal call (`"Reply with exactly READY"`) per row:
 
-| transport | latency | tokens billed for our 5-token prompt |
+| transport | latency | input tokens for our 5-token prompt |
 | --- | --- | --- |
 | `codex exec` (spawn the CLI) | 9.7s | **18,241** |
 | `claude -p` (spawn the CLI) | 8.0s | not reported |
-| Anthropic direct, Node `fetch` | **1.33s** | **26** |
-| ChatGPT-Codex direct, via `curl` | **1.8s** | our prompt only |
+| **Anthropic via `provider-claude-subscription`** | **1.47s** | **32** |
+| **ChatGPT-Codex via `provider-codex-subscription`** | **2.2s** | **26** |
 | DeepSeek direct (control) | 0.75s | 15 |
+
+The last three rows are measured through the shipped provider code, not a
+scratch script. 570x less input for the same question.
 
 A vendor CLI is an agent in its own right: it prepends its own system prompt,
 tool schemas and environment description before it will carry ours. That is the
@@ -186,14 +189,23 @@ JWT claim `https://api.openai.com/auth.chatgpt_account_id`), `originator`,
 `OpenAI-Beta: responses=experimental`, SSE response; body takes `store: false`
 and `instructions` for the system prompt.
 
-**Codex must be spoken by `curl`, not by Node.** `chatgpt.com` sits behind
-Cloudflare bot management, which fingerprints the TLS ClientHello. Identical
-requests: `curl` → 200 (on both HTTP/1.1 and h2), Node `fetch` **and**
-`node:https` → 403 with an HTML challenge page. Reordering ciphers does not
-help — JA3 also covers the extension and curve ordering, which is not
-reachable from Node's TLS API. This is a spawn, but a ~10ms one that carries
-only our prompt; the thing worth eliminating was the CLI's preamble, not the
-subprocess. Anthropic has no such block, so it stays in-process.
+**Both must be spoken by `curl`, not by Node.** Each vendor sits behind bot
+management that fingerprints the TLS ClientHello. From one machine, one token
+and one set of headers: `curl` → 200 (on HTTP/1.1 and h2 alike), Node `fetch`
+**and** `node:https` → 403. Reordering ciphers does not help — JA3 also covers
+the extension and curve ordering, which Node's TLS API does not expose.
+
+This corrects a claim made earlier the same day: Anthropic was recorded as
+working in-process on `fetch`, but that measurement had in fact been taken with
+`curl`. Node is blocked there too. The spawn is ~10ms and carries only our
+prompt; what was worth eliminating is the CLI's preamble, not the subprocess.
+
+`packages/provider-sdk/src/curl.ts` is the one place that speaks it, and it
+carries two properties the retired process-boundary contract used to assert:
+curl is given an environment containing **only** the secret-header variables —
+no PATH, no ambient proxy — and credentials are passed as curl `--variable`
+expansions so no token ever appears in argv, where any local `ps` would read
+it.
 
 **Post-mortem: `HELIUM_PROXY`, a config that was set and never read.** The mini
 egresses from a Hong Kong IP that Anthropic and OpenAI refuse — 403 *before*
@@ -210,9 +222,13 @@ maps 403 to `auth`.
 Three rules follow, and they are acceptance criteria for the provider
 milestone:
 
-1. `proxy` is passed explicitly into the request (Node dispatcher / `curl -x`).
-   Never inherited from the ambient environment, which the isolation boundary
-   strips anyway.
+1. `proxy` is passed explicitly (`curl --proxy`), read from configuration.
+   Never inherited: the helper hands curl an environment with no proxy variable
+   in it, so an ambient one cannot quietly decide the route. This is exactly the
+   difference that hid the fault — the laptop's shell exported `HTTPS_PROXY`
+   and the mini's launchd jobs did not, so the same code appeared to work on one
+   machine and fail on the other. Both machines share one HK egress; neither
+   reaches a vendor unproxied.
 2. A provider's `probe()` distinguishes *blocked* from *unauthenticated* by
    sending an unauthenticated control request: a 403 where 401 is expected is a
    network fault, and must not be reported as an auth fault.
@@ -445,7 +461,7 @@ time exceeds edit time for a month, the next finding is the process itself.
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | **M0** | Delete everything §8 marks delete; one plist; CI down to unit + 4 contracts. v1 is not kept running — it produced no useful output and is not a fallback. Green: `pnpm build`, the 4 contracts, and the §12 provider baseline (25 tests) all pass on the trimmed tree.                                                                                                                                                                                                                                                                                                                       | < 1 day |
 | **M1** | **First, confirm the dsh version actually installed on the mini**: `dsh-team-host.ts` comments target `0.1.2-alpha.3`, the lockfile pins `0.1.1-rc.2`, npm `latest` is `0.1.1-rc.2`, and the GitHub `0.1.2-alpha.*` tags were never published — the comments describe a build we cannot install. Pin one version, record it (§11.4). Then core nouns + `provider-dsh` + `fake-tenant` tool + the `span` table folded from the session log + `helium run <tenant>`. Green: `helium run fake-tenant` prints a result and the §5 query returns rows. | < 1 day |
-| **M1.5** | **Provider transport (§3.1).** Rewrite `provider-claude-subscription` onto Node `fetch` and `provider-codex-subscription` onto `curl`; add `proxy` and a measured `overheadTokens`; `probe()` tells *blocked* from *unauthenticated*. Blocks M2: option-wizard cannot send a real email from the mini until a provider can reach a model there. Green: a live call from **the mini** for all three providers, and the §12 baseline still 25 tests. | < 1 day |
+| **M1.5** ✅ | **Provider transport (§3.1) — landed 2026-09-02.** Rewrote `provider-claude-subscription` onto Node `fetch` and `provider-codex-subscription` onto `curl`; add `proxy` and a measured `overheadTokens`; `probe()` tells *blocked* from *unauthenticated*. Blocks M2: option-wizard cannot send a real email from the mini until a provider can reach a model there. Green: a live call from **the mini** for all three providers, and the §12 baseline still 25 tests. | < 1 day |
 | **M2** | option-wizard end-to-end: roles, read-only tools, preflight gate, `delivery-email`. Green: one real daily email on the mini.                                                                                                                                                                                                                                                                                                                                                                                                                      | ~3 days |
 | **M3** | Sandbox kinds + the inputs/workspace/outputs convention + `guard.ts` + contract #3; livewire read-only **gap report**.                                                                                                                                                                                                                                                                                                                                                                                                                            | ~2 days |
 | **M4** | livewire fix-in-worktree + `delivery-github-pr`. Green: one merged livewire PR authored by a run.                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ~2 days |

@@ -1,145 +1,129 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { PROCESS_RECEIPT_FILE } from "@helium/provider-sdk/process-receipt";
-import { invokeClaude } from "./invoke.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CurlRequest, CurlResponse } from "@helium/provider-sdk/curl";
 
-function fakeClaude(envelope: object): { dir: string; capture: string } {
-  const dir = mkdtempSync(join(tmpdir(), "helium-claude-bin-"));
-  const capture = join(dir, "argv.txt");
-  const bin = join(dir, "claude");
-  writeFileSync(
-    bin,
-    [
-      "#!/bin/sh",
-      `printf '%s\\n' \"$@\" > \"${capture}\"`,
-      `echo '${JSON.stringify(envelope)}'`,
-    ].join("\n"),
-  );
-  chmodSync(bin, 0o755);
-  return { dir, capture };
+const curl = vi.hoisted(() => vi.fn<(r: CurlRequest) => Promise<CurlResponse>>());
+vi.mock("@helium/provider-sdk/curl", () => ({ curlPostJson: curl }));
+
+const { invokeClaude } = await import("./invoke.js");
+
+const ENV = { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test" };
+const CALL = { model: "claude-sonnet-5", prompt: "hi", timeoutMs: 5_000, env: ENV };
+
+function reply(status: number, body: unknown) {
+  curl.mockResolvedValue({ status, body: JSON.stringify(body) });
+}
+function sent(): CurlRequest {
+  const req = curl.mock.calls[0]?.[0];
+  if (req === undefined) throw new Error("curl was never called");
+  return req;
 }
 
-function stubbornClaude(): { dir: string; ready: string } {
-  const dir = mkdtempSync(join(tmpdir(), "helium-claude-stubborn-"));
-  const ready = join(dir, "ready");
-  const bin = join(dir, "claude");
-  writeFileSync(
-    bin,
-    [
-      "#!/bin/sh",
-      "trap '' TERM",
-      'printf ready > "$HELIUM_PROVIDER_READY"',
-      "while true; do /bin/sleep 1; done",
-    ].join("\n"),
-  );
-  chmodSync(bin, 0o755);
-  return { dir, ready };
-}
-
-async function waitFor(path: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  while (!existsSync(path) && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  expect(existsSync(path)).toBe(true);
-}
+afterEach(() => curl.mockReset());
 
 describe("invokeClaude", () => {
-  it("returns a normalized provider error when the Claude executable is unavailable", async () => {
-    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
-    const out = await invokeClaude({
-      model: "claude-sonnet-5",
-      effort: "high",
-      prompt: "NO BINARY",
-      cwd: workspace,
-      maxTurns: 2,
-      timeoutMs: 5_000,
-      allowedTools: [],
-      env: { PATH: mkdtempSync(join(tmpdir(), "helium-empty-path-")) },
+  it("sends the Claude Code identity as the first system block", async () => {
+    // The subscription entitlement check. Without this exact string the OAuth
+    // token is refused; see design 3.1.
+    reply(200, {
+      content: [{ type: "text", text: "READY" }],
+      usage: { input_tokens: 26, output_tokens: 2 },
     });
-    expect(out).toMatchObject({ ok: false, classification: "error" });
-  });
 
-  it("passes exact model and effort and retains the complete modelUsage map", async () => {
-    const { dir, capture } = fakeClaude({
-      type: "result",
-      result: "CLAUDE_OK",
-      is_error: false,
-      modelUsage: {
-        "claude-sonnet-5": { inputTokens: 12, outputTokens: 3 },
-        "claude-haiku-4-5-20251001": { inputTokens: 2, outputTokens: 1 },
-      },
-    });
-    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
-    const out = await invokeClaude({
-      model: "claude-sonnet-5",
-      effort: "xhigh",
-      prompt: "PROMPTBODY",
-      cwd: workspace,
-      maxTurns: 2,
-      timeoutMs: 5_000,
-      allowedTools: [],
-      env: { PATH: dir },
-    });
-    const argv = readFileSync(capture, "utf8").trim().split("\n");
-    expect(argv).toEqual(
-      expect.arrayContaining([
-        "--model",
-        "claude-sonnet-5",
-        "--effort",
-        "xhigh",
-      ]),
-    );
+    const out = await invokeClaude({ ...CALL, systemPrompt: "be terse" });
+
+    expect(out).toMatchObject({ ok: true, text: "READY" });
     expect(out.runtimeSnapshot.modelUsage).toEqual({
-      "claude-sonnet-5": { inputTokens: 12, outputTokens: 3 },
-      "claude-haiku-4-5-20251001": { inputTokens: 2, outputTokens: 1 },
+      input_tokens: 26,
+      output_tokens: 2,
     });
+    const body = JSON.parse(sent().body);
+    expect(body.system[0].text).toBe(
+      "You are Claude Code, Anthropic's official CLI for Claude.",
+    );
+    expect(body.system[1].text).toBe("be terse");
+    expect(sent().headers["anthropic-beta"]).toContain("oauth-2025-04-20");
+    // The token travels as a secret header so it never reaches curl's argv.
+    expect(sent().secretHeaders?.authorization).toEqual({
+      prefix: "Bearer ",
+      value: "sk-ant-oat01-test",
+    });
+    expect(JSON.stringify(sent().headers)).not.toContain("sk-ant-oat01-test");
   });
 
-  it("omits effort for a target that has no native effort control", async () => {
-    const { dir, capture } = fakeClaude({
-      type: "result",
-      result: "HAIKU_OK",
-      is_error: false,
-    });
-    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
-    await invokeClaude({
-      model: "claude-haiku-4-5-20251001",
-      prompt: "PROMPTBODY",
-      cwd: workspace,
-      maxTurns: 2,
-      timeoutMs: 5_000,
-      allowedTools: [],
-      env: { PATH: dir },
-    });
-    const argv = readFileSync(capture, "utf8").trim().split("\n");
-    expect(argv).toContain("--model");
-    expect(argv).not.toContain("--effort");
-  });
-
-  it("escalates cancellation when the provider ignores TERM and clears its receipt", async () => {
-    const { dir, ready } = stubbornClaude();
-    const workspace = mkdtempSync(join(tmpdir(), "helium-claude-workspace-"));
-    const controller = new AbortController();
-    const pending = invokeClaude({
-      model: "claude-sonnet-5",
-      effort: "high",
-      prompt: "WAIT",
-      cwd: workspace,
-      maxTurns: 2,
-      timeoutMs: 30_000,
-      allowedTools: [],
-      env: { PATH: dir, HELIUM_PROVIDER_READY: ready },
-      signal: controller.signal,
-    });
-    await waitFor(ready);
-    controller.abort();
-    await expect(pending).resolves.toMatchObject({
+  it("classifies 403 as proxy, never as auth", async () => {
+    // The regression this rewrite exists for: Anthropic answers 403 before
+    // evaluating auth when egress is blocked, and the CLI wording
+    // ("Failed to authenticate ... 403") used to classify as auth, sending
+    // every investigation after the credentials instead of the network.
+    reply(403, { error: { type: "forbidden", message: "Request not allowed" } });
+    await expect(invokeClaude(CALL)).resolves.toMatchObject({
       ok: false,
-      classification: "cancelled",
+      classification: "proxy",
     });
-    expect(existsSync(join(workspace, PROCESS_RECEIPT_FILE))).toBe(false);
-  }, 10_000);
+  });
+
+  it("classifies 401 as auth and 429 as quota-exhausted", async () => {
+    reply(401, { error: { message: "invalid token" } });
+    await expect(invokeClaude(CALL)).resolves.toMatchObject({
+      ok: false,
+      classification: "auth",
+    });
+
+    curl.mockReset();
+    reply(429, { error: { message: "rate limited", retry_after: "42" } });
+    await expect(invokeClaude(CALL)).resolves.toMatchObject({
+      ok: false,
+      classification: "quota-exhausted",
+      retryAfter: "42",
+    });
+  });
+
+  it("fails as auth without spending a request when the env has no token", async () => {
+    const out = await invokeClaude({ ...CALL, env: {} });
+    expect(out).toMatchObject({ ok: false, classification: "auth" });
+    expect(curl).not.toHaveBeenCalled();
+  });
+
+  it("maps effort to a thinking budget and omits thinking at low", async () => {
+    reply(200, { content: [] });
+    await invokeClaude({ ...CALL, effort: "high" });
+    const body = JSON.parse(sent().body);
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 10_000 });
+    expect(body.max_tokens).toBeGreaterThan(10_000);
+
+    curl.mockReset();
+    reply(200, { content: [] });
+    const out = await invokeClaude({ ...CALL, effort: "low" });
+    expect(JSON.parse(sent().body).thinking).toBeUndefined();
+    expect(out.runtimeSnapshot).toMatchObject({
+      requestedEffort: "low",
+      effectiveEffort: "low",
+    });
+  });
+
+  it("passes the declared proxy through and never inherits one", async () => {
+    reply(200, { content: [] });
+    await invokeClaude({ ...CALL, proxy: "http://127.0.0.1:7897" });
+    expect(sent().proxy).toBe("http://127.0.0.1:7897");
+
+    curl.mockReset();
+    reply(200, { content: [] });
+    await invokeClaude(CALL);
+    expect(sent().proxy).toBeUndefined();
+  });
+
+  it("reports transport, timeout and cancellation distinctly", async () => {
+    for (const [terminal, expected] of [
+      ["transport", "proxy"],
+      ["timeout", "timeout"],
+      ["cancelled", "cancelled"],
+    ] as const) {
+      curl.mockReset();
+      curl.mockResolvedValue({ status: 0, body: "", terminal, error: "ECONNREFUSED" });
+      await expect(invokeClaude(CALL)).resolves.toMatchObject({
+        ok: false,
+        classification: expected,
+      });
+    }
+  });
 });

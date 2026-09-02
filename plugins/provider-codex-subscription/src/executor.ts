@@ -52,21 +52,23 @@ class CodexExecutor implements Executor {
     context: ExecutionContext,
   ): Promise<AgentResult> {
     const started = Date.now();
+    // Pure inference: the Responses request carries no tools and no workspace,
+    // so the model can neither call a tool nor touch the filesystem. That is
+    // stricter than the CLI it replaced, but a caller asking for tools would
+    // silently get a model that has none — refuse instead of quietly narrowing.
+    if (context.allowedTools.length > 0) {
+      return this.#failed(
+        work,
+        started,
+        `codex-subscription performs inference only; ${String(context.allowedTools.length)} tool(s) requested`,
+      );
+    }
     const result: CodexInvocationResult = await this.invoke({
       model: this.native.model,
       effort: this.native.effort as never,
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      cwd: context.workspace,
       timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
-      sandbox:
-        work.constraints.mutations === "permitted"
-          ? "workspace-write"
-          : "read-only",
       env: context.env,
-      allowedTools: context.allowedTools.map((tool) =>
-        tool.startsWith("mcp__") ? tool : `mcp__helium__${tool}`,
-      ),
-      mcpConfigPath: context.mcpConfigPath,
       signal,
     });
     const failureClass =
@@ -106,6 +108,28 @@ class CodexExecutor implements Executor {
       },
       runtimeMetadata: { provider: result.runtimeSnapshot },
     };
+  }
+
+  #failed(work: WorkOrder, started: number, reason: string): AgentResult {
+    return {
+      workId: work.id,
+      outcome: "failed",
+      failure: { class: "provider-error" },
+      artifacts: [],
+      usage: { ms: Date.now() - started },
+      executionSnapshot: {
+        targetId: this.targetId,
+        providerId: "codex-subscription",
+        model: this.native.model,
+        effort: this.native.effort,
+        providerVersion: codexSubscriptionCatalog.catalogVersion,
+        isolationClass: this.isolationClass,
+        recordedAt: new Date().toISOString(),
+      },
+      runtimeMetadata: {
+        provider: { requestedModel: this.native.model, usage: {}, events: [], reason },
+      },
+    } as AgentResult;
   }
 
   async drain(): Promise<void> {

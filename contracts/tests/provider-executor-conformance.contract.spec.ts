@@ -1,39 +1,26 @@
 /**
- * The two process-backed provider executors run the same Phase 0 boundary
- * harness as every other process executor. Both CLIs are non-live fixtures on
- * the narrowed PATH; no provider account or quota is touched.
+ * The subscription providers no longer spawn a vendor CLI, so the process
+ * boundary this suite used to assert has nothing left to assert on.
+ *
+ * `provider-claude-subscription` and `provider-codex-subscription` speak HTTP
+ * (design §3.1). The only child process either starts is `curl`, and the
+ * properties that used to need a fake CLI and a narrowed PATH are now either
+ * structural or covered closer to the code:
+ *
+ *   - undeclared env cannot reach the provider   -> curl is spawned with an env
+ *     containing nothing but the secret-header variables (`curl.test.ts`)
+ *   - credentials must not be visible to `ps`    -> `curl.test.ts`
+ *   - undeclared tools cannot reach the model    -> no `tools` is ever sent, and
+ *     an executor asked for one refuses (`executor.test.ts` in both plugins)
+ *   - workspace access                           -> no workspace is passed at all
+ *
+ * `provider-deepseek-dsh` runs in-process through dsh and was never a subject
+ * here. Keeping an empty suite would be the ceremony doctrine 6 forbids, so the
+ * conformance harness (`contracts/harness/execution-boundary.ts`) and its
+ * fixtures are retired with this file.
  */
-import { ExecutionTargetId } from "@helium/core";
-import { createClaudeExecutor } from "../../plugins/provider-claude-subscription/src/executor.js";
-import { createCodexExecutor } from "../../plugins/provider-codex-subscription/src/executor.js";
-import { asBoundarySubject } from "../../packages/provider-sdk/src/boundary.js";
-import { runExecutionBoundaryConformance } from "../harness/execution-boundary.js";
+import { describe, it } from "vitest";
 
-const codex = createCodexExecutor({
-  targetId: ExecutionTargetId("contract-codex-sol-high"),
-  native: {
-    targetRef: "gpt-5.6-sol",
-    model: "gpt-5.6-sol",
-    effort: "high",
-    quotaDomain: "codex-subscription-session",
-    nativeKey: "gpt-5.6-sol|effort=high",
-  },
+describe("provider executor conformance", () => {
+  it.skip("retired: no provider spawns a vendor CLI any more", () => {});
 });
-
-const claude = createClaudeExecutor({
-  targetId: ExecutionTargetId("contract-claude-sonnet-high"),
-  native: {
-    targetRef: "claude-sonnet-5",
-    model: "claude-sonnet-5",
-    effort: "high",
-    quotaDomain: "claude-subscription-session",
-    nativeKey: "claude-sonnet-5|effort=high",
-  },
-});
-
-runExecutionBoundaryConformance(
-  asBoundarySubject(codex, "provider-codex-subscription", "codex-cli"),
-);
-runExecutionBoundaryConformance(
-  asBoundarySubject(claude, "provider-claude-subscription", "claude-cli"),
-);

@@ -49,19 +49,25 @@ class ClaudeExecutor implements Executor {
     context: ExecutionContext,
   ): Promise<AgentResult> {
     const started = Date.now();
+    // This provider is pure inference: the Messages request carries no `tools`,
+    // so the model cannot call one. That is stricter than the CLI it replaced,
+    // but a caller asking for tools would silently get a model that has none —
+    // so refuse instead of quietly narrowing what was requested.
+    if (context.allowedTools.length > 0) {
+      return this.#failed(
+        work,
+        started,
+        "provider-error",
+        `claude-subscription performs inference only; ${String(context.allowedTools.length)} tool(s) requested`,
+      );
+    }
     const result: ClaudeInvocationResult = await this.invoke({
       model: this.native.model,
       ...(this.native.effort === undefined
         ? {}
         : { effort: this.native.effort as never }),
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      cwd: context.workspace,
-      maxTurns: 16,
       timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
-      allowedTools: context.allowedTools.map((tool) =>
-        tool.startsWith("mcp__") ? tool : `mcp__helium__${tool}`,
-      ),
-      mcpConfigPath: context.mcpConfigPath,
       env: context.env,
       signal,
     });
@@ -101,6 +107,33 @@ class ClaudeExecutor implements Executor {
     };
   }
 
+  #failed(
+    work: WorkOrder,
+    started: number,
+    failureClass: string,
+    reason: string,
+  ): AgentResult {
+    return {
+      workId: work.id,
+      outcome: "failed",
+      failure: { class: failureClass },
+      artifacts: [],
+      usage: { ms: Date.now() - started },
+      executionSnapshot: {
+        targetId: this.targetId,
+        providerId: "claude-subscription",
+        model: this.native.model,
+        effort: this.native.effort,
+        providerVersion: claudeSubscriptionCatalog.catalogVersion,
+        isolationClass: this.isolationClass,
+        recordedAt: new Date().toISOString(),
+      },
+      runtimeMetadata: {
+        provider: { requestedModel: this.native.model, modelUsage: {}, reason },
+      },
+    } as AgentResult;
+  }
+
   async drain(): Promise<void> {
     await Promise.allSettled([...this.#active]);
   }
@@ -120,7 +153,9 @@ export function createClaudeExecutor(input: {
 
 export function registerCertifiedClaudeTargets(input: {
   certification: EntitlementCertification;
-  capabilityCatalog: Parameters<typeof registerCertifiedTargets>[0]["capabilityCatalog"];
+  capabilityCatalog: Parameters<
+    typeof registerCertifiedTargets
+  >[0]["capabilityCatalog"];
   executorRegistry: ExecutorRegistryPort;
   conformanceFor(targetId: ExecutionTargetId): ConformanceRecord;
   targetProfile: ProviderTargetProfile;
