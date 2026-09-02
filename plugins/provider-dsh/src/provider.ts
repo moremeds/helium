@@ -63,6 +63,31 @@ const DEFAULT_KEY_ENV = "ANTHROPIC_API_KEY";
  * projection and is not priced here: pricing it would need a third rate this
  * plugin cannot verify from the wire.
  */
+/**
+ * The ids are the ones this ROUTE can actually call, which is not the same as
+ * the ids Anthropic publishes.
+ *
+ * `claude-opus-5` and `claude-fable-5` are the only two entries in pi-ai's
+ * anthropic catalog carrying `compat.allowedFallbackModels`, and pi-ai turns
+ * that into a `fallbacks` field on every request for them. The subscription
+ * endpoint rejects it outright — captured 2026-09-02:
+ *   400 {"type":"invalid_request_error","message":"fallbacks: Extra inputs are
+ *   not permitted"}
+ * — so every deep-reasoning step failed before it reached a model, and did so
+ * looking like a model with nothing to say. `claude-opus-4-8` is what
+ * `claude-opus-5` names as its own fallback target: same price, same 1M
+ * context, no `fallbacks` field. `claude-sonnet-5` replaces `claude-sonnet-4-6`
+ * for the same reason it is preferable anyway — same context, lower price.
+ * Prices are pi-ai's catalog values, read 2026-09-02 from
+ * `@earendil-works/pi-ai/dist/providers/data/anthropic.json`.
+ *
+ * `quotaDomain` is PER TIER, not per vendor, because that is how the allowance
+ * behind these ids is actually metered. Measured 2026-09-02 on one
+ * subscription, same credential, same minute: opus and sonnet both answered
+ * `429 rate_limit_error` while haiku answered `200`. A single "anthropic"
+ * domain would have retired haiku for the rest of the run on the strength of
+ * opus running out — retiring a target that was demonstrably still serving.
+ */
 export const DSH_MODELS: ProviderModel[] = [
   {
     id: "claude-haiku-4-5",
@@ -70,23 +95,23 @@ export const DSH_MODELS: ProviderModel[] = [
     usdIn: 1.0 * PER_MILLION,
     usdOut: 5.0 * PER_MILLION,
     maxContextTokens: 200_000,
-    quotaDomain: "anthropic",
+    quotaDomain: "anthropic:haiku",
   },
   {
-    id: "claude-sonnet-4-6",
+    id: "claude-sonnet-5",
     caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
-    usdIn: 3.0 * PER_MILLION,
-    usdOut: 15.0 * PER_MILLION,
+    usdIn: 2.0 * PER_MILLION,
+    usdOut: 10.0 * PER_MILLION,
     maxContextTokens: 1_000_000,
-    quotaDomain: "anthropic",
+    quotaDomain: "anthropic:sonnet",
   },
   {
-    id: "claude-opus-5",
+    id: "claude-opus-4-8",
     caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 5.0 * PER_MILLION,
     usdOut: 25.0 * PER_MILLION,
     maxContextTokens: 1_000_000,
-    quotaDomain: "anthropic",
+    quotaDomain: "anthropic:opus",
   },
 ];
 
@@ -203,7 +228,11 @@ export class DshProvider implements Provider {
       const code = String((error as { code?: unknown })?.code ?? "");
       const message = error instanceof Error ? error.message : String(error);
       if (code === "RATE_LIMIT" || /\b429\b/.test(message)) {
-        throw new ProviderRunFailure("quota-exhausted", message, "anthropic");
+        // The domain is the one this MODEL declares. Naming the vendor here
+        // instead would contradict the catalog and retire siblings that are
+        // still answering.
+        const domain = DSH_MODELS.find((entry) => entry.id === selection.model)?.quotaDomain;
+        throw new ProviderRunFailure("quota-exhausted", message, domain);
       }
       throw new ProviderRunFailure("provider-error", message);
     } finally {
