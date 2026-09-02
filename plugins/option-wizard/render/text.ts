@@ -9,11 +9,22 @@
  */
 import type { BriefView, CandidateView } from "./index.js";
 
-/** Says what the +/-% row is measured from, because it is not always the spot. */
-export function anchorLabel(candidate: CandidateView): string {
-  return candidate.anchor.quoted
-    ? `基准 spot ${candidate.anchor.price.toFixed(2)}`
-    : `基准 ${candidate.anchor.price.toFixed(2)}，reviewer 未报 spot`;
+/**
+ * The header of the payoff row, which says what its columns ARE. With a quoted
+ * spot they are moves away from it; without one they are the strikes, and
+ * saying so is what stops a reader reading a strike as a percentage.
+ */
+export function payoffLabel(quoted: boolean): string {
+  return quoted ? "到期损益（spot ±%）" : "到期损益（按行权价，reviewer 未报 spot）";
+}
+
+/** One column of the payoff row: "+10%: 320" or "750: -290". */
+export function payoffCell(point: { pct: number | null; spot: number; pnl: number }): string {
+  const head =
+    point.pct === null
+      ? point.spot.toFixed(2)
+      : `${point.pct > 0 ? "+" : ""}${String(point.pct)}%`;
+  return `${head}: ${point.pnl.toFixed(0)}`;
 }
 
 const money = (value: number | null): string =>
@@ -31,11 +42,8 @@ function pricingLines(candidate: CandidateView): string[] {
     `  ${flow} $${Math.abs(pricing.net).toFixed(2)}/股`,
     `  max gain ${money(pricing.maxGain)} · max loss ${money(pricing.maxLoss)}`,
     `  breakeven ${breakevens}`,
-    `  到期损益（${anchorLabel(candidate)}）${pricing.pnlAt
-      .map(
-        (point) =>
-          `${point.pct > 0 ? "+" : ""}${String(point.pct)}%: ${point.pnl.toFixed(0)}`,
-      )
+    `  ${payoffLabel(pricing.pnlAt[0]?.pct !== null)}${pricing.pnlAt
+      .map((point) => payoffCell(point))
       .join("  ")}`,
   ];
 }

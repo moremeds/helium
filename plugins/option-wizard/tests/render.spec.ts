@@ -203,13 +203,20 @@ describe("buildView", () => {
     expect(buildView(report(), SPEC, NOW).candidates[0]!.dte).toBe(28);
   });
 
-  it("marks the P&L anchor as a real spot only when the reviewer quoted one", () => {
-    // The reviewer quoted a spot for SPY and for nothing else. Reading "-20%"
-    // as 20% below spot on QQQ would be reading a number that was measured
-    // from its lowest strike, so the anchor travels with the row.
+  it("measures the payoff row in % only where a spot was quoted", () => {
+    // The reviewer quoted a spot for SPY and for nothing else. A "-20%" on QQQ
+    // would have been 20% below its own lowest STRIKE — arithmetic off a price
+    // nobody stated, and in the first live brief every sampled point then fell
+    // outside the spread, printing max-gain three times and max-loss three
+    // times. Without a spot the columns are the strikes themselves.
     const view = buildView(report(), SPEC, NOW);
-    expect(view.candidates[0]!.anchor).toEqual({ price: 761.78, quoted: true });
-    expect(view.candidates[1]!.anchor).toEqual({ price: 680, quoted: false });
+    const spy = view.candidates[0]!.pricing;
+    const qqq = view.candidates[1]!.pricing;
+    if (spy.kind !== "priced" || qqq.kind !== "priced") throw new Error("priced");
+    expect(spy.pnlAt.map((point) => point.pct)).toEqual([-20, -10, -5, 5, 10, 20]);
+    expect(spy.pnlAt[0]!.spot).toBe(609.42);
+    expect(qqq.pnlAt.every((point) => point.pct === null)).toBe(true);
+    expect(qqq.pnlAt.map((point) => point.spot)).toEqual([680, 695]);
   });
 
   it("never shows toolsUnconfigured, which is a known false positive", () => {
@@ -270,8 +277,8 @@ describe("renderReport (text part)", () => {
     expect(text).toContain("748.72");
     expect(text).toContain("872");
     expect(text).toContain("未定价");
-    expect(text).toContain("基准 spot 761.78");
-    expect(text).toContain("reviewer 未报 spot");
+    expect(text).toContain("到期损益（spot ±%）");
+    expect(text).toContain("到期损益（按行权价，reviewer 未报 spot）");
     // The reader never sees the model thinking out loud, its quantity guess, or
     // any run metadata.
     expect(text).not.toContain("Actually, let me");
