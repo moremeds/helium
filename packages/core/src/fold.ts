@@ -46,6 +46,15 @@ export interface FoldContext {
   price?: { usdIn: number; usdOut: number };
   /** Step numbers already folded, so a re-fold continues rather than repeats. */
   stepOffset?: number;
+  /**
+   * Identifies the STEP whose log this is. Span ids inside a session log are
+   * only unique within that log: every child session starts at turn 1, so two
+   * steps of the same run both produce `step:1:1`. The audit store keys on
+   * span id, so without a scope the second silently overwrites the first and
+   * the table under-reports a run — which is doctrine 4 failing quietly, the
+   * worst way for it to fail. Defaults to the step offset.
+   */
+  scope?: string;
 }
 
 interface Usage {
@@ -109,6 +118,7 @@ export function foldSessionLog(
   context: FoldContext,
 ): Span[] {
   const offset = context.stepOffset ?? 0;
+  const scope = context.scope ?? String(offset);
   let provider = context.provider;
   let model = context.model;
 
@@ -173,14 +183,22 @@ export function foldSessionLog(
     if (event.type === "tool/result") {
       const data = event.data as Record<string, unknown>;
       const message = data.message as Record<string, unknown> | undefined;
-      const callId = String(message?.callId ?? data.callId ?? "");
+      // The id lives at `message.source.callId` on a real dsh tool/result;
+      // the two flatter spellings are older shapes kept for other runtimes.
+      // Reading only those two silently resolved every id to "", so the
+      // lookup below missed and EVERY tool span was dropped — tool calls
+      // happened, the audit table showed none.
+      const source = message?.source as Record<string, unknown> | undefined;
+      const callId = String(
+        source?.callId ?? message?.callId ?? data.callId ?? "",
+      );
       const call = calls.get(callId);
       if (call === undefined) continue;
       calls.delete(callId);
       const content = message?.content;
       toolSpans.push({
         runId: context.runId,
-        spanId: `${TOOL_SPAN}:${callId}`,
+        spanId: `${TOOL_SPAN}:${scope}:${callId}`,
         ...(context.parentSpanId === undefined
           ? {}
           : { parentSpanId: context.parentSpanId }),
@@ -220,7 +238,7 @@ export function foldSessionLog(
       const cache = entry.usage.cacheReadTokens ?? 0;
       return {
         runId: context.runId,
-        spanId: `step:${key}`,
+        spanId: `step:${scope}:${key}`,
         ...(context.parentSpanId === undefined
           ? {}
           : { parentSpanId: context.parentSpanId }),

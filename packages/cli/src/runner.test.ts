@@ -12,6 +12,7 @@ import {
   ProviderRunFailure,
   type Provider,
 } from "@helium/core";
+import type { Channel, Gate } from "@helium/core";
 import {
   registerProviders,
   retireQuotaDomain,
@@ -32,12 +33,12 @@ tasks:
     prompt: say hello
 `;
 
-function tenant(budgetUsd = 1): LoadedTenant {
+function tenant(budgetUsd = 1, extraYaml = ""): LoadedTenant {
   const dir = mkdtempSync(join(tmpdir(), "helium-run-"));
   mkdirSync(join(dir, "demo"));
   writeFileSync(
     join(dir, "demo", "tenant.yaml"),
-    `tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: ${budgetUsd}, tokens: 100000 }\n`,
+    `tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: ${budgetUsd}, tokens: 100000 }\n${extraYaml}`,
   );
   writeFileSync(join(dir, "demo", "team.yaml"), TEAM);
   return loadTenants(dir).tenants[0]!;
@@ -532,5 +533,408 @@ describe("runTenant", () => {
     expect(retireQuotaDomain(catalog, [], "x")).toBe(0);
     const targets = catalog.snapshot().targets;
     expect(targets.every((t) => t.available)).toBe(true);
+  });
+});
+
+
+const DELIVERY_YAML = "delivery:\n  - channel: fake-mail\n    config: { to: nobody@example.invalid }\n";
+
+function gate(over: Partial<Gate> & Pick<Gate, "id">): Gate {
+  return {
+    appliesTo: ["*"],
+    phase: "input",
+    check: async () => ({ pass: true, reason: "ok" }),
+    ...over,
+  };
+}
+
+describe("gates", () => {
+  it("an input refusal costs a gate span and no model call", async () => {
+    const audit = new AuditStore(":memory:");
+    let ran = 0;
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      gates: [
+        gate({
+          id: "no-spend",
+          check: async () => ({ pass: false, reason: "market is closed" }),
+        }),
+      ],
+      modelExecutor: {
+        run: async (...args) => {
+          ran += 1;
+          return modelExecutor.run(...args);
+        },
+      },
+    });
+    expect(ran).toBe(0);
+    expect(report.steps[0]?.failure).toBe("gate-refused");
+    expect(report.steps[0]?.gateRefusals).toEqual([
+      { id: "no-spend", reason: "market is closed" },
+    ]);
+    const spans = audit.spans(report.runId);
+    expect(spans).toHaveLength(1);
+    expect(spans[0]).toMatchObject({
+      toolName: "gate:no-spend",
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    });
+    audit.close();
+  });
+
+  it("a gate that throws refuses; it never fails open", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      gates: [
+        gate({
+          id: "broken",
+          check: async () => {
+            throw new Error("IB Gateway refused the connection");
+          },
+        }),
+      ],
+    });
+    expect(report.steps[0]?.failure).toBe("gate-refused");
+    expect(report.steps[0]?.gateRefusals?.[0]?.reason).toContain(
+      "IB Gateway refused the connection",
+    );
+    audit.close();
+  });
+
+  it("skips a gate whose role does not match, and runs the step", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      gates: [
+        gate({
+          id: "other-role-only",
+          appliesTo: ["scribe"],
+          check: async () => ({ pass: false, reason: "should never run" }),
+        }),
+      ],
+    });
+    expect(report.steps[0]?.failure).toBeUndefined();
+    expect(
+      audit.spans(report.runId).some((s) => s.toolName === "gate:other-role-only"),
+    ).toBe(false);
+    audit.close();
+  });
+
+  it("an output refusal marks the step but keeps what was already paid for", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      gates: [
+        gate({
+          id: "preflight",
+          phase: "output",
+          check: async () => ({ pass: false, reason: "spread 14% of mid" }),
+        }),
+      ],
+    });
+    expect(report.steps[0]?.failure).toBe("gate-refused");
+    expect(report.steps[0]?.text).not.toBe("");
+    audit.close();
+  });
+});
+
+describe("delivery", () => {
+  const sent: Array<{ subject: string; body: string }> = [];
+  const channel: Channel = {
+    id: "fake-mail",
+    deliver: async (payload) => {
+      sent.push({ subject: payload.subject, body: payload.body });
+      return { state: "sent", detail: "1 recipient" };
+    },
+  };
+
+  it("does not send without the operator brake, and says why", async () => {
+    const audit = new AuditStore(":memory:");
+    sent.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [channel],
+    });
+    expect(sent).toHaveLength(0);
+    expect(report.delivery).toEqual([
+      {
+        channel: "fake-mail",
+        state: "skipped",
+        detail: "operator brake: HELIUM_TENANT_DELIVERY is not 1",
+      },
+    ]);
+    audit.close();
+  });
+
+  it("sends with the brake on and records the send as a span", async () => {
+    const audit = new AuditStore(":memory:");
+    sent.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: { HELIUM_TENANT_DELIVERY: "1" },
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [channel],
+    });
+    expect(report.delivery[0]?.state).toBe("sent");
+    expect(sent[0]?.subject).toContain("helium demo");
+    expect(sent[0]?.body).toContain("**Outcome:** completed");
+    // The body is a report, not a transcript: the role's own words survive.
+    expect(sent[0]?.body).toContain("hello");
+    expect(
+      audit.spans(report.runId).some((s) => s.toolName === "delivery:fake-mail"),
+    ).toBe(true);
+    audit.close();
+  });
+
+  it("still sends a report when the run FAILED — silence looks like a dead cron", async () => {
+    const audit = new AuditStore(":memory:");
+    sent.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: { HELIUM_TENANT_DELIVERY: "1" },
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      channels: [channel],
+      modelExecutor: {
+        run: async () => {
+          throw new Error("upstream exploded");
+        },
+      },
+    });
+    expect(report.outcome).toBe("failed");
+    expect(report.delivery[0]?.state).toBe("sent");
+    expect(sent[0]?.subject).toContain("[FAILED]");
+    expect(sent[0]?.body).toContain("upstream exploded");
+    audit.close();
+  });
+
+  it("reports a declared channel with no plugin instead of silently not sending", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: { HELIUM_TENANT_DELIVERY: "1" },
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+    });
+    expect(report.delivery[0]).toMatchObject({ state: "failed" });
+    expect(report.delivery[0]?.detail).toContain("delivery-fake-mail");
+    audit.close();
+  });
+});
+
+describe("deterministic steps", () => {
+  const DETERMINISTIC_TEAM = `manifestVersion: "2"
+name: demo
+roles:
+  screener:
+    requires: []
+    permissions: { tools: [echo] }
+tasks:
+  - id: one
+    role: screener
+    requires: []
+    prompt: rank these
+`;
+
+  function deterministicTenant(): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-det-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      "tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n",
+    );
+    writeFileSync(join(dir, "demo", "team.yaml"), DETERMINISTIC_TEAM);
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("runs its tools and calls no model, even with a live provider", async () => {
+    const audit = new AuditStore(":memory:");
+    let modelCalls = 0;
+    const report = await runTenant({
+      tenant: deterministicTenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor: {
+        run: async (...args) => {
+          modelCalls += 1;
+          return modelExecutor.run(...args);
+        },
+      },
+    });
+    expect(report.mode).toBe("model");
+    expect(modelCalls).toBe(0);
+    // Named for what it is, not reported as a degraded model run.
+    expect(report.steps[0]?.mode).toBe("deterministic");
+    expect(report.steps[0]?.text).toContain('{"echoed":"rank these"}');
+    const spans = audit.spans(report.runId);
+    expect(spans.every((span) => span.costUsd === 0)).toBe(true);
+    audit.close();
+  });
+});
+
+describe("a throwing tool degrades its step, not the run", () => {
+  const angry: EcosystemTool = {
+    name: "echo",
+    description: "always fails",
+    paramsSchema: z.object({ q: z.string() }),
+    mutating: false,
+    async run() {
+      throw new Error("OW_IB_HOST is unset");
+    },
+  };
+
+  it("records the failure as the tool's output and keeps going", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [],
+      tools: [angry],
+      catalog: catalogFor([]),
+    });
+    expect(report.outcome).toBe("completed");
+    expect(report.steps[0]?.text).toContain("FAILED: OW_IB_HOST is unset");
+    expect(audit.spans(report.runId)).toHaveLength(1);
+    audit.close();
+  });
+});
+
+describe("steps hand their output to the steps that depend on them", () => {
+  const CHAIN = `manifestVersion: "2"
+name: demo
+roles:
+  prober:
+    requires: [tool.use, cheap.bulk]
+    permissions: { tools: [echo] }
+  scribe:
+    requires: [tool.use, cheap.bulk]
+    permissions: { tools: [] }
+tasks:
+  - id: one
+    role: prober
+    requires: [tool.use]
+    prompt: say hello
+  - id: two
+    role: scribe
+    dependsOn: [one]
+    requires: [tool.use]
+    prompt: summarise step one
+`;
+
+  function chainTenant(): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-chain-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      "tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n",
+    );
+    writeFileSync(join(dir, "demo", "team.yaml"), CHAIN);
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("puts the dependency's output in the dependent's prompt", async () => {
+    const audit = new AuditStore(":memory:");
+    const prompts: string[] = [];
+    await runTenant({
+      tenant: chainTenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor: {
+        run: async (order, sel, sig) => {
+          prompts.push(order.inputs.prompt ?? "");
+          return modelExecutor.run(order, sel, sig);
+        },
+      },
+    });
+    // Step one's own prompt names no dependency; step two carries step one's
+    // output, which is what makes dependsOn mean more than an ordering.
+    expect(prompts[0]).not.toContain("### one");
+    expect(prompts[1]).toContain("### one");
+    audit.close();
+  });
+});
+
+describe("a model step that reached no model says so", () => {
+  it("does not report an empty, unbilled step as completed work", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      // A provider that returns cleanly having done nothing: no text, and a
+      // session log with no usage in it. Observed live from a model id the
+      // route did not actually serve.
+      modelExecutor: { run: async () => ({ text: "", events: [] }) },
+    });
+    expect(report.steps[0]?.failure).toBe("no-model-output");
+    expect(report.steps[0]?.downgradeReason).toContain("did not reach a model");
+    audit.close();
   });
 });

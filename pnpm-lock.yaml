@@ -90,6 +90,9 @@ importers:
       '@helium/core':
         specifier: file:../core
         version: link:../core
+      undici:
+        specifier: ^8.10.0
+        version: 8.10.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -168,7 +171,36 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  plugins/delivery-markdown:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   plugins/fake-tenant:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/option-wizard:
     dependencies:
       '@helium/core':
         specifier: file:../../packages/core
@@ -218,37 +250,52 @@ importers:
 
   plugins/provider-dsh:
     dependencies:
-      '@helium/core':
-        specifier: file:../../packages/core
-        version: link:../../packages/core
-    devDependencies:
       '@deepseek-ai/cordis':
         specifier: 4.0.2
         version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
-      '@deepseek-ai/dsh':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(913969de375f818a4f65d0c37b7b6bf5)
       '@deepseek-ai/dsh-agent':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(6db40c898bf1f9c9361b38a9ea2de9a5)
+      '@deepseek-ai/dsh-agent-loop':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(59d17f1c11225e87a7a87de919eb2668)
       '@deepseek-ai/dsh-llm':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
+      '@deepseek-ai/dsh-llm-pi-ai':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(79959ded6582edcb1e9d621d281212b9)
       '@deepseek-ai/dsh-session':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-session-persistence':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-session@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))))(@deepseek-ai/dsh-timeout@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(7ded537d1eaeb8b042212c7f4d0fd11a)
+      '@deepseek-ai/dsh-session-projection':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-session@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))))
       '@deepseek-ai/dsh-subagent':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(f477649e63540270ff273de93f54f5c3)
+      '@deepseek-ai/dsh-subagent-spawn-in-process':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-subagent-in-process-driver@0.1.2-alpha.3(cc21be470719e90490eeb12f7c2f2dc1))(@deepseek-ai/dsh-subagent@0.1.2-alpha.3(f477649e63540270ff273de93f54f5c3))
       '@deepseek-ai/dsh-system-prompt':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-llm@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
       '@deepseek-ai/dsh-tools':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(9856107a6511bd37694bb5d55ebb619c)
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
+      '@deepseek-ai/dsh':
+        specifier: 0.1.2-alpha.3
+        version: 0.1.2-alpha.3(913969de375f818a4f65d0c37b7b6bf5)
       '@types/node':
         specifier: ^22
         version: 22.20.1

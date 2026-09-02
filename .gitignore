@@ -19,3 +19,6 @@ CLAUDE.md
 
 # session scratch: build/test baselines captured during execution
 .baseline*.txt
+
+# Run output: audit db, session logs and delivered reports.
+.helium-state/

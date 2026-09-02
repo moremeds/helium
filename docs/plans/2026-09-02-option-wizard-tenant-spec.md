@@ -292,10 +292,17 @@ failure mode that killed `macro-watch`.
 5. **xenon Query API.** Design §7.1 lists it among option-wizard's read-only
    sources; this spec routes account state through IB Gateway 4001 directly.
    One of the two is redundant — decide before M2.
-6. **`OW_GATE_DIR` under sandbox `none`.** A kind with literally zero write
-   roots cannot write gate records; either `none` gains a single declared
-   exception path or option-wizard uses `scratch` with a deny-everything-else
-   policy. This is the one place the design doc and this spec do not compose.
+6. ~~**`OW_GATE_DIR` under sandbox `none`.**~~ **Resolved 2026-09-02 by
+   deletion.** There is no gate-record FILE. The `contentHash` is computed and
+   carried in the gate's `reason`, and the `gate:ib-preflight` span the runner
+   writes (`packages/cli/src/runner.ts`, `runGates`) IS the record. That keeps
+   the tamper-evidence the hash provides — one `sha256`, per §4 — while
+   removing the only write option-wizard needed, so sandbox `none` composes
+   with zero write roots and no declared exception path. §4's `recordPath`,
+   `${OW_GATE_DIR}/gates/<contentHash>.json` and `validate(recordPath, …)` are
+   superseded accordingly: `validate` recomputes the hash against the span, not
+   against a file. Doctrine 6 — the ledger was already dropped, and a
+   single-record file store to hold one hash is the ceremony that follows it.
 
 ## 9. What was lost
 

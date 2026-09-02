@@ -17,7 +17,7 @@
  * @module dsh-plugin-delivery-email/channel
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import nodemailer, { type Transporter } from "nodemailer";
 import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
 
@@ -51,14 +51,29 @@ interface EmailConfig {
   maxPerDay: number;
 }
 
-function readConfig(config: Record<string, unknown>): EmailConfig {
-  const to = config.to;
-  const maxPerDay = config.maxPerDay ?? config.max_per_day;
+function readConfig(config: Record<string, unknown>, env: NodeJS.ProcessEnv): EmailConfig {
+  // The address is a deployment fact, not a tenant fact: the same manifest is
+  // read on the laptop and on the mini, and only one of them should mail a
+  // person. So `to` falls back to the environment and the manifest can stay
+  // free of anyone's inbox.
+  const to = config.to ?? env.HELIUM_EMAIL_TO;
   if (typeof to !== "string" || to.trim() === "") {
-    throw new Error("email channel config needs a `to` address");
+    throw new Error("email channel config needs a `to` address, or HELIUM_EMAIL_TO set");
   }
-  if (typeof maxPerDay !== "number" || maxPerDay <= 0) {
-    throw new Error("email channel config needs a positive `maxPerDay`");
+  // The cap is a deployment fact like the address: a cron on the mini must not
+  // be able to mail sixty times overnight, while a laptop run being iterated on
+  // has an operator watching every send. So the environment overrides the
+  // manifest, and `0` there means uncapped — set deliberately, per machine,
+  // never by forgetting to configure it.
+  const override = env.HELIUM_EMAIL_MAX_PER_DAY;
+  const maxPerDay =
+    override === undefined || override.trim() === ""
+      ? (config.maxPerDay ?? config.max_per_day)
+      : Number(override) === 0
+        ? Number.POSITIVE_INFINITY
+        : Number(override);
+  if (typeof maxPerDay !== "number" || Number.isNaN(maxPerDay) || maxPerDay <= 0) {
+    throw new Error("email channel config needs a positive `maxPerDay`, or HELIUM_EMAIL_MAX_PER_DAY");
   }
   const prefix = config.subjectPrefix ?? config.subject_prefix;
   return {
@@ -73,25 +88,32 @@ type Counters = Record<string, Record<string, number>>;
 
 export class EmailChannel implements Channel {
   readonly id = "email";
+  /** Mail leaves the machine, so the operator brake applies. */
+  readonly external = true;
   #transport: Transporter | null = null;
 
+  // Every dep is optional so the module can default-export a working INSTANCE:
+  // discovery imports the default and calls `.deliver` on it, with no chance to
+  // pass constructor arguments. Tests still inject all of them.
   constructor(
     private readonly deps: {
-      stateDir: string;
-      smtp: SmtpConfig | null;
+      stateDir?: string;
+      smtp?: SmtpConfig | null;
+      env?: NodeJS.ProcessEnv;
       now?: () => Date;
       sleep?: (ms: number) => Promise<void>;
       transport?: Transporter;
-    },
+    } = {},
   ) {}
 
   async deliver(
     payload: DeliveryPayload,
     config: Record<string, unknown>,
   ): Promise<DeliveryOutcome> {
-    const email = readConfig(config);
+    const email = readConfig(config, this.#env);
+    const smtp = this.#smtp;
     const transport = this.#ensureTransport();
-    if (transport === null || this.deps.smtp === null) {
+    if (transport === null || smtp === null) {
       return { state: "skipped", detail: "no SMTP configured" };
     }
 
@@ -110,7 +132,7 @@ export class EmailChannel implements Channel {
         ? payload.subject
         : `${email.subjectPrefix} ${payload.subject}`;
     const mail = {
-      from: this.deps.smtp.from,
+      from: smtp.from,
       to: email.to,
       subject,
       text: [
@@ -135,17 +157,26 @@ export class EmailChannel implements Channel {
     return { state: "failed", detail: error };
   }
 
+  get #env(): NodeJS.ProcessEnv {
+    return this.deps.env ?? process.env;
+  }
+
+  /** Injected config wins, including an explicit `null`; otherwise the
+   *  environment answers, which is what the default export relies on. */
+  get #smtp(): SmtpConfig | null {
+    return this.deps.smtp !== undefined ? this.deps.smtp : smtpFromEnv(this.#env);
+  }
+
   #ensureTransport(): Transporter | null {
     if (this.deps.transport !== undefined) return this.deps.transport;
     if (this.#transport !== null) return this.#transport;
-    if (this.deps.smtp === null) return null;
+    const smtp = this.#smtp;
+    if (smtp === null) return null;
     this.#transport = nodemailer.createTransport({
-      host: this.deps.smtp.host,
-      port: this.deps.smtp.port,
-      secure: this.deps.smtp.secure,
-      ...(this.deps.smtp.user === undefined
-        ? {}
-        : { auth: { user: this.deps.smtp.user, pass: this.deps.smtp.pass } }),
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      ...(smtp.user === undefined ? {} : { auth: { user: smtp.user, pass: smtp.pass } }),
     });
     return this.#transport;
   }
@@ -161,7 +192,10 @@ export class EmailChannel implements Channel {
   }
 
   get #file(): string {
-    return join(this.deps.stateDir, "email-counters.json");
+    const dir =
+      this.deps.stateDir ??
+      join(this.#env.HELIUM_STATE_ROOT ?? resolve(process.cwd(), ".helium-state"), "reports");
+    return join(dir, "email-counters.json");
   }
 
   #read(): Counters {
@@ -176,9 +210,15 @@ export class EmailChannel implements Channel {
   }
 
   #write(counters: Counters): void {
-    mkdirSync(this.deps.stateDir, { recursive: true });
+    mkdirSync(dirname(this.#file), { recursive: true });
     writeFileSync(this.#file, JSON.stringify(counters));
   }
 }
 
-export default EmailChannel;
+/** Discovery imports the default export and calls `.deliver` on it, so the
+ *  default must be an INSTANCE. Exporting the class satisfies
+ *  `typeof … === "function"` on the constructor and then fails on `deliver`,
+ *  and the channel is dropped as "default export is not a Channel" — which is
+ *  exactly what this file did until 2026-09-02, so the plugin had tests and had
+ *  never once been loaded by a run. */
+export default new EmailChannel();

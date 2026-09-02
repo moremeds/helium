@@ -7,9 +7,27 @@
  * @module @helium/cli/discovery
  */
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { EcosystemTool, Provider } from "@helium/core";
+import type { Channel, EcosystemTool, Gate, Provider } from "@helium/core";
+
+/**
+ * Tenants are CONFIGURATION: which teams this install runs. Relocatable, so a
+ * tenant can be developed or run from outside the checkout.
+ */
+export function tenantsDir(env: NodeJS.ProcessEnv): string {
+  return env.HELIUM_TENANTS_DIR ?? resolve(process.cwd(), "plugins");
+}
+
+/**
+ * Providers, gates and delivery channels are CODE: discovered next to the
+ * build that imports their `lib/*.js`. Relocating tenants must not take these
+ * with it — before the split, `HELIUM_TENANTS_DIR` moved both, so pointing it
+ * at a scratch tenant silently left the run with no providers at all.
+ */
+export function pluginsDir(env: NodeJS.ProcessEnv): string {
+  return env.HELIUM_PLUGINS_DIR ?? resolve(process.cwd(), "plugins");
+}
 
 export interface Skipped {
   id: string;
@@ -33,7 +51,13 @@ export async function discoverProviders(
   const skipped: Skipped[] = [];
   if (!existsSync(pluginsDir)) return { live, skipped };
   const names = readdirSync(pluginsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("provider-"))
+    // isDirectory() is false for a symlink, so a symlinked plugin would be
+    // invisible with no error. Follow them.
+    .filter(
+      (entry) =>
+        (entry.isDirectory() || entry.isSymbolicLink()) &&
+        entry.name.startsWith("provider-"),
+    )
     .map((entry) => entry.name)
     .sort();
   for (const name of names) {
@@ -92,4 +116,116 @@ export async function loadTenantTools(
   };
   if (typeof module.buildTools !== "function") return [];
   return module.buildTools({ stateRoot: cfg.stateRoot, env: cfg.env });
+}
+
+/**
+ * The tool names this environment cannot serve, from the tenant's own
+ * VOCABULARY: every entry whose `requiresEnv` key is unset.
+ *
+ * `buildTools` builds every tool regardless — each one throws when CALLED with
+ * its key missing — so a misconfigured machine looks identical to a quiet
+ * market until a role tries. On the day OW_UW_API_KEY was absent the designer
+ * would have returned an empty proposal list and the report would have read
+ * like a considered "no trades today". This is what makes the gap say its own
+ * name, at the top of the report, before anything is reasoned about.
+ */
+export async function tenantToolGaps(
+  tenantDir: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string[]> {
+  const entry = join(tenantDir, "lib", "tools", "index.js");
+  if (!existsSync(entry)) return [];
+  const module = (await import(pathToFileURL(entry).href)) as {
+    VOCABULARY?: Map<string, { requiresEnv?: string }>;
+  };
+  if (!(module.VOCABULARY instanceof Map)) return [];
+  return [...module.VOCABULARY.entries()]
+    .filter(([, spec]) => spec.requiresEnv !== undefined && !env[spec.requiresEnv])
+    .map(([name, spec]) => `${name} (${spec.requiresEnv ?? ""} unset)`);
+}
+
+/**
+ * A tenant's own gates: `<tenant>/gates/<id>.ts`, built to `lib/gates/<id>.js`,
+ * `export default` a `Gate`. They live with the tenant and not in core because
+ * a gate encodes domain rules — doctrine 2 keeps those out of the harness.
+ *
+ * A broken gate is a SKIP with a reason, like a broken provider. It is not
+ * silently treated as passing: the caller reports the skip in the run output,
+ * so a gate that stopped loading cannot quietly stop guarding.
+ */
+export async function loadGates(
+  tenantDir: string,
+): Promise<{ gates: Gate[]; skipped: Skipped[] }> {
+  const gates: Gate[] = [];
+  const skipped: Skipped[] = [];
+  const dir = join(tenantDir, "lib", "gates");
+  if (!existsSync(dir)) return { gates, skipped };
+  const files = readdirSync(dir)
+    .filter((name) => name.endsWith(".js"))
+    .sort();
+  for (const file of files) {
+    const id = file.replace(/\.js$/, "");
+    try {
+      const module = (await import(pathToFileURL(join(dir, file)).href)) as {
+        default?: Gate;
+      };
+      const gate = module.default;
+      if (gate === undefined || typeof gate.check !== "function") {
+        skipped.push({ id, reason: "default export is not a Gate" });
+        continue;
+      }
+      gates.push(gate);
+    } catch (error: unknown) {
+      skipped.push({
+        id,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { gates, skipped };
+}
+
+/**
+ * Every `plugins/delivery-*` whose built `lib/channel.js` default-exports a
+ * `Channel`. Discovery only; whether anything is ever SENT is decided by the
+ * tenant's own `delivery:` block and the operator brake, in the runner.
+ */
+export async function discoverChannels(
+  pluginsDir: string,
+): Promise<{ channels: Channel[]; skipped: Skipped[] }> {
+  const channels: Channel[] = [];
+  const skipped: Skipped[] = [];
+  if (!existsSync(pluginsDir)) return { channels, skipped };
+  const names = readdirSync(pluginsDir, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        (entry.isDirectory() || entry.isSymbolicLink()) &&
+        entry.name.startsWith("delivery-"),
+    )
+    .map((entry) => entry.name)
+    .sort();
+  for (const name of names) {
+    const entry = join(pluginsDir, name, "lib", "channel.js");
+    if (!existsSync(entry)) {
+      skipped.push({ id: name, reason: "no built lib/channel.js" });
+      continue;
+    }
+    try {
+      const module = (await import(pathToFileURL(entry).href)) as {
+        default?: Channel;
+      };
+      const channel = module.default;
+      if (channel === undefined || typeof channel.deliver !== "function") {
+        skipped.push({ id: name, reason: "default export is not a Channel" });
+        continue;
+      }
+      channels.push(channel);
+    } catch (error: unknown) {
+      skipped.push({
+        id: name,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { channels, skipped };
 }

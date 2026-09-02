@@ -98,3 +98,17 @@ describe("CodexSubscriptionProvider", () => {
     ).rejects.toThrow(/codex-subscription performs inference only; 1 tool\(s\)/);
   });
 });
+
+
+describe("declared capabilities match what run() will actually do", () => {
+  it("no model claims tool.use, because run() refuses a work order with tools", () => {
+    // The invariant, not the value: these two facts must move together. When a
+    // tool loop lands, this test is what makes you re-add the capability.
+    const provider = new CodexSubscriptionProvider(TOKEN);
+    const claimsTools = provider.models.filter((model) =>
+      model.caps.includes("tool.use"),
+    );
+    expect(claimsTools).toEqual([]);
+    expect(provider.capabilities).not.toContain("tool.use");
+  });
+});

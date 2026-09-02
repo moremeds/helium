@@ -45,7 +45,7 @@ export interface SubagentTerminal {
   /** The child's own append-only session log, for the audit fold. */
   events: LogEvent[];
   effectiveReasoningEffort?: string;
-  providerFailure?: { code: string; status?: number; retryAfterMs?: number };
+  providerFailure?: { code: string; status?: number; retryAfterMs?: number; message?: string };
 }
 
 export interface SubagentRun {
@@ -64,7 +64,7 @@ export interface DshSubagentRuntime {
       agentOptions: Record<string, unknown>;
       outputSchema?: object;
       maxDepth: number;
-      toolFilter: { allow: string[] };
+      toolFilter?: { allow: string[] };
       persona: string;
     },
   ): Promise<SubagentRun>;
@@ -101,10 +101,22 @@ export class DshHost {
     signal: AbortSignal,
   ): Promise<{ text: string; structured?: unknown; events: LogEvent[] }> {
     const parent = await this.#parent(runId, signal);
-    const providerName = String(selection.options?.providerName ?? "default");
+    // `providerName` is the subagent TRANSPORT the child is materialised on
+    // (the name `dsh-subagent-spawn-in-process` registers itself under), never
+    // an LLM vendor. It shipped once as "deepseek", which resolves to no
+    // transport at all. It is stripped from agentOptions for the same reason:
+    // the vendor there is `provider`.
+    // `tools` comes out too: those are the tool IMPLEMENTATIONS the provider
+    // registers, not a model option, and they must never be serialised into
+    // the child's agent options.
+    const { providerName, tools: _tools, ...agentOptions } = selection.options ?? {};
+    const transport = String(providerName ?? "default");
+    // An EMPTY allow-list is not "allow nothing" to dsh — `tools.restrict()`
+    // rejects an empty filter outright. A role with no tools gets no filter.
+    const allow = [...work.constraints.tools];
     let child: SubagentRun | undefined;
     try {
-      child = await this.deps.subagents.start(providerName, {
+      child = await this.deps.subagents.start(transport, {
         prompt: [
           {
             type: "text",
@@ -113,12 +125,29 @@ export class DshHost {
         ],
         parent: parent.parent,
         signal,
-        agentOptions: { model: selection.model, ...(selection.options ?? {}) },
+        agentOptions: { model: selection.model, ...agentOptions },
         maxDepth: this.deps.maxDepth,
-        toolFilter: { allow: [...work.constraints.tools] },
+        ...(allow.length === 0 ? {} : { toolFilter: { allow } }),
         persona: this.deps.persona ?? work.role,
       });
       const terminal = await child.result;
+      // A vendor refusal arrives as a turn/end ERROR EVENT, not as a rejected
+      // promise: dsh ends the turn cleanly and records why. Returning that as
+      // an ordinary empty result is how a 429 came back looking like a model
+      // that had nothing to say — indistinguishable from a genuinely silent
+      // step, and unroutable, because the runner re-routes a spent quota and
+      // has no reason to re-route silence. Raising it here is what lets
+      // `DshProvider.run` classify it.
+      const failure = terminal.providerFailure;
+      if (failure !== undefined) {
+        const error = new Error(
+          `dsh subagent failed: ${failure.code}` +
+            `${failure.status === undefined ? "" : ` ${String(failure.status)}`}` +
+            `${failure.message === undefined ? "" : ` — ${failure.message}`}`,
+        );
+        Object.assign(error, { code: failure.code, status: failure.status });
+        throw error;
+      }
       return {
         text: terminal.output
           .map((part) => (typeof part.text === "string" ? part.text : ""))
@@ -234,7 +263,12 @@ export class CordisSubagentRuntime implements DshSubagentRuntime {
         | {
             data?: {
               reason?: {
-                error?: { code?: unknown; status?: unknown; providerRetryAfterMs?: unknown };
+                error?: {
+                code?: unknown;
+                status?: unknown;
+                providerRetryAfterMs?: unknown;
+                message?: unknown;
+              };
               };
             };
           }
@@ -257,6 +291,10 @@ export class CordisSubagentRuntime implements DshSubagentRuntime {
                 ...(typeof failure.providerRetryAfterMs === "number"
                   ? { retryAfterMs: failure.providerRetryAfterMs }
                   : {}),
+                // The code alone says a request was rejected; only the message
+                // says WHICH field the vendor objected to, and a rejection you
+                // cannot act on is barely better than silence.
+                ...(typeof failure.message === "string" ? { message: failure.message } : {}),
               },
             }),
       };

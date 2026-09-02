@@ -46,11 +46,25 @@ const POOL = "claude-subscription-session";
  * carries only what it is actually the right answer for — `sonnet` does NOT
  * claim `reason.deep`, or `opus` could never be selected.
  */
+/**
+ * A model's caps describe what THIS PLUGIN can execute, not what the vendor's
+ * API is capable of. `tool.use` is deliberately absent: the wire call here is
+ * single-shot inference with no tool loop, and `run()` below refuses a work
+ * order that declares tools.
+ *
+ * It used to be listed, and that was a lie the router believed. Every model
+ * here is `unmetered`, so this provider is always the cheapest capable target
+ * — it therefore WON every tool-using step and then failed it at execution
+ * with "performs inference only". Declaring the capability honestly turns that
+ * runtime failure into a routing decision: a tool-using role now goes to a
+ * provider that can actually run one, or fails as `capability-shortage`, which
+ * names the real problem. Put `tool.use` back only together with a tool loop.
+ */
 export const CLAUDE_MODELS: ProviderModel[] = [
   {
     // Chores: extraction, formatting, classification.
     id: "claude-haiku-4-5-20251001",
-    caps: ["cheap.bulk", "reason.fast", "tool.use", "structured.output", "long.context"],
+    caps: ["cheap.bulk", "reason.fast", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -60,7 +74,7 @@ export const CLAUDE_MODELS: ProviderModel[] = [
   {
     // The labour tier: writing and editing code, reviewing a diff.
     id: "claude-sonnet-5",
-    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -70,7 +84,7 @@ export const CLAUDE_MODELS: ProviderModel[] = [
   {
     // Reserved for work that genuinely needs it; `reason.deep` lives only here.
     id: "claude-opus-5",
-    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
