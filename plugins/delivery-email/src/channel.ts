@@ -127,19 +127,29 @@ export class EmailChannel implements Channel {
       };
     }
 
+    // The tenant's own renderer wins when it ran: the transcript is the record,
+    // the rendered form is what a person reads. Artifact paths stay on the
+    // transcript form only -- a rendered brief is a finished document and a
+    // local absolute path is not part of it.
+    const base = payload.rendered?.subject ?? payload.subject;
     const subject =
-      email.subjectPrefix === undefined
-        ? payload.subject
-        : `${email.subjectPrefix} ${payload.subject}`;
+      email.subjectPrefix === undefined ? base : `${email.subjectPrefix} ${base}`;
+    const text =
+      payload.rendered === undefined
+        ? [
+            payload.body,
+            "",
+            ...(payload.artifacts ?? []).map((path) => `Artifact: ${path}`),
+          ].join("\n")
+        : payload.rendered.text;
     const mail = {
       from: smtp.from,
       to: email.to,
       subject,
-      text: [
-        payload.body,
-        "",
-        ...(payload.artifacts ?? []).map((path) => `Artifact: ${path}`),
-      ].join("\n"),
+      text,
+      ...(payload.rendered?.html === undefined
+        ? {}
+        : { html: payload.rendered.html }),
     };
 
     let error = "";
