@@ -119,6 +119,32 @@ export async function loadTenantTools(
 }
 
 /**
+ * The tool names this environment cannot serve, from the tenant's own
+ * VOCABULARY: every entry whose `requiresEnv` key is unset.
+ *
+ * `buildTools` builds every tool regardless — each one throws when CALLED with
+ * its key missing — so a misconfigured machine looks identical to a quiet
+ * market until a role tries. On the day OW_UW_API_KEY was absent the designer
+ * would have returned an empty proposal list and the report would have read
+ * like a considered "no trades today". This is what makes the gap say its own
+ * name, at the top of the report, before anything is reasoned about.
+ */
+export async function tenantToolGaps(
+  tenantDir: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string[]> {
+  const entry = join(tenantDir, "lib", "tools", "index.js");
+  if (!existsSync(entry)) return [];
+  const module = (await import(pathToFileURL(entry).href)) as {
+    VOCABULARY?: Map<string, { requiresEnv?: string }>;
+  };
+  if (!(module.VOCABULARY instanceof Map)) return [];
+  return [...module.VOCABULARY.entries()]
+    .filter(([, spec]) => spec.requiresEnv !== undefined && !env[spec.requiresEnv])
+    .map(([name, spec]) => `${name} (${spec.requiresEnv ?? ""} unset)`);
+}
+
+/**
  * A tenant's own gates: `<tenant>/gates/<id>.ts`, built to `lib/gates/<id>.js`,
  * `export default` a `Gate`. They live with the tenant and not in core because
  * a gate encodes domain rules — doctrine 2 keeps those out of the harness.

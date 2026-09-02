@@ -46,6 +46,7 @@ import {
   discoverProviders,
   loadGates,
   loadTenantTools,
+  tenantToolGaps,
 } from "./discovery.js";
 
 export interface StepReport {
@@ -79,6 +80,8 @@ export interface RunReport {
   gatesSkipped: Array<{ id: string; reason: string }>;
   /** One entry per `delivery:` block in tenant.yaml. Empty when none declared. */
   delivery: DeliveryReport[];
+  /** Tools this machine cannot serve: their `requiresEnv` key is unset. */
+  toolsUnconfigured: string[];
 }
 
 /**
@@ -379,6 +382,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     outcome: "completed",
     gatesSkipped: loadedGates.skipped,
     delivery: [],
+    toolsUnconfigured:
+      options.tools === undefined ? await tenantToolGaps(options.tenant.dir, env) : [],
   };
 
   const signal = options.signal ?? new AbortController().signal;
@@ -857,6 +862,7 @@ function deliveryBody(report: RunReport): string {
   }
   for (const skip of report.providersSkipped) lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
   for (const skip of report.gatesSkipped) lines.push(`- **gate failed to load:** ${skip.id} — ${skip.reason}`);
+  for (const gap of report.toolsUnconfigured) lines.push(`- **tool unconfigured:** ${gap}`);
   for (const refusal of failures) lines.push(`- gate \`${refusal.id}\` refused: ${refusal.reason}`);
 
   for (const step of report.steps) {

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   discoverProviders,
   loadTenantTools,
+  tenantToolGaps,
   pluginsDir,
   tenantsDir,
 } from "./discovery.js";
@@ -79,6 +80,47 @@ describe("discoverProviders", () => {
     await expect(
       loadTenantTools(mkdtempSync(join(tmpdir(), "t-")), { stateRoot: "/tmp", env: {} }),
     ).resolves.toEqual([]);
+  });
+});
+
+describe("tenantToolGaps", () => {
+  /** A tenant whose module exports the VOCABULARY shape `buildTools` ships with. */
+  function tenant(): string {
+    const dir = mkdtempSync(join(tmpdir(), "helium-tenant-"));
+    mkdirSync(join(dir, "lib", "tools"), { recursive: true });
+    writeFileSync(
+      join(dir, "lib", "tools", "index.js"),
+      `export const VOCABULARY = new Map([
+         ["ow_spot", { mutating: false }],
+         ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+       ]);`,
+    );
+    return dir;
+  }
+
+  it("names the tool AND the key when the key is unset", async () => {
+    // The failure this pins: with the key missing every tool still BUILDS, so
+    // the run completes and the designer returns an empty proposal list that
+    // reads exactly like a considered "no trades today".
+    await expect(tenantToolGaps(tenant(), {})).resolves.toEqual([
+      "ow_uw_chain (OW_UW_API_KEY unset)",
+    ]);
+  });
+
+  it("reports nothing once the key is set", async () => {
+    await expect(
+      tenantToolGaps(tenant(), { OW_UW_API_KEY: "set" } as NodeJS.ProcessEnv),
+    ).resolves.toEqual([]);
+  });
+
+  it("treats an empty string as unset, because an empty credential is not one", async () => {
+    await expect(
+      tenantToolGaps(tenant(), { OW_UW_API_KEY: "" } as NodeJS.ProcessEnv),
+    ).resolves.toEqual(["ow_uw_chain (OW_UW_API_KEY unset)"]);
+  });
+
+  it("returns nothing for a tenant that ships no tools", async () => {
+    await expect(tenantToolGaps(mkdtempSync(join(tmpdir(), "t-")), {})).resolves.toEqual([]);
   });
 });
 

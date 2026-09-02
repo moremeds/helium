@@ -38,6 +38,9 @@ function printRun(report: RunReport): void {
   for (const skip of report.gatesSkipped) {
     console.log(`gate failed to load: ${skip.id} — ${skip.reason}`);
   }
+  for (const gap of report.toolsUnconfigured) {
+    console.log(`tool unconfigured: ${gap}`);
+  }
   if (report.mode === "tool-only") {
     console.log(
       "no live provider: no model call was made, so no token counts exist for this run.",
