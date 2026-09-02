@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "lib", "rootDir": "." },
-  "include": ["tools", "gates"]
+  "include": ["tools", "gates", "render"]
 }
