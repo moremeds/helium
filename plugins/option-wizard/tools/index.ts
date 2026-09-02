@@ -579,8 +579,35 @@ export function buildTools(cfg: {
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const { flagColors } = TvParams.parse(args);
-        if (env.OW_TV_ENABLED !== "1") {
-          throw new Error("OW_TV_ENABLED is not \"1\"; ow_tv_watchlist is disabled");
+        // TradingView is a desktop app driven by opencli, so the mini has no
+        // watchlist and the universe step would hand the designer an empty set
+        // — a run that completes and proposes nothing, every day. OW_UNIVERSE
+        // is the OPERATOR's list, not a guess made here: this tool will not
+        // invent a universe, it will only read the one someone wrote down. It
+        // says so in `source`, because a frozen list and today's flags are not
+        // the same thing and a reader must be able to tell.
+        const tvHere = env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "";
+        if (!tvHere) {
+          const listed = (env.OW_UNIVERSE ?? "")
+            .split(",")
+            .map((entry) => entry.trim().toUpperCase())
+            .filter((entry) => entry !== "");
+          if (listed.length === 0) {
+            throw new Error(
+              "ow_tv_watchlist: TradingView is not on this machine (needs OW_TV_ENABLED=1 and " +
+                "OPENCLI_BIN) and OW_UNIVERSE names no fallback tickers, so there is no " +
+                "universe to build. Refusing to return an empty one, which reads as a market " +
+                "with nothing in it.",
+            );
+          }
+          return JSON.stringify({
+            source: "operator list (OW_UNIVERSE)",
+            note:
+              "TradingView is not available on this machine. These are the tickers the operator " +
+              "listed, not today's flagged watchlists — the list is as current as whoever set it.",
+            tickers: [...new Set(listed)].sort((a, b) => a.localeCompare(b, "en")),
+            fetchedAt: new Date().toISOString(),
+          });
         }
         const bin = need(env, "OPENCLI_BIN", "ow_tv_watchlist");
         const symbols = new Set<string>();

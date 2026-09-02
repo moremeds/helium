@@ -23,6 +23,8 @@ budget:
 env:
   - OW_TV_ENABLED
   - OPENCLI_BIN
+  # The operator's ticker list, used only where TradingView is not installed.
+  - OW_UNIVERSE
   - OW_ARGON_PG_URL
   - OW_APEX_API_BASE
   - OW_PSQL_BIN

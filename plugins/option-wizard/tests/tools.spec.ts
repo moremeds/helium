@@ -131,11 +131,22 @@ describe("absent environment", () => {
     ).rejects.toThrow("no spot for SPY");
   });
 
-  it("ow_tv_watchlist refuses while disabled rather than returning an empty universe", async () => {
-    await expect(tool("ow_tv_watchlist").run({})).rejects.toThrow("OW_TV_ENABLED");
+  it("ow_tv_watchlist refuses rather than returning an empty universe", async () => {
+    await expect(tool("ow_tv_watchlist").run({})).rejects.toThrow("OW_UNIVERSE names no fallback");
     await expect(
       tool("ow_tv_watchlist", { OW_TV_ENABLED: "1" }).run({}),
-    ).rejects.toThrow("OPENCLI_BIN is unset");
+    ).rejects.toThrow("OW_UNIVERSE names no fallback");
+  });
+
+  it("ow_tv_watchlist falls back to the operator's list, and says that is what it is", async () => {
+    // The mini has no opencli, so without this the universe step hands the
+    // designer an empty set and the run proposes nothing while reporting
+    // "completed". The list is the OPERATOR's; this tool never invents one.
+    const json = await tool("ow_tv_watchlist", { OW_UNIVERSE: " spy ,qqq, spy,IWM " }).run({});
+    const parsed = JSON.parse(json);
+    expect(parsed.tickers).toEqual(["IWM", "QQQ", "SPY"]);
+    expect(parsed.source).toContain("operator list");
+    expect(parsed.note).toContain("not today's flagged watchlists");
   });
 
   it("ow_ib_positions names the host it could not reach", async () => {
