@@ -33,9 +33,9 @@ describe("vocabulary", () => {
 
 describe("absent environment", () => {
   it.each([
-    ["ow_ib_positions", {}, "OW_IB_HOST is unset"],
-    ["ow_ib_chain", { ticker: "AAPL", minDte: 21, maxDte: 60 }, "OW_IB_HOST is unset"],
-    ["ow_ib_quote", { conIds: [265598] }, "OW_IB_HOST is unset"],
+    ["ow_ib_positions", {}, "OW_IB_API_BASE is unset"],
+    ["ow_ib_chain", { ticker: "AAPL", minDte: 21, maxDte: 60 }, "OW_IB_API_BASE is unset"],
+    ["ow_ib_quote", { ticker: "AAPL", conIds: [265598] }, "OW_IB_API_BASE is unset"],
     ["ow_argon_watchlist", {}, "OW_ARGON_API_BASE is unset"],
     ["ow_uw_ticker_metrics", { tickers: ["AAPL"] }, "OW_UW_API_KEY is unset"],
     ["ow_uw_market_state", { sector: "Technology", etf: "XLK" }, "OW_UW_API_KEY is unset"],
@@ -51,13 +51,33 @@ describe("absent environment", () => {
     ).rejects.toThrow("OPENCLI_BIN is unset");
   });
 
-  it("ow_ib_positions names the host:port it could not reach", async () => {
+  it("ow_ib_positions names the host it could not reach", async () => {
     // Port 1 on loopback: nothing listens there, so this is a connection
     // refusal rather than a timeout.
-    const configured = { OW_IB_HOST: "127.0.0.1", OW_IB_PORT: "1", OW_IB_CLIENT_ID: "9" };
+    const configured = { OW_IB_API_BASE: "http://127.0.0.1:1", OW_IB_API_KEY: "x" };
     await expect(tool("ow_ib_positions", configured).run({})).rejects.toThrow(
-      "IB Gateway unreachable at 127.0.0.1:1",
+      "IB query api unreachable at 127.0.0.1:1",
     );
+  });
+
+  it("ow_ib_positions sends the key as X-API-Key and never as a bearer token", async () => {
+    // The credential is what makes this tenant unable to place an order: it is
+    // authorised for a fixed allow-list of read paths and refused on every
+    // write path. Sent under the wrong header it would simply be unauthenticated,
+    // which is a failure — but a silent one to write down.
+    let seen: Headers | undefined;
+    const configured = { OW_IB_API_BASE: "http://ib.invalid", OW_IB_API_KEY: "secret-key" };
+    await tool("ow_ib_positions", configured).run(
+      {},
+      {
+        fetchImpl: async (_url: unknown, init?: { headers?: HeadersInit }) => {
+          seen = new Headers(init?.headers);
+          return new Response("{}", { status: 200 });
+        },
+      } as never,
+    );
+    expect(seen?.get("x-api-key")).toBe("secret-key");
+    expect(seen?.get("authorization")).toBeNull();
   });
 });
 

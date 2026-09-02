@@ -24,18 +24,27 @@ env:
   - OW_TV_ENABLED
   - OPENCLI_BIN
   - OW_ARGON_API_BASE
-  - OW_IB_HOST
-  - OW_IB_PORT
-  - OW_IB_CLIENT_ID
+  - OW_IB_API_BASE
+  - OW_IB_API_KEY
   - OW_UW_API_KEY
 
-# EMPTY DELIBERATELY. The cron time, its timezone and the email recipients were
-# lost with the original spec (§8.3, §9) and are not reconstructable. A tenant
-# that ships a schedule ships a scheduled run, so declaring a guessed one would
-# start sending mail to a guessed address. Until an operator supplies both, this
-# tenant runs only when a human asks for it by name: `helium run option-wizard`.
+# TRIGGERS EMPTY DELIBERATELY. The cron time and its timezone were lost with the
+# original spec (§8.3, §9) and are not reconstructable. A tenant that ships a
+# schedule ships a scheduled run, so a guessed one would start producing reports
+# on a guessed clock. Until an operator supplies both, this tenant runs only
+# when a human asks for it by name: `helium run option-wizard`.
 triggers: []
-delivery: []
+
+# The report is a MARKDOWN FILE, not mail. The email recipients were lost with
+# the same section of the spec, and a channel whose one required setting is
+# unknown cannot be configured honestly — whereas a file on the machine that
+# produced the run needs no recipient, no credential and no operator brake.
+# Add a second `email` entry here when an address is decided; nothing else has
+# to change.
+delivery:
+  - channel: markdown
+    config:
+      dir: reports
 
 # The tenant-owned opaque block; the host never reads inside it (spec §3).
 #

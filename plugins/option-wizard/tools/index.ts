@@ -11,7 +11,6 @@
  * @module dsh-plugin-tenant-option-wizard/tools
  */
 import { execFile } from "node:child_process";
-import { connect } from "node:net";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
@@ -26,9 +25,9 @@ const execFileAsync = promisify(execFile);
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_tv_watchlist", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
   ["ow_argon_watchlist", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
-  ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_HOST" }],
-  ["ow_ib_chain", { mutating: false, requiresEnv: "OW_IB_HOST" }],
-  ["ow_ib_quote", { mutating: false, requiresEnv: "OW_IB_HOST" }],
+  ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
+  ["ow_ib_chain", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
+  ["ow_ib_quote", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_macro_rates", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -46,57 +45,64 @@ function need(env: Env, name: string, tool: string): string {
 }
 
 /**
- * IB Gateway target. Read-only side of Gateway 4001 only (spec §5) — this
- * tenant never learns an order-placement message.
- */
-function ibTarget(env: Env, tool: string): { host: string; port: number; clientId: string } {
-  const host = need(env, "OW_IB_HOST", tool);
-  const port = Number(need(env, "OW_IB_PORT", tool));
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    throw new Error(`OW_IB_PORT is not a valid port; ${tool} has no live route`);
-  }
-  return { host, port, clientId: need(env, "OW_IB_CLIENT_ID", tool) };
-}
-
-/** TCP reachability, with a short timeout so a dead gateway fails a run in
- *  seconds rather than hanging the cron slot. Rejects; never resolves false. */
-async function requireReachable(
-  host: string,
-  port: number,
-  tool: string,
-  timeoutMs = 3_000,
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const socket = connect({ host, port });
-    const fail = (why: string): void => {
-      socket.destroy();
-      reject(new Error(`${tool}: IB Gateway unreachable at ${host}:${port} (${why})`));
-    };
-    socket.setTimeout(timeoutMs, () => fail(`no response in ${timeoutMs}ms`));
-    socket.once("error", (error: Error) => fail(error.message));
-    socket.once("connect", () => {
-      socket.end();
-      resolve();
-    });
-  });
-}
-
-/**
- * ponytail: TCP reachability only; the TWS wire protocol is the next step.
+ * IB, reached through xenon's read-only query API rather than through the TWS
+ * wire protocol.
  *
- * Every IB tool proves the gateway is listening and then stops, because the
- * alternative — returning a shape with numbers in it — is the one failure this
- * tenant cannot survive. Upgrade path: a real TWS client (framed length-prefixed
- * messages over the same socket, `reqPositions` / `reqSecDefOptParams` /
- * `reqMktData`), which is a package of its own, not a branch in this file.
+ * xenon already holds live connections to IB Gateway 4001 and exposes them
+ * over HTTP; re-implementing a framed binary client here would be a second
+ * broker integration for this desk to keep correct. The key matters more than
+ * the convenience: `XENON_QUERY_API_KEY` is authorised for a fixed allow-list
+ * of read paths and is REFUSED (401) on every write path — `/orders/place`,
+ * `/orders/cancel`, `/portfolio/sync`. So "this tenant can never place an
+ * order" is enforced by the credential itself, not only by which tools exist
+ * (spec §5). Verified against xenon `src/xenon/api/auth.py` and
+ * `docs/reference/readonly-query-api.md`.
+ *
+ * Endpoints used, captured live 2026-09-02 against account U1***7831:
+ *   GET /portfolio            -> { bankroll, positions[], account_summary{
+ *                                  net_liquidation, buying_power, initial_margin,
+ *                                  excess_liquidity, maintenance_margin, ... } }
+ *   GET /options/expirations  -> { symbol, expirations: ["20260902", ...] }
+ *   GET /options/chain        -> { symbol, expiry, exchange, strikes: [50.0, ...] }
+ *   GET /orders/quote         -> single-contract bid/ask/mid
  */
-async function ibNotImplemented(env: Env, tool: string): Promise<never> {
-  const { host, port } = ibTarget(env, tool);
-  await requireReachable(host, port, tool);
-  throw new Error(
-    `${tool}: connected to IB Gateway at ${host}:${port} but the TWS wire protocol is not implemented; ` +
-      "no data was fetched and none will be invented",
+async function ibGet(
+  env: Env,
+  tool: string,
+  path: string,
+  query: Record<string, string> = {},
+  ctx?: ToolRunContext,
+): Promise<unknown> {
+  const base = need(env, "OW_IB_API_BASE", tool);
+  const key = need(env, "OW_IB_API_KEY", tool);
+  const url = new URL(path, base);
+  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  const doFetch = ctx?.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await doFetch(url, { headers: { "X-API-Key": key, Accept: "application/json" } });
+  } catch (error: unknown) {
+    throw new Error(
+      `${tool}: IB query api unreachable at ${url.host} — ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/** `20260918` -> whole days from today, the unit every DTE threshold uses. */
+function dteOf(expiry: string, now: Date): number {
+  const parsed = Date.UTC(
+    Number(expiry.slice(0, 4)),
+    Number(expiry.slice(4, 6)) - 1,
+    Number(expiry.slice(6, 8)),
   );
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((parsed - today) / 86_400_000);
 }
 
 /** Verified 2026-09-02 against argon's own client: base
@@ -155,7 +161,10 @@ const ChainParams = z.object({
   minDte: z.number().int().nonnegative(),
   maxDte: z.number().int().positive(),
 });
-const QuoteParams = z.object({ conIds: z.array(z.number().int().positive()).min(1) });
+const QuoteParams = z.object({
+  ticker: z.string().min(1),
+  conIds: z.array(z.number().int().positive()).min(1).max(20),
+});
 const TickerMetricsParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(25) });
 // sector and etf are REQUIRED: the tide endpoints are per-sector and per-ETF,
 // and picking a default here would be picking a market view on the caller's
@@ -212,13 +221,35 @@ export function buildTools(cfg: {
           const rows = Array.isArray(parsed) ? parsed : [parsed];
           for (const row of rows) {
             const list = (row as { symbols?: unknown }).symbols;
-            if (!Array.isArray(list)) continue;
+            // `symbols` comes back as a COMMA-SEPARATED STRING, not an array —
+            // captured live 2026-09-02: {"id":132043044,"name":"Daily",
+            // "symbol_count":5,"symbols":"NASDAQ:LULU,NYSE:MCD,NYSE:KO,..."}.
+            // Reading it as an array only was silent: every list was skipped and
+            // the tool returned a plausible EMPTY universe, which is the one
+            // shape this file exists to never produce. Both are accepted because
+            // -f json is opencli's shape, not TradingView's, and it can change.
+            const parts = Array.isArray(list)
+              ? list
+              : typeof list === "string"
+                ? list.split(",")
+                : [];
             // TradingView symbols carry their exchange ("NASDAQ:AAPL"); the rest
             // of the pipeline keys on the bare ticker.
-            for (const symbol of list) {
-              if (typeof symbol === "string") symbols.add(symbol.split(":").pop() ?? symbol);
+            for (const symbol of parts) {
+              if (typeof symbol !== "string") continue;
+              const ticker = (symbol.split(":").pop() ?? symbol).trim();
+              if (ticker !== "") symbols.add(ticker);
             }
           }
+        }
+        // After every requested colour, not inside the loop: one empty colour
+        // among several is a fact about that list, while nothing at all across
+        // all of them means the shape changed under us.
+        if (symbols.size === 0) {
+          throw new Error(
+            `ow_tv_watchlist: ${bin} returned watchlists but no symbol could be read from them; ` +
+              "refusing to report an empty universe as a result",
+          );
         }
         return JSON.stringify({
           source: "tradingview",
@@ -280,8 +311,12 @@ export function buildTools(cfg: {
       paramsSchema: NoParams,
       mutating: false,
       dshParams: {},
-      async run(): Promise<string> {
-        return ibNotImplemented(env, "ow_ib_positions");
+      async run(_args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        // Passed through verbatim. xenon owns this shape; re-typing it here
+        // would be a second place for it to drift, and `account_summary`
+        // carries exactly the net-liq and buying-power the preflight gate
+        // reads.
+        return JSON.stringify(await ibGet(env, "ow_ib_positions", "/portfolio", {}, ctx));
       },
     },
     {
@@ -294,9 +329,40 @@ export function buildTools(cfg: {
         minDte: { type: "number", required: true, description: "Minimum days to expiry" },
         maxDte: { type: "number", required: true, description: "Maximum days to expiry" },
       },
-      async run(args: Record<string, unknown>): Promise<string> {
-        ChainParams.parse(args);
-        return ibNotImplemented(env, "ow_ib_chain");
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { ticker, minDte, maxDte } = ChainParams.parse(args);
+        const tool = "ow_ib_chain";
+        const listed = (await ibGet(env, tool, "/options/expirations", { symbol: ticker }, ctx)) as {
+          expirations?: unknown;
+        };
+        const all = Array.isArray(listed.expirations) ? listed.expirations : [];
+        const now = new Date();
+        const inBand = all
+          .filter((value): value is string => typeof value === "string")
+          .filter((expiry) => {
+            const dte = dteOf(expiry, now);
+            return dte >= minDte && dte <= maxDte;
+          });
+        const expiries = [];
+        for (const expiry of inBand) {
+          const chain = (await ibGet(
+            env,
+            tool,
+            "/options/chain",
+            { symbol: ticker, expiry },
+            ctx,
+          )) as { strikes?: unknown; exchange?: unknown };
+          expiries.push({
+            expiry,
+            dte: dteOf(expiry, now),
+            exchange: chain.exchange,
+            strikes: chain.strikes,
+          });
+        }
+        // An empty band is a FACT, not a failure: a ticker can genuinely list
+        // no expiry between minDte and maxDte. The count of what was listed is
+        // reported alongside so the caller can tell that apart from a bad symbol.
+        return JSON.stringify({ ticker, minDte, maxDte, listedExpiries: all.length, expiries });
       },
     },
     {
@@ -305,11 +371,24 @@ export function buildTools(cfg: {
       paramsSchema: QuoteParams,
       mutating: false,
       dshParams: {
+        ticker: { type: "string", required: true, description: "Underlying symbol" },
         conIds: { type: "array", required: true, description: "IB contract ids" },
       },
-      async run(args: Record<string, unknown>): Promise<string> {
-        QuoteParams.parse(args);
-        return ibNotImplemented(env, "ow_ib_quote");
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { ticker, conIds } = QuoteParams.parse(args);
+        const quotes = [];
+        for (const conId of conIds) {
+          quotes.push(
+            await ibGet(
+              env,
+              "ow_ib_quote",
+              "/orders/quote",
+              { ticker, con_id: String(conId) },
+              ctx,
+            ),
+          );
+        }
+        return JSON.stringify({ ticker, quotes });
       },
     },
     {
