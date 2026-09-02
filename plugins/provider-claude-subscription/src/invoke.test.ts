@@ -133,3 +133,133 @@ describe("invokeClaude", () => {
     }
   });
 });
+
+describe("the tool loop", () => {
+  // Not a market tool: this exercises the loop, and putting prices in it would
+  // be inventing data to test plumbing that does not care what the data is.
+  const echo = {
+    name: "echo_args",
+    description: "Returns its arguments as JSON.",
+    dshParams: { word: { type: "string", required: true as const, description: "any word" } },
+    paramsSchema: {} as never,
+    mutating: false,
+    run: async (args: Record<string, unknown>) => JSON.stringify(args),
+  };
+
+  it("runs the tool, feeds the result back, and bills both turns", async () => {
+    curl
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          stop_reason: "tool_use",
+          content: [
+            { type: "text", text: "checking" },
+            { type: "tool_use", id: "toolu_01", name: "echo_args", input: { word: "helium" } },
+          ],
+          usage: { input_tokens: 40, output_tokens: 12 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          stop_reason: "end_turn",
+          content: [{ type: "text", text: "done" }],
+          usage: { input_tokens: 90, output_tokens: 5 },
+        }),
+      });
+
+    const out = await invokeClaude({ ...CALL, tools: [echo] });
+
+    expect(out).toMatchObject({ ok: true, turns: 2 });
+    expect(out.text).toBe("checking\ndone");
+    // Both turns are billed. Folding only the last would report a chatty tool
+    // loop as the cost of one answer.
+    expect(out.runtimeSnapshot.modelUsage).toEqual({
+      input_tokens: 130,
+      output_tokens: 17,
+    });
+
+    // The first request declares the tool with its dshParams as JSON Schema.
+    const first = JSON.parse(curl.mock.calls[0]![0].body);
+    expect(first.tools).toEqual([
+      {
+        name: "echo_args",
+        description: "Returns its arguments as JSON.",
+        input_schema: {
+          type: "object",
+          properties: { word: { type: "string", description: "any word" } },
+          required: ["word"],
+        },
+      },
+    ]);
+
+    // The second carries the assistant turn VERBATIM plus the tool result.
+    const second = JSON.parse(curl.mock.calls[1]![0].body);
+    expect(second.messages).toHaveLength(3);
+    expect(second.messages[1]).toEqual({
+      role: "assistant",
+      content: [
+        { type: "text", text: "checking" },
+        { type: "tool_use", id: "toolu_01", name: "echo_args", input: { word: "helium" } },
+      ],
+    });
+    expect(second.messages[2].content[0]).toEqual({
+      type: "tool_result",
+      tool_use_id: "toolu_01",
+      content: JSON.stringify({ word: "helium" }),
+    });
+
+    // The audit fold reads the call id at `message.source.callId`; getting that
+    // path wrong once meant every tool call ran and none appeared in the table.
+    const call = out.events!.find((e) => e.type === "tool/call");
+    const result = out.events!.find((e) => e.type === "tool/result");
+    expect(call!.data).toMatchObject({ callId: "toolu_01", name: "echo_args" });
+    expect(result!.data).toMatchObject({ message: { source: { callId: "toolu_01" } } });
+  });
+
+  it("reports a throwing tool to the model instead of failing the step", async () => {
+    const broken = { ...echo, name: "broken", run: async () => { throw new Error("endpoint 502"); } };
+    curl
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          content: [{ type: "tool_use", id: "toolu_02", name: "broken", input: {} }],
+          usage: { input_tokens: 10, output_tokens: 1 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          content: [{ type: "text", text: "the tool is down, proceeding without it" }],
+          usage: { input_tokens: 20, output_tokens: 8 },
+        }),
+      });
+
+    const out = await invokeClaude({ ...CALL, tools: [broken] });
+
+    expect(out.ok).toBe(true);
+    const second = JSON.parse(curl.mock.calls[1]![0].body);
+    expect(second.messages[2].content[0]).toMatchObject({
+      is_error: true,
+      content: "broken failed: endpoint 502",
+    });
+  });
+
+  it("stops at the turn ceiling and says the answer is partial", async () => {
+    // A model that keeps calling tools re-sends the whole transcript each turn,
+    // so an unbounded loop is quadratic against a metered API.
+    curl.mockResolvedValue({
+      status: 200,
+      body: JSON.stringify({
+        content: [{ type: "tool_use", id: "toolu_loop", name: "echo_args", input: { word: "again" } }],
+        usage: { input_tokens: 5, output_tokens: 1 },
+      }),
+    });
+
+    const out = await invokeClaude({ ...CALL, tools: [echo] });
+
+    expect(out.turns).toBe(8);
+    expect(curl).toHaveBeenCalledTimes(8);
+    expect(out.text).toContain("stopped after 8 tool turns");
+  });
+});

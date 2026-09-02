@@ -114,30 +114,43 @@ describe("ClaudeSubscriptionProvider", () => {
     });
   });
 
-  it("refuses a work order that asks for tools instead of silently dropping them", async () => {
-    // The request carries no `tools`, so the model cannot call one. A role that
-    // ordered tools and got a model without any is the failure this prevents.
+  it("refuses a work order whose tool implementations never arrived", async () => {
+    // The order names a tool and `selection.options.tools` is empty, so the
+    // runner and the role manifest disagree. Running anyway would hand the
+    // model a prompt about a tool it cannot call and return its apology as a
+    // completed step — the exact silent degradation this provider must not
+    // produce. The loop is not the licence to run degraded.
     const work = {
       role: "prober",
       constraints: { tools: ["fs.read"] },
       inputs: { prompt: "hi", artifacts: [] },
     } as never;
     await expect(
-      new ClaudeSubscriptionProvider(TOKEN).run(work, { targetId: "t" as never, model: "m" }, new AbortController().signal),
-    ).rejects.toThrow(/claude-subscription performs inference only; 1 tool\(s\)/);
+      new ClaudeSubscriptionProvider(TOKEN).run(
+        work,
+        { targetId: "t" as never, model: "m" },
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow(/declares 1 tool\(s\), 0 implementation\(s\) reached/);
   });
 });
 
-
 describe("declared capabilities match what run() will actually do", () => {
-  it("no model claims tool.use, because run() refuses a work order with tools", () => {
-    // The invariant, not the value: these two facts must move together. When a
-    // tool loop lands, this test is what makes you re-add the capability.
+  it("the labour tiers claim tool.use, and the chore tier does not", () => {
+    // The invariant, not the value: `tool.use` and a working tool loop move
+    // together. It was removed when `run()` refused tools and is back now that
+    // `invoke.ts` speaks the Messages API tool protocol; if the loop is ever
+    // deleted, this test is what fails.
     const provider = new ClaudeSubscriptionProvider(TOKEN);
-    const claimsTools = provider.models.filter((model) =>
-      model.caps.includes("tool.use"),
-    );
-    expect(claimsTools).toEqual([]);
-    expect(provider.capabilities).not.toContain("tool.use");
+    const claimsTools = provider.models
+      .filter((model) => model.caps.includes("tool.use"))
+      .map((model) => model.id);
+    expect(claimsTools).toEqual(["claude-sonnet-5", "claude-opus-5"]);
+    expect(provider.capabilities).toContain("tool.use");
+    // Every model is unmetered, so `select` takes the first covering entry —
+    // a chore tier claiming tool.use would win every tool-using step.
+    expect(
+      provider.models.find((model) => model.caps.includes("cheap.bulk"))!.caps,
+    ).not.toContain("tool.use");
   });
 });
