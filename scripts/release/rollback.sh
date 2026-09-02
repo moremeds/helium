@@ -11,6 +11,8 @@ HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
 RELEASES="$HOME/projects/helium-releases"
 DSH_HOME_DIR="$HOME/.helium/dsh-home"
 OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
+DSH_PLIST="$HOME/Library/LaunchAgents/com.helium.dsh.plist"
+PLIST_BACKUP_DIR="$RELEASES/.dsh-plist-backups"
 OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
 OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
 
@@ -26,6 +28,27 @@ if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   exit $?
 fi
 started=$(date -u +%s)
+
+# launchd caches a label's configuration from bootstrap time, so `kickstart -k`
+# restarts the PROCESS but leaves it on the plist that is already loaded. Only
+# bootout+bootstrap makes launchd re-read the file, which is what a rollback
+# needs: the plist is part of the release being rolled back.
+reload_dsh() {
+  local domain
+  domain="gui/$(id -u)"
+  if launchctl print "$domain/com.helium.dsh" >/dev/null 2>&1; then
+    launchctl bootout "$domain/com.helium.dsh" || return 1
+    local end=$((SECONDS + 15))
+    while launchctl print "$domain/com.helium.dsh" >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || {
+        echo "com.helium.dsh did not unload within 15s" >&2
+        return 1
+      }
+      sleep 1
+    done
+  fi
+  launchctl bootstrap "$domain" "$DSH_PLIST"
+}
 
 # Serialize the read-then-flip sequence against a concurrent deploy.sh or
 # rollback.sh (fix round 1, IMPORTANT 3) — same mkdir-based lock as
@@ -109,14 +132,26 @@ mv -fh "$tmp" "$RELEASES/previous"
 # note for the full reasoning.
 if ! bash "$target/scripts/deploy-profile.sh" --dsh-home "$DSH_HOME_DIR" \
      --plugin-dir "$target/plugins/helium"; then
-  echo "FATAL: current=$target but the profile re-deploy FAILED — the running daemon may still be $current (its profile was never re-pointed at $target). MANUAL INTERVENTION REQUIRED: re-run 'bash $target/scripts/deploy-profile.sh --dsh-home $DSH_HOME_DIR --plugin-dir $target/plugins/helium' by hand, then 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh'." >&2
+  echo "FATAL: current=$target but the profile re-deploy FAILED — the running daemon may still be $current (its profile was never re-pointed at $target). MANUAL INTERVENTION REQUIRED: re-run 'bash $target/scripts/deploy-profile.sh --dsh-home $DSH_HOME_DIR --plugin-dir $target/plugins/helium' by hand, then restore the plist backup and run 'launchctl bootout gui/$(id -u)/com.helium.dsh && launchctl bootstrap gui/$(id -u) $DSH_PLIST'." >&2
   exit 69
 fi
-if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-  echo "[rollback] kickstart failed once — retrying after 3s"
+# deploy.sh backs the installed plist up as pre-<version>.plist BEFORE
+# installing that version's own. Rolling $current back therefore means restoring
+# the plist that was installed before $current went in.
+plist_backup="$PLIST_BACKUP_DIR/pre-$(basename "$current").plist"
+if [ -f "$plist_backup" ]; then
+  if ! cp -p "$plist_backup" "$DSH_PLIST"; then
+    echo "FATAL: current=$target but restoring $plist_backup to $DSH_PLIST FAILED — the daemon would come back on $current's key set. MANUAL INTERVENTION REQUIRED: copy that file by hand, then run 'launchctl bootout gui/$(id -u)/com.helium.dsh && launchctl bootstrap gui/$(id -u) $DSH_PLIST'." >&2
+    exit 70
+  fi
+else
+  echo "[rollback] no plist backup at $plist_backup (deployed before deploy.sh owned the plist); reloading $DSH_PLIST as it stands"
+fi
+if ! reload_dsh; then
+  echo "[rollback] plist reload failed once — retrying after 3s"
   sleep 3
-  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-    echo "FATAL: current=$target and the profile was re-deployed, but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING $current. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
+  if ! reload_dsh; then
+    echo "FATAL: current=$target and the profile was re-deployed, but the bootout+bootstrap reload FAILED twice — the daemon may still be RUNNING $current. MANUAL INTERVENTION REQUIRED: run 'launchctl bootout gui/$(id -u)/com.helium.dsh' then 'launchctl bootstrap gui/$(id -u) $DSH_PLIST' by hand (kickstart is NOT enough: launchd would keep the loaded key set), then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
     exit 70
   fi
 fi

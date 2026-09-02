@@ -25,6 +25,8 @@ OPSD_PLIST="$HOME/Library/LaunchAgents/com.helium.opsd.plist"
 DSH_PLIST="$HOME/Library/LaunchAgents/com.helium.dsh.plist"
 OPSD_CONFIG="$HOME/.helium/ops/config/opsd.json"
 OPSD_EVENT_LOG="$HOME/.helium/ops/state/events.jsonl"
+RENDERED_PLIST="$RELEASES/.dsh-plist.$VERSION.rendered"
+PLIST_BACKUP_DIR="$RELEASES/.dsh-plist-backups"
 DSH_PIN=0.1.2-alpha.3
 KEEP=5
 
@@ -115,15 +117,29 @@ if ! node "$DEST/scripts/release/validate-tenants.mjs" "$DEST"; then
   exit 75
 fi
 
-# The flip repoints `current` but NEVER rewrites the DSH plist, so a release
-# that moves or deletes a path the plist names leaves the daemon pointing at
-# nothing. launchd restarts it, the process looks alive, and it serves zero
-# tools -- silently, which is the worst shape a production failure can take.
+# The plist is the KEY SET the daemon runs with, and launchd only re-reads it on
+# bootout+bootstrap. Until v0.1.13 the deploy never owned this file: the operator
+# installed it by hand, so v0.1.13's code started with v0.1.11's environment (no
+# HELIUM_TENANTS_DIR), the plugin's config parse failed, not one heartbeat was
+# written, and the health window rolled a good release back. The deploy now
+# renders the plist from the release it is about to install.
+say "rendering the DSH plist from $VERSION"
+if ! bash "$DEST/scripts/release/install-dsh-plist.sh" render \
+  --release-dir "$DEST" --releases-dir "$RELEASES" \
+  --out "$RENDERED_PLIST" --installed "$DSH_PLIST"; then
+  echo "could not render the DSH plist for $VERSION — aborting before flip" >&2
+  exit 76
+fi
+
+# A release that moves or deletes a path the plist names leaves the daemon
+# pointing at nothing. launchd restarts it, the process looks alive, and it serves
+# zero tools -- silently, which is the worst shape a production failure can take.
 # (v0.1.11 -> the tenant lane: HELIUM_MCP_BIN pointed into packages/v1-compat,
-# which that release deletes.) Refuse the flip and name the keys instead.
-say "checking the installed DSH plist against $VERSION"
+# which that release deletes.) Checked against the RENDERED plist -- the file
+# about to be installed -- not the stale installed one.
+say "checking the rendered DSH plist against $VERSION"
 if ! node "$DEST/scripts/release/check-plist-paths.mjs" \
-  "$DSH_PLIST" "$RELEASES" "$DEST"; then
+  "$RENDERED_PLIST" "$RELEASES" "$DEST"; then
   echo "DSH plist references paths $VERSION does not ship — aborting before flip" >&2
   exit 76
 fi
@@ -196,6 +212,36 @@ restart_opsd_if_loaded() {
   launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"
 }
 
+# launchd caches a label's configuration from bootstrap time, so `kickstart -k`
+# restarts the PROCESS but leaves it on the OLD plist. Only bootout+bootstrap
+# makes launchd re-read the file. Same shape as configure-review-canary.sh.
+reload_dsh() {
+  local domain
+  domain="gui/$(id -u)"
+  if launchctl print "$domain/com.helium.dsh" >/dev/null 2>&1; then
+    launchctl bootout "$domain/com.helium.dsh" || return 1
+    local end=$((SECONDS + 15))
+    while launchctl print "$domain/com.helium.dsh" >/dev/null 2>&1; do
+      [ $SECONDS -lt $end ] || {
+        echo "com.helium.dsh did not unload within 15s" >&2
+        return 1
+      }
+      sleep 1
+    done
+  fi
+  launchctl bootstrap "$domain" "$DSH_PLIST"
+}
+
+# Keep the exact pre-flip plist so a flip-back or a later rollback.sh can restore
+# the environment the previous release actually ran with, not a re-render of it.
+install_dsh_plist() {
+  mkdir -p "$PLIST_BACKUP_DIR" || return 1
+  if [ -f "$DSH_PLIST" ]; then
+    cp -p "$DSH_PLIST" "$PLIST_BACKUP_DIR/pre-$VERSION.plist" || return 1
+  fi
+  cp "$RENDERED_PLIST" "$DSH_PLIST"
+}
+
 opsd_cycle_after() {
   local target="$1" since="$2"
   node "$DEST/scripts/release/opsd-cycle-after.mjs" "$OPSD_EVENT_LOG" "$since" "$target"
@@ -224,16 +270,20 @@ fi
 
 flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 flip_to "$DEST"
-say "flipped current -> $VERSION; restarting daemon"
-# fix round 2, ITEM 2: match the flip-back path's kickstart handling here
+say "flipped current -> $VERSION; installing the plist and reloading the daemon"
+if ! install_dsh_plist; then
+  echo "FATAL: current=$VERSION but installing the rendered DSH plist FAILED — the daemon is still configured by the OLD plist at $DSH_PLIST. MANUAL INTERVENTION REQUIRED: copy $RENDERED_PLIST to $DSH_PLIST by hand, then run 'launchctl bootout gui/$(id -u)/com.helium.dsh' followed by 'launchctl bootstrap gui/$(id -u) $DSH_PLIST'." >&2
+  exit 74
+fi
+# fix round 2, ITEM 2: match the flip-back path's restart handling here
 # too — a bare set -e abort on an otherwise-healthy deploy (current already
 # flipped to $VERSION) would leave the daemon running the OLD build with no
 # clear signal why, and no automatic path back into the health window below.
-if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-  say "kickstart failed once — retrying after 3s"
+if ! reload_dsh; then
+  say "plist reload failed once — retrying after 3s"
   sleep 3
-  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-    echo "FATAL: current=$VERSION but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING the OLD release even though current now points at $VERSION. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'. If it comes up healthy, the deploy is fine; if not, run scripts/release/rollback.sh." >&2
+  if ! reload_dsh; then
+    echo "FATAL: current=$VERSION and $DSH_PLIST is the $VERSION plist, but the bootout+bootstrap reload FAILED twice — the daemon may still be RUNNING the OLD release. MANUAL INTERVENTION REQUIRED: run 'launchctl bootout gui/$(id -u)/com.helium.dsh' then 'launchctl bootstrap gui/$(id -u) $DSH_PLIST' by hand (kickstart is NOT enough: launchd would keep the old key set), then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'. If it comes up healthy, the deploy is fine; if not, run scripts/release/rollback.sh." >&2
     exit 74
   fi
 fi
@@ -242,7 +292,10 @@ if ! restart_opsd_if_loaded; then
   exit 76
 fi
 
-say "post-flip health window (2 heartbeat intervals)"
+# ONE row is the whole signal: the tenant runtime writes a runtime-level
+# liveness row at start-up even with zero enabled tenants, so its presence proves
+# the plugin loaded its config and the runtime started on the new plist.
+say "post-flip health window (up to 180s for the start-up liveness row)"
 ok=0; end=$((SECONDS + 180))
 while [ $SECONDS -lt $end ]; do
   sleep 15
@@ -260,7 +313,7 @@ while [ $SECONDS -lt $end ]; do
     opsd_fresh=$(opsd_cycle_after "$DEST" "$flip_start_ms")
     say "  opsd target-release observation cycle: $opsd_fresh"
   fi
-  if [ "$fresh" -ge 2 ] && [ "$opsd_fresh" = "1" ]; then
+  if [ "$fresh" -ge 1 ] && [ "$opsd_fresh" = "1" ]; then
     ok=1
     break
   fi
@@ -283,19 +336,29 @@ if [ "$ok" != "1" ]; then
   # individually below with a message naming the exact inconsistency, so a
   # partial failure is loud and unambiguous rather than a bare set -e exit.
   if ! flip_to "$prev_target"; then
-    echo "FATAL: flip-back symlink update to $prev_target FAILED — current=<unknown, verify by hand> but the daemon is still running $VERSION. MANUAL INTERVENTION REQUIRED: inspect $RELEASES/current, re-point it at $prev_target if needed (ln -sfn $prev_target $RELEASES/current), then run: launchctl kickstart -k gui/$(id -u)/com.helium.dsh" >&2
+    echo "FATAL: flip-back symlink update to $prev_target FAILED — current=<unknown, verify by hand> but the daemon is still running $VERSION. MANUAL INTERVENTION REQUIRED: inspect $RELEASES/current, re-point it at $prev_target if needed (ln -sfn $prev_target $RELEASES/current), restore $PLIST_BACKUP_DIR/pre-$VERSION.plist to $DSH_PLIST, then run: launchctl bootout gui/$(id -u)/com.helium.dsh && launchctl bootstrap gui/$(id -u) $DSH_PLIST" >&2
     exit 70
   fi
   if ! bash "$prev_target/scripts/deploy-profile.sh" --dsh-home "$DSH_HOME_DIR" \
        --plugin-dir "$prev_target/plugins/helium"; then
-    echo "FATAL: current=$prev_target but the profile re-deploy FAILED — the running daemon may still be $VERSION (its profile was never re-pointed at $prev_target). MANUAL INTERVENTION REQUIRED: re-run 'bash $prev_target/scripts/deploy-profile.sh --dsh-home $DSH_HOME_DIR --plugin-dir $prev_target/plugins/helium' by hand, then 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh'." >&2
+    echo "FATAL: current=$prev_target but the profile re-deploy FAILED — the running daemon may still be $VERSION (its profile was never re-pointed at $prev_target). MANUAL INTERVENTION REQUIRED: re-run 'bash $prev_target/scripts/deploy-profile.sh --dsh-home $DSH_HOME_DIR --plugin-dir $prev_target/plugins/helium' by hand, then restore $PLIST_BACKUP_DIR/pre-$VERSION.plist to $DSH_PLIST and run 'launchctl bootout gui/$(id -u)/com.helium.dsh && launchctl bootstrap gui/$(id -u) $DSH_PLIST'." >&2
     exit 71
   fi
-  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-    say "kickstart failed once — retrying after 3s"
+  # The plist is part of the release. Restoring the profile without restoring
+  # the plist leaves $prev_target running with $VERSION's key set.
+  if [ -f "$PLIST_BACKUP_DIR/pre-$VERSION.plist" ]; then
+    if ! cp -p "$PLIST_BACKUP_DIR/pre-$VERSION.plist" "$DSH_PLIST"; then
+      echo "FATAL: current=$prev_target but restoring $PLIST_BACKUP_DIR/pre-$VERSION.plist to $DSH_PLIST FAILED — the daemon would come back on $VERSION's key set. MANUAL INTERVENTION REQUIRED: copy that file by hand, then run 'launchctl bootout gui/$(id -u)/com.helium.dsh && launchctl bootstrap gui/$(id -u) $DSH_PLIST'." >&2
+      exit 72
+    fi
+  else
+    say "no pre-$VERSION plist backup to restore; reloading $DSH_PLIST as it stands"
+  fi
+  if ! reload_dsh; then
+    say "plist reload failed once — retrying after 3s"
     sleep 3
-    if ! launchctl kickstart -k "gui/$(id -u)/com.helium.dsh"; then
-      echo "FATAL: current=$prev_target and the profile was re-deployed, but 'launchctl kickstart -k' FAILED twice — the daemon may still be RUNNING the unhealthy $VERSION build even though current and the profile now point at $prev_target. MANUAL INTERVENTION REQUIRED: run 'launchctl kickstart -k gui/$(id -u)/com.helium.dsh' by hand, then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
+    if ! reload_dsh; then
+      echo "FATAL: current=$prev_target and the profile and plist were restored, but the bootout+bootstrap reload FAILED twice — the daemon may still be RUNNING the unhealthy $VERSION build. MANUAL INTERVENTION REQUIRED: run 'launchctl bootout gui/$(id -u)/com.helium.dsh' then 'launchctl bootstrap gui/$(id -u) $DSH_PLIST' by hand (kickstart is NOT enough: launchd would keep the loaded key set), then verify with 'launchctl print gui/$(id -u)/com.helium.dsh'." >&2
       exit 72
     fi
   fi
@@ -318,7 +381,7 @@ if [ "$ok" != "1" ]; then
       exit 76
     fi
   fi
-  say "flip-back to $prev_target complete: symlink flipped, profile re-deployed, daemon kickstarted"
+  say "flip-back to $prev_target complete: symlink flipped, profile re-deployed, plist restored, daemon reloaded"
   exit 68
 fi
 
