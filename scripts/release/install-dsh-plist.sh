@@ -86,6 +86,19 @@ for key in HELIUM_TEAM_PROMOTION_MODE HELIUM_TEAM_CANARY_TENANTS \
   }
 done
 
+# `review-only`/`delivered` without a canary allow-list is a combination the
+# daemon REFUSES to boot on (promotion.ts:315). The v1 knob was
+# HELIUM_TEAM_CANARY_JOBS, which the tenant lane retired, so carrying the mode
+# over from a v1 plist leaves the list empty. Downgrade to `off` rather than
+# install a plist the daemon will reject; the operator re-arms the canary with
+# configure-review-canary.sh enable --tenant NAME once a tenant is enabled.
+mode="$(plutil -extract EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE raw -o - "$tmp" 2>/dev/null || true)"
+tenants="$(plutil -extract EnvironmentVariables.HELIUM_TEAM_CANARY_TENANTS raw -o - "$tmp" 2>/dev/null || true)"
+if [ "$mode" != "off" ] && [ -n "$mode" ] && [ -z "$tenants" ]; then
+  echo "carried HELIUM_TEAM_PROMOTION_MODE=$mode has no HELIUM_TEAM_CANARY_TENANTS — downgrading to off" >&2
+  plutil -replace EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE -string "off" "$tmp"
+fi
+
 plutil -lint "$tmp" >/dev/null || { echo "rendered DSH plist failed plutil -lint" >&2; exit 71; }
 # plutil -lint is NOT sufficient: it accepts files launchd rejects (e.g. a `--`
 # inside an XML comment). plistlib is the stricter XML parser of the two.
