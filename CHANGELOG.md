@@ -1,3 +1,7 @@
+## v0.1.15 — 2026-09-02
+
+- fix(release): downgrade a canary-less promotion mode instead of shipping it
+
 ## v0.1.14 — 2026-09-02
 
 - fix(release): start the health window after the old daemon is gone
