@@ -530,7 +530,7 @@ time exceeds edit time for a month, the next finding is the process itself.
 | **M0** | Delete everything §8 marks delete; one plist; CI down to unit + 4 contracts. v1 is not kept running — it produced no useful output and is not a fallback. Green: `pnpm build`, the 4 contracts, and the §12 provider baseline (25 tests) all pass on the trimmed tree.                                                                                                                                                                                                                                                                                                                       | < 1 day |
 | **M1** | ~~First, confirm the dsh version actually installed on the mini~~ — **resolved 2026-09-02: `@deepseek-ai/dsh` `0.1.2-alpha.3` IS installed and resolvable** (`plugins/provider-dsh/node_modules/@deepseek-ai/`), so the claim that those tags "were never published" was wrong; the `dsh-team-host.ts` comments describe the build we actually have. Then core nouns + `provider-dsh` + `fake-tenant` tool + the `span` table folded from the session log + `helium run <tenant>`. Green: `helium run fake-tenant` prints a result and the §5 query returns rows. | < 1 day |
 | **M1.5** ✅ | **Provider transport + the routable provider seam (§3.1) — landed 2026-09-02.** Both subscription providers speak HTTP through one `curl` helper; `HELIUM_PROXY` is read from `~/.config/helium/helium.env`; each ships a `provider.ts` the runner discovers, with a MEASURED `overheadTokens` and a `probe()` that tells *blocked* (403 unauthenticated) from *unauthenticated* (401). A provider that can route but not execute is skipped by name rather than left to win and fail. Green (all verified 2026-09-02): `helium run` reaches a real model and writes real token rows; `HELIUM_EVAL_LIVE=1` re-measures the declared overhead against the wire; §12 baseline 40 tests. | < 1 day |
-| **M2** | option-wizard end-to-end: roles, read-only tools, preflight gate, `delivery-email`. Green: one real daily email on the mini.                                                                                                                                                                                                                                                                                                                                                                                                                      | ~3 days |
+| **M2** ✅ | **option-wizard end-to-end — landed 2026-09-02, PRs #62–#65.** Roles declaring `requires` and never a model, read-only tools, the `ib-preflight` gate, `delivery-email`, and the `HELIUM_TENANT_DELIVERY` operator brake. Deployed to the mini as its own lane — separate checkout `~/projects/helium-v2`, separate `HELIUM_STATE_ROOT=~/.helium/state-v2`, separate launchd label — with the v1 lane untouched. Green (all verified 2026-09-02): `run-ad9c67bc` and `run-84a83ad2` both `completed` on the mini with **`delivery email: sent`**; `com.helium.option-wizard` fires 18:00 HKT daily; 216 unit tests; audit answers "where did the tokens go" in one query ($0.059545 over 16,405 tokens). The three failure shapes M2 actually had to solve were all SILENT, and none of them were in this row: a missing credential deleted a tool and the run still said `completed`, a desktop GUI app sat in the price AND universe paths, and a watchlist's section headers arrived as tradeable tickers. See §10.1.                                                                                                                                                                                                                                                                                                                                                                                                                      | ~3 days |
 | **M3** | Sandbox kinds + the inputs/workspace/outputs convention + `guard.ts` + contract #3; livewire read-only **gap report**.                                                                                                                                                                                                                                                                                                                                                                                                                            | ~2 days |
 | **M4** | livewire fix-in-worktree + `delivery-github-pr`. Green: one merged livewire PR authored by a run.                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ~2 days |
 | **M5** | `helium-self`: auditor + proposer + verifier + PR. Green: one merged helium PR authored by helium.                                                                                                                                                                                                                                                                                                                                                                                                                                                | ~3 days |
@@ -542,6 +542,35 @@ M1's dsh-version reconciliation was **dropped** on the day (operator call): the
 mini gets rebuilt from scratch later, so pinning a version against the current
 install was work with no consumer. M0 and M1 landed 2026-09-02 in PR #60
 (57,792 → 8,455 TS lines).
+
+### 10.1 What M2 actually cost, and why none of it was in the row
+
+M2 was budgeted at ~3 days for "roles, tools, gate, email". The roles, tools,
+gate and email were the easy part. Every expensive hour went to a failure the
+row did not name, and all three have the same shape: **the run reports
+`completed` and the output is plausible.** A loud failure is cheap — someone
+sees it. These are not seen at all.
+
+| Shape | What the reader sees | Fix |
+| ----- | -------------------- | --- |
+| **Missing credential** | Tools are BUILT regardless of whether their key is present and throw only when CALLED. A machine without `OW_UW_API_KEY` produces a run that says `completed` with an empty proposal list — indistinguishable from a considered "no trades today". | `tenantToolGaps` reports every tool whose `requiresEnv` is unset, into the report body and the terminal (PR #62). It caught a real gap on its first run — and cried wolf on two working tools on its third, which PR #63 fixed. A gap report is honest only while every line of it still holds. |
+| **A GUI app in the data path** | The spot came from TradingView, driven over CDP by `opencli`; so did the universe. Both are desktop facts. Where the app is closed there is no spot, so `ow_uw_chain` correctly refuses to trim strikes around nothing, so the designer correctly proposes nothing — **every day, reporting `completed`.** | Both paths got a second source over a credential the tenant already holds: `/api/stock/{t}/stock-state` for the spot, the operator's `OW_UNIVERSE` for the universe (PRs #62, #64). TradingView stays first where it is live. The fallback names itself in `source`, because a frozen list and today's flags are not the same thing. |
+| **A plausible string in a tradeable slot** | Real watchlists hold section headers, futures, forex, crypto and index pseudo-tickers. Taking the bare ticker off every entry put `###BOND` and `ES1!` into the universe handed to the designer. | Filter on the EXCHANGE, not the ticker's shape — no regex tells `SPY` from `SPX`, the venue always does (PR #65). Same failure as the QQQ 420/410 spread on a 707 underlying: a plausible-looking value where a real one belongs. |
+
+Two rules earned the hard way, both about **evidence, not code**:
+
+1. **A machine fact derived from a shell whose PATH you did not print is not a
+   fact.** `ssh macmini command -v opencli` returned nothing and became two code
+   comments asserting the mini had no `opencli`. It has had it all along, at
+   `/usr/local/bin/opencli` — which a non-login `ssh` PATH omits.
+2. **`triggers:` in `tenant.yaml` is declarative only.** Nothing in `packages/cli`
+   or `packages/core` reads it. The schedule is real only once launchd has it,
+   and `plutil -lint` is not sufficient to validate a plist — `plistlib.load`
+   catches files `plutil` accepts and launchd rejects.
+
+The `ib-preflight` gate checks a STRUCTURE, not a level. "This strike exists in
+today's chain" is still verified out-of-band by the operator, not by the gate —
+the single largest known hole left in this tenant.
 
 ## 11. Open questions
 
@@ -564,7 +593,13 @@ install was work with no consumer. M0 and M1 landed 2026-09-02 in PR #60
    subagents?** It has the captain/sub-agent DAG, atomic task claiming,
    stale-attempt revocation and cold-restart recovery — but is session-scoped
    rather than trigger-driven and pins itself to host builds we do not run
-   (v0.1.15 ↔ host `0.1.2-alpha.2`), which is §11.4 again. Decide at M2.
+   (v0.1.15 ↔ host `0.1.2-alpha.2`), which is §11.4 again. ~~Decide at M2.~~
+   **Closed 2026-09-02 by M2 shipping without it.** `team.yaml`'s `tasks` with
+   `dependsOn` is the DAG, and it is about forty lines of reducer. The claiming,
+   revocation and cold-restart recovery `dsh-agent-teams` offers are answers to
+   a question a once-daily cron does not ask — and taking it would have pinned
+   us to a host build we do not run, to get them. Revisit only when a tenant
+   needs concurrent workers on one task, which none does.
 6. ~~**pi-ai as model backend from M1?**~~ **Closed 2026-09-02.** Neither
    `pi-ai` nor `dsh-llm-pi-ai` is taken as a dependency. We own the two
    subscription transports outright (§3.1), borrowing pi's request shapes and
