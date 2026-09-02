@@ -772,3 +772,57 @@ describe("delivery", () => {
     audit.close();
   });
 });
+
+describe("deterministic steps", () => {
+  const DETERMINISTIC_TEAM = `manifestVersion: "2"
+name: demo
+roles:
+  screener:
+    requires: []
+    permissions: { tools: [echo] }
+tasks:
+  - id: one
+    role: screener
+    requires: []
+    prompt: rank these
+`;
+
+  function deterministicTenant(): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-det-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      "tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n",
+    );
+    writeFileSync(join(dir, "demo", "team.yaml"), DETERMINISTIC_TEAM);
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("runs its tools and calls no model, even with a live provider", async () => {
+    const audit = new AuditStore(":memory:");
+    let modelCalls = 0;
+    const report = await runTenant({
+      tenant: deterministicTenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor: {
+        run: async (...args) => {
+          modelCalls += 1;
+          return modelExecutor.run(...args);
+        },
+      },
+    });
+    expect(report.mode).toBe("model");
+    expect(modelCalls).toBe(0);
+    // Named for what it is, not reported as a degraded model run.
+    expect(report.steps[0]?.mode).toBe("deterministic");
+    expect(report.steps[0]?.text).toContain('{"echoed":"rank these"}');
+    const spans = audit.spans(report.runId);
+    expect(spans.every((span) => span.costUsd === 0)).toBe(true);
+    audit.close();
+  });
+});

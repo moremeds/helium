@@ -51,7 +51,7 @@ import {
 export interface StepReport {
   task: string;
   role: string;
-  mode: "model" | "tool-only";
+  mode: "model" | "tool-only" | "deterministic";
   targetId?: string;
   downgradeReason?: string;
   text: string;
@@ -376,7 +376,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       continue;
     }
 
-    if (mode === "tool-only") {
+    // A step that requires no capability is deterministic BY DECLARATION, not
+    // by circumstance: it takes the same tool path a provider-less run takes,
+    // but says so under its own name so the report never reads as a degraded
+    // model run.
+    const deterministic = task.requires.length === 0;
+    if (mode === "tool-only" || deterministic) {
       stepNo += 1;
       const outputs: string[] = [];
       for (const name of role.permissions.tools) {
@@ -431,7 +436,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       report.steps.push({
         task: taskId,
         role: task.role,
-        mode: "tool-only",
+        mode: deterministic ? "deterministic" : "tool-only",
         text,
         ...(out.refusals.length === 0
           ? {}

@@ -16,7 +16,13 @@ import { rejectRoutingKeys } from "./tenant.js";
 
 const CapabilityList = z
   .array(z.string().min(1))
-  .min(1)
+  // EMPTY is meaningful and legal: a step that requires no capability is a
+  // DETERMINISTIC step. Nothing is routed for it and no model is called — it
+  // runs its declared tools and hands the result on. Spec §2 calls these out
+  // explicitly ("deterministic — not an agent"): ranking rows by numeric
+  // fields is reproducible arithmetic, and an LLM there costs tokens and adds
+  // variance for nothing. Requiring at least one capability forced every step
+  // to be an agent, which is the opposite of doctrine 6.
   .superRefine((values, ctx) => {
     if (new Set(values).size !== values.length) {
       ctx.addIssue({
