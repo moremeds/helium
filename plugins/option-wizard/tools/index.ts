@@ -23,8 +23,14 @@ import {
 const execFileAsync = promisify(execFile);
 
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
-  ["ow_tv_watchlist", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
-  ["ow_spot", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
+  // Both of these have TWO sources now — TradingView where the machine has it,
+  // Unusual Whales or the operator's list where it does not — so neither has a
+  // single key whose absence disables it. `requiresEnv` names exactly one key,
+  // so naming OW_TV_ENABLED here made the run report reads them as broken on
+  // the very machine they were made to work on. An honest gap report is only
+  // honest while its entries are true.
+  ["ow_tv_watchlist", { mutating: false }],
+  ["ow_spot", { mutating: false }],
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
