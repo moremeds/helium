@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { EmailChannel, smtpFromEnv } from "./channel.js";
+import channel_, { EmailChannel, smtpFromEnv } from "./channel.js";
 
 const SMTP = { host: "smtp.example.test", port: 587, secure: false, from: "helium@example.test" };
 const CONFIG = { to: "ops@example.test", subjectPrefix: "[helium]", maxPerDay: 2 };
@@ -23,6 +23,16 @@ function channel(sendMail: ReturnType<typeof vi.fn>, env: NodeJS.ProcessEnv = {}
 }
 
 describe("EmailChannel", () => {
+  it("is exported as an instance, which is what discovery imports", () => {
+    // Exporting the class passes `typeof … === "function"` on the constructor
+    // and then fails on `.deliver`, so discovery drops it as "default export is
+    // not a Channel". This file did exactly that for its whole life: the plugin
+    // had seven green tests and had never been loaded by a run.
+    expect(typeof channel_.deliver).toBe("function");
+    expect(channel_.id).toBe("email");
+    expect(channel_.external).toBe(true);
+  });
+
   it("skips rather than throwing when no SMTP is configured", async () => {
     const c = new EmailChannel({ stateDir: mkdtempSync(join(tmpdir(), "e-")), smtp: null });
     await expect(c.deliver(payload(), CONFIG)).resolves.toEqual({

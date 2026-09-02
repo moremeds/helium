@@ -349,11 +349,16 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     options.gates === undefined
       ? await loadGates(options.tenant.dir)
       : { gates: options.gates, skipped: [] };
-  const channels =
-    options.channels ??
-    (spec.delivery.length === 0
-      ? []
-      : (await discoverChannels(options.pluginsDir)).channels);
+  // The skip REASONS are kept, not just the channels: a declared channel that
+  // did not load is reported with why it did not. "no built lib/channel.js" was
+  // once printed for a plugin whose lib/channel.js was sitting right there —
+  // the real reason was a bad default export, and the message sent the reader
+  // to rebuild something that was already built.
+  const loadedChannels =
+    options.channels === undefined && spec.delivery.length > 0
+      ? await discoverChannels(options.pluginsDir)
+      : { channels: options.channels ?? [], skipped: [] as Array<{ id: string; reason: string }> };
+  const channels = loadedChannels.channels;
 
   const catalog = options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
   if (options.catalog === undefined) registerProviders(catalog, discovered.live);
@@ -744,10 +749,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   for (const entry of spec.delivery) {
     const channel = channels.find((candidate) => candidate.id === entry.channel);
     if (channel === undefined) {
+      const why = loadedChannels.skipped.find(
+        (skip) => skip.id === `delivery-${entry.channel}`,
+      )?.reason;
       report.delivery.push({
         channel: entry.channel,
         state: "failed",
-        detail: `no delivery-${entry.channel} plugin with a built lib/channel.js`,
+        detail: `delivery-${entry.channel} did not load: ${why ?? "no such plugin under plugins/"}`,
       });
       continue;
     }
