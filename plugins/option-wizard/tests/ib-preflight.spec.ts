@@ -16,6 +16,7 @@ import gate, {
   checkDefinedRisk,
   contentHash,
   evaluateProposal,
+  ProposalSchema,
   extractProposals,
   unfence,
   type Proposal,
@@ -180,9 +181,21 @@ describe("contentHash", () => {
 });
 
 describe("unconfigured thresholds", () => {
-  it("refuses each live sub-gate by name when its limits are absent", () => {
+  it("reports each live sub-gate by name when its limits are absent, without sinking the proposal", () => {
+    // Unchecked is not failed. Nothing here can place an order — the tenant
+    // registers no such tool and the IB credential is refused on every write
+    // path — so refusing a daily READ on limits nobody has set would refuse
+    // every proposal for the same four reasons every morning.
     const result = evaluateProposal(proposal(), {});
-    expect(result.pass).toBe(false);
+    expect(result.pass).toBe(true);
+    expect(result.unchecked).toEqual([
+      "buying_power",
+      "liquidity",
+      "event_window",
+      "position_conflict",
+    ]);
+    expect(result.gates.buying_power.state).toBe("unchecked");
+    expect(result.gates.defined_risk.state).toBe("pass");
     expect(result.gates.defined_risk.pass).toBe(true);
     expect(result.gates.buying_power.detail).toContain(
       "extensions.gates.buying_power.maxMarginFractionOfNetLiq",
@@ -194,13 +207,26 @@ describe("unconfigured thresholds", () => {
     );
   });
 
-  it("still refuses once configured, naming the missing IB data rather than passing", () => {
+  it("stays unchecked once configured, naming the missing IB data rather than claiming a pass", () => {
     const result = evaluateProposal(proposal(), CONFIGURED);
-    expect(result.pass).toBe(false);
     for (const id of ["buying_power", "liquidity", "event_window", "position_conflict"] as const) {
+      expect(result.gates[id].state).toBe("unchecked");
       expect(result.gates[id].pass).toBe(false);
       expect(result.gates[id].detail).toContain("TWS wire protocol is not implemented");
-      expect(result.gates[id].detail).not.toContain("unconfigured");
+      expect(result.gates[id].detail).not.toContain("no limit configured");
+    }
+  });
+
+  it("still fails hard on a naked short, configured or not", () => {
+    // The one invariant that needs neither a threshold nor a network, and the
+    // one the three-state change must not have loosened.
+    const naked = proposal({
+      legs: [{ right: "C", expiry: "2026-10-16", strike: 330, action: "SELL", ratio: 1 }],
+    });
+    for (const thresholds of [{}, CONFIGURED]) {
+      const result = evaluateProposal(naked, thresholds);
+      expect(result.pass).toBe(false);
+      expect(result.gates.defined_risk.state).toBe("fail");
     }
   });
 });
@@ -243,5 +269,32 @@ describe("unfence", () => {
     // Refusing on presentation is wrong; refusing because the role answered
     // something other than what it was asked is the point.
     expect(() => JSON.parse(unfence('Here you go:\n{"proposals":[]}'))).toThrow();
+  });
+});
+
+describe("leg vocabulary", () => {
+  it("accepts the words a model actually writes and normalises them", () => {
+    // Refusing "call"/"buy" is refusing on vocabulary. A whole live run's
+    // proposals were rejected for it while the structures themselves were fine.
+    const parsed = ProposalSchema.parse({
+      ...proposal(),
+      legs: [
+        { right: "put", expiry: "2026-10-16", strike: 320, action: "buy", ratio: 1 },
+        { right: "Put", expiry: "2026-10-16", strike: 330, action: "SELL", ratio: 1 },
+      ],
+    });
+    expect(parsed.legs.map((leg) => [leg.right, leg.action])).toEqual([
+      ["P", "BUY"],
+      ["P", "SELL"],
+    ]);
+  });
+
+  it("still refuses a right that is neither", () => {
+    expect(
+      ProposalSchema.safeParse({
+        ...proposal(),
+        legs: [{ right: "future", expiry: "2026-10-16", strike: 1, action: "buy", ratio: 1 }],
+      }).success,
+    ).toBe(false);
   });
 });

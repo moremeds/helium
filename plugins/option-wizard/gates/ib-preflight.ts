@@ -27,10 +27,20 @@ import { z } from "zod";
 import { parseTenantYaml, type Gate, type GateCtx } from "@helium/core";
 
 const LegSchema = z.object({
-  right: z.enum(["C", "P"]),
+  // Both spellings, normalised to IB's. A model asked for a "right" answers
+  // "call" as readily as "C", and refusing that is refusing on vocabulary —
+  // the gate exists to reject unsafe structures, not unfamiliar synonyms. The
+  // canonical form stays "C"/"P" so every rule below compares one thing.
+  right: z
+    .string()
+    .transform((value) => value.trim().slice(0, 1).toUpperCase())
+    .pipe(z.enum(["C", "P"])),
   expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
   strike: z.number().positive(),
-  action: z.enum(["BUY", "SELL"]),
+  action: z
+    .string()
+    .transform((value) => value.trim().toUpperCase())
+    .pipe(z.enum(["BUY", "SELL"])),
   ratio: z.number().int().positive(),
 });
 
@@ -48,8 +58,27 @@ export const ProposalSchema = z.object({
 
 export type Proposal = z.infer<typeof ProposalSchema>;
 
+/**
+ * `pass` and `fail` are verdicts. `unchecked` is the absence of one, and it is
+ * a THIRD thing on purpose.
+ *
+ * Collapsing it into `fail` is what a fail-closed gate is supposed to do —
+ * while it is gating an order. Nothing here places an order: this tenant has
+ * no tool that could, and the credential it reads IB with is refused on every
+ * write path. Gating a daily READ on limits nobody has set yet does not make
+ * anyone safer; it just refuses every proposal for the same four reasons every
+ * morning, and a warning that fires unconditionally is one nobody reads.
+ *
+ * So an unchecked sub-gate does not sink the proposal, and it never reports as
+ * passing either. `defined_risk` is unaffected: it needs no configuration and
+ * no network, it encodes the desk's hard invariant (no naked shorts), and it
+ * still fails hard.
+ */
+export type SubGateState = "pass" | "fail" | "unchecked";
+
 export interface SubGate {
   pass: boolean;
+  state: SubGateState;
   detail: string;
 }
 
@@ -64,6 +93,9 @@ export interface PreflightResult {
   contentHash: string;
   gates: Record<GateId, SubGate>;
   pass: boolean;
+  /** Sub-gates that reached no verdict, named so the reason travels with the
+   *  proposal instead of being lost in a boolean. */
+  unchecked: GateId[];
 }
 
 /** One option contract covers 100 shares. Not configurable: it is a fact about
@@ -110,7 +142,7 @@ export function contentHash(proposal: unknown): string {
 export function checkDefinedRisk(proposal: Proposal): SubGate {
   const { legs, quantity, limitPrice } = proposal;
   if (legs.length === 0) {
-    return { pass: false, detail: "no legs; max loss is not computable" };
+    return { pass: false, state: "fail", detail: "no legs; max loss is not computable" };
   }
 
   const byExpiry = new Map<string, Proposal["legs"]>();
@@ -129,6 +161,7 @@ export function checkDefinedRisk(proposal: Proposal): SubGate {
       if (shortRatio > longRatio) {
         return {
           pass: false,
+          state: "fail",
           detail:
             `uncovered short ${right === "C" ? "call" : "put"} at ${expiry}: ` +
             `short ratio ${shortRatio} exceeds long ratio ${longRatio} of the same ` +
@@ -148,6 +181,7 @@ export function checkDefinedRisk(proposal: Proposal): SubGate {
     if (expiryValue(group, far) < expiryValue(group, Math.max(...strikes))) {
       return {
         pass: false,
+        state: "fail",
         detail: `payoff at ${expiry} still falls above the highest strike; max loss is unbounded`,
       };
     }
@@ -157,10 +191,11 @@ export function checkDefinedRisk(proposal: Proposal): SubGate {
   // limitPrice is a net debit (+) / credit (-) per spread per share (spec §4).
   const maxLoss = (intrinsicLoss + limitPrice) * CONTRACT_MULTIPLIER * quantity;
   if (!Number.isFinite(maxLoss)) {
-    return { pass: false, detail: "max loss did not evaluate to a finite number" };
+    return { pass: false, state: "fail", detail: "max loss did not evaluate to a finite number" };
   }
   return {
     pass: true,
+    state: "pass",
     detail: `max loss ${maxLoss.toFixed(2)} USD over ${quantity} spread(s), computable from the legs alone`,
   };
 }
@@ -241,9 +276,9 @@ export function evaluateProposal(
   const live = (gate: GateId, keys: string[], detail: string): SubGate => {
     const missing = requireNumbers(thresholds, gate, keys);
     if (missing !== null) {
-      return { pass: false, detail: `unconfigured risk limit: ${missing}` };
+      return { pass: false, state: "unchecked", detail: `no limit configured: ${missing}` };
     }
-    return { pass: false, detail: `${detail}: ${NO_IB_DATA}` };
+    return { pass: false, state: "unchecked", detail: `${detail}: ${NO_IB_DATA}` };
   };
 
   const gates: Record<GateId, SubGate> = {
@@ -266,10 +301,15 @@ export function evaluateProposal(
     ),
   };
 
+  const unchecked = (Object.keys(gates) as GateId[]).filter(
+    (id) => gates[id].state === "unchecked",
+  );
   return {
     contentHash: contentHash(proposal),
     gates,
-    pass: Object.values(gates).every((sub) => sub.pass),
+    // A proposal fails only on a sub-gate that actually reached "fail".
+    pass: Object.values(gates).every((sub) => sub.state !== "fail"),
+    unchecked,
   };
 }
 
@@ -332,7 +372,12 @@ const gate: Gate = {
       return { pass: false, reason: extracted.error };
     }
     if (extracted.proposals.length === 0) {
-      return { pass: false, reason: "role produced an empty proposal list" };
+      // Nothing to gate is not a refusal. A gate refusal means "this proposal
+      // is unsafe"; an empty list means the role produced no proposal, which
+      // is the role's own result and shows up as its output. Conflating the
+      // two spent every empty run reporting a risk violation that did not
+      // exist, and would have trained a reader to ignore the word "refused".
+      return { pass: true, reason: "no proposals to check" };
     }
     const thresholds = readThresholds(TENANT_DIR);
     const lines: string[] = [];
@@ -350,12 +395,18 @@ const gate: Gate = {
       }
       const result = evaluateProposal(parsed.data, thresholds);
       if (!result.pass) allPass = false;
-      const failing = (Object.entries(result.gates) as Array<[GateId, SubGate]>)
-        .filter(([, sub]) => !sub.pass)
+      const entries = Object.entries(result.gates) as Array<[GateId, SubGate]>;
+      const failing = entries
+        .filter(([, sub]) => sub.state === "fail")
         .map(([id, sub]) => `${id}: ${sub.detail}`);
+      // Unchecked sub-gates ride along on a PASS as well. A proposal that
+      // cleared the one check that ran is not the same as a proposal that
+      // cleared five, and the line has to say so or the pass overstates itself.
+      const caveat =
+        result.unchecked.length === 0 ? "" : ` (unchecked: ${result.unchecked.join(", ")})`;
       lines.push(
         `${parsed.data.ticker} ${parsed.data.strategy} ${result.contentHash} ` +
-          (result.pass ? "PASS" : `FAIL — ${failing.join(" | ")}`),
+          (result.pass ? `PASS${caveat}` : `FAIL — ${failing.join(" | ")}${caveat}`),
       );
     }
     return { pass: allPass, reason: lines.join("\n") };
