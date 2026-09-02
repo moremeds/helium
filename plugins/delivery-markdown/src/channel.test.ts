@@ -37,14 +37,26 @@ describe("markdown channel", () => {
     expect(written).toContain("helium audit run-1");
   });
 
-  it("puts the run id in the FILENAME so two runs in a day cannot overwrite", async () => {
+  it("names the file by PHASE, so a rerun of one phase corrects it in place", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
     const channelUnderTest = new MarkdownChannel({ now, stateRoot });
-    await channelUnderTest.deliver(payload, {});
-    await channelUnderTest.deliver({ ...payload, runId: "run-2" }, {});
+    await channelUnderTest.deliver({ ...payload, phase: "premarket" }, {});
+    await channelUnderTest.deliver({ ...payload, phase: "close", runId: "run-2" }, {});
+    await channelUnderTest.deliver({ ...payload, phase: "premarket", runId: "run-3" }, {});
     expect(readdirSync(join(stateRoot, "reports")).sort()).toEqual([
+      "option-wizard-2026-09-02-close.md",
+      "option-wizard-2026-09-02-premarket.md",
+    ]);
+    expect(
+      readFileSync(join(stateRoot, "reports", "option-wizard-2026-09-02-premarket.md"), "utf8"),
+    ).toContain("run-3");
+  });
+
+  it("falls back to the run id when no phase is set", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
+    await new MarkdownChannel({ now, stateRoot }).deliver(payload, {});
+    expect(readdirSync(join(stateRoot, "reports"))).toEqual([
       "option-wizard-2026-09-02-run-1.md",
-      "option-wizard-2026-09-02-run-2.md",
     ]);
   });
 

@@ -150,6 +150,9 @@ export interface DeliveryPayload {
    * readable form opts in, and one that wants the record does nothing.
    */
   rendered?: RenderedReport;
+  /** The run label. A channel may name its artifact after it; core does not
+   *  interpret it. */
+  phase?: string;
 }
 
 export interface DeliveryOutcome {

@@ -20,13 +20,19 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
 
-/** `<dir>/<tenant>-<yyyy-mm-dd>-<runId>.md`. The run id is in the NAME, not
- *  only in the body: two runs on one day must not overwrite each other, and a
- *  reader who sees a surprising number needs the audit query for that exact
- *  run without opening the file. */
+/** `<dir>/<tenant>-<yyyy-mm-dd>-<phase>.md`.
+ *
+ *  The PHASE is in the name, not the run id. Five scheduled runs a day need
+ *  five stable names a later run can find by name (that is what the tenant's
+ *  own report-reading tool does), and a second run of the SAME phase is a
+ *  correction of that report — overwriting is the intent, not a collision.
+ *  The run id lives in the file's header line and in the audit table, which is
+ *  where a reader chasing a surprising number goes anyway. A run with no phase
+ *  falls back to the run id, so a tenant that never sets one is unchanged. */
 function reportPath(dir: string, payload: DeliveryPayload, now: Date): string {
   const day = now.toISOString().slice(0, 10);
-  return join(dir, `${payload.tenant}-${day}-${payload.runId}.md`);
+  const tail = payload.phase ?? payload.runId;
+  return join(dir, `${payload.tenant}-${day}-${tail}.md`);
 }
 
 export class MarkdownChannel implements Channel {

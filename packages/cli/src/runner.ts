@@ -845,6 +845,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           runId,
           subject: deliverySubject(report),
           body: deliveryBody(report),
+          phase: report.phase,
           ...(rendered === undefined ? {} : { rendered }),
         },
         entry.config,
@@ -900,7 +901,11 @@ function deliverySubject(report: RunReport): string {
       : report.mode === "tool-only"
         ? "[DEGRADED] "
         : "";
-  return `${tag}helium ${report.tenant} ${day}`;
+  // The tenant name is already the subject prefix configured in tenant.yaml
+  // ("[option-wizard]"), so repeating it here read as "[option-wizard] helium
+  // option-wizard 2026-09-03". Phase and date are what tell two of the day's
+  // five emails apart.
+  return `${tag}${report.phase} ${day}`;
 }
 
 /**
