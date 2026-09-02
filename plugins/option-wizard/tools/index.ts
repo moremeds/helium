@@ -22,6 +22,15 @@ import {
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * The US equity venues TradingView tags an optionable listing with. Everything
+ * else in a watchlist — futures, forex, crypto, foreign listings, index
+ * pseudo-tickers, and the "###Section" headers that carry no exchange at all —
+ * is not something a defined-risk options proposal can be written against.
+ * AMEX is what TradingView calls NYSE Arca, which is where most ETFs live.
+ */
+const US_EQUITY_VENUES = new Set(["NASDAQ", "NYSE", "AMEX", "BATS", "ARCA"]);
+
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // Both of these have TWO sources now — TradingView where the machine has it,
   // Unusual Whales or the operator's list where it does not — so neither has a
@@ -656,11 +665,30 @@ export function buildTools(cfg: {
               : typeof list === "string"
                 ? list.split(",")
                 : [];
-            // TradingView symbols carry their exchange ("NASDAQ:AAPL"); the rest
-            // of the pipeline keys on the bare ticker.
+            // TradingView symbols carry their exchange ("NASDAQ:AAPL"), and that
+            // prefix is the only reliable way to tell an optionable US listing
+            // from the rest of what a real watchlist holds. Captured live from
+            // the mini's own lists, 2026-09-02: 170 of 253 entries are
+            // NASDAQ/AMEX/NYSE, and the other 83 are section HEADERS with no
+            // prefix at all ("###BOND", "###SECTION 1" — 26 of them), futures
+            // (CME_MINI:ES1!, NYMEX:CL1!), forex (FX:EURUSD), crypto
+            // (BITSTAMP:BTCUSD), foreign listings (KRX:000660, TSE:6981) and
+            // index pseudo-tickers (TVC:NDX, CBOE:VIX, SPCFD:SPX).
+            //
+            // Taking the bare ticker off every one of those put "###BOND" and
+            // "ES1!" into the universe handed to the designer. That is the
+            // 420/410 failure wearing a different hat: a plausible-looking
+            // string in a slot that is supposed to hold a tradeable instrument.
+            // Filtering on the exchange rather than on the ticker's SHAPE is
+            // what makes this stable — no regex can tell SPY from SPX, but the
+            // venue always can.
             for (const symbol of parts) {
               if (typeof symbol !== "string") continue;
-              const ticker = (symbol.split(":").pop() ?? symbol).trim();
+              const trimmed = symbol.trim();
+              const colon = trimmed.indexOf(":");
+              if (colon === -1) continue;
+              if (!US_EQUITY_VENUES.has(trimmed.slice(0, colon).toUpperCase())) continue;
+              const ticker = trimmed.slice(colon + 1).trim();
               if (ticker !== "") symbols.add(ticker);
             }
           }
@@ -674,11 +702,15 @@ export function buildTools(cfg: {
           );
         }
         return JSON.stringify({
-          // Named per quote, not once for the list: on a machine with no
-          // TradingView every price comes from UW, and on one with both the
-          // list can legitimately mix the two.
-          sourceNote:
-            "`source` on each quote is the exchange when the price came from TradingView, or `unusualwhales`. A UW quote carries `marketTime` naming the session its close is from.",
+          // This said "`source` on each quote is the exchange..." — copied from
+          // ow_spot, describing quotes, in a payload that has none. A wrong note
+          // is worse than no note: it is a confident sentence about a field that
+          // is not there, aimed at a reader that cannot check.
+          source: "TradingView watchlists (live)",
+          note:
+            "Today's flagged lists, filtered to US equity and ETF listings — " +
+            "TradingView section headers, futures, forex, crypto, foreign " +
+            "listings and index pseudo-tickers are not optionable and are dropped.",
           tickers: [...symbols].sort(),
           asOf: new Date().toISOString(),
         });

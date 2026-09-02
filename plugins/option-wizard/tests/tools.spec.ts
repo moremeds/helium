@@ -3,6 +3,9 @@
  * names what is missing. A tool that returned a plausible empty shape here
  * would put an invented number in a trading email.
  */
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   VOCABULARY,
@@ -16,6 +19,11 @@ import {
 } from "../tools/index.js";
 
 const EMPTY_ENV: Record<string, string | undefined> = {};
+
+// A real opencli cannot run in CI, and mocking execFile would test the mock.
+// A tiny script on disk that prints a CAPTURED response exercises the actual
+// subprocess + parse path against the real wire shape.
+const tmp = mkdtempSync(join(tmpdir(), "ow-tv-"));
 
 function tool(name: string, env = EMPTY_ENV) {
   const found = buildTools({ stateRoot: "/nonexistent", env }).find((t) => t.name === name);
@@ -166,6 +174,41 @@ describe("absent environment", () => {
     // The reason travels with the fallback: a reader must be able to tell a
     // machine that never had TradingView from one whose app was shut.
     expect(parsed.note).toContain("/nonexistent/opencli");
+  });
+
+  it("ow_tv_watchlist keeps only optionable US listings out of a real watchlist", async () => {
+    // The exact shape captured from the mini's own TradingView, 2026-09-02 —
+    // section headers with no exchange at all, futures, forex, crypto, a Korean
+    // listing and an index pseudo-ticker, mixed in with the real names. Before
+    // the venue filter every one of these reached the designer as a candidate
+    // instrument, "###BOND" and "ES1!" included.
+    const script = join(tmp, "fake-opencli.sh");
+    writeFileSync(
+      script,
+      "#!/bin/sh\ncat <<'JSON'\n" +
+        JSON.stringify([
+          {
+            id: 122362817,
+            name: "Everything",
+            symbol_count: 9,
+            symbols:
+              "###Indices,SPCFD:SPX,CBOE:VIX,TVC:NDX,###Stocks,NASDAQ:AAPL," +
+              "NYSE:GS,AMEX:SPY,CME_MINI:ES1!,FX:EURUSD,BITSTAMP:BTCUSD,KRX:000660",
+          },
+        ]) +
+        "\nJSON\n",
+      { mode: 0o755 },
+    );
+    const json = await tool("ow_tv_watchlist", {
+      OW_TV_ENABLED: "1",
+      OPENCLI_BIN: script,
+    }).run({});
+    const parsed = JSON.parse(json);
+    expect(parsed.tickers).toEqual(["AAPL", "GS", "SPY"]);
+    expect(parsed.source).toContain("TradingView");
+    // The note must describe THIS payload. It used to describe ow_spot's quote
+    // sources, in a payload that carries no quotes.
+    expect(parsed.note).not.toContain("marketTime");
   });
 
   it("ow_ib_positions names the host it could not reach", async () => {
