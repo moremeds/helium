@@ -47,6 +47,20 @@ const SPARK_POOL = "codex-spark";
  * that appears on two tiers hides the lower one. Each tier claims only what it
  * is the right answer for.
  */
+/**
+ * A model's caps describe what THIS PLUGIN can execute, not what the vendor's
+ * API is capable of. `tool.use` is deliberately absent: the wire call here is
+ * single-shot inference with no tool loop, and `run()` below refuses a work
+ * order that declares tools.
+ *
+ * It used to be listed, and that was a lie the router believed. Every model
+ * here is `unmetered`, so this provider is always the cheapest capable target
+ * — it therefore WON every tool-using step and then failed it at execution
+ * with "performs inference only". Declaring the capability honestly turns that
+ * runtime failure into a routing decision: a tool-using role now goes to a
+ * provider that can actually run one, or fails as `capability-shortage`, which
+ * names the real problem. Put `tool.use` back only together with a tool loop.
+ */
 export const CODEX_MODELS: ProviderModel[] = [
   {
     // Chores, at roughly haiku's level. Operator feedback 2026-09-02: quality
@@ -54,7 +68,7 @@ export const CODEX_MODELS: ProviderModel[] = [
     // allowance makes it the right thing to burn while wiring a flow up, and
     // under review once real work runs through it.
     id: "gpt-5.3-codex-spark",
-    caps: ["cheap.bulk", "reason.fast", "tool.use", "structured.output", "long.context"],
+    caps: ["cheap.bulk", "reason.fast", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -64,7 +78,7 @@ export const CODEX_MODELS: ProviderModel[] = [
   {
     // The labour tier.
     id: "gpt-5.6-luna",
-    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
@@ -74,7 +88,7 @@ export const CODEX_MODELS: ProviderModel[] = [
   {
     // Reserved for work that needs it; `reason.deep` lives only here.
     id: "gpt-5.6-sol",
-    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
