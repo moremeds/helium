@@ -29,13 +29,13 @@ export interface ClaudeInvocation {
   systemPrompt?: string;
   timeoutMs: number;
   /**
-   * The provider's declared environment. Only two keys are read, in this order:
-   * `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token` credential) then
-   * `ANTHROPIC_API_KEY`. Nothing is inherited from the ambient process.
+   * The provider's declared environment. Three keys are read: the credential,
+   * as `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token`) then
+   * `ANTHROPIC_API_KEY`, and `HELIUM_PROXY` — the egress the mini needs and the
+   * laptop does not (§3.1). Nothing is inherited from the ambient process;
+   * `loadOperatorEnv` puts the file's values into the env that is handed here.
    */
   env: Record<string, string>;
-  /** Explicit egress proxy; the mini needs one, the laptop does not (§3.1). */
-  proxy?: string;
   signal?: AbortSignal;
 }
 
@@ -137,7 +137,9 @@ export async function invokeClaude(
     },
     body: JSON.stringify(body),
     timeoutMs: input.timeoutMs,
-    ...(input.proxy === undefined ? {} : { proxy: input.proxy }),
+    ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+      ? {}
+      : { proxy: input.env.HELIUM_PROXY }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 

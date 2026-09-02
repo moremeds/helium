@@ -101,11 +101,17 @@ describe("invokeClaude", () => {
     });
   });
 
-  it("passes the declared proxy through and never inherits one", async () => {
+  it("takes the proxy from the declared env and never inherits one", async () => {
     reply(200, { content: [] });
-    await invokeClaude({ ...CALL, proxy: "http://127.0.0.1:7897" });
+    await invokeClaude({
+      ...CALL,
+      env: { ...ENV, HELIUM_PROXY: "http://127.0.0.1:7897" },
+    });
     expect(sent().proxy).toBe("http://127.0.0.1:7897");
 
+    // No declared proxy means no --proxy flag, never a fallback to an ambient
+    // https_proxy: the mini's direct egress is refused before auth, and a
+    // silent fallback is what made that look like a credential fault.
     curl.mockReset();
     reply(200, { content: [] });
     await invokeClaude(CALL);

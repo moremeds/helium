@@ -12,7 +12,13 @@
  * @module @helium/cli/cli
  */
 import { resolve } from "node:path";
-import { AuditStore, CapabilityCatalog, loadTenants, auditDbPath } from "@helium/core";
+import {
+  AuditStore,
+  CapabilityCatalog,
+  loadTenants,
+  auditDbPath,
+  loadOperatorEnv,
+} from "@helium/core";
 import { discoverProviders } from "./discovery.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
 
@@ -95,6 +101,9 @@ function printAudit(store: AuditStore, runId: string): number {
 
 async function main(argv: string[]): Promise<number> {
   const [command, argument] = argv;
+  // Before anything reads a credential or a proxy. Ambient values still win,
+  // so a one-off `HELIUM_PROXY=... helium run` overrides the file.
+  loadOperatorEnv();
   const env = process.env;
 
   if (command === "audit") {

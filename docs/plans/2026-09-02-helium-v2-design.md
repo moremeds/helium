@@ -106,11 +106,12 @@ export interface Provider {
   // estimated: the router adds it to every candidate, so a cheap per-token
   // model with a fat preamble must lose to a dearer one without (§3.1).
   overheadTokens: number;
-  // HTTP egress. Explicit because macOS system-proxy settings reach neither
-  // curl nor a launchd-spawned Node process, and because a provider is handed a
-  // curated env — an ambient https_proxy would not survive the isolation
-  // boundary. See the HELIUM_PROXY post-mortem in §3.1.
-  proxy?: string;
+  // HTTP egress arrives as the `HELIUM_PROXY` key of the provider's declared
+  // env, not as a separate argument — one channel, so there is no second place
+  // for a route to be decided. Explicit because macOS system-proxy settings
+  // reach neither curl nor a launchd-spawned Node process, and because a
+  // provider is handed a curated env, which an ambient https_proxy would not
+  // survive. See the HELIUM_PROXY post-mortem in §3.1.
   probe(): Promise<boolean>; // liveness; a dead provider is skipped, not fatal
   select(req: AgentRequest): ModelSelection; // dsh: installModelSelection args
 }
@@ -219,10 +220,21 @@ hand, every call above succeeds from the mini. Claude therefore never worked in
 production, and the failure surfaced as `"Not logged in"` because `classify()`
 maps 403 to `auth`.
 
+**Resolved.** The value is now read from `~/.config/helium/helium.env`, the
+0600 operator config the launchd wrapper already sources, via
+`loadOperatorEnv()` (`packages/core/src/config.ts`) — one line of
+`process.loadEnvFile`, which fills the environment without overwriting a
+variable already set, so `HELIUM_PROXY=… helium run` still beats the file. The
+plist variable is not the source of truth and can go. Proven from the mini
+2026-09-02: unauthenticated `POST https://api.anthropic.com/v1/messages`
+returns **401 through the proxy** and **403 direct** — rule 2's exact
+signature, from the machine that has the fault.
+
 Three rules follow, and they are acceptance criteria for the provider
 milestone:
 
-1. `proxy` is passed explicitly (`curl --proxy`), read from configuration.
+1. `proxy` is passed explicitly (`curl --proxy`), read from configuration
+   (`HELIUM_PROXY` in `~/.config/helium/helium.env`, overridable per run).
    Never inherited: the helper hands curl an environment with no proxy variable
    in it, so an ambient one cannot quietly decide the route. This is exactly the
    difference that hid the fault — the laptop's shell exported `HTTPS_PROXY`

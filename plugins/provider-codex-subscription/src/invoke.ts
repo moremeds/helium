@@ -29,13 +29,13 @@ export interface CodexInvocation {
   systemPrompt?: string;
   timeoutMs: number;
   /**
-   * The provider's declared environment. One key is read:
-   * `CODEX_ACCESS_TOKEN`, the `access_token` from `~/.codex/auth.json`.
-   * Nothing is inherited from the ambient process.
+   * The provider's declared environment. Two keys are read:
+   * `CODEX_ACCESS_TOKEN`, the `access_token` from `~/.codex/auth.json`, and
+   * `HELIUM_PROXY`, the egress the mini needs (§3.1). Nothing is inherited from
+   * the ambient process; `loadOperatorEnv` puts the file's values into the env
+   * that is handed here.
    */
   env: Record<string, string>;
-  /** Explicit egress proxy; the mini needs one (§3.1). */
-  proxy?: string;
   signal?: AbortSignal;
 }
 
@@ -209,7 +209,9 @@ export async function invokeCodex(
       parallel_tool_calls: true,
     }),
     timeoutMs: input.timeoutMs,
-    ...(input.proxy === undefined ? {} : { proxy: input.proxy }),
+    ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+      ? {}
+      : { proxy: input.env.HELIUM_PROXY }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 
