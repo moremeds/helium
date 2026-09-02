@@ -1233,9 +1233,11 @@ export function buildTools(cfg: {
       dshParams: {
         ticker: { type: "string", required: true, description: "Underlying symbol" },
         strategy: { type: "string", required: true, description: "e.g. put-credit-spread" },
-        legs: { type: "array", required: true, description: "right/expiry/strike/action/ratio" },
-        quantity: { type: "number", required: true, description: "Number of spreads" },
-        limitPrice: { type: "number", required: true, description: "Net debit(+) / credit(-)" },
+        legs: {
+          type: "array",
+          required: true,
+          description: "right/expiry/strike/action/ratio, plus the NBBO mid of each leg",
+        },
         rationale: { type: "string", required: true, description: "Why this structure" },
       },
       async run(args: Record<string, unknown>): Promise<string> {
