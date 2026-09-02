@@ -32,11 +32,13 @@ import {
   topologicalOrder,
   type CapabilityCatalog,
   type Channel,
+  type DeliveryReport,
   type EcosystemTool,
   type Gate,
   type LoadedTenant,
   type ModelSelection,
   type Provider,
+  type RunReport,
   type Span,
   type TargetProfile,
   type WorkOrder,
@@ -49,40 +51,15 @@ import {
   tenantToolGaps,
 } from "./discovery.js";
 
-export interface StepReport {
-  task: string;
-  role: string;
-  mode: "model" | "tool-only" | "deterministic";
-  targetId?: string;
-  downgradeReason?: string;
-  text: string;
-  failure?: string;
-  /** Gates that said no. An input refusal means no model call was made. */
-  gateRefusals?: Array<{ id: string; reason: string }>;
-}
-
-export interface DeliveryReport {
-  channel: string;
-  state: "sent" | "skipped" | "rate-capped" | "failed";
-  detail?: string;
-}
-
-export interface RunReport {
-  runId: string;
-  tenant: string;
-  mode: "model" | "tool-only";
-  providersLive: string[];
-  providersSkipped: Array<{ id: string; reason: string }>;
-  steps: StepReport[];
-  outcome: "completed" | "failed";
-  failure?: { class: string; detail: string };
-  /** Gates that failed to LOAD. A gate that stopped loading stopped guarding. */
-  gatesSkipped: Array<{ id: string; reason: string }>;
-  /** One entry per `delivery:` block in tenant.yaml. Empty when none declared. */
-  delivery: DeliveryReport[];
-  /** Tools this machine cannot serve: their `requiresEnv` key is unset. */
-  toolsUnconfigured: string[];
-}
+// These moved to `@helium/core` so a tenant's own renderer can name them
+// without depending on the CLI. Re-exported here because every existing
+// importer (cli.ts, the tests) reaches them through this module.
+export type {
+  DeliveryReport,
+  RenderedReport,
+  RunReport,
+  StepReport,
+} from "@helium/core";
 
 /**
  * What a step is assumed to cost before it runs, for cheapest-capable ranking

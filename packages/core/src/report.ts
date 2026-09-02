@@ -1,0 +1,69 @@
+/**
+ * What one run produced, as a value. It lives in core rather than in the CLI
+ * for one reason: a tenant that renders its own delivery must be able to name
+ * this type, and a tenant may not depend on the CLI.
+ *
+ * Core does not INTERPRET any of it. `text` is an opaque string here; whoever
+ * wrote it is the only one who knows what it means (doctrine 2).
+ * @module @helium/core/report
+ */
+import type { TenantSpec } from "./tenant.js";
+
+export interface StepReport {
+  task: string;
+  role: string;
+  mode: "model" | "tool-only" | "deterministic";
+  targetId?: string;
+  downgradeReason?: string;
+  text: string;
+  failure?: string;
+  /** Gates that said no. An input refusal means no model call was made. */
+  gateRefusals?: Array<{ id: string; reason: string }>;
+}
+
+export interface DeliveryReport {
+  channel: string;
+  state: "sent" | "skipped" | "rate-capped" | "failed";
+  detail?: string;
+}
+
+export interface RunReport {
+  runId: string;
+  tenant: string;
+  mode: "model" | "tool-only";
+  providersLive: string[];
+  providersSkipped: Array<{ id: string; reason: string }>;
+  steps: StepReport[];
+  outcome: "completed" | "failed";
+  failure?: { class: string; detail: string };
+  /** Gates that failed to LOAD. A gate that stopped loading stopped guarding. */
+  gatesSkipped: Array<{ id: string; reason: string }>;
+  /**
+   * Set when a tenant ships a renderer and it failed to load or threw. Its own
+   * field, not a row in `gatesSkipped`: a gate that stopped loading stopped
+   * GUARDING, while a renderer that stopped loading only costs the reader the
+   * pretty form. Folding the two together would make an email-formatting bug
+   * look like a safety check went missing.
+   */
+  rendererSkipped?: { reason: string };
+  /** One entry per `delivery:` block in tenant.yaml. Empty when none declared. */
+  delivery: DeliveryReport[];
+  /** Tools this machine cannot serve: their `requiresEnv` key is unset. */
+  toolsUnconfigured: string[];
+}
+
+/** What a tenant's own renderer produces. `html` is optional; `text` is not. */
+export interface RenderedReport {
+  subject: string;
+  text: string;
+  html?: string;
+}
+
+/**
+ * `plugins/<tenant>/render/index.ts`, `export default`. Optional: a tenant that
+ * ships none gets the generic transcript, unchanged.
+ */
+export type TenantRenderer = (
+  report: RunReport,
+  cfg: TenantSpec,
+) => RenderedReport;
