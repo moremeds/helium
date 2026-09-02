@@ -187,14 +187,27 @@ export interface RunOptions {
   signal?: AbortSignal;
 }
 
-/** The single required string parameter of a tool, if it has exactly one. */
+/**
+ * The single string parameter of a tool, if it has exactly one and that one
+ * actually accepts a string.
+ *
+ * The type check is not pedantry: this is how the tool-only path feeds a step's
+ * prompt to a tool, and a tool whose one parameter is an ARRAY was being handed
+ * a string and reported as a tool failure — a validation error dressed up as an
+ * unreachable service. Asking the schema whether it accepts a string is
+ * version-proof in a way that reaching into zod internals is not.
+ */
 function singleStringParam(tool: EcosystemTool): string | undefined {
   const shape = (
-    tool.paramsSchema as unknown as { shape?: Record<string, unknown> }
+    tool.paramsSchema as unknown as {
+      shape?: Record<string, { safeParse?: (value: unknown) => { success: boolean } }>;
+    }
   ).shape;
   if (shape === undefined) return undefined;
   const keys = Object.keys(shape);
-  return keys.length === 1 ? keys[0] : undefined;
+  if (keys.length !== 1) return undefined;
+  const field = shape[keys[0]!];
+  return field?.safeParse?.("probe")?.success === true ? keys[0] : undefined;
 }
 
 /**
@@ -396,7 +409,17 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           continue;
         }
         const startedAt = Date.now();
-        const value = await tool.run({ [key]: task.prompt ?? taskId });
+        // A tool that cannot reach its service THROWS, by design — that is how
+        // it avoids returning an invented number. Catching it here is what
+        // makes spec §7 possible: an unreachable IB Gateway degrades the report
+        // it appears in, it does not take the run down. The failure text is
+        // recorded as the tool's output so the reason reaches the email.
+        let value: string;
+        try {
+          value = await tool.run({ [key]: task.prompt ?? taskId });
+        } catch (error: unknown) {
+          value = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
+        }
         const span: Span = {
           runId,
           spanId: `tool:${taskId}:${name}`,

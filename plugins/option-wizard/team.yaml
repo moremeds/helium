@@ -1,0 +1,84 @@
+manifestVersion: "2"
+name: option-wizard
+# Source of truth: docs/plans/2026-09-02-option-wizard-tenant-spec.md §2.
+# No role names a model or a vendor — `requires` is the only routing input
+# (doctrine 3). Four of the seven steps require NOTHING, which is how this
+# manifest says "deterministic, not an agent": nothing is routed for them and
+# no model is called. Ranking rows by numeric fields is reproducible
+# arithmetic, and an LLM there costs tokens and adds variance for nothing.
+roles:
+  universe-builder:
+    requires: []
+    permissions:
+      mutations: forbidden
+      tools: [ow_tv_watchlist, ow_argon_watchlist, ow_ib_positions]
+
+  universe-screener:
+    requires: []
+    permissions:
+      mutations: forbidden
+      # Spec §3 says "pure compute over step 0 rows", but the rank FUNCTION was
+      # lost with the original spec (§8.2, §9) and is not reconstructable. Until
+      # it is specified this step declares no tool and reports that it produced
+      # nothing, which is the truthful state — never a placeholder ranking.
+      tools: []
+
+  regime-analyst:
+    requires: [reason.deep, tool.use]
+    permissions:
+      mutations: forbidden
+      tools: [ow_macro_rates, ow_uw_market_state]
+    persona: >-
+      You read the rates, yield-curve and market-tide data you are given and
+      state one regime verdict: direction bias, volatility stance, hedge
+      posture. You cite the numbers you used. You do not propose trades.
+
+  structure-designer:
+    requires: [reason.deep, tool.use, structured.output]
+    permissions:
+      mutations: forbidden
+      tools: [ow_uw_ticker_metrics, ow_ib_chain, ow_ib_quote]
+    persona: >-
+      You turn a ticker plus its IV, skew and gamma state plus the regime
+      verdict into concrete DEFINED-RISK proposals — legs, quantity, limit
+      price. Every short leg is covered by a long leg of the same right and
+      expiry. You never propose a naked short. You propose at most eight.
+
+  risk-reviewer:
+    requires: [reason.deep, long.context]
+    permissions:
+      mutations: forbidden
+      tools: [ow_ib_positions]
+    persona: >-
+      You are the adversarial second pass. You keep at most five proposals and
+      move the rest to a risk list, naming for each the specific reason it was
+      dropped. The risk list is an output in its own right, not a leftover.
+tasks:
+  - id: universe
+    role: universe-builder
+    requires: []
+    prompt: Merge the TradingView flag lists, the argon watchlist and the open IB positions into one deduplicated ticker set.
+
+  - id: screen
+    role: universe-screener
+    dependsOn: [universe]
+    requires: []
+    prompt: Rank the universe on argon's numeric fields alone and cut to a shortlist, recording a rejection reason for every ticker dropped.
+
+  - id: regime
+    role: regime-analyst
+    dependsOn: [universe]
+    requires: [reason.deep]
+    prompt: State today's regime verdict — direction bias, volatility stance, hedge posture — from the macro rates and market-state data.
+
+  - id: design
+    role: structure-designer
+    dependsOn: [screen, regime]
+    requires: [structured.output]
+    prompt: For the shortlisted tickers, propose defined-risk structures consistent with the regime verdict. Legs, quantity and limit price for each.
+
+  - id: review
+    role: risk-reviewer
+    dependsOn: [design]
+    requires: [long.context]
+    prompt: Keep at most five proposals. Move the rest to the risk list with the reason each was dropped.

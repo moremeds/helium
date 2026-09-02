@@ -1,0 +1,40 @@
+# option-wizard — helium's first tenant on the team lane.
+# Source of truth: docs/plans/2026-09-02-option-wizard-tenant-spec.md.
+#
+# Everything this tenant knows about options, IB, argon and Unusual Whales
+# lives in this directory and nowhere in packages/core (doctrine 2).
+tenant: option-wizard
+enabled: true
+team: team.yaml
+
+# Sandbox `none`: no filesystem write capability, and no tool with
+# order-placement semantics is ever registered, so "never place an order" is
+# structural rather than a prompt (spec §5).
+sandbox: none
+
+# Spec §6. The sum of the per-role caps is 370k tokens / $1.70; this is the run
+# ceiling with headroom. Real cost is read back from the audit table, never
+# estimated: SELECT role, SUM(cost_usd) FROM span WHERE run_id = ? GROUP BY role
+budget:
+  usd: 2.00
+  tokens: 400000
+
+# Key NAMES only — no value ever appears in this file (spec §3).
+env:
+  - OW_TV_ENABLED
+  - OPENCLI_BIN
+  - OW_ARGON_API_BASE
+  - OW_IB_HOST
+  - OW_IB_PORT
+  - OW_IB_CLIENT_ID
+  - OW_UW_API_KEY
+
+# EMPTY DELIBERATELY. The cron time, its timezone and the email recipients were
+# lost with the original spec (§8.3, §9) and are not reconstructable. A tenant
+# that ships a schedule ships a scheduled run, so declaring a guessed one would
+# start sending mail to a guessed address. Until an operator supplies both, this
+# tenant runs only when a human asks for it by name: `helium run option-wizard`.
+triggers: []
+delivery: []
+
+extensions: {}

@@ -826,3 +826,32 @@ tasks:
     audit.close();
   });
 });
+
+describe("a throwing tool degrades its step, not the run", () => {
+  const angry: EcosystemTool = {
+    name: "echo",
+    description: "always fails",
+    paramsSchema: z.object({ q: z.string() }),
+    mutating: false,
+    async run() {
+      throw new Error("OW_IB_HOST is unset");
+    },
+  };
+
+  it("records the failure as the tool's output and keeps going", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [],
+      tools: [angry],
+      catalog: catalogFor([]),
+    });
+    expect(report.outcome).toBe("completed");
+    expect(report.steps[0]?.text).toContain("FAILED: OW_IB_HOST is unset");
+    expect(audit.spans(report.runId)).toHaveLength(1);
+    audit.close();
+  });
+});
