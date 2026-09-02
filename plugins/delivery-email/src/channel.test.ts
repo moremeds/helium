@@ -11,10 +11,11 @@ function payload(runId = "r1") {
   return { tenant: "demo", runId, subject: "daily", body: "body" };
 }
 
-function channel(sendMail: ReturnType<typeof vi.fn>) {
+function channel(sendMail: ReturnType<typeof vi.fn>, env: NodeJS.ProcessEnv = {}) {
   return new EmailChannel({
     stateDir: mkdtempSync(join(tmpdir(), "helium-email-")),
     smtp: SMTP,
+    env,
     now: () => new Date("2026-09-02T12:00:00Z"),
     sleep: async () => {},
     transport: { sendMail } as never,
@@ -73,5 +74,15 @@ describe("EmailChannel", () => {
     const c = channel(vi.fn());
     await expect(c.deliver(payload(), { maxPerDay: 1 })).rejects.toThrow(/`to` address/);
     await expect(c.deliver(payload(), { to: "x@y.test" })).rejects.toThrow(/maxPerDay/);
+  });
+
+  it("takes the recipient from the environment when the manifest names none", async () => {
+    // option-wizard's tenant.yaml deliberately carries no address: the same
+    // manifest is read on a laptop and on the mini, and only one of them should
+    // mail a person.
+    const sendMail = vi.fn().mockResolvedValue({});
+    const c = channel(sendMail, { HELIUM_EMAIL_TO: "desk@example.test" });
+    await expect(c.deliver(payload(), { maxPerDay: 1 })).resolves.toMatchObject({ state: "sent" });
+    expect(sendMail.mock.calls[0]?.[0]).toMatchObject({ to: "desk@example.test" });
   });
 });

@@ -42,12 +42,22 @@ triggers: []
 # the same section of the spec, and a channel whose one required setting is
 # unknown cannot be configured honestly — whereas a file on the machine that
 # produced the run needs no recipient, no credential and no operator brake.
-# Add a second `email` entry here when an address is decided; nothing else has
-# to change.
+# The `email` entry below was added once the recipient could come from the
+# environment; the markdown file remains the artifact that needs no credential.
 delivery:
   - channel: markdown
     config:
       dir: reports
+  # Mail is external, so this entry alone sends nothing: the channel is resolved
+  # first and then asked whether it leaves the machine, and it does — so it also
+  # needs the operator's HELIUM_TENANT_DELIVERY=1 and a reachable SMTP_HOST.
+  # Three independent conditions, deliberately: intent here, authority in the
+  # brake, capability in the environment. The recipient is HELIUM_EMAIL_TO
+  # rather than a literal, so nobody's inbox is committed to the repo.
+  - channel: email
+    config:
+      subjectPrefix: "[option-wizard]"
+      maxPerDay: 2
 
 # The tenant-owned opaque block; the host never reads inside it (spec §3).
 #

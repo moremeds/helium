@@ -51,11 +51,15 @@ interface EmailConfig {
   maxPerDay: number;
 }
 
-function readConfig(config: Record<string, unknown>): EmailConfig {
-  const to = config.to;
+function readConfig(config: Record<string, unknown>, env: NodeJS.ProcessEnv): EmailConfig {
+  // The address is a deployment fact, not a tenant fact: the same manifest is
+  // read on the laptop and on the mini, and only one of them should mail a
+  // person. So `to` falls back to the environment and the manifest can stay
+  // free of anyone's inbox.
+  const to = config.to ?? env.HELIUM_EMAIL_TO;
   const maxPerDay = config.maxPerDay ?? config.max_per_day;
   if (typeof to !== "string" || to.trim() === "") {
-    throw new Error("email channel config needs a `to` address");
+    throw new Error("email channel config needs a `to` address, or HELIUM_EMAIL_TO set");
   }
   if (typeof maxPerDay !== "number" || maxPerDay <= 0) {
     throw new Error("email channel config needs a positive `maxPerDay`");
@@ -81,6 +85,7 @@ export class EmailChannel implements Channel {
     private readonly deps: {
       stateDir: string;
       smtp: SmtpConfig | null;
+      env?: NodeJS.ProcessEnv;
       now?: () => Date;
       sleep?: (ms: number) => Promise<void>;
       transport?: Transporter;
@@ -91,7 +96,7 @@ export class EmailChannel implements Channel {
     payload: DeliveryPayload,
     config: Record<string, unknown>,
   ): Promise<DeliveryOutcome> {
-    const email = readConfig(config);
+    const email = readConfig(config, this.deps.env ?? process.env);
     const transport = this.#ensureTransport();
     if (transport === null || this.deps.smtp === null) {
       return { state: "skipped", detail: "no SMTP configured" };
