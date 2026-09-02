@@ -22,3 +22,7 @@ CLAUDE.md
 
 # Run output: audit db, session logs and delivered reports.
 .helium-state/
+
+# Playwright MCP session scratch: console logs and page snapshots, tens of MB
+# per browsing session, regenerated on demand.
+.playwright-mcp/
