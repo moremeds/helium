@@ -23,6 +23,9 @@ budget:
 env:
   - OW_TV_ENABLED
   - OPENCLI_BIN
+  # Frank's Substack path. Separate from OPENCLI_BIN so the substack/web reader
+  # can be pointed at a different build without disabling TradingView too.
+  - OW_OPENCLI_BIN
   # The operator's ticker list, used only where TradingView is not installed.
   - OW_UNIVERSE
   - OW_ARGON_PG_URL

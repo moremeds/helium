@@ -11,6 +11,8 @@
  * @module dsh-plugin-tenant-option-wizard/tools
  */
 import { execFile } from "node:child_process";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
@@ -46,6 +48,15 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_gex", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  // No `requiresEnv`: the state root is always known, and an empty reports
+  // directory is a real answer — the first ever run of a phase — not a
+  // misconfiguration to report as a broken tool.
+  ["ow_reports", { mutating: false }],
+  // No `requiresEnv` either: OW_OPENCLI_BIN has a working default, and a
+  // `requiresEnv` on a key with a default reports a working machine as broken
+  // (the note above ow_tv_watchlist is the precedent).
+  ["ow_frank", { mutating: false }],
   ["ow_macro_rates", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_ib_preflight", { mutating: false }],
 ]);
@@ -562,6 +573,20 @@ const TickerMetricsParams = z.object({ tickers: z.array(z.string().min(1)).min(1
 // and picking a default here would be picking a market view on the caller's
 // behalf.
 const MarketStateParams = z.object({ sector: z.string().min(1), etf: z.string().min(1) });
+const FRANK_PUBLICATION = "https://franktrading.substack.com";
+
+const ReportsParams = z.object({
+  phase: z.string().min(1).max(64).optional(),
+  days: z.number().int().min(1).max(10),
+});
+
+/** `option-wizard-2026-09-02-premarket.md` -> {date, phase}. Anything that does
+ *  not match is not one of our reports and is ignored rather than guessed at. */
+const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
+
+const GexParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).max(12).optional(),
+});
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
   lookbackDays: z.number().int().positive().max(3650).optional(),
@@ -572,6 +597,35 @@ const BarsParams = z.object({
   timeframe: z.string().min(1).optional(),
   lookbackDays: z.number().int().positive().max(3650).optional(),
 });
+
+/** The most recently modified `.md` under `<root>/<dir>/`. Absent root, absent
+ *  file and an empty tree are all "no article", reported by the caller as the
+ *  failure it is — never as an empty string that reads like a silent Frank. */
+async function newestMarkdown(root: string): Promise<string | undefined> {
+  let best: { path: string; mtimeMs: number } | undefined;
+  let dirs: string[];
+  try {
+    dirs = await readdir(root);
+  } catch {
+    return undefined;
+  }
+  for (const entry of dirs) {
+    let names: string[];
+    try {
+      names = await readdir(join(root, entry));
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".md")) continue;
+      const path = join(root, entry, name);
+      const info = await stat(path);
+      if (best === undefined || info.mtimeMs > best.mtimeMs)
+        best = { path, mtimeMs: info.mtimeMs };
+    }
+  }
+  return best === undefined ? undefined : readFile(best.path, "utf8");
+}
 
 export function buildTools(cfg: {
   stateRoot: string;
@@ -1104,6 +1158,179 @@ export function buildTools(cfg: {
             {},
             ctx,
           ),
+        });
+      },
+    },
+    {
+      // GET /api/stock/{ticker}/gex-levels?source=vol
+      // Verified against the live response 2026-09-02 (SPY):
+      //   {"date":"2026-09-02","time":"2026-09-02T17:31:16.000000Z",
+      //    "source":"vol","call_wall":"766","gamma_flip":"764.77",
+      //    "gamma_magnet":"766","nearby_flips":["764.77","765.16","770.49",
+      //    "758.3","771.37"],"put_wall":"764"}
+      // Every level is a STRING in the response and stays a string here: the
+      // model quotes the level it was given, and a Number() round-trip is how
+      // "764.77" becomes 764.7699999 in a trading email.
+      // `source=vol` is volume-derived exposure — the same basis UW's own
+      // levels page shows. There is no net GEX/DEX total on this endpoint;
+      // those stay in ow_argon_metrics (uw_scan.greek_exposure_daily).
+      name: "ow_uw_gex",
+      description:
+        "Unusual Whales GEX levels per ticker: call wall, put wall, gamma flip, gamma magnet, nearby flips, with the as-of time UW returned.",
+      paramsSchema: GexParams,
+      mutating: false,
+      dshParams: {
+        tickers: {
+          type: "array",
+          description: "Tickers, e.g. [\"SPY\",\"QQQ\"]. Defaults to SPY and QQQ.",
+        },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { tickers } = GexParams.parse(args);
+        const wanted = (tickers ?? ["SPY", "QQQ"]).map((t) => symbolLiteral(t, "ow_uw_gex"));
+        const levels: unknown[] = [];
+        const unavailable: Array<{ ticker: string; reason: string }> = [];
+        for (const ticker of wanted) {
+          try {
+            const raw = (await uwGet(
+              env,
+              "ow_uw_gex",
+              `/api/stock/${encodeURIComponent(ticker)}/gex-levels`,
+              { source: "vol" },
+              ctx,
+            )) as Record<string, unknown>;
+            const body = (raw.data ?? raw) as Record<string, unknown>;
+            levels.push({
+              ticker,
+              // Untouched, in UW's own words and UW's own types.
+              date: body.date,
+              asOf: body.time,
+              source: body.source,
+              callWall: body.call_wall,
+              putWall: body.put_wall,
+              gammaFlip: body.gamma_flip,
+              gammaMagnet: body.gamma_magnet,
+              nearbyFlips: body.nearby_flips,
+            });
+          } catch (error: unknown) {
+            // One ticker's outage is not the tool's outage; a fabricated level
+            // would be. The absent one is NAMED so the reader can see the gap.
+            unavailable.push({
+              ticker,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        if (levels.length === 0) {
+          throw new Error(
+            `ow_uw_gex: no ticker returned levels — ${unavailable
+              .map((entry) => `${entry.ticker}: ${entry.reason}`)
+              .join("; ")}`,
+          );
+        }
+        return JSON.stringify({ levels, unavailable });
+      },
+    },
+    {
+      // Reads what THIS tenant wrote on earlier runs (delivery-markdown,
+      // <stateRoot>/reports). It is the only way a later phase can grade
+      // an earlier one, and it needs no database: the report file IS the
+      // record. `days` is capped at 10 because the whole point of the cap is
+      // to keep a markout step from pulling a fortnight of prose into context
+      // (doctrine 4).
+      name: "ow_reports",
+      description:
+        "This tenant's own past daily reports, newest first. Filter by phase; `days` bounds how far back to look.",
+      paramsSchema: ReportsParams,
+      mutating: false,
+      dshParams: {
+        phase: { type: "string", description: "premarket | intraday | close | weekly | frank" },
+        days: { type: "number", required: true, description: "How many days back, 1-10." },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { phase, days } = ReportsParams.parse(args);
+        const dir = join(cfg.stateRoot, "reports");
+        const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+        let names: string[];
+        try {
+          names = await readdir(dir);
+        } catch {
+          // No directory yet means no report yet — the first ever run of a
+          // phase is a legitimate empty answer, not a broken tool.
+          return JSON.stringify({ dir, reports: [] });
+        }
+        const rows = [];
+        for (const name of names.sort().reverse()) {
+          const match = REPORT_NAME.exec(name);
+          if (match === null) continue;
+          const [, date, found] = match;
+          if (date < cutoff) continue;
+          if (phase !== undefined && found !== phase) continue;
+          rows.push({ date, phase: found, text: await readFile(join(dir, name), "utf8") });
+        }
+        return JSON.stringify({ dir, reports: rows });
+      },
+    },
+    {
+      // Two opencli calls, verified locally 2026-09-03:
+      //   opencli substack publication <url> --limit 1 -f json
+      //     -> [{ "title", "url", "publish_time": "2026-08-31T12:37:14.509Z", … }]
+      //   opencli web read --url <post url>
+      //     -> writes web-articles/<title>/<title>.md under the CWD and prints
+      //        a JSON envelope with status: success. 26.6 KB, no paywall cut,
+      //        because the Chromium bridge carries the logged-in session — the
+      //        mini's login is prepared by the operator, and its absence shows
+      //        up here as a short or truncated markdown, never as an invention.
+      // CWD is a scratch dir under the state root precisely BECAUSE `web read`
+      // writes files where it stands: pointed at the repo it would litter the
+      // checkout (doctrine 5 — blast radius is where it runs).
+      name: "ow_frank",
+      description:
+        "Frank's latest Substack note: its url, publish time, and full markdown text.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(): Promise<string> {
+        const bin = (env.OW_OPENCLI_BIN ?? "").trim() === "" ? "opencli" : env.OW_OPENCLI_BIN!;
+        const cwd = join(cfg.stateRoot, "scratch", "frank");
+        await mkdir(cwd, { recursive: true });
+        const listArgv = ["substack", "publication", FRANK_PUBLICATION, "--limit", "1", "-f", "json"];
+        let listed: string;
+        try {
+          ({ stdout: listed } = await execFileAsync(bin, listArgv, { cwd, timeout: 120_000 }));
+        } catch (error: unknown) {
+          throw new Error(
+            `ow_frank: ${bin} ${listArgv.join(" ")} failed — ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        const parsed: unknown = JSON.parse(listed.trim() === "" ? "[]" : listed);
+        const rows = Array.isArray(parsed) ? parsed : [parsed];
+        const post = rows[0] as { url?: unknown; publish_time?: unknown; title?: unknown } | undefined;
+        if (typeof post?.url !== "string") {
+          throw new Error(`ow_frank: no post url in ${bin} substack publication output`);
+        }
+        const readArgv = ["web", "read", "--url", post.url];
+        try {
+          await execFileAsync(bin, readArgv, { cwd, timeout: 180_000 });
+        } catch (error: unknown) {
+          throw new Error(
+            `ow_frank: ${bin} ${readArgv.join(" ")} failed — ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        // `web read` names the directory and the file after the article title,
+        // and the exact slugging is opencli's business, not ours — so find the
+        // one .md it just wrote rather than reconstructing its name.
+        const markdown = await newestMarkdown(join(cwd, "web-articles"));
+        if (markdown === undefined) {
+          throw new Error(`ow_frank: ${bin} web read wrote no markdown under ${cwd}/web-articles`);
+        }
+        return JSON.stringify({
+          url: post.url,
+          publishedAt: typeof post.publish_time === "string" ? post.publish_time : undefined,
+          title: typeof post.title === "string" ? post.title : undefined,
+          markdown,
         });
       },
     },
