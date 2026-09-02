@@ -31,6 +31,9 @@ export interface RunReport {
   runId: string;
   tenant: string;
   mode: "model" | "tool-only";
+  /** The run label this run was started with. Opaque to core; the tenant and
+   *  the delivery channels are the only things that know what it means. */
+  phase: string;
   providersLive: string[];
   providersSkipped: Array<{ id: string; reason: string }>;
   steps: StepReport[];

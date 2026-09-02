@@ -179,6 +179,10 @@ export interface RunOptions {
   modelExecutor?: ModelExecutor;
   catalog?: CapabilityCatalog;
   signal?: AbortSignal;
+  /** The run label. Core-neutral; forwarded to prompts, gates and delivery. */
+  phase?: string;
+  /** Injected in tests so the clock in the step preamble can be frozen. */
+  now?: () => Date;
 }
 
 /**
@@ -235,6 +239,10 @@ function singleStringParam(tool: EcosystemTool): string | undefined {
  * ponytail: whole prior outputs, verbatim. Design §5 wants large tool outputs
  * summarised before they enter a context; when a hand-off first blows a
  * context window, that summariser is where this belongs.
+ *
+ * Dependencies with no text are dropped, not rendered as an empty section.
+ * That is also what makes a phase-skipped dependency harmless: it produced
+ * nothing, so it forwards nothing.
  */
 function handoff(
   task: { dependsOn: readonly string[] },
@@ -316,9 +324,48 @@ async function runGates(
   return { ran: applicable.length, refusals };
 }
 
+/**
+ * `2026-09-03T18:00:12+08:00` in Asia/Hong_Kong. Written out by hand from the
+ * parts `Intl` gives, because `toISOString()` is UTC and no runtime formats a
+ * zoned offset ISO string directly. The offset is derived, never hardcoded:
+ * HK does not observe DST today, and a literal +08:00 would make that a
+ * property of this file instead of a property of the zone.
+ */
+export function zonedNow(now: Date, timeZone = "Asia/Hong_Kong"): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(now);
+  const get = (type: string) => parts.find((part) => part.type === type)!.value;
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  const local = Date.UTC(
+    Number(get("year")),
+    Number(get("month")) - 1,
+    Number(get("day")),
+    Number(hour),
+    Number(get("minute")),
+    Number(get("second")),
+  );
+  const offsetMin = Math.round((local - now.getTime()) / 60_000);
+  const sign = offsetMin < 0 ? "-" : "+";
+  const abs = Math.abs(offsetMin);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}:${get("second")}` +
+    `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
+  );
+}
+
 export async function runTenant(options: RunOptions): Promise<RunReport> {
   const env = options.env ?? process.env;
   const runId = options.runId ?? `run-${randomUUID()}`;
+  const phase = options.phase ?? "premarket";
   const { spec, manifest } = options.tenant;
 
   const discovered =
@@ -367,6 +414,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     runId,
     tenant: spec.tenant,
     mode,
+    phase,
     providersLive: discovered.live.map((p) => p.id),
     providersSkipped: discovered.skipped,
     steps: [],
@@ -387,6 +435,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
 
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
+    // A task that names phases and does not name THIS one does not run. It is
+    // not a failure and it is not a gate refusal: it is a task that belongs to
+    // a different time of day. It contributes no `produced` entry, so every
+    // dependent sees exactly what it would see if the step had never been
+    // written — `handoff` already drops dependencies with no text.
+    if (task.phases !== undefined && !task.phases.includes(phase)) continue;
     const role = manifest.roles[task.role]!;
 
     const budget = remaining(options.audit, runId, spec.budget);
@@ -403,6 +457,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     // what the system-prompt assembly seam injects; here it is prepended to
     // the step prompt so the same text reaches the model either way.
     const line = budgetLine(budget, spec.budget);
+    const clock = `phase: ${phase}\nnow: ${zonedNow(options.now?.() ?? new Date())}`;
     const work: WorkOrder = WorkOrderSchema.parse({
       id: `${runId}:${taskId}`,
       role: task.role,
@@ -415,7 +470,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       },
       inputs: {
         artifacts: task.dependsOn.map((id) => `step:${id}`),
-        prompt: [line, role.persona ?? "", handoff(task, produced), task.prompt ?? taskId]
+        prompt: [clock, line, role.persona ?? "", handoff(task, produced), task.prompt ?? taskId]
           .filter((part) => part !== "")
           .join("\n\n"),
       },
