@@ -31,7 +31,9 @@ import {
   select,
   topologicalOrder,
   type CapabilityCatalog,
+  type Channel,
   type EcosystemTool,
+  type Gate,
   type LoadedTenant,
   type ModelSelection,
   type Provider,
@@ -39,7 +41,12 @@ import {
   type TargetProfile,
   type WorkOrder,
 } from "@helium/core";
-import { discoverProviders, loadTenantTools } from "./discovery.js";
+import {
+  discoverChannels,
+  discoverProviders,
+  loadGates,
+  loadTenantTools,
+} from "./discovery.js";
 
 export interface StepReport {
   task: string;
@@ -49,6 +56,14 @@ export interface StepReport {
   downgradeReason?: string;
   text: string;
   failure?: string;
+  /** Gates that said no. An input refusal means no model call was made. */
+  gateRefusals?: Array<{ id: string; reason: string }>;
+}
+
+export interface DeliveryReport {
+  channel: string;
+  state: "sent" | "skipped" | "rate-capped" | "failed";
+  detail?: string;
 }
 
 export interface RunReport {
@@ -60,6 +75,10 @@ export interface RunReport {
   steps: StepReport[];
   outcome: "completed" | "failed";
   failure?: { class: string; detail: string };
+  /** Gates that failed to LOAD. A gate that stopped loading stopped guarding. */
+  gatesSkipped: Array<{ id: string; reason: string }>;
+  /** One entry per `delivery:` block in tenant.yaml. Empty when none declared. */
+  delivery: DeliveryReport[];
 }
 
 /**
@@ -159,6 +178,10 @@ export interface RunOptions {
   providers?: Provider[];
   providersSkipped?: Array<{ id: string; reason: string }>;
   tools?: EcosystemTool[];
+  /** Injected in tests; loaded from the tenant's `lib/gates/` when absent. */
+  gates?: Gate[];
+  /** Injected in tests; discovered from `plugins/delivery-*` when absent. */
+  channels?: Channel[];
   modelExecutor?: ModelExecutor;
   catalog?: CapabilityCatalog;
   signal?: AbortSignal;
@@ -172,6 +195,73 @@ function singleStringParam(tool: EcosystemTool): string | undefined {
   if (shape === undefined) return undefined;
   const keys = Object.keys(shape);
   return keys.length === 1 ? keys[0] : undefined;
+}
+
+/**
+ * A gate is its own audited step (design §3): it runs BEFORE the model call it
+ * guards, so a refusal costs one zero-token span instead of a whole call. The
+ * span carries `toolName: "gate:<id>"` so the §5 query separates gate cost from
+ * model cost without a second table.
+ */
+async function runGates(
+  gates: readonly Gate[],
+  phase: "input" | "output",
+  input: unknown,
+  ctx: {
+    audit: AuditStore;
+    runId: string;
+    tenant: string;
+    role: string;
+    taskId: string;
+    stepNo: number;
+    remainingUsd: number;
+  },
+): Promise<{ ran: number; refusals: Array<{ id: string; reason: string }> }> {
+  const refusals: Array<{ id: string; reason: string }> = [];
+  const applicable = gates.filter(
+    (gate) =>
+      gate.phase === phase &&
+      (gate.appliesTo.includes("*") || gate.appliesTo.includes(ctx.role)),
+  );
+  for (const gate of applicable) {
+    const startedAt = Date.now();
+    // A gate that THROWS is a refusal, never a pass. Failing open would make a
+    // broken guard indistinguishable from a satisfied one.
+    let verdict: { pass: boolean; reason: string };
+    try {
+      verdict = await gate.check(input, {
+        runId: ctx.runId,
+        role: ctx.role,
+        remainingUsd: ctx.remainingUsd,
+      });
+    } catch (error: unknown) {
+      verdict = {
+        pass: false,
+        reason: `gate threw: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    ctx.audit.append({
+      runId: ctx.runId,
+      spanId: `gate:${ctx.taskId}:${gate.id}`,
+      tenant: ctx.tenant,
+      role: ctx.role,
+      provider: "none",
+      model: "none",
+      stepNo: ctx.stepNo,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      contextSize: 0,
+      latencyMs: Math.max(0, Date.now() - startedAt),
+      costUsd: 0,
+      toolName: `gate:${gate.id}`,
+      toolOutputBytes: Buffer.byteLength(verdict.reason, "utf8"),
+      summarised: false,
+      ts: new Date().toISOString(),
+    });
+    if (!verdict.pass) refusals.push({ id: gate.id, reason: verdict.reason });
+  }
+  return { ran: applicable.length, refusals };
 }
 
 export async function runTenant(options: RunOptions): Promise<RunReport> {
@@ -191,6 +281,16 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     }));
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
+  const loadedGates =
+    options.gates === undefined
+      ? await loadGates(options.tenant.dir)
+      : { gates: options.gates, skipped: [] };
+  const channels =
+    options.channels ??
+    (spec.delivery.length === 0
+      ? []
+      : (await discoverChannels(options.pluginsDir)).channels);
+
   const catalog = options.catalog ?? new (await import("@helium/core")).CapabilityCatalog();
   if (options.catalog === undefined) registerProviders(catalog, discovered.live);
 
@@ -208,12 +308,14 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     providersSkipped: discovered.skipped,
     steps: [],
     outcome: "completed",
+    gatesSkipped: loadedGates.skipped,
+    delivery: [],
   };
 
   const signal = options.signal ?? new AbortController().signal;
   let stepNo = 0;
 
-  for (const taskId of topologicalOrder(manifest)) {
+  tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
     const role = manifest.roles[task.role]!;
 
@@ -224,7 +326,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         class: "budget-exhausted",
         detail: `${spec.tenant} run ${runId} ran out of ${budget.reason} before task ${taskId}`,
       };
-      return report;
+      break tasks;
     }
 
     // Doctrine 4: the agent is TOLD what is left. In model mode this line is
@@ -249,6 +351,30 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       },
       acceptance: { outputSchema: "text" },
     });
+
+    // Input gates guard the STEP, so they run in tool-only mode too: a guard
+    // that only exists when a model is live is not a guard.
+    const input = await runGates(loadedGates.gates, "input", work, {
+      audit: options.audit,
+      runId,
+      tenant: spec.tenant,
+      role: task.role,
+      taskId,
+      stepNo: stepNo + 1,
+      remainingUsd: budget.usd,
+    });
+    if (input.ran > 0) stepNo += 1;
+    if (input.refusals.length > 0) {
+      report.steps.push({
+        task: taskId,
+        role: task.role,
+        mode,
+        text: "",
+        failure: "gate-refused",
+        gateRefusals: input.refusals,
+      });
+      continue;
+    }
 
     if (mode === "tool-only") {
       stepNo += 1;
@@ -288,14 +414,28 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         options.audit.append(span);
         outputs.push(`${name} -> ${value}`);
       }
+      const text =
+        outputs.length === 0
+          ? "(no tools declared for this role)"
+          : outputs.join("\n");
+      const out = await runGates(loadedGates.gates, "output", { text }, {
+        audit: options.audit,
+        runId,
+        tenant: spec.tenant,
+        role: task.role,
+        taskId,
+        stepNo: stepNo + 1,
+        remainingUsd: budget.usd,
+      });
+      if (out.ran > 0) stepNo += 1;
       report.steps.push({
         task: taskId,
         role: task.role,
         mode: "tool-only",
-        text:
-          outputs.length === 0
-            ? "(no tools declared for this role)"
-            : outputs.join("\n"),
+        text,
+        ...(out.refusals.length === 0
+          ? {}
+          : { failure: "gate-refused", gateRefusals: out.refusals }),
       });
       continue;
     }
@@ -315,7 +455,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           class: decision.failure?.class ?? "capability-shortage",
           detail: decision.failure?.reasons.join("; ") ?? "no target",
         };
-        return report;
+        break tasks;
       }
 
       const [providerId, ...rest] = String(decision.selected).split(":");
@@ -369,7 +509,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           class: failure?.failureClass ?? "provider-error",
           detail: error instanceof Error ? error.message : String(error),
         };
-        return report;
+        break tasks;
       }
 
       const spans = foldSessionLog(result.events, {
@@ -386,6 +526,20 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       options.audit.appendAll(spans);
       stepNo += spans.filter((span) => span.toolName === undefined).length;
 
+      // Output gates see what the model produced. A refusal here does NOT
+      // discard the text — the step ran and was paid for; it marks it so the
+      // tenant's renderer can route it (design §7: a failed gate is normal
+      // operation, not an error).
+      const out = await runGates(loadedGates.gates, "output", result, {
+        audit: options.audit,
+        runId,
+        tenant: spec.tenant,
+        role: task.role,
+        taskId,
+        stepNo: stepNo + 1,
+        remainingUsd: budget.usd,
+      });
+      if (out.ran > 0) stepNo += 1;
       report.steps.push({
         task: taskId,
         role: task.role,
@@ -395,10 +549,122 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           ? {}
           : { downgradeReason: decision.downgradeReason }),
         text: result.text,
+        ...(out.refusals.length === 0
+          ? {}
+          : { failure: "gate-refused", gateRefusals: out.refusals }),
       });
       break;
     }
   }
 
+  // Delivery runs even when the run FAILED. Design §7: silence is
+  // indistinguishable from a dead cron, which is the failure mode that killed
+  // the job this tenant replaces. A degraded report is still a report.
+  const brake = env.HELIUM_TENANT_DELIVERY === "1";
+  for (const entry of spec.delivery) {
+    if (!brake) {
+      report.delivery.push({
+        channel: entry.channel,
+        state: "skipped",
+        detail: "operator brake: HELIUM_TENANT_DELIVERY is not 1",
+      });
+      continue;
+    }
+    const channel = channels.find((candidate) => candidate.id === entry.channel);
+    if (channel === undefined) {
+      report.delivery.push({
+        channel: entry.channel,
+        state: "failed",
+        detail: `no delivery-${entry.channel} plugin with a built lib/channel.js`,
+      });
+      continue;
+    }
+    const startedAt = Date.now();
+    let outcome: DeliveryReport;
+    try {
+      const result = await channel.deliver(
+        {
+          tenant: spec.tenant,
+          runId,
+          subject: deliverySubject(report),
+          body: deliveryBody(report),
+        },
+        entry.config,
+      );
+      outcome = {
+        channel: entry.channel,
+        state: result.state,
+        ...(result.detail === undefined ? {} : { detail: result.detail }),
+      };
+    } catch (error: unknown) {
+      outcome = {
+        channel: entry.channel,
+        state: "failed",
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    stepNo += 1;
+    options.audit.append({
+      runId,
+      spanId: `delivery:${entry.channel}`,
+      tenant: spec.tenant,
+      role: "delivery",
+      provider: "none",
+      model: "none",
+      stepNo,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      contextSize: 0,
+      latencyMs: Math.max(0, Date.now() - startedAt),
+      costUsd: 0,
+      toolName: `delivery:${entry.channel}`,
+      toolOutputBytes: Buffer.byteLength(outcome.detail ?? outcome.state, "utf8"),
+      summarised: false,
+      ts: new Date().toISOString(),
+    });
+    report.delivery.push(outcome);
+  }
+
   return report;
+}
+
+/**
+ * The email IS the artifact (design §7.1), so rendering it is deterministic
+ * template work and never another model call — a role that only reformats an
+ * earlier role's output is the kind of ceremony doctrine 6 deletes.
+ */
+function deliverySubject(report: RunReport): string {
+  const day = new Date().toISOString().slice(0, 10);
+  const tag =
+    report.outcome === "failed"
+      ? "[FAILED] "
+      : report.mode === "tool-only"
+        ? "[DEGRADED] "
+        : "";
+  return `${tag}helium ${report.tenant} ${day}`;
+}
+
+function deliveryBody(report: RunReport): string {
+  const lines = [`run ${report.runId}  tenant ${report.tenant}  mode ${report.mode}`];
+  for (const skip of report.providersSkipped) {
+    lines.push(`provider skipped: ${skip.id} — ${skip.reason}`);
+  }
+  for (const skip of report.gatesSkipped) {
+    lines.push(`gate failed to load: ${skip.id} — ${skip.reason}`);
+  }
+  for (const step of report.steps) {
+    lines.push("", `── ${step.task} (${step.role})`);
+    for (const refusal of step.gateRefusals ?? []) {
+      lines.push(`   gate ${refusal.id} refused: ${refusal.reason}`);
+    }
+    if (step.text !== "") lines.push(step.text);
+  }
+  lines.push("");
+  lines.push(
+    report.outcome === "completed"
+      ? `outcome: completed (${report.steps.length} steps)`
+      : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
+  );
+  return lines.join("\n");
 }

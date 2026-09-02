@@ -34,6 +34,9 @@ function printRun(report: RunReport): void {
   for (const skip of report.providersSkipped) {
     console.log(`provider skipped: ${skip.id} — ${skip.reason}`);
   }
+  for (const skip of report.gatesSkipped) {
+    console.log(`gate failed to load: ${skip.id} — ${skip.reason}`);
+  }
   if (report.mode === "tool-only") {
     console.log(
       "no live provider: no model call was made, so no token counts exist for this run.",
@@ -45,7 +48,12 @@ function printRun(report: RunReport): void {
     if (step.downgradeReason !== undefined) {
       console.log(`   downgrade: ${step.downgradeReason}`);
     }
-    for (const line of step.text.split("\n")) console.log(`   ${line}`);
+    for (const refusal of step.gateRefusals ?? []) {
+      console.log(`   gate ${refusal.id} refused: ${refusal.reason}`);
+    }
+    if (step.text !== "") {
+      for (const line of step.text.split("\n")) console.log(`   ${line}`);
+    }
   }
   console.log("");
   console.log(
@@ -53,6 +61,11 @@ function printRun(report: RunReport): void {
       ? `outcome: completed (${report.steps.length} steps)`
       : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
   );
+  for (const sent of report.delivery) {
+    console.log(
+      `delivery ${sent.channel}: ${sent.state}${sent.detail === undefined ? "" : ` — ${sent.detail}`}`,
+    );
+  }
   console.log(`audit: helium audit ${report.runId}`);
 }
 
