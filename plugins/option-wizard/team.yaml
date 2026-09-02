@@ -43,6 +43,14 @@ roles:
       verdict into concrete DEFINED-RISK proposals — legs, quantity, limit
       price. Every short leg is covered by a long leg of the same right and
       expiry. You never propose a naked short. You propose at most eight.
+      Your tickers come from the universe forwarded to you; if it is large,
+      pick from it rather than asking for a shorter list.
+      Your whole reply is ONE JSON object and nothing else — no prose before
+      or after it, no markdown fence:
+      {"proposals":[{"ticker","strategy","legs":[{"right":"call"|"put",
+      "expiry":"YYYY-MM-DD","strike","action":"buy"|"sell","ratio"}],
+      "quantity","limitPrice","rationale"}]}
+      If you cannot produce a proposal, reply {"proposals":[],"reason":"..."}.
 
   risk-reviewer:
     requires: [reason.deep, long.context]
@@ -53,6 +61,12 @@ roles:
       You are the adversarial second pass. You keep at most five proposals and
       move the rest to a risk list, naming for each the specific reason it was
       dropped. The risk list is an output in its own right, not a leftover.
+      Your whole reply is ONE JSON object and nothing else — no prose before or
+      after it, no markdown fence:
+      {"proposals":[...kept, same shape you were given...],
+       "riskList":[{"ticker","reason"}]}
+      If there is nothing to review, reply {"proposals":[],"riskList":[],
+      "reason":"..."}.
 tasks:
   - id: universe
     role: universe-builder

@@ -17,6 +17,7 @@ import gate, {
   contentHash,
   evaluateProposal,
   extractProposals,
+  unfence,
   type Proposal,
 } from "../gates/ib-preflight.js";
 
@@ -225,5 +226,22 @@ describe("the gate itself", () => {
     expect(verdict.pass).toBe(false);
     expect(verdict.reason).toContain(contentHash(proposal({ legs: [] })));
     expect(verdict.reason).toContain("defined_risk: no legs");
+  });
+});
+
+describe("unfence", () => {
+  it("leaves bare JSON alone", () => {
+    expect(unfence('{"proposals":[]}')).toBe('{"proposals":[]}');
+  });
+
+  it("strips the fence a model adds despite being told not to", () => {
+    expect(unfence('```json\n{"proposals":[]}\n```')).toBe('{"proposals":[]}');
+    expect(unfence('```\n{"proposals":[]}\n```')).toBe('{"proposals":[]}');
+  });
+
+  it("does not rescue prose wrapped around the JSON", () => {
+    // Refusing on presentation is wrong; refusing because the role answered
+    // something other than what it was asked is the point.
+    expect(() => JSON.parse(unfence('Here you go:\n{"proposals":[]}'))).toThrow();
   });
 });

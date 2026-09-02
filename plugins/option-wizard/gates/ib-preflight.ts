@@ -274,6 +274,20 @@ export function evaluateProposal(
 }
 
 /**
+ * A model told to answer with JSON and nothing else will still fence it about
+ * half the time, and refusing that is refusing on presentation rather than on
+ * risk — the one thing this gate must never do. Only a fence is stripped:
+ * prose around the JSON stays a refusal, because it means the role did
+ * something other than what it was asked.
+ */
+export function unfence(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("```")) return trimmed;
+  const withoutOpen = trimmed.replace(/^```[a-zA-Z]*\r?\n?/, "");
+  return withoutOpen.replace(/\r?\n?```$/, "").trim();
+}
+
+/**
  * Output-gate input is whatever the role produced. A proposal that cannot be
  * parsed out of it is a refusal, not a skip: an unreadable proposal is
  * indistinguishable from an unsafe one.
@@ -285,7 +299,7 @@ export function extractProposals(input: unknown): { proposals: unknown[]; error?
     if (record.structured !== undefined) candidate = record.structured;
     else if (typeof record.text === "string") {
       try {
-        candidate = JSON.parse(record.text);
+        candidate = JSON.parse(unfence(record.text));
       } catch {
         return { proposals: [], error: "role output is not JSON" };
       }
