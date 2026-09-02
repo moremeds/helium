@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   dshBin,
+  dshOverridesYaml,
   makeDshHome,
   PINNED_DSH_VERSION,
   repoRoot,
@@ -36,6 +37,14 @@ describe("contract: agentCtx.tools.restrict() denies a tool in the agent's own s
 
   beforeAll(() => {
     dshHome = makeDshHome();
+    // Neither install below has a lockfile, so both re-resolve the dsh train's
+    // caret self-dependencies from the registry at run time. Pinning them is
+    // what keeps this contract's verdict a function of the code and not of the
+    // date (see dshOverridesYaml).
+    writeFileSync(
+      join(fixtureDir, "pnpm-workspace.yaml"),
+      `${["packages:", "  - .", "", ...dshOverridesYaml(), ""].join("\n")}`,
+    );
     execFileSync("pnpm", ["-C", fixtureDir, "install"], { stdio: "pipe" });
     execFileSync("pnpm", ["-C", fixtureDir, "build"], { stdio: "pipe" });
 
@@ -91,6 +100,8 @@ describe("contract: agentCtx.tools.restrict() denies a tool in the agent's own s
         "  protobufjs: true",
         "  '@google/genai': true",
         "  '@deepseek-ai/dsh-subprocess-local': true",
+        "",
+        ...dshOverridesYaml(),
         "",
       ].join("\n"),
     );
