@@ -1,6 +1,0 @@
-- id: health-sensor
-  config:
-    url: !!js process.env.SENSOR_URL
-    intervalMs: !!js Number(process.env.SENSOR_INTERVAL_MS)
-    outFile: !!js process.env.SENSOR_OUT
-    fields: [ok, db, version, watchlist_size]

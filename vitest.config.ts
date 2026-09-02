@@ -9,6 +9,7 @@ export default defineConfig({
           environment: "node",
           include: [
             "packages/*/tests/**/*.spec.ts",
+            "packages/*/src/**/*.test.ts",
             "plugins/*/tests/**/*.spec.ts",
             "plugins/*/src/**/*.test.ts",
           ],

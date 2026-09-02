@@ -1,6 +1,0 @@
-- insert:
-    - id: helium-team-host-fixture
-      name: "dsh-plugin-helium-team-host-fixture"
-      config:
-        outFile: !!js process.env.HELIUM_TEAM_HOST_OUT
-        workspacesDir: !!js process.env.HELIUM_TEAM_HOST_WORKSPACES

@@ -1,67 +1,35 @@
-manifestVersion: "1"
+manifestVersion: "2"
 name: fake-tenant
+# Two roles, so routing has to distinguish two capability sets, and a
+# three-task DAG so the topological order is actually exercised. No role names
+# a model; `requires` is the only routing input.
 roles:
   prober:
-    responsibility: evidence
-    requires: [fake-probe-evidence]
+    requires: [tool.use, cheap.bulk]
     permissions:
-      externalResearch: false
       mutations: forbidden
-      artifactRead: [source-artifacts]
-      tools: [fake_probe]
-  checker:
-    responsibility: verification
-    requires: [fake-verification]
-    permissions:
-      externalResearch: false
-      mutations: forbidden
-      artifactRead: [source-artifacts, dependency-artifacts]
-      tools: []
+      tools: [fake_probe, fake_count]
+    persona: >-
+      You call the tools you are given and report exactly what they returned.
   scribe:
-    responsibility: rendering
-    requires: [fake-rendering]
+    requires: [structured.output, cheap.bulk]
     permissions:
-      externalResearch: false
       mutations: forbidden
-      artifactRead: [accepted-claim-ledger]
       tools: []
-# Two independent producers, then a verifier, then a renderer. Fewer nodes
-# would not exercise the seam honestly: `requireIndependentEvidence` needs two
-# producers, and the renderer's `acceptedClaimKeys` can only resolve against a
-# ledger some verifier actually populated.
+    persona: >-
+      You summarise the prior steps in at most three sentences.
 tasks:
-  - id: probe-a
+  - id: probe
     role: prober
-    dependsOn: []
-    requires: [fake-probe-evidence]
-    inputs: [source-artifacts]
-    outputSchema: ClaimSet.v1
-  - id: probe-b
+    requires: [tool.use]
+    prompt: Call fake_probe with q="hello" and report what it echoed.
+  - id: count
     role: prober
-    dependsOn: []
-    requires: [fake-probe-evidence]
-    inputs: [source-artifacts]
-    outputSchema: ClaimSet.v1
-  - id: checker
-    role: checker
-    dependsOn: [probe-a, probe-b]
-    requires: [fake-verification]
-    inputs: [source-artifacts, dependency-artifacts]
-    outputSchema: EvidenceDecisionSet.v1
-  - id: render
+    dependsOn: [probe]
+    requires: [tool.use]
+    prompt: Call fake_count with text="hello world" and report the counts.
+  - id: report
     role: scribe
-    dependsOn: [checker]
-    requires: [fake-rendering]
-    inputs: [accepted-claim-ledger]
-    # A BUILTIN id. The registry throws `unknown team output schema: <id>` for
-    # anything unregistered, and this tenant deliberately ships no descriptor,
-    # so it has no way to register one of its own. A tenant-owned schema and
-    # "a tenant with no descriptor" are mutually exclusive; this file is the
-    # second.
-    outputSchema: AdjudicatedSynthesis.v1
-crossReference:
-  compareClaims: true
-  materialContradictions: fresh-evidence-work-order
-  requireIndependentEvidence: true
-budgets: { maxAttempts: 4, maxTokens: 100000 }
-acceptance: { allowPartialClaims: true, terminalTasks: [render] }
+    dependsOn: [probe, count]
+    requires: [structured.output]
+    prompt: Summarise what the two probe steps found.

@@ -1,21 +1,17 @@
 # The tenant-seam proof. It exists only so CI can remove and re-add a whole
-# tenant without editing packages/core or plugins/helium -- the exact drill
-# packages/fake-flat-rate runs for the provider seam.
+# tenant without editing packages/core, and so `helium run fake-tenant` is a
+# real end-to-end path that touches no network and knows no business domain.
 #
-# `enabled: false` is the shipped state, and it is a boundary rather than a
-# comment. Discovery is a glob over `plugins/*/tenant.yaml` and the deploy
-# points HELIUM_TENANTS_DIR at `__RELEASE__/plugins`, which is the whole
-# deployed tree; there is no second allow-list, and HELIUM_TENANT_DELIVERY=0
-# suppresses SMTP only -- the controller would still run. A tenant that ships
-# `enabled: true` with a daily cron therefore runs on the mini at 04:00 UTC.
-# The tests copy this directory to a temp root and flip the flag there.
+# `enabled: true` is safe here precisely because it has no cron trigger and no
+# delivery channel: discovery is a glob over `plugins/*/tenant.yaml`, so a
+# tenant that ships a schedule ships a scheduled run. This one runs only when
+# a human asks for it by name.
 tenant: fake-tenant
-enabled: false
+enabled: true
 team: team.yaml
-promotionMode: delivered
-triggers:
-  - kind: cron
-    schedule: "0 4 * * *"
-    timezone: UTC
-delivery:
-  jsonl: true
+sandbox: none
+budget:
+  usd: 0.05
+  tokens: 20000
+triggers: []
+delivery: []

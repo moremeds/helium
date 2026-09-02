@@ -1,17 +1,8 @@
-import { type ChildProcess } from "node:child_process";
-import { readFileSync } from "node:fs";
-import {
-  ProviderProcessExitedBeforeReceiptError,
-  spawnSupervisedProviderProcess,
-  writeProviderProcessReceipt,
-} from "@helium/provider-sdk/process-receipt";
+import { curlPostJson } from "@helium/provider-sdk/curl";
 import type { CodexEffort } from "./catalog.js";
 
 export type CodexClassification =
-  | "timeout"
-  | "cancelled"
-  | "quota-exhausted"
-  | "error";
+  "proxy" | "auth" | "timeout" | "cancelled" | "quota-exhausted" | "error";
 
 export interface CodexRuntimeSnapshot {
   requestedModel: string;
@@ -30,371 +21,236 @@ export interface CodexInvocationResult {
   runtimeSnapshot: CodexRuntimeSnapshot;
 }
 
-const QUOTA_RE = /\b429\b|rate[_\s-]?limit|usage limit|quota|credits exhausted/i;
-const RETRY_RE = /"(?:retry[_-]?after|resets?[_-]?at)"\s*:\s*"([^"]+)"/i;
-
-function killTree(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.pid !== undefined) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Fall through when the process group is already gone.
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch {
-    // Already gone.
-  }
-}
-
-function parseEvents(stdout: string): unknown[] {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line) as unknown;
-      } catch {
-        return { malformed: line };
-      }
-    });
-}
-
-interface McpServerConfig {
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-}
-
-const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/;
-
-function parseMcpConfig(path: string): Record<string, McpServerConfig> {
-  const parsed = JSON.parse(readFileSync(path, "utf8")) as {
-    mcpServers?: unknown;
-  };
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    typeof parsed.mcpServers !== "object" ||
-    parsed.mcpServers === null ||
-    Array.isArray(parsed.mcpServers)
-  ) {
-    throw new Error("Codex MCP config must contain an mcpServers object");
-  }
-  const servers: Record<string, McpServerConfig> = {};
-  for (const [name, value] of Object.entries(parsed.mcpServers)) {
-    if (!BARE_TOML_KEY.test(name)) {
-      throw new Error(`invalid MCP server name for Codex config: ${name}`);
-    }
-    if (typeof value !== "object" || value === null || Array.isArray(value)) {
-      throw new Error(`invalid MCP server config: ${name}`);
-    }
-    const raw = value as { command?: unknown; args?: unknown; env?: unknown };
-    if (typeof raw.command !== "string" || raw.command.length === 0) {
-      throw new Error(`MCP server ${name} requires a command`);
-    }
-    if (
-      raw.args !== undefined &&
-      (!Array.isArray(raw.args) || raw.args.some((arg) => typeof arg !== "string"))
-    ) {
-      throw new Error(`MCP server ${name} args must be strings`);
-    }
-    if (
-      raw.env !== undefined &&
-      (typeof raw.env !== "object" || raw.env === null || Array.isArray(raw.env))
-    ) {
-      throw new Error(`MCP server ${name} env must be a string map`);
-    }
-    const env = raw.env as Record<string, unknown> | undefined;
-    if (
-      env !== undefined &&
-      Object.entries(env).some(
-        ([key, entry]) => !BARE_TOML_KEY.test(key) || typeof entry !== "string",
-      )
-    ) {
-      throw new Error(`MCP server ${name} env must use safe keys and string values`);
-    }
-    servers[name] = {
-      command: raw.command,
-      ...(raw.args === undefined ? {} : { args: raw.args as string[] }),
-      ...(env === undefined ? {} : { env: env as Record<string, string> }),
-    };
-  }
-  return servers;
-}
-
-function tomlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function tomlStringArray(values: string[]): string {
-  return `[${values.map(tomlString).join(",")}]`;
-}
-
-function tomlStringMap(values: Record<string, string>): string {
-  return `{ ${Object.entries(values)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([key, value]) => `${key} = ${tomlString(value)}`)
-    .join(", ")} }`;
-}
-
-function toolAssignments(
-  serverNames: string[],
-  allowedTools: string[],
-): Map<string, string[]> {
-  const assigned = new Map(serverNames.map((name) => [name, new Set<string>()]));
-  for (const declared of allowedTools) {
-    const match = /^mcp__([A-Za-z0-9_-]+)__(.+)$/.exec(declared);
-    const server = match?.[1] ?? (serverNames.length === 1 ? serverNames[0] : undefined);
-    const tool = match?.[2] ?? declared;
-    if (server === undefined || !assigned.has(server)) {
-      throw new Error(
-        `allowed tool ${declared} is not addressed to a configured MCP server`,
-      );
-    }
-    if (tool.length === 0) throw new Error(`allowed tool ${declared} has no tool name`);
-    assigned.get(server)?.add(tool);
-  }
-  return new Map(
-    [...assigned].map(([server, tools]) => [server, [...tools].sort()]),
-  );
-}
-
-function boundaryConfig(input: {
-  allowedTools: string[];
-  mcpConfigPath?: string;
-}): string[] {
-  const values = [
-    'approval_policy="never"',
-    "features.shell_tool=false",
-    "features.unified_exec=false",
-    "tools.web_search=false",
-    "features.multi_agent=false",
-    "features.apps=false",
-    "features.browser_use=false",
-    "features.browser_use_external=false",
-    "features.chronicle=false",
-    "features.computer_use=false",
-    "features.image_generation=false",
-    "features.in_app_browser=false",
-    "features.memories=false",
-    "features.plugin_sharing=false",
-    "features.tool_suggest=false",
-    "features.workspace_dependencies=false",
-  ];
-  if (input.mcpConfigPath === undefined) {
-    if (input.allowedTools.length > 0) {
-      throw new Error("allowed Codex MCP tools require an MCP config path");
-    }
-    return values;
-  }
-  const servers = parseMcpConfig(input.mcpConfigPath);
-  const names = Object.keys(servers).sort();
-  const assignments = toolAssignments(names, input.allowedTools);
-  for (const name of names) {
-    const server = servers[name] as McpServerConfig;
-    values.push(`mcp_servers.${name}.command=${tomlString(server.command)}`);
-    if (server.args !== undefined) {
-      values.push(`mcp_servers.${name}.args=${tomlStringArray(server.args)}`);
-    }
-    if (server.env !== undefined) {
-      values.push(`mcp_servers.${name}.env=${tomlStringMap(server.env)}`);
-    }
-    values.push(
-      `mcp_servers.${name}.enabled_tools=${tomlStringArray(assignments.get(name) ?? [])}`,
-      `mcp_servers.${name}.required=true`,
-    );
-  }
-  return values;
-}
-
-export async function invokeCodex(input: {
+export interface CodexInvocation {
   model: string;
   effort: CodexEffort;
   prompt: string;
-  cwd: string;
+  /** Becomes the Responses API `instructions` field. */
+  systemPrompt?: string;
   timeoutMs: number;
-  sandbox: "read-only" | "workspace-write";
+  /**
+   * The provider's declared environment. Two keys are read:
+   * `CODEX_ACCESS_TOKEN`, the `access_token` from `~/.codex/auth.json`, and
+   * `HELIUM_PROXY`, the egress the mini needs (§3.1). Nothing is inherited from
+   * the ambient process; `loadOperatorEnv` puts the file's values into the env
+   * that is handed here.
+   */
   env: Record<string, string>;
-  allowedTools: string[];
-  mcpConfigPath?: string;
   signal?: AbortSignal;
-}): Promise<CodexInvocationResult> {
-  const config = boundaryConfig(input);
-  const args = [
-    "exec",
-    "--model",
-    input.model,
-    "--config",
-    `model_reasoning_effort=\"${input.effort}\"`,
-    "--cd",
-    input.cwd,
-    "--sandbox",
-    input.sandbox,
-    "--skip-git-repo-check",
-    "--ephemeral",
-    "--ignore-user-config",
-    "--ignore-rules",
-    "--strict-config",
-    ...config.flatMap((value) => ["--config", value]),
-    "--json",
-    input.prompt,
-  ];
+}
 
-  return await new Promise<CodexInvocationResult>((resolve) => {
-    const child = spawnSupervisedProviderProcess("codex", args, {
-      cwd: input.cwd,
-      env: input.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.on("error", () => {});
-    if (child.pid === undefined) {
-      resolve({
-        ok: false,
-        classification: "error",
-        runtimeSnapshot: {
-          requestedModel: input.model,
-          requestedEffort: input.effort,
-          effectiveEffort: input.effort,
-          usage: {},
-          events: [{ spawnError: "Codex child has no pid" }],
-        },
-      });
-      return;
-    }
-    let receipt: { clear(): void } = { clear() {} };
+/**
+ * The ChatGPT subscription backend, not `api.openai.com` — a subscription token
+ * is only accepted here. Same endpoint the official CLI uses.
+ */
+const ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
+
+/** The JWT claim that carries the account the subscription bills to. */
+const ACCOUNT_CLAIM = "https://api.openai.com/auth";
+
+/**
+ * Identifies the caller to OpenAI. Unlike Anthropic's identity string this is
+ * not an entitlement check — pi ships `originator: pi` and is served — but the
+ * header is required, so we answer honestly rather than impersonate the CLI.
+ */
+const ORIGINATOR = "helium";
+
+function classify(status: number): CodexClassification {
+  if (status === 401) return "auth";
+  // 403 here is Cloudflare or geo, never credentials: the token is not even
+  // evaluated. See the design §3.1 post-mortem.
+  if (status === 403) return "proxy";
+  if (status === 429) return "quota-exhausted";
+  return "error";
+}
+
+function accountIdFrom(token: string): string | undefined {
+  const payload = token.split(".")[1];
+  if (payload === undefined) return undefined;
+  try {
+    const claims = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    ) as Record<string, { chatgpt_account_id?: string } | undefined>;
+    return claims[ACCOUNT_CLAIM]?.chatgpt_account_id;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The endpoint only streams, so a complete reply arrives as SSE. We collect
+ * rather than surface a stream: every consumer here is a non-interactive run
+ * that wants the finished text, and buffering keeps the token accounting in
+ * one place.
+ */
+function collectSse(body: string): {
+  text: string;
+  usage: { inputTokens?: number; outputTokens?: number };
+  events: unknown[];
+  errorMessage?: string;
+} {
+  let text = "";
+  let usage: { inputTokens?: number; outputTokens?: number } = {};
+  let errorMessage: string | undefined;
+  const events: unknown[] = [];
+
+  for (const line of body.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (payload === "" || payload === "[DONE]") continue;
+    let event: unknown;
     try {
-      receipt = writeProviderProcessReceipt({
-        workspace: input.cwd,
-        pid: child.pid,
-        provider: "codex-subscription",
-      });
-    } catch (error) {
-      if (error instanceof ProviderProcessExitedBeforeReceiptError) {
-        // The close handler still owns the already-buffered provider result.
-      } else {
-        child.on("error", () => {});
-        killTree(child, "SIGKILL");
-        resolve({
-          ok: false,
-          classification: "error",
-          runtimeSnapshot: {
-            requestedModel: input.model,
-            requestedEffort: input.effort,
-            effectiveEffort: input.effort,
-            usage: {},
-            events: [
-              {
-                receiptError:
-                  error instanceof Error ? error.message : String(error),
-              },
-            ],
-          },
-        });
-        return;
-      }
+      event = JSON.parse(payload);
+    } catch {
+      continue;
     }
-    let stdout = "";
-    let stderr = "";
-    let terminal: CodexClassification | undefined;
-    let settled = false;
-    let killTimer: NodeJS.Timeout | undefined;
-    const stopChild = () => {
-      killTree(child, "SIGTERM");
-      if (killTimer === undefined) {
-        killTimer = setTimeout(() => killTree(child, "SIGKILL"), 1_000);
-        killTimer.unref();
-      }
+    events.push(event);
+    const e = event as {
+      type?: string;
+      delta?: string;
+      message?: string;
+      error?: { message?: string };
+      response?: {
+        usage?: { input_tokens?: number; output_tokens?: number };
+        error?: { message?: string };
+      };
     };
-    const finish = (result: CodexInvocationResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (killTimer !== undefined) clearTimeout(killTimer);
-      input.signal?.removeEventListener("abort", abort);
-      try { receipt.clear(); } catch { /* startup reaper handles a residual receipt */ }
-      resolve(result);
-    };
-    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
-    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
-    const timer = setTimeout(() => {
-      terminal = "timeout";
-      stopChild();
-    }, input.timeoutMs);
-    const abort = () => {
-      terminal = "cancelled";
-      stopChild();
-    };
-    if (input.signal?.aborted) abort();
-    else input.signal?.addEventListener("abort", abort, { once: true });
+    if (
+      e.type === "response.output_text.delta" &&
+      typeof e.delta === "string"
+    ) {
+      text += e.delta;
+    }
+    if (e.type === "error" || e.error !== undefined) {
+      errorMessage = e.error?.message ?? e.message ?? errorMessage;
+    }
+    // In-progress events carry `usage: null`, not an absent key.
+    const u = e.response?.usage;
+    if (u !== undefined && u !== null) {
+      usage = {
+        ...(u.input_tokens === undefined
+          ? {}
+          : { inputTokens: u.input_tokens }),
+        ...(u.output_tokens === undefined
+          ? {}
+          : { outputTokens: u.output_tokens }),
+      };
+    }
+    if (e.response?.error?.message !== undefined) {
+      errorMessage = e.response.error.message;
+    }
+  }
+  return {
+    text,
+    usage,
+    events,
+    ...(errorMessage === undefined ? {} : { errorMessage }),
+  };
+}
 
-    child.on("error", (error) => {
-      finish({
-        ok: false,
-        classification: "error",
-        runtimeSnapshot: {
-          requestedModel: input.model,
-          requestedEffort: input.effort,
-          effectiveEffort: input.effort,
-          usage: {},
-          events: [{ spawnError: error.message }],
-        },
-      });
-    });
-    child.on("close", (code) => {
-      const events = parseEvents(stdout);
-      const agentMessages = events
-        .map((event) =>
-          (event as { type?: string; item?: { type?: string; text?: string } })
-            ?.type === "item.completed"
-            ? (event as { item?: { type?: string; text?: string } }).item
-            : undefined,
-        )
-        .filter((item) => item?.type === "agent_message");
-      const text = agentMessages.at(-1)?.text;
-      const completed = events.findLast(
-        (event) => (event as { type?: string })?.type === "turn.completed",
-      ) as
-        | { usage?: { input_tokens?: number; output_tokens?: number } }
-        | undefined;
-      const usage = {
-        ...(completed?.usage?.input_tokens === undefined
-          ? {}
-          : { inputTokens: completed.usage.input_tokens }),
-        ...(completed?.usage?.output_tokens === undefined
-          ? {}
-          : { outputTokens: completed.usage.output_tokens }),
-      };
-      const runtimeSnapshot: CodexRuntimeSnapshot = {
-        requestedModel: input.model,
-        requestedEffort: input.effort,
-        effectiveEffort: input.effort,
-        usage,
-        events,
-      };
-      if (terminal !== undefined) {
-        finish({ ok: false, classification: terminal, runtimeSnapshot });
-        return;
-      }
-      if (code === 0 && completed !== undefined && text !== undefined) {
-        finish({ ok: true, text, runtimeSnapshot });
-        return;
-      }
-      const blob = `${stderr}\n${stdout}`;
-      if (QUOTA_RE.test(blob)) {
-        const retryAfter = RETRY_RE.exec(blob)?.[1];
-        finish({
-          ok: false,
-          classification: "quota-exhausted",
-          ...(retryAfter === undefined ? {} : { retryAfter }),
-          runtimeSnapshot,
-        });
-        return;
-      }
-      finish({ ok: false, classification: "error", runtimeSnapshot });
-    });
+export async function invokeCodex(
+  input: CodexInvocation,
+): Promise<CodexInvocationResult> {
+  const snapshot = (
+    usage: { inputTokens?: number; outputTokens?: number } = {},
+    events: unknown[] = [],
+  ): CodexRuntimeSnapshot => ({
+    requestedModel: input.model,
+    requestedEffort: input.effort,
+    effectiveEffort: input.effort,
+    usage,
+    events,
   });
+
+  const token = input.env.CODEX_ACCESS_TOKEN;
+  if (token === undefined || token === "") {
+    return {
+      ok: false,
+      classification: "auth",
+      runtimeSnapshot: snapshot(),
+    };
+  }
+  const accountId = accountIdFrom(token);
+  if (accountId === undefined) {
+    return {
+      ok: false,
+      classification: "auth",
+      runtimeSnapshot: snapshot(),
+    };
+  }
+
+  const res = await curlPostJson({
+    url: ENDPOINT,
+    secretHeaders: {
+      authorization: { prefix: "Bearer ", value: token },
+      "chatgpt-account-id": { prefix: "", value: accountId },
+    },
+    headers: {
+      originator: ORIGINATOR,
+      "OpenAI-Beta": "responses=experimental",
+      accept: "text/event-stream",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: input.model,
+      // The backend refuses `store: true` outright.
+      store: false,
+      stream: true,
+      instructions: input.systemPrompt ?? "You are a helpful assistant.",
+      input: [
+        {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: input.prompt }],
+        },
+      ],
+      reasoning: { effort: input.effort, summary: "auto" },
+      tool_choice: "auto",
+      parallel_tool_calls: true,
+    }),
+    timeoutMs: input.timeoutMs,
+    ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+      ? {}
+      : { proxy: input.env.HELIUM_PROXY }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+  });
+
+  if (res.terminal === "timeout") {
+    return {
+      ok: false,
+      classification: "timeout",
+      runtimeSnapshot: snapshot(),
+    };
+  }
+  if (res.terminal === "cancelled") {
+    return {
+      ok: false,
+      classification: "cancelled",
+      runtimeSnapshot: snapshot(),
+    };
+  }
+  if (res.terminal === "transport") {
+    return { ok: false, classification: "proxy", runtimeSnapshot: snapshot() };
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    return {
+      ok: false,
+      classification: classify(res.status),
+      runtimeSnapshot: snapshot(),
+    };
+  }
+
+  const { text, usage, events, errorMessage } = collectSse(res.body);
+  if (errorMessage !== undefined) {
+    // A 200 whose stream carries an error: the quota case arrives this way.
+    return {
+      ok: false,
+      classification: /rate limit|quota|usage limit/i.test(errorMessage)
+        ? "quota-exhausted"
+        : "error",
+      runtimeSnapshot: snapshot(usage, events),
+    };
+  }
+  return { ok: true, text, runtimeSnapshot: snapshot(usage, events) };
 }

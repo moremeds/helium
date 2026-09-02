@@ -1,32 +1,38 @@
 /**
- * The opaque execution-target registry.
+ * Capability tags and the opaque execution-target registry.
  *
- * A target is an ID, a flat set of capability tags, a declared isolation
- * class, the hard constraints it supports, and a dynamic availability state.
- * It is deliberately NOT a provider or a model: the whole point of the seam is
- * that capability requirements go in and an opaque `ExecutionTargetId` comes
- * out, so scoring can be added later without touching the work-order contract.
+ * A target is an ID, a flat set of capability tags, the hard constraints it
+ * supports, its per-token price, and a dynamic availability state. It is
+ * deliberately NOT a vendor or a model: capability requirements go in and an
+ * opaque `ExecutionTargetId` comes out, so the router can rank without ever
+ * learning who runs the work.
  *
- * SCOPE (thin selector v1). This ships the seam, not the scoring machinery.
- * The 31-leaf capability ontology, per-capability scores, confidence
- * intervals, evaluation suite/version and `sampleCount` are deferred v2
- * pending real usage data -- a session-capped subscription cannot produce an
- * `n` that makes a confidence interval mean anything, and the number would
- * launder a guess. The schema is strict so that such a field arriving early
- * fails loud instead of sitting unused, where a later reader would mistake it
- * for a measurement.
- *
- * `isolationClass` here is a CLAIM the catalog records. The
- * execution-boundary conformance suite is what proves it, and the executor
- * registry (Task 10) is what refuses to register a target whose claim has no
- * passing conformance record -- so by the time a profile reaches this catalog
- * its class has been demonstrated.
+ * v2 note: the v1 `isolationClass` field is gone from the profile. A target's
+ * blast radius is now WHERE it runs (the sandbox kind, `sandbox.ts`), not a
+ * class the catalog certifies. The executor still declares and proves one at
+ * the process boundary; the catalog no longer re-states it.
  * @module @helium/core/capabilities
  */
 import { z } from "zod";
-import { ISOLATION_CLASSES, type IsolationClass } from "./work.js";
 
-/** An opaque handle. Core never parses it and never infers a provider from it. */
+/**
+ * The closed capability set. Extend by editing this array, never by naming a
+ * vendor. A role writes `requires: [code.edit, tool.use]`; the router
+ * intersects that with the live catalog.
+ */
+export const CAPABILITY_TAGS = [
+  "reason.deep",
+  "reason.fast",
+  "code.edit",
+  "code.review",
+  "tool.use",
+  "long.context",
+  "cheap.bulk",
+  "structured.output",
+] as const;
+export type CapabilityTag = (typeof CAPABILITY_TAGS)[number];
+
+/** An opaque handle. Core never parses it and never infers a vendor from it. */
 export type ExecutionTargetId = string & {
   readonly __brand: "ExecutionTargetId";
 };
@@ -45,15 +51,33 @@ export type AvailabilityState = (typeof AVAILABILITY_STATES)[number];
 
 export const AvailabilitySchema = z.strictObject({
   state: z.enum(AVAILABILITY_STATES),
-  /** Opaque provider hint; only meaningful for `quota-exhausted`. */
+  /** Opaque vendor hint; only meaningful for `quota-exhausted`. */
   retryAfter: z.string().min(1).optional(),
 });
 export type Availability = z.infer<typeof AvailabilitySchema>;
 
+/**
+ * Per-token USD, as the owning plugin declares it. Absent means the target is
+ * not metered (a flat-rate subscription); the router treats an unpriced target
+ * as free to rank last, never as measured-zero.
+ */
+export const PriceSchema = z.strictObject({
+  usdIn: z.number().nonnegative(),
+  usdOut: z.number().nonnegative(),
+  /**
+   * Input tokens this route spends on its own preamble before the caller's
+   * prompt is counted. Charged on top of the projected prompt, so a fat
+   * preamble shows up as money at selection time rather than as a surprise in
+   * the audit table. Measured by the owning plugin, never estimated (§3.1).
+   */
+  overheadInputTokens: z.number().int().nonnegative().optional(),
+});
+export type Price = z.infer<typeof PriceSchema>;
+
 export const TargetProfileSchema = z.strictObject({
   targetId: z.string().min(1),
   capabilities: z.array(z.string().min(1)).min(1),
-  isolationClass: z.enum(ISOLATION_CLASSES),
+  price: PriceSchema.optional(),
   operations: z.strictObject({
     maxLatencyMs: z.number().int().positive().optional(),
     maxContextTokens: z.number().int().positive().optional(),
@@ -68,7 +92,7 @@ export const TargetProfileSchema = z.strictObject({
 export interface TargetProfile {
   targetId: ExecutionTargetId;
   capabilities: string[];
-  isolationClass: IsolationClass;
+  price?: Price;
   operations: { maxLatencyMs?: number; maxContextTokens?: number };
   supports: {
     structuredOutput: boolean;
@@ -85,8 +109,6 @@ export interface TargetSnapshot extends TargetProfile {
 
 export interface CatalogSnapshot {
   targets: TargetSnapshot[];
-  /** Advances on every mutation, so a decision can name the catalog it saw. */
-  catalogVersion: string;
 }
 
 const AVAILABLE: Availability = { state: "available" };
@@ -94,15 +116,14 @@ const AVAILABLE: Availability = { state: "available" };
 export class CapabilityCatalog {
   readonly #profiles = new Map<string, TargetProfile>();
   readonly #availability = new Map<string, Availability>();
-  #version = 0;
 
   /**
    * Register a target profile.
    *
-   * @returns an effect-scoped disposer that removes the registration, so a
-   * plugin's `ctx.effect` teardown leaves no ghost target behind.
+   * @returns a disposer that removes the registration, so a plugin's teardown
+   * leaves no ghost target behind.
    * @throws on a duplicate target, a duplicate capability tag, an empty tag
-   * set, an unknown isolation class, or any deferred v2 / provider field.
+   * set, or any unknown field.
    */
   register(profile: TargetProfile): () => void {
     const parsed = TargetProfileSchema.parse(profile);
@@ -114,11 +135,9 @@ export class CapabilityCatalog {
       throw new Error(`duplicate capability tag on target ${parsed.targetId}`);
     }
     this.#profiles.set(parsed.targetId, profile);
-    this.#version += 1;
     return () => {
       this.#profiles.delete(parsed.targetId);
       this.#availability.delete(parsed.targetId);
-      this.#version += 1;
     };
   }
 
@@ -136,14 +155,13 @@ export class CapabilityCatalog {
       throw new Error(`unknown target: ${targetId}`);
     }
     this.#availability.set(targetId, AvailabilitySchema.parse(availability));
-    this.#version += 1;
   }
 
   /**
-   * Whether a target can be given work now. Provider reset hints are opaque:
-   * only an explicit provider-owned availability publication can restore it.
+   * Whether a target can be given work now. Vendor reset hints are opaque:
+   * only an explicit availability publication can restore it.
    */
-  available(targetId: ExecutionTargetId, _now: Date): boolean {
+  available(targetId: ExecutionTargetId): boolean {
     const state = this.#availability.get(targetId) ?? AVAILABLE;
     return state.state === "available";
   }
@@ -152,14 +170,12 @@ export class CapabilityCatalog {
    * A frozen value, not a live view: the selector is pure, so it must be
    * handed the catalog it decided on rather than one that can change under it.
    */
-  snapshot(now: Date): CatalogSnapshot {
-    const version = `catalog-${this.#version}`;
+  snapshot(): CatalogSnapshot {
     return {
-      catalogVersion: version,
       targets: this.list().map((profile) => ({
         ...profile,
         availability: this.#availability.get(profile.targetId) ?? AVAILABLE,
-        available: this.available(profile.targetId, now),
+        available: this.available(profile.targetId),
       })),
     };
   }

@@ -9,7 +9,8 @@
     ".": "./lib/catalog.js",
     "./catalog": "./lib/catalog.js",
     "./executor": "./lib/executor.js",
-    "./invoke": "./lib/invoke.js"
+    "./invoke": "./lib/invoke.js",
+    "./provider": "./lib/provider.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

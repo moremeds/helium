@@ -1,25 +1,32 @@
 /**
- * Provider-neutral work orders and results.
+ * Vendor-neutral work orders and results.
  *
  * A `WorkOrder` says what must be done and under what constraints; it never
- * says who does it. The selector turns capability requirements into an opaque
- * `ExecutionTargetId`, and only the provider adapter at the far edge knows a
- * model name. Every schema here is strict: an unknown key is a rejection, not
- * an ignored field, because the fields that would sneak in are exactly the
- * provider and model names this package exists to keep out.
+ * says who does it. The router turns capability requirements into an opaque
+ * `ExecutionTargetId`, and only the plugin at the far edge knows a model name.
+ * Every schema here is strict: an unknown key is a rejection, not an ignored
+ * field, because the fields that would sneak in are exactly the vendor and
+ * model names this package exists to keep out.
  * @module @helium/core/work
  */
 import { z } from "zod";
 
+/**
+ * What an executor's child actually inherits, proven by the shared boundary
+ * conformance suite rather than asserted. This is a property of a running
+ * process, not a routing input: the router no longer filters on it (v2 blast
+ * radius is the sandbox kind, `sandbox.ts`), and it survives only because the
+ * execution-boundary contract grades a subject against its own declaration.
+ */
 export const ISOLATION_CLASSES = ["in-process", "process", "sandboxed"] as const;
 export type IsolationClass = (typeof ISOLATION_CLASSES)[number];
 
 /**
  * Normalized failure vocabulary. `quota-exhausted` is deliberately distinct
- * from `budget-exhausted` and must stay so: it is dynamic provider
- * availability carrying an opaque `retryAfter`, not a spent allowance and not
- * a capability score. Collapsing the two would make a target that is briefly
- * unavailable indistinguishable from one that has spent its money.
+ * from `budget-exhausted` and must stay so: it is dynamic vendor availability
+ * carrying an opaque `retryAfter`, not a spent allowance. Collapsing the two
+ * would make a target that is briefly unavailable indistinguishable from one
+ * that has spent its money.
  */
 export const FAILURE_CLASSES = [
   "unavailable",
@@ -31,7 +38,7 @@ export const FAILURE_CLASSES = [
   "schema-invalid",
   "tool-boundary-violation",
   "provider-error",
-  "verification-failed",
+  "gate-refused",
 ] as const;
 export type FailureClass = (typeof FAILURE_CLASSES)[number];
 
@@ -48,11 +55,7 @@ export const WorkOrderSchema = z.strictObject({
   id: z.string().min(1),
   role: z.string().min(1),
   taskClass: z.string().min(1),
-  /**
-   * A FLAT tag set, evaluated as a hard filter. The graded form
-   * (`{tag: {min, weight}}`) is deferred v2 pending real usage data, so the
-   * schema rejects it rather than accepting a shape nothing reads.
-   */
+  /** A FLAT tag set, evaluated as a hard filter. */
   requires: z.array(z.string().min(1)),
   constraints: WorkConstraintsSchema,
   inputs: z.strictObject({
@@ -64,14 +67,13 @@ export const WorkOrderSchema = z.strictObject({
 export type WorkOrder = z.infer<typeof WorkOrderSchema>;
 
 /**
- * Provenance recorded at the provider edge and stored as evidence.
+ * Provenance recorded at the plugin edge and folded into the audit table.
  *
- * The provider adapter is the ONLY writer. Core, teams, and the selector never
- * read it to decide anything -- no branch, no filter, no ranking. Its only
- * consumers are the evidence ledger, the manifest, and replay. `providerId`,
- * `model`, and `effort` are opaque strings to core: the neutrality guard bans
- * provider names in core SOURCE and branching logic, not provider-supplied
- * values flowing through a typed audit field at runtime.
+ * The plugin adapter is the ONLY writer. Core and the router never read it to
+ * decide anything -- no branch, no filter, no ranking. `providerId`, `model`
+ * and `effort` are opaque strings to core: the neutrality guard bans vendor
+ * names in core SOURCE and branching logic, not vendor-supplied values flowing
+ * through a typed audit field at runtime.
  */
 export const ExecutionSnapshotSchema = z.strictObject({
   targetId: z.string().min(1),
@@ -79,7 +81,6 @@ export const ExecutionSnapshotSchema = z.strictObject({
   model: z.string().min(1),
   effort: z.string().optional(),
   providerVersion: z.string().min(1),
-  /** The class actually demonstrated by the executor that ran this work. */
   isolationClass: z.enum(ISOLATION_CLASSES),
   recordedAt: z.string().min(1),
 });
@@ -92,7 +93,7 @@ export const AgentResultSchema = z.strictObject({
     .strictObject({
       class: z.enum(FAILURE_CLASSES),
       safeDetail: z.string().optional(),
-      /** Opaque provider hint; only meaningful for `quota-exhausted`. */
+      /** Opaque vendor hint; only meaningful for `quota-exhausted`. */
       retryAfter: z.string().optional(),
     })
     .optional(),
@@ -110,7 +111,7 @@ export const AgentResultSchema = z.strictObject({
     ms: z.number().int().nonnegative(),
   }),
   executionSnapshot: ExecutionSnapshotSchema,
-  /** Provider-native audit data with no typed home; core never interprets it. */
+  /** Vendor-native audit data with no typed home; core never interprets it. */
   runtimeMetadata: z.record(z.string(), z.unknown()),
 });
 export type AgentResult = z.infer<typeof AgentResultSchema>;

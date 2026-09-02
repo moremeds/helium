@@ -1,0 +1,25 @@
+{
+  "name": "@helium/cli",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./lib/index.js",
+  "bin": { "helium": "./lib/cli.js" },
+  "exports": {
+    ".": "./lib/index.js",
+    "./runner": "./lib/runner.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x lib/cli.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@helium/core": "file:../core",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

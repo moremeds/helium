@@ -2,12 +2,7 @@ packages:
   - packages/*
   - plugins/*
   - contracts
-  - contracts/fixtures/plugin-live-dispatch
-  - contracts/fixtures/mcp-ping
   - contracts/fixtures/plugin-restrict-proof
-  - contracts/fixtures/senior-isolation
-  - contracts/fixtures/ops-controller
-  - contracts/fixtures/team-host
 allowBuilds:
   esbuild: true
   koffi: true
