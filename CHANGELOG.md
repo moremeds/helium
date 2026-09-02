@@ -1,3 +1,7 @@
+## v0.1.16 — 2026-09-02
+
+- fix(release): ask opsd which release it is running
+
 ## v0.1.15 — 2026-09-02
 
 - fix(release): downgrade a canary-less promotion mode instead of shipping it
