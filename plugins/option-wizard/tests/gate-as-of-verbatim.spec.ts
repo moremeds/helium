@@ -54,3 +54,27 @@ describe("as-of-verbatim", () => {
     expect(result.reason).toContain("no tool output in this run");
   });
 });
+
+it("accepts a timestamp whose only difference is dropped fractional seconds", async () => {
+  // TradingView returned `.075Z`; the briefing's prose wrote the same instant
+  // without the milliseconds. Same zone, same second — not the bug this gate
+  // exists for. Real strings from the 2026-09-02 close run.
+  await expect(
+    gate.check(
+      { text: "rates fetched 2026-09-02T18:40:17Z" },
+      {
+        ...ctx,
+        toolOutputs: ['{"fetchedAt":"2026-09-02T18:40:17.075Z"}'],
+      },
+    ),
+  ).resolves.toMatchObject({ pass: true });
+});
+
+it("still refuses a converted zone even when fractions are dropped", async () => {
+  await expect(
+    gate.check(
+      { text: "as of 2026-09-02T16:45:00Z" },
+      { ...ctx, toolOutputs: ['{"timestamp":"2026-09-02T12:45:00.000000-04:00"}'] },
+    ),
+  ).resolves.toMatchObject({ pass: false });
+});
