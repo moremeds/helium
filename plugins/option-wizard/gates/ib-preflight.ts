@@ -42,6 +42,11 @@ const LegSchema = z.object({
     .transform((value) => value.trim().toUpperCase())
     .pipe(z.enum(["BUY", "SELL"])),
   ratio: z.number().int().positive(),
+  // The NBBO mid the designer read for this exact strike and expiry, per share.
+  // Optional because pricing is not this gate's job: a leg the market did not
+  // quote still has a computable STRUCTURE, and refusing it here would turn a
+  // missing quote into "no trades today" instead of the 未定价 the reader sees.
+  mid: z.number().nonnegative().optional(),
 });
 
 /** Spec §4. `.object` (not `.strictObject`) so a model's extra prose field is
@@ -51,8 +56,6 @@ export const ProposalSchema = z.object({
   ticker: z.string().min(1),
   strategy: z.string().min(1),
   legs: z.array(LegSchema),
-  quantity: z.number().int().positive(),
-  limitPrice: z.number(),
   rationale: z.string(),
 });
 
@@ -140,7 +143,7 @@ export function contentHash(proposal: unknown): string {
  * really is covered fails here today, which is the fail-closed direction.
  */
 export function checkDefinedRisk(proposal: Proposal): SubGate {
-  const { legs, quantity, limitPrice } = proposal;
+  const { legs } = proposal;
   if (legs.length === 0) {
     return { pass: false, state: "fail", detail: "no legs; max loss is not computable" };
   }
@@ -188,15 +191,28 @@ export function checkDefinedRisk(proposal: Proposal): SubGate {
     intrinsicLoss += Math.max(0, -Math.min(...values));
   }
 
-  // limitPrice is a net debit (+) / credit (-) per spread per share (spec §4).
-  const maxLoss = (intrinsicLoss + limitPrice) * CONTRACT_MULTIPLIER * quantity;
+  // Net debit (+) / credit (-) per share, from the quoted mids. There is no
+  // `limitPrice` to trust any more: five of five quoted limit prices on
+  // 2026-09-02 disagreed with their own legs, so the number is computed here
+  // exactly as the renderer computes it, per contract and never per position.
+  if (legs.some((leg) => leg.mid === undefined)) {
+    return {
+      pass: true,
+      state: "pass",
+      detail: "structure is defined-risk; max loss unpriced — a leg carries no NBBO mid",
+    };
+  }
+  const net = sum(
+    legs.map((leg) => (leg.action === "BUY" ? 1 : -1) * leg.ratio * (leg.mid ?? 0)),
+  );
+  const maxLoss = (intrinsicLoss + net) * CONTRACT_MULTIPLIER;
   if (!Number.isFinite(maxLoss)) {
     return { pass: false, state: "fail", detail: "max loss did not evaluate to a finite number" };
   }
   return {
     pass: true,
     state: "pass",
-    detail: `max loss ${maxLoss.toFixed(2)} USD over ${quantity} spread(s), computable from the legs alone`,
+    detail: `max loss ${maxLoss.toFixed(2)} USD per contract, computable from the legs alone`,
   };
 }
 

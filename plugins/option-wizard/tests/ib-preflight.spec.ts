@@ -7,8 +7,13 @@
  * and carries the 2026-09-01 close). Verified against the UW daily OHLC row on
  * 2026-09-02: open 324.66, high 325.36, low 324.05, close 325.13. Strikes sit
  * either side of that real close and 2026-10-16 is the real third-Friday
- * October monthly. `limitPrice` is a proposal parameter — what the order would
- * be sent at — and is deliberately NOT presented as an observed quote.
+ * October monthly. The AAPL fixture carries NO `mid`, which is the structural
+ * case: coverage is decided from the legs alone and needs no quote.
+ *
+ * The priced cases use SPY 2026-09-30 750/720 puts at the NBBO mids 4.92 and
+ * 2.02 that ow_uw_chain returned on 2026-09-02 (run-ec962c3e). Those two mids
+ * are observed; which way round the test buys and sells them is the test's own
+ * construction.
  */
 import { describe, expect, it } from "vitest";
 import gate, {
@@ -33,8 +38,6 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
       { right: "P", expiry: EXPIRY, strike: 320, action: "SELL", ratio: 1 },
       { right: "P", expiry: EXPIRY, strike: 315, action: "BUY", ratio: 1 },
     ],
-    quantity: 2,
-    limitPrice: -1.35,
     rationale: "spot 325.13, last close as of 2026-09-02; short strike below spot",
     ...overrides,
   };
@@ -51,11 +54,47 @@ const CONFIGURED = {
 };
 
 describe("defined_risk", () => {
-  it("passes a vertical credit spread and reports max loss = width - credit", () => {
+  it("passes an unpriced vertical on structure alone, and says the loss is unpriced", () => {
+    // The regression this pins: the gate used to REQUIRE quantity and
+    // limitPrice, so once the designer stopped emitting them every proposal was
+    // refused as malformed and the reader got an empty brief with a gate error
+    // where the trades belonged (run-ec962c3e, 2026-09-02).
     const verdict = checkDefinedRisk(proposal());
     expect(verdict.pass).toBe(true);
-    // (320 - 315 width - 1.35 credit) * 100 * 2 spreads
-    expect(verdict.detail).toContain("730.00");
+    expect(verdict.detail).toContain("unpriced");
+  });
+
+  it("prices max loss per contract from the leg mids — debit spread", () => {
+    const verdict = checkDefinedRisk(
+      proposal({
+        ticker: "SPY",
+        strategy: "put-debit-spread",
+        legs: [
+          { right: "P", expiry: EXPIRY, strike: 750, action: "BUY", ratio: 1, mid: 4.92 },
+          { right: "P", expiry: EXPIRY, strike: 720, action: "SELL", ratio: 1, mid: 2.02 },
+        ],
+      }),
+    );
+    expect(verdict.pass).toBe(true);
+    // A debit spread can lose only the debit: (4.92 - 2.02) * 100.
+    expect(verdict.detail).toContain("290.00 USD per contract");
+  });
+
+  it("prices max loss per contract from the leg mids — credit spread", () => {
+    const verdict = checkDefinedRisk(
+      proposal({
+        ticker: "SPY",
+        strategy: "put-credit-spread",
+        legs: [
+          { right: "P", expiry: EXPIRY, strike: 750, action: "SELL", ratio: 1, mid: 4.92 },
+          { right: "P", expiry: EXPIRY, strike: 720, action: "BUY", ratio: 1, mid: 2.02 },
+        ],
+      }),
+    );
+    expect(verdict.pass).toBe(true);
+    // Width 30 less the 2.90 credit, per contract — and never per position:
+    // nothing here knows the account, so there is no quantity to multiply by.
+    expect(verdict.detail).toContain("2710.00 USD per contract");
   });
 
   it("fails a naked short call", () => {
@@ -131,8 +170,6 @@ describe("defined_risk", () => {
     const verdict = checkDefinedRisk(
       proposal({
         strategy: "iron-condor",
-        quantity: 1,
-        limitPrice: -2.1,
         legs: [
           { right: "P", expiry: EXPIRY, strike: 310, action: "BUY", ratio: 1 },
           { right: "P", expiry: EXPIRY, strike: 315, action: "SELL", ratio: 1 },
@@ -142,10 +179,10 @@ describe("defined_risk", () => {
       }),
     );
     expect(verdict.pass).toBe(true);
-    // The payoff is minimised over the whole expiry group at once, so only the
-    // one wing that can finish in the money counts: (5 width - 2.10 credit) * 100.
-    // Loss is only summed ACROSS expiries, where no single price exists.
-    expect(verdict.detail).toContain("290.00");
+    // Both wings are covered, so the structure passes; unpriced because the
+    // fixture quotes no mids. Loss is only summed ACROSS expiries, where no
+    // single price exists.
+    expect(verdict.detail).toContain("unpriced");
   });
 });
 
@@ -154,8 +191,6 @@ describe("contentHash", () => {
     const a = proposal();
     const reordered = {
       rationale: a.rationale,
-      limitPrice: a.limitPrice,
-      quantity: a.quantity,
       legs: a.legs.map((leg) => ({
         ratio: leg.ratio,
         action: leg.action,

@@ -253,8 +253,6 @@ describe("ow_ib_preflight", () => {
           { right: "P", expiry: "2026-10-16", strike: 320, action: "SELL", ratio: 1 },
           { right: "P", expiry: "2026-10-16", strike: 315, action: "BUY", ratio: 1 },
         ],
-        quantity: 1,
-        limitPrice: -1.35,
         rationale: "spot 325.13, last close as of 2026-09-02",
       }),
     ) as {
