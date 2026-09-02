@@ -8,12 +8,19 @@
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
-import type { Pricing } from "./math.js";
+
+/** Says what the +/-% row is measured from, because it is not always the spot. */
+export function anchorLabel(candidate: CandidateView): string {
+  return candidate.anchor.quoted
+    ? `基准 spot ${candidate.anchor.price.toFixed(2)}`
+    : `基准 ${candidate.anchor.price.toFixed(2)}，reviewer 未报 spot`;
+}
 
 const money = (value: number | null): string =>
   value === null ? "无上限" : `$${value.toFixed(2)}`;
 
-function pricingLines(pricing: Pricing): string[] {
+function pricingLines(candidate: CandidateView): string[] {
+  const pricing = candidate.pricing;
   if (pricing.kind !== "priced") return [`  ${pricing.reason}`];
   const flow = pricing.net >= 0 ? "净收权利金" : "净付权利金";
   const breakevens =
@@ -24,7 +31,7 @@ function pricingLines(pricing: Pricing): string[] {
     `  ${flow} $${Math.abs(pricing.net).toFixed(2)}/股`,
     `  max gain ${money(pricing.maxGain)} · max loss ${money(pricing.maxLoss)}`,
     `  breakeven ${breakevens}`,
-    `  到期损益 ${pricing.pnlAt
+    `  到期损益（${anchorLabel(candidate)}）${pricing.pnlAt
       .map(
         (point) =>
           `${point.pct > 0 ? "+" : ""}${String(point.pct)}%: ${point.pnl.toFixed(0)}`,
@@ -42,7 +49,7 @@ function candidateLines(candidate: CandidateView): string[] {
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +
         (leg.mid === undefined ? " mid —" : ` mid ${leg.mid.toFixed(2)}`),
     ),
-    ...pricingLines(candidate.pricing),
+    ...pricingLines(candidate),
     `  ${candidate.rationale}`,
     "",
   ];

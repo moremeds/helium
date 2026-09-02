@@ -22,6 +22,10 @@ export interface CandidateView {
   /** Calendar days to expiry against the ET date; null when unparseable. */
   dte: number | null;
   legs: Leg[];
+  /** The price the +/-% row is measured from, and whether it is a real spot.
+   *  Without this the reader reads "-20%" as 20% below spot when the reviewer
+   *  never quoted one; the row would be arithmetic off an unstated anchor. */
+  anchor: { price: number; quoted: boolean };
   pricing: Pricing;
   /** Widest strike span, per share; 0 when single-strike. */
   width: number;
@@ -233,6 +237,10 @@ export function buildView(
       expiry,
       dte: Number.isFinite(days) ? days : null,
       legs,
+      anchor: {
+        price: spot ?? Math.min(...legs.map((leg) => leg.strike)),
+        quoted: spot !== undefined,
+      },
       // Without a quoted spot the payoff extremes and breakevens are still
       // exact — only the +/-% row needs one, so it is anchored on the lowest
       // strike rather than on an invented price.

@@ -18,6 +18,7 @@
  * @module dsh-plugin-tenant-option-wizard/render/html
  */
 import type { BriefView, CandidateView } from "./index.js";
+import { anchorLabel } from "./text.js";
 
 const INK = "#232830";
 const DIM = "#6b7484";
@@ -100,7 +101,7 @@ function pricingBlock(candidate: CandidateView): string {
     <div class="ink-dim" style="font-size:13px;color:${DIM}">breakeven ${breakevens}</div>
     ${bar(fraction, credit)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-top:1px solid ${RULE}"><tr>${cells}</tr></table>
-    <div class="ink-dim" style="color:${DIM};font-size:11px;margin-top:2px">到期损益，每张合约，不含数量</div>`;
+    <div class="ink-dim" style="color:${DIM};font-size:11px;margin-top:2px">到期损益，每张合约，不含数量 · ${esc(anchorLabel(candidate))}</div>`;
 }
 
 function candidateCard(candidate: CandidateView): string {
