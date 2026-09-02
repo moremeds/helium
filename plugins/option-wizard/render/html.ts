@@ -18,7 +18,7 @@
  * @module dsh-plugin-tenant-option-wizard/render/html
  */
 import type { BriefView, CandidateView } from "./index.js";
-import { anchorLabel } from "./text.js";
+import { payoffCell, payoffLabel } from "./text.js";
 
 const INK = "#232830";
 const DIM = "#6b7484";
@@ -84,7 +84,7 @@ function pricingBlock(candidate: CandidateView): string {
   const cells = pricing.pnlAt
     .map(
       (point) => `<td align="center" style="padding:4px 2px;font-size:12px;color:${point.pnl >= 0 ? GREEN : RED}">
-        <div class="ink-dim" style="color:${DIM}">${point.pct > 0 ? "+" : ""}${String(point.pct)}%</div>
+        <div class="ink-dim" style="color:${DIM}">${esc(payoffCell(point).split(":")[0] ?? "")}</div>
         <div>${point.pnl.toFixed(0)}</div>
       </td>`,
     )
@@ -101,7 +101,7 @@ function pricingBlock(candidate: CandidateView): string {
     <div class="ink-dim" style="font-size:13px;color:${DIM}">breakeven ${breakevens}</div>
     ${bar(fraction, credit)}
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-top:1px solid ${RULE}"><tr>${cells}</tr></table>
-    <div class="ink-dim" style="color:${DIM};font-size:11px;margin-top:2px">到期损益，每张合约，不含数量 · ${esc(anchorLabel(candidate))}</div>`;
+    <div class="ink-dim" style="color:${DIM};font-size:11px;margin-top:2px">${esc(payoffLabel(pricing.pnlAt[0]?.pct !== null))}，每张合约，不含数量</div>`;
 }
 
 function candidateCard(candidate: CandidateView): string {

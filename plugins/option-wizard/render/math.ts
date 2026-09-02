@@ -27,7 +27,8 @@ export interface Leg {
 }
 
 export interface PnlPoint {
-  pct: -20 | -10 | -5 | 5 | 10 | 20;
+  /** `null` when no spot was quoted: the point is a STRIKE, not an offset. */
+  pct: -20 | -10 | -5 | 5 | 10 | 20 | null;
   spot: number;
   pnl: number;
 }
@@ -87,7 +88,7 @@ function pnlAtSpot(legs: Leg[], net: number, spot: number): number {
   return round2((intrinsic(legs, spot) + net) * MULTIPLIER);
 }
 
-export function priceStructure(legs: Leg[], spot: number): Pricing {
+export function priceStructure(legs: Leg[], spot?: number): Pricing {
   if (legs.length === 0)
     return { kind: "invalid", reason: "结构不合规：没有任何腿" };
 
@@ -171,9 +172,23 @@ export function priceStructure(legs: Leg[], spot: number): Pricing {
     maxGain,
     maxLoss,
     breakevens: [...new Set(breakevens)].sort((a, b) => a - b),
-    pnlAt: PCTS.map((pct) => {
-      const at = round2(spot * (1 + pct / 100));
-      return { pct, spot: at, pnl: pnlAtSpot(legs, net, at) };
-    }),
+    // With a quoted spot the reader wants "what if it moves"; without one,
+    // a percentage grid has to be measured from something, and the only
+    // candidates are invented. The strikes are not: they are the prices this
+    // structure actually turns on, and the payoff at each is exact. The first
+    // live brief (run-add8a86a) showed why the invented anchor had to go — a
+    // grid off the lowest strike printed max-gain three times and max-loss
+    // three times and told the reader nothing.
+    pnlAt:
+      spot === undefined
+        ? strikes.map((at) => ({
+            pct: null,
+            spot: at,
+            pnl: pnlAtSpot(legs, net, at),
+          }))
+        : PCTS.map((pct) => {
+            const at = round2(spot * (1 + pct / 100));
+            return { pct, spot: at, pnl: pnlAtSpot(legs, net, at) };
+          }),
   };
 }
