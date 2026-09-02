@@ -510,9 +510,14 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     // without that, a model that needs "as of when" converts this to UTC and
     // the as-of gate refuses a value that was true — the conversion, not the
     // timestamp, is the defect the gate exists to catch.
-    const clock = `phase: ${phase}\nnow: ${zonedNow(
-      options.now?.() ?? new Date(),
-    )} (quote this string verbatim if you need the current time; never convert it)`;
+    const at = options.now?.() ?? new Date();
+    const clock = [
+      `phase: ${phase}`,
+      `now: ${zonedNow(at)}`,
+      `now (UTC): ${at.toISOString().replace(/\.\d{3}Z$/, "Z")}`,
+      "Both clock lines above are quotable verbatim. Every other timestamp you",
+      "write must be copied character-for-character from a tool output.",
+    ].join("\n");
     toolOutputs.push(clock);
     const work: WorkOrder = WorkOrderSchema.parse({
       id: `${runId}:${taskId}`,

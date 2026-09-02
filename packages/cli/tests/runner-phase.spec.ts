@@ -128,9 +128,9 @@ describe("run phase", () => {
     expect(seenPrompt).toContain("now: 2026-09-03T18:00:00+08:00");
     // The clause is what stops a model converting the clock to UTC and then
     // being refused by the as-of gate for a timestamp that was true.
-    expect(seenPrompt).toContain(
-      "now: 2026-09-03T18:00:00+08:00 (quote this string verbatim if you need the current time; never convert it)",
-    );
+    // The UTC twin exists so a model that wants a Z timestamp has one to copy
+    // rather than converting the zoned line and being refused by the gate.
+    expect(seenPrompt).toContain("now (UTC): 2026-09-03T10:00:00Z");
     audit.close();
   });
 });
