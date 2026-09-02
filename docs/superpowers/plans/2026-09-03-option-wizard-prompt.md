@@ -1537,7 +1537,13 @@ ls -1 "$HELIUM_STATE_ROOT/reports/"
 3. `close` contains a markout section settling yesterday's close calls and the weekly's calls; `premarket` does **not**.
 4. `weekly` cites only close reports; `frank` cites Frank's note and our weekly.
 5. `grep -ci quantity plugins/option-wizard/team.yaml` shows no size field.
-6. Every ISO timestamp in each report appears in that run's audit tool spans: `helium audit <run-id> | grep -F "<timestamp>"`.
+6. Every ISO timestamp in each report is a verbatim tool (or clock) string. NOT
+   checkable from the audit: `helium audit <run-id>` prints a token/cost table
+   (role, provider, model, spans, tokens, usd, sec) and stores `toolOutputBytes`,
+   never the tool text. The enforcement is the in-process `as-of-verbatim` gate,
+   so the evidence is the run outcome: a step that writes a non-quotable
+   timestamp fails the run with `gate-refused`, and `outcome: completed` is the
+   proof that none did.
 7. The as-of gate refused nothing — or, if it did, the refusal is quoted and the offending timestamp explained.
 8. `pnpm typecheck && pnpm test && pnpm test:contracts` all green, pasted.
 
