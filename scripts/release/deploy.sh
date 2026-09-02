@@ -201,16 +201,14 @@ opsd_is_loaded() {
   [ -f "$OPSD_PLIST" ] && launchctl print "gui/$(id -u)/com.helium.opsd" >/dev/null 2>&1
 }
 
-restart_opsd_if_loaded() {
-  [ -f "$OPSD_PLIST" ] || return 0
-  opsd_is_loaded || return 0
-  if launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
-    return 0
-  fi
-  say "opsd kickstart failed once — retrying after 3s"
-  sleep 3
-  launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"
-}
+# opsd is NOT restarted on a helium flip. Its config pins its own release
+# directory (a helium-ops-candidates/<sha> tree on the mini), so it does not run
+# the code being flipped, and everything it reads through `current` resolves at
+# read time. Restarting it cost about twelve minutes of blindness -- measured:
+# cycles every ~60s at 02:14:34/02:15:33/02:16:50/02:17:33, then nothing until
+# 02:29:29 after a restart -- and that gap failed the health gate on a release
+# that was already healthy. The gate below still requires a fresh opsd cycle, so
+# an opsd that has actually died is still caught.
 
 # launchd caches a label's configuration from bootstrap time, so `kickstart -k`
 # restarts the PROCESS but leaves it on the OLD plist. Only bootout+bootstrap
@@ -311,10 +309,6 @@ fi
 # writing heartbeat rows until `reload_dsh` boots it out, and one of those stale
 # rows would satisfy the window on its own.
 flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
-if ! restart_opsd_if_loaded; then
-  echo "FATAL: current=$VERSION but installed com.helium.opsd did not restart. The collector/plugin release pair may be inconsistent; inspect both launchd labels before continuing." >&2
-  exit 76
-fi
 
 # ONE row is the whole signal: the tenant runtime writes a runtime-level
 # liveness row at start-up even with zero enabled tenants, so its presence proves
@@ -325,7 +319,7 @@ fi
 # restart. 180s is right for the release under test; it is far too short for
 # opsd, so opsd gets its own longer deadline rather than failing a good deploy.
 say "post-flip health window (up to 180s for the start-up liveness row)"
-ok=0; end=$((SECONDS + 180)); opsd_end=$((SECONDS + 600))
+ok=0; end=$((SECONDS + 180)); opsd_end=$((SECONDS + 300))
 while [ $SECONDS -lt $end ] || { [ "$ok" = "2" ] && [ $SECONDS -lt $opsd_end ]; }; do
   sleep 15
   fresh=$(HELIUM_STATE_ROOT="$STATE_ROOT" node -e '
@@ -400,14 +394,10 @@ if [ "$ok" != "1" ]; then
     fi
   fi
   flip_back_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
-  if ! restart_opsd_if_loaded; then
-    echo "FATAL: current=$prev_target and DSH restarted, but installed com.helium.opsd did not restart on the restored release. MANUAL INTERVENTION REQUIRED." >&2
-    exit 76
-  fi
   if [ "$opsd_required" = "1" ]; then
     # 90s could not cover a restarted opsd's first sweep (~5 min, measured), so
     # a healthy flip-back reported FATAL. Same deadline as the forward gate.
-    restored=0; restore_end=$((SECONDS + 600))
+    restored=0; restore_end=$((SECONDS + 300))
     while [ $SECONDS -lt $restore_end ]; do
       sleep 10
       if [ "$(opsd_cycle_after "$prev_target" "$flip_back_start_ms")" = "1" ]; then

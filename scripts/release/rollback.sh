@@ -155,16 +155,19 @@ if ! reload_dsh; then
     exit 70
   fi
 fi
-if [ "$opsd_loaded" = "1" ]; then
-  if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
-    echo "[rollback] opsd kickstart failed once — retrying after 3s"
-    sleep 3
-    if ! launchctl kickstart -k "gui/$(id -u)/com.helium.opsd"; then
-      echo "FATAL: current=$target and DSH restarted, but com.helium.opsd did not restart on the compatible collector/plugin pair. MANUAL INTERVENTION REQUIRED." >&2
-      exit 71
-    fi
-  fi
-fi
+# opsd is deliberately NOT restarted here, for the same reason as in deploy.sh:
+# it runs its own pinned release, and restarting it blinds the observer for
+# about twelve minutes at exactly the moment a rollback most needs it watching.
+
+# opsd is versioned independently of the helium release: its config pins the
+# directory it runs from, and its controller-cycle events carry THAT path as
+# releaseRef. Comparing them against the release being rolled to never matches.
+opsd_ref="$(node -e '
+  const {readFileSync}=require("node:fs");
+  try{const c=JSON.parse(readFileSync(process.argv[1],"utf8"));
+    if(typeof c.releaseDir==="string"&&c.releaseDir)process.stdout.write(c.releaseDir);}
+  catch{}' "$OPSD_CONFIG")"
+[ -n "$opsd_ref" ] || opsd_ref="$target"
 
 end=$((SECONDS + 90)); ok=0
 pid=""
@@ -174,7 +177,7 @@ while [ $SECONDS -lt $end ]; do
   opsd_fresh=1
   if [ "$opsd_loaded" = "1" ]; then
     opsd_fresh=$(node "$current/scripts/release/opsd-cycle-after.mjs" \
-      "$OPSD_EVENT_LOG" "$flip_start_ms" "$target")
+      "$OPSD_EVENT_LOG" "$flip_start_ms" "$opsd_ref")
   fi
   if [ -n "$pid" ] && [ "$opsd_fresh" = "1" ]; then
     ok=1
