@@ -181,3 +181,108 @@ describe("invokeCodex", () => {
     }
   });
 });
+
+describe("the tool loop", () => {
+  // Not a market tool: this exercises the SSE plumbing, and putting prices in
+  // it would be inventing data to test code that does not read them.
+  const echo = {
+    name: "echo_args",
+    description: "Returns its arguments as JSON.",
+    dshParams: { word: { type: "string", required: true as const, description: "any word" } },
+    paramsSchema: {} as never,
+    mutating: false,
+    run: async (args: Record<string, unknown>) => JSON.stringify(args),
+  };
+
+  /** The endpoint only streams, so every reply is SSE — including tool calls. */
+  function sse(...events: unknown[]): { status: number; body: string } {
+    return {
+      status: 200,
+      body: events.map((e) => `data: ${JSON.stringify(e)}`).join("\n\n") + "\n\ndata: [DONE]\n",
+    };
+  }
+  const callItem = {
+    type: "response.output_item.done",
+    item: {
+      type: "function_call",
+      name: "echo_args",
+      call_id: "call_abc",
+      arguments: '{"word":"helium"}',
+    },
+  };
+  const done = (text: string, input: number, output: number) => [
+    { type: "response.output_text.delta", delta: text },
+    { type: "response.completed", response: { usage: { input_tokens: input, output_tokens: output } } },
+  ];
+
+  it("replays the function_call item verbatim and appends its output", async () => {
+    curl
+      .mockResolvedValueOnce(
+        sse(callItem, {
+          type: "response.completed",
+          response: { usage: { input_tokens: 44, output_tokens: 9 } },
+        }),
+      )
+      .mockResolvedValueOnce(sse(...done("done", 88, 4)));
+
+    const out = await invokeCodex({ ...CALL, tools: [echo] });
+
+    expect(out).toMatchObject({ ok: true, text: "done", turns: 2 });
+    // Both turns billed: `store: false` means the whole conversation is resent,
+    // so the second turn is the expensive one and must not be invisible.
+    expect(out.runtimeSnapshot.usage).toEqual({ inputTokens: 132, outputTokens: 13 });
+
+    const first = JSON.parse(curl.mock.calls[0]![0].body);
+    expect(first.tools).toEqual([
+      {
+        type: "function",
+        name: "echo_args",
+        description: "Returns its arguments as JSON.",
+        parameters: {
+          type: "object",
+          properties: { word: { type: "string", description: "any word" } },
+          required: ["word"],
+        },
+        strict: false,
+      },
+    ]);
+
+    const second = JSON.parse(curl.mock.calls[1]![0].body);
+    // The item goes back exactly as it arrived — there is no server-side state
+    // to refer to, because the backend refuses `store`.
+    expect(second.input[1]).toEqual(callItem.item);
+    expect(second.input[2]).toEqual({
+      type: "function_call_output",
+      call_id: "call_abc",
+      output: JSON.stringify({ word: "helium" }),
+    });
+    expect(out.events!.find((e) => e.type === "tool/call")!.data).toMatchObject({
+      callId: "call_abc",
+      name: "echo_args",
+    });
+  });
+
+  it("stops at the turn ceiling and says the answer is partial", async () => {
+    curl.mockResolvedValue(
+      sse(callItem, {
+        type: "response.completed",
+        response: { usage: { input_tokens: 5, output_tokens: 1 } },
+      }),
+    );
+
+    const out = await invokeCodex({ ...CALL, tools: [echo] });
+
+    expect(out.turns).toBe(8);
+    expect(curl).toHaveBeenCalledTimes(8);
+    expect(out.text).toContain("stopped after 8 tool turns");
+  });
+
+  it("declares no tools and takes one turn when the step has none", async () => {
+    curl.mockResolvedValueOnce(sse(...done("plain", 10, 2)));
+
+    const out = await invokeCodex(CALL);
+
+    expect(out).toMatchObject({ ok: true, text: "plain", turns: 1 });
+    expect(JSON.parse(curl.mock.calls[0]![0].body).tools).toBeUndefined();
+  });
+});

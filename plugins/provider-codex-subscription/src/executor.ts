@@ -52,15 +52,15 @@ class CodexExecutor implements Executor {
     context: ExecutionContext,
   ): Promise<AgentResult> {
     const started = Date.now();
-    // Pure inference: the Responses request carries no tools and no workspace,
-    // so the model can neither call a tool nor touch the filesystem. That is
-    // stricter than the CLI it replaced, but a caller asking for tools would
-    // silently get a model that has none — refuse instead of quietly narrowing.
+    // This is the v1 `Executor` seam, which nothing in v2 routes through: the
+    // runner discovers `provider.ts`, and the tool loop lives there. It is
+    // reached only by its own test. Refusing here rather than growing a second
+    // loop keeps one implementation of the tool protocol, not two that drift.
     if (context.allowedTools.length > 0) {
       return this.#failed(
         work,
         started,
-        `codex-subscription performs inference only; ${String(context.allowedTools.length)} tool(s) requested`,
+        `codex-subscription: the legacy executor seam has no tool loop (provider.ts does); ${String(context.allowedTools.length)} tool(s) requested`,
       );
     }
     const result: CodexInvocationResult = await this.invoke({

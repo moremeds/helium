@@ -106,8 +106,18 @@ function exclusions(work: WorkOrder, target: TargetSnapshot): string[] {
   const tags = new Set(target.capabilities);
   if (!work.requires.every((tag) => tags.has(tag))) reasons.push("capability");
 
-  if (work.constraints.tools.length > 0 && !target.supports.toolIsolation) {
-    reasons.push("tool-isolation");
+  if (work.constraints.tools.length > 0) {
+    if (!target.supports.toolIsolation) reasons.push("tool-isolation");
+    // A step that carries tools must go to a target that can CALL one. The
+    // work order's `requires` comes from the task, and a task is routinely
+    // written without `tool.use` while the role it names holds five tools —
+    // so requiring the tag only when the manifest happens to say it leaves
+    // the mismatch to be discovered at execution, as a failed step.
+    //
+    // Until now nothing checked this and nothing had to: exactly one provider
+    // in the tree declared `tool.use`, and it won these steps because it is
+    // metered and an unpriced target sorts last. That is luck, not a rule.
+    if (!tags.has("tool.use")) reasons.push("tool-capability");
   }
 
   if (work.constraints.mutations === "permitted" && !target.supports.mutations) {

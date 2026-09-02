@@ -49,16 +49,16 @@ class ClaudeExecutor implements Executor {
     context: ExecutionContext,
   ): Promise<AgentResult> {
     const started = Date.now();
-    // This provider is pure inference: the Messages request carries no `tools`,
-    // so the model cannot call one. That is stricter than the CLI it replaced,
-    // but a caller asking for tools would silently get a model that has none —
-    // so refuse instead of quietly narrowing what was requested.
+    // This is the v1 `Executor` seam, which nothing in v2 routes through: the
+    // runner discovers `provider.ts`, and the tool loop lives there. It is
+    // reached only by its own test. Refusing here rather than growing a second
+    // loop keeps one implementation of the tool protocol, not two that drift.
     if (context.allowedTools.length > 0) {
       return this.#failed(
         work,
         started,
         "provider-error",
-        `claude-subscription performs inference only; ${String(context.allowedTools.length)} tool(s) requested`,
+        `claude-subscription: the legacy executor seam has no tool loop (provider.ts does); ${String(context.allowedTools.length)} tool(s) requested`,
       );
     }
     const result: ClaudeInvocationResult = await this.invoke({
