@@ -109,6 +109,12 @@ export function retireQuotaDomain(
       if (model.quotaDomain !== quotaDomain) continue;
       const targetId = ExecutionTargetId(`${provider.id}:${model.id}`);
       if (catalog.get(targetId) === undefined) continue;
+      // Only a target that was still SERVING counts. Retiring is idempotent —
+      // the entry stays in the catalog, marked unavailable — so counting it
+      // again on a second call reports progress that did not happen. The
+      // re-route loop uses this number as its termination condition, and an
+      // always-positive count is an infinite loop.
+      if (!catalog.available(targetId)) continue;
       catalog.setAvailability(targetId, { state: "quota-exhausted" });
       retired += 1;
     }
@@ -185,6 +191,26 @@ export interface RunOptions {
   modelExecutor?: ModelExecutor;
   catalog?: CapabilityCatalog;
   signal?: AbortSignal;
+}
+
+/**
+ * The arguments a deterministic step can hand a tool, or undefined when it
+ * cannot supply what the tool demands.
+ *
+ * NO ARGUMENTS COMES FIRST. A tool whose parameters are all optional — every
+ * IB tool that reads an account, the TradingView list with no colour filter —
+ * wants to be called with nothing, and the older rule ("find the one string
+ * parameter") skipped every one of them as unfeedable. That skip was silent
+ * and total: the tools that need no input are exactly the tools a universe
+ * step exists to call.
+ */
+function toolArgs(tool: EcosystemTool, text: string): Record<string, unknown> | undefined {
+  const schema = tool.paramsSchema as unknown as {
+    safeParse?: (value: unknown) => { success: boolean };
+  };
+  if (schema.safeParse?.({})?.success === true) return {};
+  const key = singleStringParam(tool);
+  return key === undefined ? undefined : { [key]: text };
 }
 
 /**
@@ -430,9 +456,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           outputs.push(`${name}: not built by this tenant`);
           continue;
         }
-        const key = singleStringParam(tool);
-        if (key === undefined) {
-          outputs.push(`${name}: skipped, no single string parameter to feed`);
+        const args = toolArgs(tool, task.prompt ?? taskId);
+        if (args === undefined) {
+          outputs.push(`${name}: skipped, needs parameters this step cannot supply`);
           continue;
         }
         const startedAt = Date.now();
@@ -443,7 +469,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         // recorded as the tool's output so the reason reaches the email.
         let value: string;
         try {
-          value = await tool.run({ [key]: task.prompt ?? taskId });
+          value = await tool.run(args);
         } catch (error: unknown) {
           value = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
         }
@@ -469,10 +495,20 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         options.audit.append(span);
         outputs.push(`${name} -> ${value}`);
       }
+      // A step that ran no tool has nothing OF ITS OWN to say — but it is still
+      // in the chain, and its output is what every dependent receives instead
+      // of its dependencies'. Emitting a placeholder there silently starved
+      // every downstream step: a 190-ticker universe reached the screen step
+      // and stopped, and the two roles after it correctly reported that nobody
+      // had given them anything to work on. Forwarding is not a substitute for
+      // the work: the text says plainly that nothing was applied.
+      const inherited = handoff(task, produced);
       const text =
-        outputs.length === 0
-          ? "(no tools declared for this role)"
-          : outputs.join("\n");
+        outputs.length > 0
+          ? outputs.join("\n")
+          : inherited === ""
+            ? "(no tools declared for this role, and nothing upstream to forward)"
+            : `(no tools declared for this role; forwarding its input unchanged)\n\n${inherited}`;
       const out = await runGates(loadedGates.gates, "output", { text }, {
         audit: options.audit,
         runId,
@@ -496,22 +532,37 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       continue;
     }
 
-    // One re-route per step, and only for a spent quota. A pool that is out
-    // stays out for the rest of the run: the vendor's reset hint is opaque, so
-    // re-offering a sibling on the same allowance would just spend a second
-    // call to learn the same thing.
-    let attempt = 0;
+    // Re-route only on a spent quota, and only while each failure RETIRES
+    // something. A pool that is out stays out for the rest of the run: the
+    // vendor's reset hint is opaque, so re-offering a sibling on the same
+    // allowance would just spend a second call to learn the same thing.
+    //
+    // The loop is bounded by the catalog, not by a counter. Every retry has
+    // strictly fewer targets to choose from than the one before it, and `select`
+    // fails outright when none are left — so "retired something" is a safe
+    // condition, and a fixed budget of one was simply wrong: an account with
+    // three separately-metered tiers needs two hops to reach the third.
     for (;;) {
       const decision = select(work, catalog.snapshot(), {
         budget: projection(budget, STEP_ESTIMATE),
       });
       if (decision.selected === undefined) {
-        report.outcome = "failed";
-        report.failure = {
-          class: decision.failure?.class ?? "capability-shortage",
-          detail: decision.failure?.reasons.join("; ") ?? "no target",
-        };
-        break tasks;
+        // A capability nothing can serve degrades THIS STEP, not the run. It
+        // reads as a run-ending condition only if you assume the shortage is
+        // permanent, and the commonest cause is the opposite: a tier that hit
+        // its rate limit two lines above and was retired, leaving the one
+        // capability only it declared. Losing every other step's work — and
+        // the report that carries them — to a transient 429 on one model is
+        // the failure mode the delivery block below already refuses to accept.
+        report.steps.push({
+          task: taskId,
+          role: task.role,
+          mode: "model",
+          text: "",
+          failure: decision.failure?.class ?? "capability-shortage",
+          downgradeReason: decision.failure?.reasons.join("; ") ?? "no target",
+        });
+        break;
       }
 
       const [providerId, ...rest] = String(decision.selected).split(":");
@@ -563,8 +614,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           failure?.quotaDomain === undefined
             ? 0
             : retireQuotaDomain(catalog, discovered.live, failure.quotaDomain);
-        if (retired > 0 && attempt === 0) {
-          attempt += 1;
+        if (retired > 0) {
           report.steps.push({
             task: taskId,
             role: task.role,
@@ -655,25 +705,57 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     }
   }
 
+  // A run whose loop reached the end is not a run that SUCCEEDED. Steps now
+  // degrade in place rather than ending the run — a gate refusal, a capability
+  // nothing can serve — and without this the report said "completed" over the
+  // top of them. The class comes from the first failed step because the first
+  // one is usually the cause and the rest the consequence.
+  if (report.outcome === "completed") {
+    // Keyed by TASK, not by step row: a quota re-route leaves a failed row
+    // behind for the attempt that was retired, and the retry that succeeded is
+    // a second row for the same task. Counting rows would report a run as
+    // failed precisely because the re-route worked.
+    const succeeded = new Set(
+      report.steps.filter((step) => step.failure === undefined).map((step) => step.task),
+    );
+    const failed = report.steps.filter(
+      (step) => step.failure !== undefined && !succeeded.has(step.task),
+    );
+    if (failed.length > 0) {
+      report.outcome = "failed";
+      report.failure = {
+        class: failed[0]!.failure!,
+        detail: `${String(failed.length)} of ${String(report.steps.length)} steps failed: ${failed
+          .map((step) => step.task)
+          .join(", ")}`,
+      };
+    }
+  }
+
   // Delivery runs even when the run FAILED. Design §7: silence is
   // indistinguishable from a dead cron, which is the failure mode that killed
   // the job this tenant replaces. A degraded report is still a report.
+  // The brake guards EGRESS, so the channel is resolved first and only then
+  // asked whether it leaves the machine. Checking the brake first would have
+  // meant an operator must arm outbound mail to get a report written to their
+  // own disk — and a channel that never declares itself is treated as external,
+  // so forgetting the flag brakes rather than sends.
   const brake = env.HELIUM_TENANT_DELIVERY === "1";
   for (const entry of spec.delivery) {
-    if (!brake) {
-      report.delivery.push({
-        channel: entry.channel,
-        state: "skipped",
-        detail: "operator brake: HELIUM_TENANT_DELIVERY is not 1",
-      });
-      continue;
-    }
     const channel = channels.find((candidate) => candidate.id === entry.channel);
     if (channel === undefined) {
       report.delivery.push({
         channel: entry.channel,
         state: "failed",
         detail: `no delivery-${entry.channel} plugin with a built lib/channel.js`,
+      });
+      continue;
+    }
+    if (channel.external !== false && !brake) {
+      report.delivery.push({
+        channel: entry.channel,
+        state: "skipped",
+        detail: "operator brake: HELIUM_TENANT_DELIVERY is not 1",
       });
       continue;
     }
