@@ -1421,7 +1421,7 @@ Copy the existing production `run-option-wizard.sh` from the mini before editing
 
 ```zsh
 phase="${1:-premarket}"
-exec node "$CHECKOUT/packages/cli/lib/index.js" run option-wizard --phase "$phase"
+exec node "$CHECKOUT/packages/cli/lib/cli.js" run option-wizard --phase "$phase"
 ```
 
 (keep whatever env sourcing and PATH the live script already has; only the last line changes).
@@ -1525,7 +1525,7 @@ pnpm build
 export HELIUM_STATE_ROOT="$PWD/.helium-state"
 unset HELIUM_TENANT_DELIVERY        # markdown only; nothing is emailed
 for p in premarket intraday close weekly frank; do
-  node packages/cli/lib/index.js run option-wizard --phase "$p"
+  node packages/cli/lib/cli.js run option-wizard --phase "$p"
 done
 ls -1 "$HELIUM_STATE_ROOT/reports/"
 ```
