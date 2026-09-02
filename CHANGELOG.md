@@ -1,3 +1,7 @@
+## v0.1.17 — 2026-09-02
+
+- fix(release): give the opsd gate a deadline it can actually meet
+
 ## v0.1.16 — 2026-09-02
 
 - fix(release): ask opsd which release it is running
