@@ -18,7 +18,7 @@ import type {
   ProviderModel,
   WorkOrder,
 } from "@helium/core";
-import { ExecutionTargetId } from "@helium/core";
+import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
 import type { ClaudeEffort } from "./catalog.js";
 import { invokeClaude } from "./invoke.js";
@@ -37,35 +37,59 @@ export const CLAUDE_OVERHEAD_TOKENS = 21;
 
 const CONTEXT = 200_000;
 
+/** All three draw on the one subscription session; they run out together. */
+const POOL = "claude-subscription-session";
+
+/**
+ * Ordered cheapest-first: `select` takes the FIRST model that covers, so an
+ * overlapping tag silently hides everything below it. Each tier therefore
+ * carries only what it is actually the right answer for — `sonnet` does NOT
+ * claim `reason.deep`, or `opus` could never be selected.
+ */
 export const CLAUDE_MODELS: ProviderModel[] = [
   {
+    // Chores: extraction, formatting, classification.
     id: "claude-haiku-4-5-20251001",
-    caps: ["reason.fast", "tool.use", "cheap.bulk", "structured.output", "long.context"],
+    caps: ["cheap.bulk", "reason.fast", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
+    quotaDomain: POOL,
     maxContextTokens: CONTEXT,
   },
   {
+    // The labour tier: writing and editing code, reviewing a diff.
     id: "claude-sonnet-5",
-    caps: ["reason.fast", "reason.deep", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
+    quotaDomain: POOL,
     maxContextTokens: CONTEXT,
   },
   {
+    // Reserved for work that genuinely needs it; `reason.deep` lives only here.
     id: "claude-opus-5",
-    caps: ["reason.fast", "reason.deep", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
+    quotaDomain: POOL,
     maxContextTokens: CONTEXT,
   },
 ];
 
-/** Deeper reasoning costs thinking tokens, so it is asked for, never default. */
-const EFFORT_FOR_DEEP: ClaudeEffort = "high";
+/**
+ * Extended thinking is billed in tokens, so it is asked for by the shape of the
+ * request and never defaulted on. Chores get none at all.
+ */
+function effortFor(requires: readonly string[]): ClaudeEffort | undefined {
+  if (requires.includes("reason.deep")) return "high";
+  if (requires.includes("code.edit") || requires.includes("code.review")) {
+    return "medium";
+  }
+  return undefined;
+}
 
 export function claudeTargetId(modelId: string) {
   return ExecutionTargetId(`claude-subscription:${modelId}`);
@@ -134,13 +158,11 @@ export class ClaudeSubscriptionProvider implements Provider {
         `claude-subscription has no model covering [${request.requires.join(", ")}] for role ${request.role}`,
       );
     }
-    const deep = request.requires.includes("reason.deep");
+    const effort = effortFor(request.requires);
     return {
       targetId: claudeTargetId(chosen.id),
       model: chosen.id,
-      ...(deep && chosen.id !== "claude-haiku-4-5-20251001"
-        ? { effort: EFFORT_FOR_DEEP }
-        : {}),
+      ...(effort === undefined ? {} : { effort }),
     };
   }
 
@@ -153,7 +175,8 @@ export class ClaudeSubscriptionProvider implements Provider {
     // one. A role that asked for tools would silently get a model with none, so
     // refuse rather than quietly narrow what was ordered (doctrine 4).
     if (work.constraints.tools.length > 0) {
-      throw new Error(
+      throw new ProviderRunFailure(
+        "provider-error",
         `claude-subscription performs inference only; ${String(work.constraints.tools.length)} tool(s) requested by role ${work.role}`,
       );
     }
@@ -169,8 +192,11 @@ export class ClaudeSubscriptionProvider implements Provider {
       signal,
     });
     if (!result.ok) {
-      throw new Error(
-        `claude-subscription ${selection.model}: ${result.classification ?? "error"}`,
+      const failure = result.classification ?? "error";
+      throw new ProviderRunFailure(
+        failure,
+        `claude-subscription ${selection.model}: ${failure}`,
+        failure === "quota-exhausted" ? POOL : undefined,
       );
     }
     return {

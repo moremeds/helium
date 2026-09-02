@@ -14,7 +14,7 @@ import type {
   ProviderModel,
   WorkOrder,
 } from "@helium/core";
-import { ExecutionTargetId } from "@helium/core";
+import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
 import type { CodexEffort } from "./catalog.js";
 import { invokeCodex } from "./invoke.js";
@@ -32,37 +32,68 @@ export const CODEX_OVERHEAD_TOKENS = 16;
 
 const CONTEXT = 400_000;
 
-/** Ordered small-to-large: `select` takes the first model that covers. */
+/** The main subscription session: luna and sol run out together. */
+const POOL = "codex-subscription-session";
+
+/**
+ * Spark bills against its own allowance, so it OUTLIVES an exhausted main pool
+ * — that, not its price, is why it is here. Declared by the operator, not
+ * measured: proving it would mean deliberately exhausting the main pool.
+ */
+const SPARK_POOL = "codex-spark";
+
+/**
+ * Ordered cheapest-first: `select` takes the FIRST covering model, so a tag
+ * that appears on two tiers hides the lower one. Each tier claims only what it
+ * is the right answer for.
+ */
 export const CODEX_MODELS: ProviderModel[] = [
   {
-    id: "gpt-5.4-mini",
-    caps: ["reason.fast", "tool.use", "cheap.bulk", "structured.output", "long.context"],
+    // Chores, at roughly haiku's level. Operator feedback 2026-09-02: quality
+    // is weak and cheapness is its only advantage — kept because a separate
+    // allowance makes it the right thing to burn while wiring a flow up, and
+    // under review once real work runs through it.
+    id: "gpt-5.3-codex-spark",
+    caps: ["cheap.bulk", "reason.fast", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
+    quotaDomain: SPARK_POOL,
     maxContextTokens: CONTEXT,
   },
   {
+    // The labour tier.
+    id: "gpt-5.6-luna",
+    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    usdIn: 0,
+    usdOut: 0,
+    unmetered: true,
+    quotaDomain: POOL,
+    maxContextTokens: CONTEXT,
+  },
+  {
+    // Reserved for work that needs it; `reason.deep` lives only here.
     id: "gpt-5.6-sol",
-    caps: ["reason.fast", "reason.deep", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0,
     usdOut: 0,
     unmetered: true,
-    maxContextTokens: CONTEXT,
-  },
-  {
-    id: "gpt-5.6-terra",
-    caps: ["reason.fast", "reason.deep", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
-    usdIn: 0,
-    usdOut: 0,
-    unmetered: true,
+    quotaDomain: POOL,
     maxContextTokens: CONTEXT,
   },
 ];
 
-/** The Responses API always takes an effort; this is the floor, not a default. */
-const EFFORT_FAST: CodexEffort = "low";
-const EFFORT_DEEP: CodexEffort = "high";
+/**
+ * This API always takes an effort, so the chore case is an explicit floor
+ * rather than an omitted field.
+ */
+function effortFor(requires: readonly string[]): CodexEffort {
+  if (requires.includes("reason.deep")) return "high";
+  if (requires.includes("code.edit") || requires.includes("code.review")) {
+    return "medium";
+  }
+  return "low";
+}
 
 export function codexTargetId(modelId: string) {
   return ExecutionTargetId(`codex-subscription:${modelId}`);
@@ -122,7 +153,7 @@ export class CodexSubscriptionProvider implements Provider {
     return {
       targetId: codexTargetId(chosen.id),
       model: chosen.id,
-      effort: request.requires.includes("reason.deep") ? EFFORT_DEEP : EFFORT_FAST,
+      effort: effortFor(request.requires),
     };
   }
 
@@ -135,22 +166,28 @@ export class CodexSubscriptionProvider implements Provider {
     // one. A role that asked for tools would silently get a model with none, so
     // refuse rather than quietly narrow what was ordered (doctrine 4).
     if (work.constraints.tools.length > 0) {
-      throw new Error(
+      throw new ProviderRunFailure(
+        "provider-error",
         `codex-subscription performs inference only; ${String(work.constraints.tools.length)} tool(s) requested by role ${work.role}`,
       );
     }
     const startedAt = Date.now();
     const result = await invokeCodex({
       model: selection.model,
-      effort: (selection.effort ?? EFFORT_FAST) as CodexEffort,
+      effort: (selection.effort ?? "low") as CodexEffort,
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
       timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
       env: this.env as Record<string, string>,
       signal,
     });
     if (!result.ok) {
-      throw new Error(
-        `codex-subscription ${selection.model}: ${result.classification ?? "error"}`,
+      const failure = result.classification ?? "error";
+      throw new ProviderRunFailure(
+        failure,
+        `codex-subscription ${selection.model}: ${failure}`,
+        failure === "quota-exhausted"
+          ? (this.models.find((m) => m.id === selection.model)?.quotaDomain ?? POOL)
+          : undefined,
       );
     }
     return {

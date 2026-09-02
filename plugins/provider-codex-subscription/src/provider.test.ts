@@ -18,18 +18,31 @@ describe("CodexSubscriptionProvider", () => {
     expect(provider.overheadTokens).toBe(CODEX_OVERHEAD_TOKENS);
   });
 
-  it("takes the smallest covering model and always states an effort", () => {
-    // Unlike Anthropic's, this API has no "no effort" setting, so the fast case
-    // is an explicit floor rather than an omitted field.
+  it("routes each tier to the model it is actually the right answer for", () => {
     const provider = new CodexSubscriptionProvider(TOKEN);
     expect(provider.select({ role: "r", requires: ["cheap.bulk"] })).toMatchObject({
-      model: "gpt-5.4-mini",
+      model: "gpt-5.3-codex-spark",
       effort: "low",
+    });
+    expect(provider.select({ role: "r", requires: ["code.edit"] })).toMatchObject({
+      model: "gpt-5.6-luna",
+      effort: "medium",
     });
     expect(provider.select({ role: "r", requires: ["reason.deep"] })).toMatchObject({
       model: "gpt-5.6-sol",
       effort: "high",
     });
+  });
+
+  it("keeps spark on its own allowance so it outlives the main pool", () => {
+    // Spark's separate quota, not its price, is why it is in the menu: it is
+    // still there when the subscription session is spent.
+    const byId = new Map(
+      new CodexSubscriptionProvider(TOKEN).models.map((m) => [m.id, m.quotaDomain]),
+    );
+    expect(byId.get("gpt-5.3-codex-spark")).toBe("codex-spark");
+    expect(byId.get("gpt-5.6-luna")).toBe("codex-subscription-session");
+    expect(byId.get("gpt-5.6-sol")).toBe("codex-subscription-session");
   });
 
   it("refuses to route a request no model covers", () => {

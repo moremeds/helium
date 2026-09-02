@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import {
   AuditStore,
   ExecutionTargetId,
+  ProviderRunFailure,
   WorkOrderSchema,
   budgetLine,
   foldSessionLog,
@@ -67,6 +68,34 @@ export interface RunReport {
  * only ever records what a session log reported.
  */
 const STEP_ESTIMATE = { inputTokens: 8_000, outputTokens: 1_000 };
+
+/**
+ * Take every target drawing on one exhausted allowance out of the catalog.
+ *
+ * Models sharing a `quotaDomain` run out together, so retiring only the model
+ * that reported 429 would just route to a sibling on the same spent pool. A
+ * model on its own domain — spark, on its separate allowance — is untouched,
+ * which is the entire reason the field exists.
+ *
+ * @returns how many targets were retired.
+ */
+export function retireQuotaDomain(
+  catalog: CapabilityCatalog,
+  providers: readonly Provider[],
+  quotaDomain: string,
+): number {
+  let retired = 0;
+  for (const provider of providers) {
+    for (const model of provider.models) {
+      if (model.quotaDomain !== quotaDomain) continue;
+      const targetId = ExecutionTargetId(`${provider.id}:${model.id}`);
+      if (catalog.get(targetId) === undefined) continue;
+      catalog.setAvailability(targetId, { state: "quota-exhausted" });
+      retired += 1;
+    }
+  }
+  return retired;
+}
 
 /** Register every live provider's models as opaque routing targets. */
 export function registerProviders(
@@ -271,57 +300,96 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       continue;
     }
 
-    const decision = select(work, catalog.snapshot(), {
-      budget: projection(budget, STEP_ESTIMATE),
-    });
-    if (decision.selected === undefined) {
-      report.outcome = "failed";
-      report.failure = {
-        class: decision.failure?.class ?? "capability-shortage",
-        detail: decision.failure?.reasons.join("; ") ?? "no target",
-      };
-      return report;
+    // One re-route per step, and only for a spent quota. A pool that is out
+    // stays out for the rest of the run: the vendor's reset hint is opaque, so
+    // re-offering a sibling on the same allowance would just spend a second
+    // call to learn the same thing.
+    let attempt = 0;
+    for (;;) {
+      const decision = select(work, catalog.snapshot(), {
+        budget: projection(budget, STEP_ESTIMATE),
+      });
+      if (decision.selected === undefined) {
+        report.outcome = "failed";
+        report.failure = {
+          class: decision.failure?.class ?? "capability-shortage",
+          detail: decision.failure?.reasons.join("; ") ?? "no target",
+        };
+        return report;
+      }
+
+      const [providerId] = String(decision.selected).split(":");
+      const provider = discovered.live.find((entry) => entry.id === providerId)!;
+      const selection = provider.select({
+        role: task.role,
+        requires: [...task.requires],
+        projectedInputTokens: STEP_ESTIMATE.inputTokens,
+        projectedOutputTokens: STEP_ESTIMATE.outputTokens,
+      });
+      const model = provider.models.find((entry) => entry.id === selection.model);
+
+      const executor: ModelExecutor =
+        options.modelExecutor ?? {
+          run: async (order, sel, sig) => provider.run!(order, sel, sig),
+        };
+
+      let result: Awaited<ReturnType<ModelExecutor["run"]>>;
+      try {
+        result = await executor.run(work, selection, signal);
+      } catch (error: unknown) {
+        const failure =
+          error instanceof ProviderRunFailure ? error : undefined;
+        const retired =
+          failure?.quotaDomain === undefined
+            ? 0
+            : retireQuotaDomain(catalog, discovered.live, failure.quotaDomain);
+        if (retired > 0 && attempt === 0) {
+          attempt += 1;
+          report.steps.push({
+            task: taskId,
+            role: task.role,
+            mode: "model",
+            targetId: String(decision.selected),
+            downgradeReason: `quota domain ${failure!.quotaDomain!} exhausted; ${String(retired)} target(s) retired for this run`,
+            text: "",
+            failure: "quota-exhausted",
+          });
+          continue;
+        }
+        report.outcome = "failed";
+        report.failure = {
+          class: failure?.failureClass ?? "provider-error",
+          detail: error instanceof Error ? error.message : String(error),
+        };
+        return report;
+      }
+
+      const spans = foldSessionLog(result.events, {
+        runId,
+        tenant: spec.tenant,
+        role: task.role,
+        provider: provider.id,
+        model: selection.model,
+        stepOffset: stepNo,
+        ...(model === undefined
+          ? {}
+          : { price: { usdIn: model.usdIn, usdOut: model.usdOut } }),
+      });
+      options.audit.appendAll(spans);
+      stepNo += spans.filter((span) => span.toolName === undefined).length;
+
+      report.steps.push({
+        task: taskId,
+        role: task.role,
+        mode: "model",
+        targetId: String(decision.selected),
+        ...(decision.downgradeReason === undefined
+          ? {}
+          : { downgradeReason: decision.downgradeReason }),
+        text: result.text,
+      });
+      break;
     }
-
-    const [providerId] = String(decision.selected).split(":");
-    const provider = discovered.live.find((entry) => entry.id === providerId)!;
-    const selection = provider.select({
-      role: task.role,
-      requires: [...task.requires],
-      projectedInputTokens: STEP_ESTIMATE.inputTokens,
-      projectedOutputTokens: STEP_ESTIMATE.outputTokens,
-    });
-    const model = provider.models.find((entry) => entry.id === selection.model);
-
-    const executor: ModelExecutor =
-      options.modelExecutor ?? {
-        run: async (order, sel, sig) => provider.run!(order, sel, sig),
-      };
-    const result = await executor.run(work, selection, signal);
-    const spans = foldSessionLog(result.events, {
-      runId,
-      tenant: spec.tenant,
-      role: task.role,
-      provider: provider.id,
-      model: selection.model,
-      stepOffset: stepNo,
-      ...(model === undefined
-        ? {}
-        : { price: { usdIn: model.usdIn, usdOut: model.usdOut } }),
-    });
-    options.audit.appendAll(spans);
-    stepNo += spans.filter((span) => span.toolName === undefined).length;
-
-    report.steps.push({
-      task: taskId,
-      role: task.role,
-      mode: "model",
-      targetId: String(decision.selected),
-      ...(decision.downgradeReason === undefined
-        ? {}
-        : { downgradeReason: decision.downgradeReason }),
-      text: result.text,
-    });
   }
 
   return report;

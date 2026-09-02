@@ -255,6 +255,50 @@ milestone:
 
 ---
 
+### 3.2 Model tiers, effort, and quota domains
+
+A vendor's menu is not flat, and the difference is what the capability tags are
+for. Three tiers, one meaning each, verified live 2026-09-02:
+
+| tier | requires | Claude | Codex | effort |
+| --- | --- | --- | --- | --- |
+| chore | `cheap.bulk` | `haiku-4-5` | `gpt-5.3-codex-spark` | none / `low` |
+| labour | `code.edit`, `code.review` | `sonnet-5` | `gpt-5.6-luna` | `medium` |
+| reasoning | `reason.deep` | `opus-5` | `gpt-5.6-sol` | `high` |
+
+**A tag may appear on only the tier it is the right answer for.** `select`
+takes the FIRST covering model, so an overlapping tag silently hides everything
+below it — the first cut of this table gave `sonnet` `reason.deep` and made
+`opus` unreachable, and did the same to `terra` behind `sol`. `gpt-5.4-mini`
+and `gpt-5.6-terra` are not in the menu: operator call, they add a tier nobody
+asked for.
+
+Effort is a within-model dial billed in thinking tokens, so it is derived from
+the same request shape and never defaulted upward. A chore spends none at all.
+
+**Quota domains.** Models sharing a `quotaDomain` run out TOGETHER, so a 429 on
+one retires all of them for the rest of the run (`retireQuotaDomain`) and the
+step re-routes once. Re-offering a sibling on the same spent allowance would
+cost a call to learn what we already know; a vendor's reset hint is opaque, so
+a retired pool stays retired for the run rather than being probed again.
+
+`gpt-5.3-codex-spark` draws on its **own** allowance, which is the only reason
+it is in the menu — it is still there when the main subscription session is
+spent. Declared by the operator, not measured: proving it would mean
+deliberately exhausting the main pool. Operator feedback on its quality is
+negative ("cheap is its only advantage"), and the live check is consistent —
+it spent 17 output tokens where `luna` spent 5 on the same one-word answer. It
+is kept as the thing to burn while wiring a flow up, and is under review.
+
+**Deferred, deliberately.** DeepSeek-as-backup-when-the-subscription-is-spent
+needs the opposite of the router's current rank (unpriced sorts last, so a
+metered DeepSeek would out-rank a paid-for subscription). `SelectionPolicy`
+already expresses it as an ordered walk and needs no router change, but
+DeepSeek's peak/off-peak pricing means the rank is time-dependent too. Both
+wait for real workload rather than being guessed at now.
+
+---
+
 ## 4. Sandbox and blast radius
 
 Doctrine 5: the boundary is _where_, not _what was signed_. dsh's sandbox is

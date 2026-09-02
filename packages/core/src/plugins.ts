@@ -38,12 +38,36 @@ export interface ProviderModel {
   usdOut: number;
   maxContextTokens?: number;
   /**
+   * The pool this model draws from. Models sharing a domain exhaust TOGETHER:
+   * a 429 on one takes the whole domain out of the catalog for the run, so the
+   * router stops offering siblings that are already spent. A model on its own
+   * domain survives its neighbours' exhaustion, which is the only reason to
+   * care — otherwise this would be decoration.
+   */
+  quotaDomain?: string;
+  /**
    * A flat-rate route: a subscription bills a month, not a token. Such a
    * target is registered with NO price, so the router ranks it last rather
    * than treating it as measured-zero and preferring it over every metered
    * model. Its token columns are still real — unmetered is not free.
    */
   unmetered?: boolean;
+}
+
+/**
+ * A step that did not run. Thrown by `Provider.run` so the runner can tell a
+ * spent quota from a broken route WITHOUT parsing a message: the first takes
+ * the whole quota domain out of the catalog and re-routes, the second does not.
+ */
+export class ProviderRunFailure extends Error {
+  constructor(
+    readonly failureClass: string,
+    message: string,
+    readonly quotaDomain?: string,
+  ) {
+    super(message);
+    this.name = "ProviderRunFailure";
+  }
 }
 
 /** One executed step, in the only shape the audit fold reads. */

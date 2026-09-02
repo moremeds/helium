@@ -9,9 +9,15 @@ import {
   loadTenants,
   type EcosystemTool,
   type LoadedTenant,
+  ProviderRunFailure,
   type Provider,
 } from "@helium/core";
-import { registerProviders, runTenant, type ModelExecutor } from "./runner.js";
+import {
+  registerProviders,
+  retireQuotaDomain,
+  runTenant,
+  type ModelExecutor,
+} from "./runner.js";
 
 const TEAM = `manifestVersion: "2"
 name: demo
@@ -243,5 +249,137 @@ describe("runTenant", () => {
     expect(
       targets.find((t) => String(t.targetId) === "metered:cheap")?.price,
     ).toEqual({ usdIn: 1e-6, usdOut: 2e-6, overheadInputTokens: 500 });
+  });
+
+  it("retires a whole exhausted pool and re-routes to the model that has its own", async () => {
+    // The reason quotaDomain exists: retiring only the model that reported 429
+    // would route straight to a sibling drawing on the same spent allowance.
+    const audit = new AuditStore(":memory:");
+    const spent: Provider = {
+      ...provider,
+      id: "pool",
+      models: [
+        { id: "a", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-9, usdOut: 1e-9, quotaDomain: "shared" },
+        { id: "b", caps: ["tool.use", "cheap.bulk"], usdIn: 2e-9, usdOut: 2e-9, quotaDomain: "shared" },
+      ],
+      select: () => ({ targetId: "pool:a" as never, model: "a" }),
+      run: async () => {
+        throw new ProviderRunFailure("quota-exhausted", "429", "shared");
+      },
+    };
+    const survivor: Provider = {
+      ...provider,
+      id: "own",
+      models: [
+        { id: "c", caps: ["tool.use", "cheap.bulk"], usdIn: 9e-6, usdOut: 9e-6, quotaDomain: "separate" },
+      ],
+      select: () => ({ targetId: "own:c" as never, model: "c" }),
+      run: async () => ({
+        text: "served by the separate allowance",
+        events: [
+          { type: "step/start", seq: 1, time: 1_000, data: { turn: 1, step: 1 } },
+          {
+            type: "assistant/message",
+            seq: 2,
+            time: 1_100,
+            data: { turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 2 } },
+          },
+        ],
+      }),
+    };
+
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [spent, survivor],
+      tools: [echo],
+      catalog: catalogFor([spent, survivor]),
+    });
+
+    expect(report.outcome).toBe("completed");
+    // Both pool models are retired by one 429, not just the one that reported.
+    expect(report.steps[0]).toMatchObject({
+      failure: "quota-exhausted",
+      downgradeReason: expect.stringContaining("2 target(s) retired"),
+    });
+    expect(report.steps[1]?.text).toBe("served by the separate allowance");
+    audit.close();
+  });
+
+  it("re-routes at most once, then fails the run with the provider's own class", async () => {
+    const audit = new AuditStore(":memory:");
+    const alwaysSpent: Provider = {
+      ...provider,
+      id: "pool",
+      models: [
+        { id: "a", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-9, usdOut: 1e-9, quotaDomain: "one" },
+        { id: "b", caps: ["tool.use", "cheap.bulk"], usdIn: 2e-9, usdOut: 2e-9, quotaDomain: "two" },
+      ],
+      select: () => ({ targetId: "pool:a" as never, model: "a" }),
+      run: async () => {
+        throw new ProviderRunFailure("quota-exhausted", "429", "one");
+      },
+    };
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [alwaysSpent],
+      tools: [echo],
+      catalog: catalogFor([alwaysSpent]),
+    });
+    expect(report).toMatchObject({
+      outcome: "failed",
+      failure: { class: "quota-exhausted" },
+    });
+    audit.close();
+  });
+
+  it("fails the step instead of throwing when a provider breaks", async () => {
+    // Before this, an exception out of run() escaped runTenant entirely and
+    // took the process with it.
+    const audit = new AuditStore(":memory:");
+    const broken: Provider = {
+      ...provider,
+      id: "broken",
+      select: () => ({ targetId: "broken:cheap" as never, model: "cheap" }),
+      run: async () => {
+        throw new Error("socket hung up");
+      },
+    };
+    await expect(
+      runTenant({
+        tenant: tenant(),
+        audit,
+        pluginsDir: "/nonexistent",
+        stateRoot: "/tmp",
+        providers: [broken],
+        tools: [echo],
+        catalog: catalogFor([broken]),
+      }),
+    ).resolves.toMatchObject({
+      outcome: "failed",
+      failure: { class: "provider-error", detail: "socket hung up" },
+    });
+    audit.close();
+  });
+
+  it("leaves a target on another allowance alone", () => {
+    const catalog = catalogFor([
+      {
+        ...provider,
+        id: "p",
+        models: [
+          { id: "shared", caps: ["tool.use"], usdIn: 0, usdOut: 0, quotaDomain: "x" },
+          { id: "own", caps: ["tool.use"], usdIn: 0, usdOut: 0, quotaDomain: "y" },
+        ],
+      },
+    ]);
+    expect(retireQuotaDomain(catalog, [], "x")).toBe(0);
+    const targets = catalog.snapshot().targets;
+    expect(targets.every((t) => t.available)).toBe(true);
   });
 });

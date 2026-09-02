@@ -20,18 +20,44 @@ describe("ClaudeSubscriptionProvider", () => {
     expect(provider.overheadTokens).toBe(CLAUDE_OVERHEAD_TOKENS);
   });
 
-  it("takes the smallest model that covers the request", () => {
+  it("routes each tier to the model it is actually the right answer for", async () => {
+    // The tag overlap that used to hide opus: `select` takes the FIRST covering
+    // model, so sonnet claiming `reason.deep` made opus unreachable.
     const provider = new ClaudeSubscriptionProvider(TOKEN);
-    expect(provider.select({ role: "r", requires: ["cheap.bulk"] }).model).toBe(
-      "claude-haiku-4-5-20251001",
-    );
-    const deep = provider.select({ role: "r", requires: ["reason.deep"] });
-    expect(deep.model).toBe("claude-sonnet-5");
-    // Extended thinking costs tokens, so it is asked for only when required.
-    expect(deep.effort).toBe("high");
+    expect(provider.select({ role: "r", requires: ["cheap.bulk"] })).toEqual({
+      targetId: "claude-subscription:claude-haiku-4-5-20251001",
+      model: "claude-haiku-4-5-20251001",
+    });
+    expect(provider.select({ role: "r", requires: ["code.edit"] })).toEqual({
+      targetId: "claude-subscription:claude-sonnet-5",
+      model: "claude-sonnet-5",
+      effort: "medium",
+    });
+    expect(provider.select({ role: "r", requires: ["reason.deep"] })).toEqual({
+      targetId: "claude-subscription:claude-opus-5",
+      model: "claude-opus-5",
+      effort: "high",
+    });
+  });
+
+  it("spends no thinking tokens on a chore", () => {
+    // Extended thinking is billed. A chore asks for none at all, rather than a
+    // small amount that nobody decided to spend.
     expect(
-      provider.select({ role: "r", requires: ["cheap.bulk"] }).effort,
+      new ClaudeSubscriptionProvider(TOKEN).select({
+        role: "r",
+        requires: ["cheap.bulk"],
+      }).effort,
     ).toBeUndefined();
+  });
+
+  it("puts all three tiers on one allowance", () => {
+    // They are one subscription session: a 429 on any of them means the pool is
+    // spent, so the runner must retire all three together.
+    const domains = new Set(
+      new ClaudeSubscriptionProvider(TOKEN).models.map((m) => m.quotaDomain),
+    );
+    expect(domains).toEqual(new Set(["claude-subscription-session"]));
   });
 
   it("refuses to route a request no model covers", () => {
