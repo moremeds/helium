@@ -6,10 +6,8 @@ dist/
 state/
 *.tsbuildinfo
 .worktrees/
-evals/runs/
 
 # Playwright MCP scratch output (console logs, screenshots) from UI verification runs
-.playwright-mcp/
 # Point-in-time operator handoff notes — working docs, not repo history
 HANDOFF-*.md
 # Local agent instructions. Deliberately untracked: they describe THIS machine's

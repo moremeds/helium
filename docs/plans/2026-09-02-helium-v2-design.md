@@ -1,7 +1,7 @@
 # Helium v2 — design
 
 **Date:** 2026-09-02 · **Status:** design of record for v2 · **Supersedes:**
-everything under `docs/plans/2026-08-*` and `docs/specs/2026-08-23-helium-design.md`.
+the v1 plans and spec, deleted with v1 in PR #60 (git history has them).
 
 `CLAUDE.md` §Doctrine is this document's acceptance criterion; every section
 traces to a doctrine point (table at the end). Claims not verifiable from a repo
@@ -472,7 +472,7 @@ v1's version works.
 | `plugins/helium/src/cron.ts` (71)           | **delete**          | Duplicates `dsh-schedule`/`dsh-jobs` `[INFERRED — not yet exercised]`.                       |
 | `packages/core/src/event-store.ts` (260)    | **delete**          | Hash-chained log for a ledger v2 lacks; the dsh session log _is_ that log.                   |
 | `packages/core/src/runs.ts` (145)           | **delete**          | Duplicates dsh `SessionId` + turn events; `tier: triage/senior` was a domain leak.           |
-| `launchd/*.plist.template` (5 files)        | keep-trim → **1**   | One `com.helium.plist`; the rest go with the ops lane.                                       |
+| `launchd/*.plist.template` (5 files)        | **delete**          | All five went with v1 (the survivor was a KeepAlive dsh web daemon with no cron path to `helium run`). M2 writes one fresh `com.helium.plist` with `StartCalendarInterval`. |
 | `plugins/ops-agent` (17,440)                | **delete**          | The SOP lane is a non-goal.                                                                  |
 | `packages/core/src/operations/` (3,532)     | **delete**          | Leases, authority, recovery budget — authorizes an empty set.                                |
 | `ops/` (563)                                | **delete**          | Declarations for the deleted lane; useful scripts return as tenant tools.                    |
