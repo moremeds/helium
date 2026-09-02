@@ -265,9 +265,18 @@ describe("unfence", () => {
     expect(unfence('```\n{"proposals":[]}\n```')).toBe('{"proposals":[]}');
   });
 
-  it("does not rescue prose wrapped around the JSON", () => {
-    // Refusing on presentation is wrong; refusing because the role answered
-    // something other than what it was asked is the point.
+  it("takes a fenced block that a preamble sits in front of", () => {
+    // A whole live run failed `role output is not JSON` because the designer
+    // wrote two sentences before the exact object it was asked for. The fence
+    // is the model marking its answer; the prose beside it is commentary.
+    expect(
+      unfence('IB is unavailable. Given that:\n\n```json\n{"proposals":[]}\n```'),
+    ).toBe('{"proposals":[]}');
+  });
+
+  it("does not scrape bare JSON out of prose", () => {
+    // With no fence there is no mark saying which braces are the answer, and a
+    // worked EXAMPLE of a trade would get lifted and gated as a real one.
     expect(() => JSON.parse(unfence('Here you go:\n{"proposals":[]}'))).toThrow();
   });
 });

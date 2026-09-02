@@ -316,15 +316,25 @@ export function evaluateProposal(
 /**
  * A model told to answer with JSON and nothing else will still fence it about
  * half the time, and refusing that is refusing on presentation rather than on
- * risk — the one thing this gate must never do. Only a fence is stripped:
- * prose around the JSON stays a refusal, because it means the role did
- * something other than what it was asked.
+ * risk — the one thing this gate must never do.
+ *
+ * A FENCED block is taken wherever it sits, preamble and all. Observed
+ * 2026-09-02 on run c40b61ee: the designer wrote two sentences of context and
+ * then the exact object it was asked for, and the whole run failed
+ * `gate-refused: role output is not JSON` — refusing on presentation again,
+ * one layer up from the fence itself. A fence is the model saying
+ * unambiguously "this is the answer"; the prose beside it is commentary.
+ *
+ * Bare JSON loose in prose is still a refusal. Without a fence there is no
+ * mark saying which braces are the answer, and scraping the first `{` out of
+ * an explanation would happily lift a worked EXAMPLE of a trade and gate it as
+ * a real one.
  */
 export function unfence(text: string): string {
   const trimmed = text.trim();
-  if (!trimmed.startsWith("```")) return trimmed;
-  const withoutOpen = trimmed.replace(/^```[a-zA-Z]*\r?\n?/, "");
-  return withoutOpen.replace(/\r?\n?```$/, "").trim();
+  const fenced = /```[a-zA-Z]*\r?\n([\s\S]*?)\r?\n?```/.exec(trimmed);
+  if (fenced?.[1] !== undefined) return fenced[1].trim();
+  return trimmed;
 }
 
 /**
