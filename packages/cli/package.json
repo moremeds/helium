@@ -5,7 +5,9 @@
   "private": true,
   "type": "module",
   "main": "./lib/index.js",
-  "bin": { "helium": "./lib/cli.js" },
+  "bin": {
+    "helium": "./lib/cli.js"
+  },
   "exports": {
     ".": "./lib/index.js",
     "./runner": "./lib/runner.js"
@@ -16,6 +18,7 @@
   },
   "dependencies": {
     "@helium/core": "file:../core",
+    "undici": "^8.10.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

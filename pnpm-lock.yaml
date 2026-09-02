@@ -90,6 +90,9 @@ importers:
       '@helium/core':
         specifier: file:../core
         version: link:../core
+      undici:
+        specifier: ^8.10.0
+        version: 8.10.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -164,6 +167,19 @@ importers:
       '@types/nodemailer':
         specifier: 8.0.1
         version: 8.0.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/delivery-markdown:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
       typescript:
         specifier: ^5
         version: 5.9.3

@@ -20,6 +20,7 @@ import {
   loadOperatorEnv,
 } from "@helium/core";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
+import { applyProxy } from "./proxy.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
 
 function stateRoot(env: NodeJS.ProcessEnv): string {
@@ -114,6 +115,8 @@ async function main(argv: string[]): Promise<number> {
   // so a one-off `HELIUM_PROXY=... helium run` overrides the file.
   loadOperatorEnv();
   const env = process.env;
+  // Before the first fetch, so no provider probe goes out unproxied.
+  applyProxy(env);
 
   if (command === "audit") {
     if (argument === undefined) {
