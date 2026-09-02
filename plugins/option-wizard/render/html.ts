@@ -194,7 +194,6 @@ export function renderHtml(view: BriefView): string {
 [data-ogsc] .ink-dim { color: #a2abbb !important; }
 [data-ogsb] .card { background-color: #1b1f27 !important; }
 @media only screen and (max-width: 359px) {
-  .stack { display: block !important; width: 100% !important; }
   .pad { padding-left: 12px !important; padding-right: 12px !important; }
 }
 </style>
