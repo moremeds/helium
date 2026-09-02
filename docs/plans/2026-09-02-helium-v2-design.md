@@ -29,7 +29,7 @@ runtime floor; the rest contribute one design idea each.
 | **LangGraph**                                | checkpoint at every step, not at task boundaries — cheap rollback for an agent editing a repo                                                                                                                                              | the graph/LangChain runtime and its tool interface                                                                      |
 | **Temporal**                                 | the **idea only**: deterministic orchestration (the reducer, replayable) split from non-deterministic activity (LLM/tool calls, retryable); v2's reducer adopts the split explicitly.                                                      | the product. No Temporal dependency, no worker fleet.                                                                   |
 | **`NanmiCoder/dsh-agent-teams`**             | the only public multi-agent-on-dsh example: a captain session spawning durable sub-agents over a dependency DAG, atomic scheduler, quality gates. Read before §6's scheduler.                                                              | wholesale adoption — open question (§11.5): session-scoped, not trigger-driven, and pinned to a dsh build we do not run |
-| **pi** (`badlogic/pi-mono`, `@earendil-works/pi-*`, MIT; installed locally at 0.79.3) | the provider layer: `pi-ai` gives 30+ providers with OAuth for Claude Pro/Max, ChatGPT Codex and Copilot subscriptions; dsh itself ships `dsh-llm-pi-ai`, so this is a supported dsh backend, not a fork. Its extension-event API is a reference for our hook table (§3). | pi as the runtime: no first-party subagents (docs say so; ≥4 competing community extensions) and no sandbox or permission model (docs disclaim it). Replacing dsh would mean rebuilding both — weeks, not days. Decided 2026-09-02: **not now**. pi buys only provider breadth, and the three providers we ship already work; adding a fourth path risks regressing them for no capability we lack. Revisit only if we need subscription OAuth we cannot get today, or if dsh rc churn (§11.4) forces a runtime swap. |
+| **pi** (`badlogic/pi-mono`, `@earendil-works/pi-*`, MIT; installed locally at 0.79.3) | the provider layer: `pi-ai` gives 30+ providers with OAuth for Claude Pro/Max, ChatGPT Codex and Copilot subscriptions; dsh itself ships `dsh-llm-pi-ai`, so this is a supported dsh backend, not a fork. Its extension-event API is a reference for our hook table (§3). | pi as the runtime: no first-party subagents (docs say so; ≥4 competing community extensions) and no sandbox or permission model (docs disclaim it). Replacing dsh would mean rebuilding both — weeks, not days. Decided 2026-09-02, **revised the same day** after measuring the CLI providers (§3.1): take pi's *transport design*, not the package. `pi-ai`'s OAuth request shapes for Anthropic and ChatGPT-Codex are the reference implementation we copy into our own providers — a dependency we would have to track through pi's release cadence buys us nothing we cannot write in ~150 lines and must maintain anyway. pi as the *runtime* stays rejected for the reasons above. |
 
 **No surveyed framework has** glob tenant discovery (all use explicit
 registration), a queryable local token table (all export to a sink or do
@@ -99,9 +99,18 @@ all things dsh has no opinion on.
 
 ```ts
 export interface Provider {
-  id: string; // "dsh", "claude-cli", "codex-cli"
+  id: string; // "dsh", "claude-subscription", "codex-subscription"
   capabilities: string[]; // what roles may require
   models: Array<{ id: string; caps: string[]; usdIn: number; usdOut: number }>;
+  // Tokens this provider spends before our prompt is counted. MEASURED, never
+  // estimated: the router adds it to every candidate, so a cheap per-token
+  // model with a fat preamble must lose to a dearer one without (§3.1).
+  overheadTokens: number;
+  // HTTP egress. Explicit because macOS system-proxy settings reach neither
+  // curl nor a launchd-spawned Node process, and because a provider is handed a
+  // curated env — an ambient https_proxy would not survive the isolation
+  // boundary. See the HELIUM_PROXY post-mortem in §3.1.
+  proxy?: string;
   probe(): Promise<boolean>; // liveness; a dead provider is skipped, not fatal
   select(req: AgentRequest): ModelSelection; // dsh: installModelSelection args
 }
@@ -139,6 +148,77 @@ providers' capabilities and picks the cheapest satisfying model (§5). A new
 vendor — or a new agent kind, e.g. a reviewer shelling out to `codex` — is one
 directory and no core edit; CI's add/remove-a-package drill proves the seam
 `[COMPUTED]`.
+
+### 3.1 Provider transport: direct HTTP, never the vendor CLI
+
+Measured 2026-09-02, one minimal call (`"Reply with exactly READY"`) per row:
+
+| transport | latency | tokens billed for our 5-token prompt |
+| --- | --- | --- |
+| `codex exec` (spawn the CLI) | 9.7s | **18,241** |
+| `claude -p` (spawn the CLI) | 8.0s | not reported |
+| Anthropic direct, Node `fetch` | **1.33s** | **26** |
+| ChatGPT-Codex direct, via `curl` | **1.8s** | our prompt only |
+| DeepSeek direct (control) | 0.75s | 15 |
+
+A vendor CLI is an agent in its own right: it prepends its own system prompt,
+tool schemas and environment description before it will carry ours. That is the
+18,241 tokens — a floor paid on every call, including a routing decision or a
+one-line tool result. Under doctrine 4 that is disqualifying, and it is
+invisible in a per-token price list, which is why `overheadTokens` is part of
+the interface and the router's cost function is
+`overheadTokens + expectedTokens`, not `expectedTokens`.
+
+So each subscription provider owns its HTTP call. The request shapes are copied
+from `pi-ai` (§0) and verified against live endpoints:
+
+**Anthropic** — plain Node `fetch` to `api.anthropic.com/v1/messages`:
+`authorization: Bearer <sk-ant-oat…>`,
+`anthropic-beta: claude-code-20250219,oauth-2025-04-20`,
+`user-agent: claude-cli/<version>`, `x-app: cli`; and `system[0]` **must** be
+the literal `"You are Claude Code, Anthropic's official CLI for Claude."`, with
+our own system prompt appended as `system[1]`. That identity string is the
+entitlement check — omit it and the subscription token is refused.
+
+**ChatGPT-Codex** — `chatgpt.com/backend-api/codex/responses`:
+`authorization: Bearer <access_token>`, `ChatGPT-Account-Id` (read from the
+JWT claim `https://api.openai.com/auth.chatgpt_account_id`), `originator`,
+`OpenAI-Beta: responses=experimental`, SSE response; body takes `store: false`
+and `instructions` for the system prompt.
+
+**Codex must be spoken by `curl`, not by Node.** `chatgpt.com` sits behind
+Cloudflare bot management, which fingerprints the TLS ClientHello. Identical
+requests: `curl` → 200 (on both HTTP/1.1 and h2), Node `fetch` **and**
+`node:https` → 403 with an HTML challenge page. Reordering ciphers does not
+help — JA3 also covers the extension and curve ordering, which is not
+reachable from Node's TLS API. This is a spawn, but a ~10ms one that carries
+only our prompt; the thing worth eliminating was the CLI's preamble, not the
+subprocess. Anthropic has no such block, so it stays in-process.
+
+**Post-mortem: `HELIUM_PROXY`, a config that was set and never read.** The mini
+egresses from a Hong Kong IP that Anthropic and OpenAI refuse — 403 *before*
+auth is evaluated (an unauthenticated control request gets the same 403; the
+laptop correctly gets 401). Clash Verge listens on `127.0.0.1:7897` and macOS
+system-proxy is enabled, but that setting reaches neither `curl` nor a
+launchd-spawned Node process. `com.helium.dsh.plist` sets
+`HELIUM_PROXY=http://127.0.0.1:7897`; **no code in the repo has ever read it**
+(`git grep` on `master` and this branch: zero hits). With `https_proxy` set by
+hand, every call above succeeds from the mini. Claude therefore never worked in
+production, and the failure surfaced as `"Not logged in"` because `classify()`
+maps 403 to `auth`.
+
+Three rules follow, and they are acceptance criteria for the provider
+milestone:
+
+1. `proxy` is passed explicitly into the request (Node dispatcher / `curl -x`).
+   Never inherited from the ambient environment, which the isolation boundary
+   strips anyway.
+2. A provider's `probe()` distinguishes *blocked* from *unauthenticated* by
+   sending an unauthenticated control request: a 403 where 401 is expected is a
+   network fault, and must not be reported as an auth fault.
+3. `overheadTokens` is measured by a live test, not declared by hand.
+
+---
 
 ## 4. Sandbox and blast radius
 
@@ -365,6 +445,7 @@ time exceeds edit time for a month, the next finding is the process itself.
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
 | **M0** | Delete everything §8 marks delete; one plist; CI down to unit + 4 contracts. v1 is not kept running — it produced no useful output and is not a fallback. Green: `pnpm build`, the 4 contracts, and the §12 provider baseline (25 tests) all pass on the trimmed tree.                                                                                                                                                                                                                                                                                                                       | < 1 day |
 | **M1** | **First, confirm the dsh version actually installed on the mini**: `dsh-team-host.ts` comments target `0.1.2-alpha.3`, the lockfile pins `0.1.1-rc.2`, npm `latest` is `0.1.1-rc.2`, and the GitHub `0.1.2-alpha.*` tags were never published — the comments describe a build we cannot install. Pin one version, record it (§11.4). Then core nouns + `provider-dsh` + `fake-tenant` tool + the `span` table folded from the session log + `helium run <tenant>`. Green: `helium run fake-tenant` prints a result and the §5 query returns rows. | < 1 day |
+| **M1.5** | **Provider transport (§3.1).** Rewrite `provider-claude-subscription` onto Node `fetch` and `provider-codex-subscription` onto `curl`; add `proxy` and a measured `overheadTokens`; `probe()` tells *blocked* from *unauthenticated*. Blocks M2: option-wizard cannot send a real email from the mini until a provider can reach a model there. Green: a live call from **the mini** for all three providers, and the §12 baseline still 25 tests. | < 1 day |
 | **M2** | option-wizard end-to-end: roles, read-only tools, preflight gate, `delivery-email`. Green: one real daily email on the mini.                                                                                                                                                                                                                                                                                                                                                                                                                      | ~3 days |
 | **M3** | Sandbox kinds + the inputs/workspace/outputs convention + `guard.ts` + contract #3; livewire read-only **gap report**.                                                                                                                                                                                                                                                                                                                                                                                                                            | ~2 days |
 | **M4** | livewire fix-in-worktree + `delivery-github-pr`. Green: one merged livewire PR authored by a run.                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ~2 days |
@@ -373,12 +454,19 @@ time exceeds edit time for a month, the next finding is the process itself.
 M0 first, deliberately (doctrine 5/6): deleting v1 before M1 means every later
 milestone is written against an empty core, not negotiated with dead code.
 
+M1's dsh-version reconciliation was **dropped** on the day (operator call): the
+mini gets rebuilt from scratch later, so pinning a version against the current
+install was work with no consumer. M0 and M1 landed 2026-09-02 in PR #60
+(57,792 → 8,455 TS lines).
+
 ## 11. Open questions
 
 1. **Push to master** (§4) — three options, none chosen. Decide before M5.
-2. **Is dsh the only in-process runtime?** A `claude`/`codex` CLI provider is a
-   subprocess with weaker usage reporting. Define `Provider` at M1 with a CLI
-   provider as the _second_ implementation at M3, before the shape sets.
+2. ~~**Is dsh the only in-process runtime?**~~ **Answered 2026-09-02 (§3.1).**
+   There is no CLI provider: `claude` and `codex` are spoken as HTTP. Anthropic
+   runs in-process on `fetch`; ChatGPT-Codex shells out to `curl` only because
+   Cloudflare fingerprints Node's TLS. Usage reporting is therefore the API's
+   own `usage` object for both, not scraped CLI output.
 3. **Audit DB location** — release root (wiped by rollback) vs. `~/.helium`
    (survives, outside the deploy unit). `[INFERRED]` Lean `~/.helium/`; loss is
    recoverable either way since §5 refolds from the session logs.
@@ -393,11 +481,11 @@ milestone is written against an empty core, not negotiated with dead code.
    stale-attempt revocation and cold-restart recovery — but is session-scoped
    rather than trigger-driven and pins itself to host builds we do not run
    (v0.1.15 ↔ host `0.1.2-alpha.2`), which is §11.4 again. Decide at M2.
-6. **pi-ai as model backend from M1, or plain dsh-llm first?** `dsh-llm-pi-ai`
-   exists upstream but is unverified against the pinned rc [INFERRED]. If it
-   loads cleanly, take it at M1 for subscription OAuth; otherwise M3, with the
-   Provider interface (§3) shaped so the swap is a plugin directory. Superseded
-   in part by §0's pi row: deferred past M5, and never at the cost of §12.
+6. ~~**pi-ai as model backend from M1?**~~ **Closed 2026-09-02.** Neither
+   `pi-ai` nor `dsh-llm-pi-ai` is taken as a dependency. We own the two
+   subscription transports outright (§3.1), borrowing pi's request shapes and
+   not its release cadence. The OAuth breadth that motivated the question is
+   the part we now implement ourselves.
 
 ---
 
@@ -406,7 +494,21 @@ milestone is written against an empty core, not negotiated with dead code.
 The one thing v1 produced that works is the provider edge:
 `provider-claude-subscription`, `provider-codex-subscription` and
 `provider-deepseek-dsh`, each a `catalog` + `invoke` + `executor` triple over
-`packages/provider-sdk`. Baseline measured 2026-09-02 on `master`:
+`packages/provider-sdk`.
+
+**What "working" means, precisely** (corrected 2026-09-02 — the earlier
+"three working providers" was untested on the machine that matters). All three
+sets of *credentials* are valid. Reachability is not uniform:
+
+| provider | laptop (SG egress) | mini (prod, HK egress) |
+| --- | --- | --- |
+| `deepseek-dsh` | live-verified | **live-verified**, no proxy needed |
+| `codex-subscription` | live-verified | blocked without proxy |
+| `claude-subscription` | live-verified | blocked without proxy; **verified working through it** |
+
+So the asset being protected is the `provider-sdk` seam and the 25 tests, not a
+claim that all three run unattended in production today. They do not, and will
+not until `proxy` is plumbed (§3.1). Baseline measured 2026-09-02 on `master`:
 
 ```
 pnpm vitest run --project unit plugins/provider-claude-subscription \
@@ -421,8 +523,11 @@ Rules for every milestone, M0 included:
 2. `contracts/tests/provider-executor-conformance.contract.spec.ts` is kept as
    the fourth contract for exactly this reason — it is the only surviving test
    that all three implementations must satisfy together.
-3. No fourth provider (pi-ai included) lands before M5. Provider breadth is not
-   a doctrine goal; the three cover DeepSeek, Claude and Codex already.
+3. No fourth provider lands before M5, and no provider package is taken as a
+   dependency (§0, §11.6). Provider breadth is not a doctrine goal; the three
+   cover DeepSeek, Claude and Codex already. Rewriting the *transport* of the
+   existing three (§3.1) is not a fourth provider — but it must keep the 25
+   tests green, per rule 4.
 4. If a milestone must change `provider-sdk`, run the baseline before and after
    in the same commit and put both counts in the commit message.
 
