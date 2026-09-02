@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { canonicalJson } from "../src/event-store.js";
+import { canonicalJson } from "../src/jsonl.js";
 import type { AgentResult, WorkOrder } from "../src/work.js";
 import type { RoleContract, TeamEvent } from "../src/team/events.js";
 import {

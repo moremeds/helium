@@ -1,9 +1,7 @@
-import { createHash } from "node:crypto";
 import { chmodSync, mkdtempSync, readFileSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { canonicalJson } from "../src/event-store.js";
 import type { RoleContract, TeamEvent } from "../src/team/events.js";
 import { reduceTeam } from "../src/team/reducer.js";
 import { openTeamStore } from "../src/team/store.js";
@@ -52,7 +50,6 @@ describe("team store", () => {
     const store = openTeamStore(path, "case-store", { sync: noSync });
     store.append(opened);
     store.append(started);
-    store.snapshot();
     store.append(rostered);
 
     expect(store.load()).toEqual(reduceTeam([opened, started, rostered]));
@@ -86,7 +83,6 @@ describe("team store", () => {
     const store = openTeamStore(path, "case-store", { sync: noSync });
     store.append(opened);
     store.append(started);
-    store.snapshot();
     store.append(rostered);
     const raw = readFileSync(store.logPath);
     truncateSync(store.logPath, raw.length - 20);
@@ -98,28 +94,12 @@ describe("team store", () => {
       .toEqual([opened, started, rostered]);
   });
 
-  it("ignores a corrupt snapshot and replays the authoritative log", () => {
-    const path = root();
-    const store = openTeamStore(path, "case-store", { sync: noSync });
-    store.append(opened);
-    store.append(started);
-    store.snapshot();
-    const snapshot = JSON.parse(readFileSync(store.snapshotPath, "utf8"));
-    snapshot.lastHash = "sha256:tampered";
-    writeFileSync(store.snapshotPath, JSON.stringify(snapshot));
-    chmodSync(store.snapshotPath, 0o600);
-
-    expect(openTeamStore(path, "case-store", { sync: noSync }).load())
-      .toEqual(reduceTeam([opened, started]));
-  });
-
   it("rejects an unsupported event version in the log", () => {
     const path = root();
     const store = openTeamStore(path, "case-store", { sync: noSync });
     store.append(opened);
     const envelope = JSON.parse(readFileSync(store.logPath, "utf8"));
     envelope.record.version = 2;
-    envelope.hash = `sha256:${createHash("sha256").update(canonicalJson(envelope.record)).digest("hex")}`;
     writeFileSync(store.logPath, `${JSON.stringify(envelope)}\n`);
     chmodSync(store.logPath, 0o600);
     expect(() => openTeamStore(path, "case-store", { sync: noSync })).toThrow();

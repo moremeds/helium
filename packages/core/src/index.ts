@@ -10,7 +10,6 @@
 export * from "./time.js";
 export * from "./jsonl.js";
 export * from "./state.js";
-export * from "./runs.js";
 export * from "./verdict.js";
 export * from "./theses.js";
 export * from "./tenant-health.js";
@@ -21,7 +20,6 @@ export * from "./capabilities.js";
 export * from "./router.js";
 export * from "./execution.js";
 export * from "./sensor-context.js";
-export * from "./event-store.js";
 export * from "./evidence/bundle.js";
 export * from "./evidence/ledger.js";
 export * from "./evidence/manifest.js";

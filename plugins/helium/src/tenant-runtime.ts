@@ -1,5 +1,5 @@
 /**
- * The tenant trigger loop: one `CronTrigger` per declared trigger, each firing
+ * The tenant trigger loop: one `croner` Cron per declared trigger, each firing
  * a `TeamRunInput` at that tenant's own `TeamController`. This is the whole of
  * the tenant lane's scheduling — `tenant.yaml` declares cron triggers only, so
  * there is no poller, no calendar watcher and no state-change dedup here.
@@ -17,7 +17,7 @@ import {
   type JsonlWriter,
   type TeamRunProjection,
 } from "@helium/core";
-import { CronTrigger } from "./cron.js";
+import { Cron } from "croner";
 import {
   createBuiltinOutputContractRegistry,
   type OutputContractRegistry,
@@ -98,7 +98,7 @@ export function buildTenantRunInput(
 
 /**
  * The ONE load path. Startup (`apply()`) and the pre-flip release check
- * (`scripts/release/validate-tenants.mjs`) both call this, so the two can
+ * both call this, so the two can
  * never diverge: `loadTenants` + `loadTenantTools` + `validateTeamTools` +
  * `loadTenantDescriptor` + `readiness()`, with every failure landing in
  * `skipped` and nothing thrown except a duplicate tenant name.
@@ -280,12 +280,24 @@ export class TenantRuntime {
         phase: "startup",
       });
       for (const trigger of tenant.spec.triggers) {
-        const cron = new CronTrigger({
-          tenant: tenant.spec.tenant,
-          trigger,
-          onTrigger: (event: TenantTriggerEvent) => this.#fire(tenant, event),
-        });
-        cron.start();
+        // `protect: true`: a run still in flight when the next tick arrives
+        // suppresses that tick rather than overlapping it.
+        const cron = new Cron(
+          trigger.schedule,
+          { timezone: trigger.timezone, protect: true },
+          () => {
+            const firedAt = nowIso();
+            void this.#fire(tenant, {
+              tenant: tenant.spec.tenant,
+              kind: "cron",
+              firedAt,
+              dedupKey: `${tenant.spec.tenant}:cron:${firedAt.slice(0, 16)}Z`,
+              payload: { scheduledFor: firedAt },
+            }).catch((error: unknown) => {
+              console.error(`helium.cron(${tenant.spec.tenant}):`, error);
+            });
+          },
+        );
         this.#disposers.push(() => {
           cron.stop();
         });

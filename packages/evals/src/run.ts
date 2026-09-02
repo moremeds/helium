@@ -8,7 +8,6 @@ import {
   parseTeamYaml,
   type TeamManifest,
 } from "@helium/core";
-import { parse as parseYaml } from "yaml";
 import {
   evaluatePairedGate,
   fixtureDirectoryHash,
@@ -106,16 +105,15 @@ function argument(name: string): string | undefined {
   return index < 0 ? undefined : process.argv[index + 1];
 }
 
-function registeredHash(): string {
-  const register = parseYaml(
-    readFileSync(resolve(repoRoot, "docs/evidence/claims.yaml"), "utf8"),
-  ) as { claims: Array<{ id: string; fixtureSetSha256?: string }> };
-  const value = register.claims.find(
-    (claim) => claim.id === "P3-CODEX-PAIRED-UNSUPPORTED-CLAIM-RATE",
-  )?.fixtureSetSha256;
-  if (value === undefined) throw new Error("P3 frozen fixture hash is absent from claims register");
-  return value;
-}
+/**
+ * The pre-registered hash of `evals/fixtures/macro`, frozen before the paired
+ * arms were ever run. It is pinned here rather than looked up in a claims
+ * register: the register is gone, and a hash that travels with the code it
+ * guards is what makes a fixture edit show up as a gate failure.
+ * `packages/evals/tests/paired-gate.spec.ts` recomputes it from the directory.
+ */
+const FROZEN_FIXTURE_SHA256 =
+  "44d3cc143e6eb423840ba2dcf85ad11feb6730e33ab161a874e8979dfbced268";
 
 export async function replayFrozenCases(fixtureDir: string): Promise<PairedEvaluation[]> {
   const fixtures = JSON.parse(readFileSync(resolve(fixtureDir, "cases.json"), "utf8")) as FrozenCase[];
@@ -147,7 +145,7 @@ export interface OfflineEvaluationReport {
 export async function runOfflineEvaluation(fixtureDir: string): Promise<OfflineEvaluationReport> {
   const gate = evaluatePairedGate({
     fixtureDir,
-    expectedFixtureHash: registeredHash(),
+    expectedFixtureHash: FROZEN_FIXTURE_SHA256,
     pairs: await replayFrozenCases(fixtureDir),
   });
   const autonomyInputs = JSON.parse(

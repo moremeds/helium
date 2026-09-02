@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Placeholders, substituted by the operator when installing this plist:
+       __RELEASE__       the immutable release dir, e.g. ~/projects/helium-releases/current
+       __HOME__          the operator account's home directory
+       __NODE_BIN_DIR__  the directory holding `node`, e.g. /opt/homebrew/bin
+       __EMAIL_TO__      where alerts are delivered
+     The deploy renders this file, refusing any unresolved placeholder, and
+     validates the result with BOTH plutil -lint and plistlib (plutil alone
+     accepts files launchd rejects). Do not hand-edit the installed plist:
+     the next deploy re-renders it, and launchd only re-reads it on
+     bootout + bootstrap.
+
+     A tenant may declare `env:` key NAMES it needs forwarded to its MCP child.
+     Those are CREDENTIALS and are read from HELIUM_ENV_FILE by run-dsh.sh; they
+     must never appear here. OPTION_WIZARD_DIR below is a path, not a secret,
+     which is why it belongs in this file. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.helium.dsh</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__RELEASE__/scripts/launchd/run-dsh.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>__RELEASE__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>ExitTimeOut</key><integer>30</integer>
+  <key>ProcessType</key><string>Standard</string>
+  <key>StandardOutPath</key><string>__HOME__/.helium/logs/dsh.out.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/.helium/logs/dsh.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__NODE_BIN_DIR__:/Applications/ChatGPT.app/Contents/Resources:__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>CODEX_HOME</key><string>__HOME__/.codex</string>
+    <key>HOME</key><string>__HOME__</string>
+    <key>DSH_HOME</key><string>__HOME__/.helium/dsh-home</string>
+    <key>HELIUM_TENANTS_DIR</key><string>__RELEASE__/plugins</string>
+    <!-- The operator's brake. `narrower()` takes the MORE RESTRICTIVE of this
+         and each tenant.yaml's own promotionMode, so no tenant file can exceed
+         it: raising it is a deliberate operator change, never something a
+         tenant can do for itself. It ships `off`; raising it is an explicit,
+         reversible edit to the installed plist made by the operator.
+         HELIUM_TEAM_CANARY_TENANTS below is a second, independent gate: with it
+         empty, no tenant is promoted at any mode above `shadow`. -->
+    <key>HELIUM_TEAM_PROMOTION_MODE</key><string>off</string>
+    <!-- Empty until a tenant is deliberately allow-listed. -->
+    <key>HELIUM_TEAM_CANARY_TENANTS</key><string></string>
+    <key>HELIUM_TEAM_CANARY_MAX_PER_UTC_DAY</key><string>1</string>
+    <key>HELIUM_TEAMS_DIR</key><string>__RELEASE__/teams</string>
+    <key>HELIUM_OPS_EVENT_LOG</key><string>__HOME__/.helium/ops/state/events.jsonl</string>
+    <key>HELIUM_STATE_ROOT</key><string>__HOME__/.helium/state</string>
+    <key>HELIUM_CONTEXT_FILE</key><string>__RELEASE__/context/ecosystem.md</string>
+    <key>HELIUM_ARGON_BASE</key><string>http://127.0.0.1:8400</string>
+    <key>HELIUM_APEX_BASE</key><string>http://127.0.0.1:8322</string>
+    <key>OPTION_WIZARD_DIR</key><string>__HOME__/projects/option-wizard</string>
+    <key>HELIUM_ENV_FILE</key><string>__HOME__/.config/helium/helium.env</string>
+    <key>HELIUM_CLAUDE_TOKEN_FILE</key><string>__HOME__/.config/helium/claude-token.env</string>
+    <key>HELIUM_PROXY</key><string>http://127.0.0.1:7897</string>
+    <!-- The built server itself, not a pnpm bin shim: `lib/` is a tsc build
+         product, so at `pnpm install` time (which always precedes `pnpm build`
+         in deploy.sh) the bin target does not exist yet and pnpm silently
+         creates NO shim at all — verified on the mini during task 3.3, where
+         both candidate .bin paths were absent after a clean install+build. The
+         file carries a `#!/usr/bin/env node` shebang and `pnpm build` chmod +x's
+         it, and PATH above puts node first, so spawning it directly works and
+         has one less moving part. -->
+    <key>HELIUM_MCP_BIN</key><string>__RELEASE__/plugins/helium/lib/mcp/server.js</string>
+    <!-- A tenant file saying `delivered` is a declaration of intent; this is
+         the operator saying this host may actually send. Both are required. -->
+    <key>HELIUM_TENANT_DELIVERY</key><string>0</string>
+    <key>HELIUM_EMAIL_TO</key><string>__EMAIL_TO__</string>
+  </dict>
+</dict>
+</plist>

@@ -1,7 +1,4 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parse as parseYaml } from "yaml";
 import {
   EvidenceManifestSchema,
   P0_CLAIM_FIELDS,
@@ -139,24 +136,4 @@ describe("EvidenceManifestSchema", () => {
     ).toThrow();
   });
 
-  // P1 inherits the frozen template: every field survives with the same
-  // meaning, P1 may only add fields or tighten types, and the hand-written P0
-  // manifest must validate against this schema WITHOUT being rewritten.
-  it.each([
-    ["p0-manifest.yaml", 7, 2],
-    ["p1-manifest.yaml", 6, 2],
-    ["p2.5a-manifest.yaml", 21, 2],
-  ])("validates the committed %s unchanged", (file, claims, partial) => {
-    const path = fileURLToPath(
-      new URL(`../../../docs/evidence/${file}`, import.meta.url),
-    );
-    const parsed = EvidenceManifestSchema.parse(
-      parseYaml(readFileSync(path, "utf8")),
-    );
-    expect(parsed.manifestVersion).toBe("p0-1");
-    expect(parsed.claims).toHaveLength(claims);
-    expect(parsed.claims.filter((c) => c.status === "PARTIAL")).toHaveLength(
-      partial,
-    );
-  });
 });

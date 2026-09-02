@@ -9,7 +9,7 @@ import type {
   TeamEvent,
 } from "./events.js";
 import type { AgentResult, WorkOrder } from "../work.js";
-import { canonicalJson } from "../event-store.js";
+import { canonicalJson } from "../jsonl.js";
 
 export interface CaseProjection {
   caseId: string;

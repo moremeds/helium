@@ -7,6 +7,21 @@
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * Deterministic JSON: object keys sorted at every depth, so a record hashes
+ * the same however its keys were ordered when it was built. Array order is
+ * meaningful and is left alone.
+ */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
+  return `{${entries.join(",")}}`;
+}
+
 /** The UTC calendar date (`YYYY-MM-DD`) an instant belongs to. */
 export function utcDate(at: Date = new Date()): string {
   return at.toISOString().slice(0, 10);
