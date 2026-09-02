@@ -1,3 +1,8 @@
+## v0.1.14 — 2026-09-02
+
+- fix(release): start the health window after the old daemon is gone
+- fix(release): make the deploy own the DSH plist
+
 ## v0.1.13 — 2026-09-01
 
 - fix(release): let a deliberately disabled tenant ship
