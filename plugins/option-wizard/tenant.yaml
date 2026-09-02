@@ -36,17 +36,41 @@ env:
   - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
 
-# The cron time and timezone were lost with the original spec (§8.3, §9) and
-# were never reconstructable from it — an operator supplied them on 2026-09-02.
-# 18:00 Hong Kong is after the US premarket data the run reads has settled and
-# before the US open, so the quotes it prices against are a whole session's
-# NBBO rather than a half-formed one. The timezone is named, never a UTC offset:
-# HK does not observe DST, but writing +08:00 would make that a property of this
-# file instead of a property of the zone.
+# DECLARATIVE ONLY. Nothing in this repo runs a cron loop: launchd is the
+# scheduler and `launchd/com.helium.option-wizard-<phase>.plist` is where the
+# time actually lives. These five entries exist so the schedule is readable
+# next to the tenant it schedules, and they must be kept in step with the
+# plists BY HAND — a drift between the two is invisible until an email is
+# missing. Timezone is named, never a UTC offset: HK does not observe DST, but
+# writing +08:00 would make that a property of this file instead of the zone.
 triggers:
+  # 06:00 ET — the US tape is FROZEN at this hour; see the regime prompt.
   - kind: cron
     schedule: "0 18 * * *"
     timezone: Asia/Hong_Kong
+    phase: premarket
+  # Monday only, 09:00 ET. Frank posts 12:37 UTC = 20:37 HKT, two and a half
+  # hours after Monday's premarket, so he cannot ride along with it.
+  - kind: cron
+    schedule: "0 21 * * 1"
+    timezone: Asia/Hong_Kong
+    phase: frank
+  # 13:00 ET, mid-session: the tape is live here and nowhere else.
+  - kind: cron
+    schedule: "0 1 * * *"
+    timezone: Asia/Hong_Kong
+    phase: intraday
+  # 16:15 ET, after the close: markout settles against final prints, not
+  # estimates. The cost is that the reader sees it next morning.
+  - kind: cron
+    schedule: "15 4 * * *"
+    timezone: Asia/Hong_Kong
+    phase: close
+  # Sunday 08:00 ET.
+  - kind: cron
+    schedule: "0 20 * * 0"
+    timezone: Asia/Hong_Kong
+    phase: weekly
 
 # The report is a MARKDOWN FILE, not mail. The email recipients were lost with
 # the same section of the spec, and a channel whose one required setting is
@@ -67,7 +91,12 @@ delivery:
   - channel: email
     config:
       subjectPrefix: "[option-wizard]"
-      maxPerDay: 2
+      # Five, because the day now has five runs. The counter is per UTC day
+      # (delivery-email/src/channel.ts:120 uses toISOString().slice(0,10)), so
+      # the boundary is 00:00 UTC = 08:00 HKT and phases 1-4 all fall in the
+      # same UTC day: Monday 4 mails, other weekdays 3, Sunday 1. WHOEVER ADDS
+      # A SIXTH must first check it does not cross 08:00 HKT.
+      maxPerDay: 5
 
 # The tenant-owned opaque block; the host never reads inside it (spec §3).
 #

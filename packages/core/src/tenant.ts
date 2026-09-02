@@ -82,6 +82,10 @@ const CronTriggerSchema = z.strictObject({
   kind: z.literal("cron"),
   schedule: z.string().min(1).max(200),
   timezone: z.string().min(1).max(64),
+  // An opaque label core never reads, compares or acts on. Nothing here runs a
+  // cron loop, so a trigger is documentation of a schedule kept elsewhere; the
+  // label lets that documentation say WHICH scheduled entry it describes.
+  phase: z.string().min(1).max(64).optional(),
 });
 
 const DeliverySchema = z.strictObject({
@@ -176,13 +180,15 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
 /** Every directory under `dir` that carries a `tenant.yaml`, name-ordered. */
 export function tenantDirs(dir: string): string[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    // A symlinked tenant directory is a directory for our purposes; without
-    // this it is skipped silently (isDirectory() does not follow links).
-    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-    .map((entry) => entry.name)
-    .sort()
-    .filter((name) => existsSync(join(dir, name, "tenant.yaml")));
+  return (
+    readdirSync(dir, { withFileTypes: true })
+      // A symlinked tenant directory is a directory for our purposes; without
+      // this it is skipped silently (isDirectory() does not follow links).
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .sort()
+      .filter((name) => existsSync(join(dir, name, "tenant.yaml")))
+  );
 }
 
 export function loadTenants(dir: string): TenantLoadResult {
@@ -198,7 +204,9 @@ export function loadTenants(dir: string): TenantLoadResult {
       );
       const previous = seen.get(spec.tenant);
       if (previous !== undefined) {
-        throw new Error(`duplicate tenant: ${spec.tenant} (also in ${previous})`);
+        throw new Error(
+          `duplicate tenant: ${spec.tenant} (also in ${previous})`,
+        );
       }
       seen.set(spec.tenant, name);
       const manifest = parseTeamYaml(
