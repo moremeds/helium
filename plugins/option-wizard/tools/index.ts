@@ -406,14 +406,19 @@ export async function tvLast(
 /**
  * The spot, from whichever source THIS MACHINE actually has.
  *
- * TradingView is a desktop app driven over CDP by opencli. That is a laptop
- * fact, not a deployment one: the mini has neither opencli nor a logged-in
- * chart (`ssh macmini command -v opencli` -> nothing, 2026-09-02). A price
- * path through it therefore leaves the mini with no spot, no chain — since
- * ow_uw_chain refuses to trim strikes around nothing — and a designer that
- * correctly returns no proposals every single day. Unusual Whales answers the
- * same question over the credential the chain already requires, so the fallback
- * costs no new secret and no new dependency.
+ * TradingView is a desktop GUI app driven over CDP by opencli, so its
+ * availability is a property of a MACHINE AND A MOMENT, not of the codebase.
+ * Both boxes have it (mini: /usr/local/bin/opencli, TradingView.app logged in,
+ * verified 2026-09-02) — but the app can be closed, the CDP port down, or the
+ * session logged out, and none of those announce themselves. An earlier comment
+ * here asserted the mini had no opencli at all; that came from a non-login
+ * `ssh macmini command -v opencli`, whose PATH omits /usr/local/bin. Do not
+ * re-derive machine facts from a shell whose PATH you did not print.
+ *
+ * So the second source is not a mini-only crutch, it is the answer to "TV is a
+ * GUI app". Unusual Whales answers the same question over the credential the
+ * chain already requires, so the fallback costs no new secret and no new
+ * dependency.
  *
  * TradingView stays FIRST where it exists: it is the live regular-session last,
  * and it is what every strike shipped so far was checked against. UW's
@@ -567,8 +572,9 @@ export function buildTools(cfg: {
   return [
     {
       // opencli's TradingView adapter is read-only and drives the LOCAL app over
-      // CDP; on the mini the app is installed but opencli is not, so this tool's
-      // absence is a degraded run, not a failed one (spec §5, §7). Surface
+      // CDP. Installed on both boxes, but a GUI app is never a guarantee: it can
+      // be closed or its debugging port down, so its absence at run time is a
+      // degraded run, not a failed one (spec §5, §7). Surface
       // verified 2026-09-02 against `opencli tradingview watchlists --help`:
       // options `--id`, `--color <red|orange|…>`, `-f json`; columns
       // id, name, symbol_count, symbols.
@@ -585,35 +591,35 @@ export function buildTools(cfg: {
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const { flagColors } = TvParams.parse(args);
-        // TradingView is a desktop app driven by opencli, so the mini has no
-        // watchlist and the universe step would hand the designer an empty set
-        // — a run that completes and proposes nothing, every day. OW_UNIVERSE
-        // is the OPERATOR's list, not a guess made here: this tool will not
-        // invent a universe, it will only read the one someone wrote down. It
-        // says so in `source`, because a frozen list and today's flags are not
-        // the same thing and a reader must be able to tell.
-        const tvHere = env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "";
-        if (!tvHere) {
+        // OW_UNIVERSE is the OPERATOR's list, not a guess made here: this tool
+        // will not invent a universe, it will only read the one someone wrote
+        // down. It says so in `source`, because a frozen list and today's flags
+        // are not the same thing and a reader must be able to tell.
+        const operatorUniverse = (why: string): string => {
           const listed = (env.OW_UNIVERSE ?? "")
             .split(",")
             .map((entry) => entry.trim().toUpperCase())
             .filter((entry) => entry !== "");
           if (listed.length === 0) {
             throw new Error(
-              "ow_tv_watchlist: TradingView is not on this machine (needs OW_TV_ENABLED=1 and " +
-                "OPENCLI_BIN) and OW_UNIVERSE names no fallback tickers, so there is no " +
-                "universe to build. Refusing to return an empty one, which reads as a market " +
-                "with nothing in it.",
+              `ow_tv_watchlist: ${why}, and OW_UNIVERSE names no fallback tickers, so there ` +
+                "is no universe to build. Refusing to return an empty one, which reads as a " +
+                "market with nothing in it.",
             );
           }
           return JSON.stringify({
             source: "operator list (OW_UNIVERSE)",
             note:
-              "TradingView is not available on this machine. These are the tickers the operator " +
-              "listed, not today's flagged watchlists — the list is as current as whoever set it.",
+              `TradingView was not usable on this run (${why}). These are the tickers the ` +
+              "operator listed, not today's flagged watchlists — the list is as current as " +
+              "whoever set it.",
             tickers: [...new Set(listed)].sort((a, b) => a.localeCompare(b, "en")),
             fetchedAt: new Date().toISOString(),
           });
+        };
+        const tvHere = env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "";
+        if (!tvHere) {
+          return operatorUniverse("TradingView is not enabled here (needs OW_TV_ENABLED=1 and OPENCLI_BIN)");
         }
         const bin = need(env, "OPENCLI_BIN", "ow_tv_watchlist");
         const symbols = new Set<string>();
@@ -624,8 +630,12 @@ export function buildTools(cfg: {
           try {
             ({ stdout } = await execFileAsync(bin, argv, { timeout: 30_000 }));
           } catch (error: unknown) {
-            throw new Error(
-              `ow_tv_watchlist: ${bin} ${argv.join(" ")} failed — ${
+            // TradingView is a GUI app: closed, mid-update, or CDP port down are
+            // all normal, and none of them mean "the market is empty". Fall back
+            // to the operator list rather than failing the whole run — but SAY
+            // which one the reader is looking at.
+            return operatorUniverse(
+              `${bin} ${argv.join(" ")} failed — ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -659,9 +669,8 @@ export function buildTools(cfg: {
         // among several is a fact about that list, while nothing at all across
         // all of them means the shape changed under us.
         if (symbols.size === 0) {
-          throw new Error(
-            `ow_tv_watchlist: ${bin} returned watchlists but no symbol could be read from them; ` +
-              "refusing to report an empty universe as a result",
+          return operatorUniverse(
+            `${bin} returned watchlists but no symbol could be read from them`,
           );
         }
         return JSON.stringify({

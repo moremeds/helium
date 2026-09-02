@@ -139,14 +139,33 @@ describe("absent environment", () => {
   });
 
   it("ow_tv_watchlist falls back to the operator's list, and says that is what it is", async () => {
-    // The mini has no opencli, so without this the universe step hands the
-    // designer an empty set and the run proposes nothing while reporting
-    // "completed". The list is the OPERATOR's; this tool never invents one.
+    // Without this the universe step hands the designer an empty set and the
+    // run proposes nothing while reporting "completed". The list is the
+    // OPERATOR's; this tool never invents one.
     const json = await tool("ow_tv_watchlist", { OW_UNIVERSE: " spy ,qqq, spy,IWM " }).run({});
     const parsed = JSON.parse(json);
     expect(parsed.tickers).toEqual(["IWM", "QQQ", "SPY"]);
     expect(parsed.source).toContain("operator list");
     expect(parsed.note).toContain("not today's flagged watchlists");
+  });
+
+  it("ow_tv_watchlist falls back when opencli itself fails, naming the failure", async () => {
+    // TradingView is a desktop GUI app: closed, mid-update or CDP port down are
+    // all normal states, and none of them mean "the market is empty". Before
+    // this the tool threw and took the whole run with it. OPENCLI_BIN points at
+    // a path that does not exist, which is exactly what a closed app looks like
+    // from here — an exec that fails.
+    const json = await tool("ow_tv_watchlist", {
+      OW_TV_ENABLED: "1",
+      OPENCLI_BIN: "/nonexistent/opencli",
+      OW_UNIVERSE: "SPY,QQQ",
+    }).run({});
+    const parsed = JSON.parse(json);
+    expect(parsed.tickers).toEqual(["QQQ", "SPY"]);
+    expect(parsed.source).toContain("operator list");
+    // The reason travels with the fallback: a reader must be able to tell a
+    // machine that never had TradingView from one whose app was shut.
+    expect(parsed.note).toContain("/nonexistent/opencli");
   });
 
   it("ow_ib_positions names the host it could not reach", async () => {
