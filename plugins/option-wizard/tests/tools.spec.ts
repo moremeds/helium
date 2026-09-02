@@ -4,7 +4,7 @@
  * would put an invented number in a trading email.
  */
 import { describe, expect, it } from "vitest";
-import { VOCABULARY, buildTools, symbolLiteral } from "../tools/index.js";
+import { VOCABULARY, buildTools, symbolLiteral, tvYieldCurve } from "../tools/index.js";
 
 const EMPTY_ENV: Record<string, string | undefined> = {};
 
@@ -159,6 +159,25 @@ describe("symbolLiteral", () => {
     // from a model's tool call — the one input here that is nobody's contract.
     for (const bad of ["SPY'; DROP TABLE x --", "../../etc", "SPY OR 1=1", ""]) {
       expect(() => symbolLiteral(bad, "t")).toThrow("is not a symbol this tool will pass on");
+    }
+  });
+});
+
+describe("tvYieldCurve", () => {
+  // The overlay is an ADDITION to argon's daily path, so a broken TradingView
+  // must cost the caller the intraday level and nothing else. It also must not
+  // go quiet: an absent curve that reported nothing would let a regime read
+  // quote an 8-day-old 10y as this morning's, which is the whole reason the
+  // overlay exists.
+  it("reports why it has no curve instead of throwing", async () => {
+    for (const env of [
+      {},
+      { OW_TV_ENABLED: "1" },
+      { OW_TV_ENABLED: "1", OPENCLI_BIN: "/nonexistent/opencli" },
+    ]) {
+      const result = await tvYieldCurve(env, "ow_macro_rates");
+      expect(result).toHaveProperty("unavailable");
+      expect((result as { unavailable: string }).unavailable).not.toBe("");
     }
   });
 });

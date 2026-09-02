@@ -166,6 +166,99 @@ const DEFAULT_MACRO_SERIES = [
   "ANFCI",
 ] as const;
 
+/**
+ * The live yield curve, and the FRED series each tenor is the intraday twin of.
+ *
+ * argon's macro store is a DAILY FRED mirror and its scanner runs behind: on
+ * 2026-09-02 its newest DGS10 observation was 2026-08-25 at 4.64, while the
+ * curve had already moved to 4.812 — 17bp of a rates read that a report dated
+ * today would have got wrong. So the daily series stays as the HISTORY (it is
+ * the only thing that can carry a 30-day path) and today's level comes off
+ * TradingView instead.
+ *
+ * DGS2 and DGS5 are listed even though argon ingests neither: the mapping is
+ * what the two halves are joined on, and naming a series argon lacks is how a
+ * reader sees there is no daily path behind that tenor.
+ *
+ * Exchange is TVC — TradingView's own index feed, verified 2026-09-02.
+ */
+const TV_YIELD_TENORS: ReadonlyArray<{ ticker: string; fredId: string; label: string }> = [
+  { ticker: "US02Y", fredId: "DGS2", label: "2y" },
+  { ticker: "US05Y", fredId: "DGS5", label: "5y" },
+  { ticker: "US10Y", fredId: "DGS10", label: "10y" },
+  { ticker: "US30Y", fredId: "DGS30", label: "30y" },
+];
+
+/**
+ * One TVC quote per tenor, or the reason there are none.
+ *
+ * It does NOT throw: argon's daily history is the primary result and losing the
+ * intraday overlay must not cost the caller the path as well. It never returns
+ * silence either — a missing overlay comes back as a `unavailable` string, so
+ * the difference between "the curve did not move" and "we could not read the
+ * curve" survives into the report.
+ *
+ * `fetchedAt` is deliberately not called a quote time. opencli's `time` field
+ * moves with the REQUEST (two calls a minute apart returned the same 4.812 at
+ * two different `time`s, verified 2026-09-02), so it dates our read and says
+ * nothing about the feed's own age. TradingView does not expose that age here;
+ * treat the level as intraday but not as tick-fresh.
+ */
+export async function tvYieldCurve(
+  env: Env,
+  tool: string,
+): Promise<{ tenors: unknown[]; fetchedAt: string } | { unavailable: string }> {
+  if (env.OW_TV_ENABLED !== "1") {
+    return { unavailable: 'OW_TV_ENABLED is not "1"; no intraday curve, daily series only' };
+  }
+  const bin = env.OPENCLI_BIN;
+  if (bin === undefined || bin.trim() === "") {
+    return { unavailable: "OPENCLI_BIN is unset; no intraday curve, daily series only" };
+  }
+  const tenors: unknown[] = [];
+  for (const tenor of TV_YIELD_TENORS) {
+    const argv = [
+      "tradingview",
+      "quote",
+      "--ticker",
+      symbolLiteral(tenor.ticker, tool),
+      "--exchange",
+      "TVC",
+      "-f",
+      "json",
+    ];
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync(bin, argv, { timeout: 30_000 }));
+    } catch (error: unknown) {
+      return {
+        unavailable:
+          `${bin} ${argv.join(" ")} failed — ` +
+          (error instanceof Error ? error.message : String(error)),
+      };
+    }
+    const parsed: unknown = JSON.parse(stdout);
+    const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
+      | { close?: unknown; change_abs?: unknown }
+      | undefined;
+    const close = row?.close;
+    // A tenor that answers without a number is dropped rather than reported as
+    // zero — a 0.00% yield reads as a real and catastrophic level.
+    if (typeof close !== "number") continue;
+    tenors.push({
+      tenor: tenor.label,
+      symbol: `TVC:${tenor.ticker}`,
+      fredId: tenor.fredId,
+      yieldPct: close,
+      ...(typeof row?.change_abs === "number" ? { changeAbsPct: row.change_abs } : {}),
+    });
+  }
+  if (tenors.length === 0) {
+    return { unavailable: "every TVC tenor answered without a numeric close" };
+  }
+  return { tenors, fetchedAt: new Date().toISOString() };
+}
+
 /** Verified 2026-09-02 against argon's own client: base
  *  `https://api.unusualwhales.com`, bearer token in `Authorization`
  *  (`/Users/chenxi/projects/argon/src/uw_scan/api/client.py:111`). */
@@ -554,7 +647,7 @@ export function buildTools(cfg: {
       // NFCI (financial conditions), BAMLH0A0HYM2 (HY OAS), DTWEXBGS (dollar).
       name: "ow_macro_rates",
       description:
-        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date.",
+        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date, plus today's 2y/5y/10y/30y Treasury curve live from TradingView. `series` is the daily path; `liveCurve` is the current level — quote the live level for today and the series for the trend.",
       paramsSchema: MacroParams,
       mutating: false,
       dshParams: {
@@ -584,7 +677,15 @@ export function buildTools(cfg: {
               `in the last ${String(days)} days; returning no rates rather than an empty curve that reads as flat`,
           );
         }
-        return JSON.stringify({ source: "argon.uw_scan.macro_series_daily", rows });
+        // Two sources, two keys, never merged into one number: `series` is the
+        // daily path and carries its own observation dates, `liveCurve` is
+        // today's level. A single blended field would let a caller quote an
+        // 8-day-old 10y as this morning's, which is exactly the mistake this
+        // overlay exists to remove.
+        return JSON.stringify({
+          series: { source: "argon.uw_scan.macro_series_daily", rows },
+          liveCurve: { source: "tradingview:TVC", ...(await tvYieldCurve(env, "ow_macro_rates")) },
+        });
       },
     },
     {
