@@ -515,8 +515,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       `phase: ${phase}`,
       `now: ${zonedNow(at)}`,
       `now (UTC): ${at.toISOString().replace(/\.\d{3}Z$/, "Z")}`,
-      "Both clock lines above are quotable verbatim. Every other timestamp you",
-      "write must be copied character-for-character from a tool output.",
+      // Spelling out that the two lines are one instant is not padding: a run
+      // near HK midnight shows two different calendar dates, and a model that
+      // reads them as a contradiction spends the step reasoning about the
+      // clock instead of the tape.
+      "The two clock lines are the SAME instant written in two zones, not two",
+      "times. Both are quotable verbatim; every other timestamp you write must",
+      "be copied character-for-character from a tool output.",
     ].join("\n");
     toolOutputs.push(clock);
     const work: WorkOrder = WorkOrderSchema.parse({

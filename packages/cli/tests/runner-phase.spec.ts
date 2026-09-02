@@ -131,6 +131,7 @@ describe("run phase", () => {
     // The UTC twin exists so a model that wants a Z timestamp has one to copy
     // rather than converting the zoned line and being refused by the gate.
     expect(seenPrompt).toContain("now (UTC): 2026-09-03T10:00:00Z");
+    expect(seenPrompt).toContain("SAME instant written in two zones");
     audit.close();
   });
 });
