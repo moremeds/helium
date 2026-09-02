@@ -23,9 +23,12 @@ budget:
 env:
   - OW_TV_ENABLED
   - OPENCLI_BIN
-  - OW_ARGON_API_BASE
+  - OW_ARGON_PG_URL
+  - OW_APEX_API_BASE
+  - OW_PSQL_BIN
   - OW_IB_API_BASE
   - OW_IB_API_KEY
+  - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
 
 # TRIGGERS EMPTY DELIBERATELY. The cron time and its timezone were lost with the

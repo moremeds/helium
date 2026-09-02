@@ -24,13 +24,14 @@ const execFileAsync = promisify(execFile);
 
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_tv_watchlist", { mutating: false, requiresEnv: "OW_TV_ENABLED" }],
-  ["ow_argon_watchlist", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
+  ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_ib_chain", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_ib_quote", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
-  ["ow_macro_rates", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_macro_rates", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_ib_preflight", { mutating: false }],
 ]);
 
@@ -105,6 +106,66 @@ function dteOf(expiry: string, now: Date): number {
   return Math.round((parsed - today) / 86_400_000);
 }
 
+/**
+ * A symbol or series id, validated as a SQL/URL literal.
+ *
+ * Every identifier here reaches either a psql `-c` string or a path segment,
+ * and the tool takes them from a model's tool call — the one input on this
+ * whole surface that is neither ours nor the vendor's. An allow-list is the
+ * only defence that does not depend on getting quoting right.
+ */
+export function symbolLiteral(raw: string, tool: string): string {
+  const value = raw.trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9._:!-]{0,23}$/.test(value)) {
+    throw new Error(`${tool}: ${JSON.stringify(raw)} is not a symbol this tool will pass on`);
+  }
+  return value;
+}
+
+/**
+ * Read-only query against argon's Postgres, through psql.
+ *
+ * ponytail: psql over a driver. The alternative is a connection pool and a new
+ * dependency for a handful of SELECTs a day, and the execFile pattern is
+ * already here for opencli. `ON_ERROR_STOP` plus `--single-transaction` means
+ * a broken query fails the tool instead of returning a partial result set, and
+ * the connection string is a libpq URL so credentials stay in the env.
+ */
+async function pgJson(env: Env, tool: string, sql: string): Promise<unknown[]> {
+  const url = need(env, "OW_ARGON_PG_URL", tool);
+  const bin = env.OW_PSQL_BIN ?? "psql";
+  const wrapped = `SELECT coalesce(json_agg(q), '[]'::json) FROM (${sql}) q`;
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(
+      bin,
+      ["-v", "ON_ERROR_STOP=1", "--single-transaction", "-At", "-c", wrapped, url],
+      { timeout: 30_000, maxBuffer: 32 * 1024 * 1024 },
+    ));
+  } catch (error: unknown) {
+    throw new Error(
+      `${tool}: argon postgres query failed — ${
+        error instanceof Error ? error.message.split("\n").slice(0, 3).join(" ") : String(error)
+      }`,
+    );
+  }
+  const parsed: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+/** Rates, breakevens, credit and financial conditions — the legs a regime read
+ *  actually uses. All verified present in argon's store on 2026-09-02. */
+const DEFAULT_MACRO_SERIES = [
+  "DGS10",
+  "DFII10",
+  "T10YIE",
+  "T5YIFR",
+  "VIXCLS",
+  "BAMLH0A0HYM2",
+  "DTWEXBGS",
+  "ANFCI",
+] as const;
+
 /** Verified 2026-09-02 against argon's own client: base
  *  `https://api.unusualwhales.com`, bearer token in `Authorization`
  *  (`/Users/chenxi/projects/argon/src/uw_scan/api/client.py:111`). */
@@ -130,30 +191,9 @@ async function uwGet(
   return response.json();
 }
 
-/**
- * argon's real response shape, not an invented one. `[VERIFIED — spec §3,
- * from /Users/chenxi/projects/argon/src/uw_scan/api/routers/watchlist.py:107-186]`.
- * `scanned_at` is null for a watchlist ticker with no card row yet; consumers
- * must tolerate that rather than filtering it away.
- */
-export interface WatchlistResponse {
-  scanned_at_min: string | null;
-  scanned_at_max: string | null;
-  scheduler_lag_seconds: number | null;
-  queue: { total: number; queued: number; running: number; oldest_requested_at: string | null };
-  hot_count: number;
-  hot_max: number;
-  tickers: unknown[];
-}
 
 const TvParams = z.object({
   flagColors: z.array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"])).optional(),
-});
-const ArgonParams = z.object({
-  sector: z.string().optional(),
-  chain: z.string().optional(),
-  setup: z.string().optional(),
-  freshWithinMinutes: z.number().int().positive().optional(),
 });
 const NoParams = z.object({});
 const ChainParams = z.object({
@@ -170,8 +210,16 @@ const TickerMetricsParams = z.object({ tickers: z.array(z.string().min(1)).min(1
 // and picking a default here would be picking a market view on the caller's
 // behalf.
 const MarketStateParams = z.object({ sector: z.string().min(1), etf: z.string().min(1) });
-const MATURITIES = ["3month", "2year", "5year", "7year", "10year", "30year"] as const;
-const MacroParams = z.object({ maturities: z.array(z.enum(MATURITIES)).min(1).optional() });
+const MacroParams = z.object({
+  series: z.array(z.string().min(1)).min(1).max(24).optional(),
+  lookbackDays: z.number().int().positive().max(3650).optional(),
+});
+const BarsParams = z.object({
+  symbol: z.string().min(1),
+  assetClass: z.enum(["equity", "index", "rates", "crypto", "futures"]).optional(),
+  timeframe: z.string().min(1).optional(),
+  lookbackDays: z.number().int().positive().max(3650).optional(),
+});
 
 export function buildTools(cfg: {
   stateRoot: string;
@@ -259,50 +307,52 @@ export function buildTools(cfg: {
       },
     },
     {
-      name: "ow_argon_watchlist",
+      // Straight to argon's Postgres, not to argon's HTTP API.
+      //
+      // The API is a process that has to be up; the database is the system of
+      // record and was up the whole time the API was returning 502. Reading
+      // the shell instead of the store made "argon is unavailable" a daily
+      // occurrence when the data was always there.
+      //
+      // Columns verified live 2026-09-02 against the running database:
+      //   iv_rank_history(ticker, market_date, close, volatility, iv_rank_1y)
+      //   greek_exposure_daily(ticker, trade_date, net_gex, net_dex,
+      //                        call_gex, put_gex, call_delta, put_delta)
+      //   skew_analytics_snapshot(ticker, market_date, spot, rr_25d, skew_25d,
+      //                           rr_z_180d, deviation_class, regime,
+      //                           directional_lean, lean_confidence)
+      // Every row carries its own as-of date, because these tables are fed by
+      // a scanner that can fall behind and a stale number must be visibly stale.
+      name: "ow_argon_metrics",
       description:
-        "argon's scanned watchlist (GET /api/watchlist): cards with spot, iv_rank, gamma, skew and positioning per ticker.",
-      paramsSchema: ArgonParams,
+        "Per-ticker IV rank, gamma/delta exposure and 25-delta skew from argon's store, each with the date it was observed.",
+      paramsSchema: TickerMetricsParams,
       mutating: false,
       dshParams: {
-        sector: { type: "string", description: "Filter by sector" },
-        chain: { type: "string", description: "Filter by chain" },
-        setup: { type: "string", description: "Filter by setup type" },
-        freshWithinMinutes: {
-          type: "number",
-          description: "Only cards scanned within this many minutes",
-        },
+        tickers: { type: "array", required: true, description: "Up to 25 symbols" },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const params = ArgonParams.parse(args);
-        const base = need(env, "OW_ARGON_API_BASE", "ow_argon_watchlist");
-        const url = new URL("/api/watchlist", base);
-        if (params.sector !== undefined) url.searchParams.set("sector", params.sector);
-        if (params.chain !== undefined) url.searchParams.set("chain", params.chain);
-        if (params.setup !== undefined) url.searchParams.set("setup", params.setup);
-        if (params.freshWithinMinutes !== undefined) {
-          url.searchParams.set("fresh_within_minutes", String(params.freshWithinMinutes));
-        }
-        const doFetch = ctx?.fetchImpl ?? fetch;
-        let response: Response;
-        try {
-          response = await doFetch(url);
-        } catch (error: unknown) {
-          throw new Error(
-            `ow_argon_watchlist: argon unreachable at ${url.host} — ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        }
-        if (!response.ok) {
-          throw new Error(
-            `ow_argon_watchlist: ${url.pathname} returned ${response.status} ${response.statusText}`,
-          );
-        }
-        // Passed through verbatim: argon owns this shape and re-typing it here
-        // would be a second place for it to drift.
-        const body = (await response.json()) as WatchlistResponse;
-        return JSON.stringify(body);
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { tickers } = TickerMetricsParams.parse(args);
+        const list = tickers.map((ticker) => `'${symbolLiteral(ticker, "ow_argon_metrics")}'`).join(",");
+        const rows = await pgJson(
+          env,
+          "ow_argon_metrics",
+          `SELECT t.ticker,
+                  to_jsonb(iv) - 'inserted_at' - 'updated_at_src' AS iv,
+                  to_jsonb(gx) - 'payload'                        AS gex,
+                  to_jsonb(sk)                                    AS skew
+             FROM (SELECT unnest(ARRAY[${list}]) AS ticker) t
+             LEFT JOIN LATERAL (SELECT * FROM uw_scan.iv_rank_history r
+                                 WHERE r.ticker = t.ticker
+                                 ORDER BY r.market_date DESC LIMIT 1) iv ON true
+             LEFT JOIN LATERAL (SELECT * FROM uw_scan.greek_exposure_daily g
+                                 WHERE g.ticker = t.ticker
+                                 ORDER BY g.trade_date DESC LIMIT 1) gx ON true
+             LEFT JOIN LATERAL (SELECT * FROM uw_scan.skew_analytics_snapshot s
+                                 WHERE s.ticker = t.ticker
+                                 ORDER BY s.market_date DESC LIMIT 1) sk ON true`,
+        );
+        return JSON.stringify({ source: "argon.uw_scan", rows });
       },
     },
     {
@@ -312,11 +362,38 @@ export function buildTools(cfg: {
       mutating: false,
       dshParams: {},
       async run(_args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        // Passed through verbatim. xenon owns this shape; re-typing it here
-        // would be a second place for it to drift, and `account_summary`
-        // carries exactly the net-liq and buying-power the preflight gate
-        // reads.
-        return JSON.stringify(await ibGet(env, "ow_ib_positions", "/portfolio", {}, ctx));
+        const body = (await ibGet(env, "ow_ib_positions", "/portfolio", {}, ctx)) as {
+          last_sync?: unknown;
+        };
+        // `/portfolio` is a PERSISTED SNAPSHOT, not a live read. xenon refreshes
+        // it on `POST /portfolio/sync`, a write path this read-only key is
+        // deliberately refused on — so the age of what comes back is unbounded
+        // and nothing in the payload flags it. It was served 35 days stale and
+        // passed through verbatim, and a role then reasoned about "today's"
+        // buying power from a snapshot taken five weeks earlier. An account
+        // number with the wrong date on it is not a weaker number, it is a
+        // wrong one; refusing is the only honest option, and the message names
+        // the exact command that fixes it.
+        const syncedAt = typeof body.last_sync === "string" ? Date.parse(body.last_sync) : NaN;
+        if (Number.isNaN(syncedAt)) {
+          throw new Error("ow_ib_positions: /portfolio carried no readable last_sync; refusing an undateable account snapshot");
+        }
+        const ageHours = (Date.now() - syncedAt) / 3_600_000;
+        const maxAgeHours = Number(env.OW_IB_MAX_SNAPSHOT_AGE_HOURS ?? "24");
+        if (!Number.isFinite(maxAgeHours) || maxAgeHours <= 0) {
+          throw new Error("OW_IB_MAX_SNAPSHOT_AGE_HOURS is not a positive number; ow_ib_positions has no freshness bound to check against");
+        }
+        if (ageHours > maxAgeHours) {
+          throw new Error(
+            `ow_ib_positions: the account snapshot is ${ageHours.toFixed(1)}h old ` +
+              `(last_sync ${String(body.last_sync)}), past the ${String(maxAgeHours)}h bound. ` +
+              "xenon refreshes it with POST /portfolio/sync, which this read-only key cannot call. " +
+              "No account figures are returned rather than dating today's risk from a stale book.",
+          );
+        }
+        // Age travels WITH the data, so a consumer that ignores the bound still
+        // cannot mistake the vintage.
+        return JSON.stringify({ ...body, snapshotAgeHours: Number(ageHours.toFixed(2)) });
       },
     },
     {
@@ -466,40 +543,103 @@ export function buildTools(cfg: {
       },
     },
     {
-      // Spec §3 names UW routes `central_bank_rates` and `yield_curve`; neither
-      // appears in the live OpenAPI docs (searched 2026-09-02). What does exist
-      // is GET /api/economy/{indicator} with `fed-funds` and `treasury-yield`
-      // (+ `maturity`), Advanced+ tier — so the curve is assembled from those
-      // rather than from a path that could not be verified to exist.
+      // Unusual Whales' `/api/economy/*` answers 403 on this subscription, and
+      // the spec's `central_bank_rates` / `yield_curve` routes do not exist at
+      // all. argon already ingests the FRED series into its own store, so the
+      // rates leg comes from there — the same numbers, one hop closer, and no
+      // tier to be refused by.
+      //
+      // Series verified present 2026-09-02: DGS10 (10y nominal), DFII10 (10y
+      // real), T10YIE (10y breakeven), T5YIFR (5y5y forward), VIXCLS, ANFCI /
+      // NFCI (financial conditions), BAMLH0A0HYM2 (HY OAS), DTWEXBGS (dollar).
       name: "ow_macro_rates",
       description:
-        "Fed funds series and the treasury yield curve from Unusual Whales' economy endpoint.",
+        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date.",
       paramsSchema: MacroParams,
       mutating: false,
       dshParams: {
-        maturities: {
+        series: {
           type: "array",
-          description: "Treasury maturities: 3month, 2year, 5year, 7year, 10year, 30year",
+          description: "FRED series ids; omit for the default rates/vol/credit set",
         },
+        lookbackDays: { type: "number", description: "How far back to return observations (default 30)" },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const { maturities } = MacroParams.parse(args);
-        const tool = "ow_macro_rates";
-        const yieldCurve: Record<string, unknown> = {};
-        for (const maturity of maturities ?? MATURITIES) {
-          yieldCurve[maturity] = await uwGet(
-            env,
-            tool,
-            "/api/economy/treasury-yield",
-            { maturity },
-            ctx,
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { series, lookbackDays } = MacroParams.parse(args);
+        const wanted = series ?? [...DEFAULT_MACRO_SERIES];
+        const list = wanted.map((id) => `'${symbolLiteral(id, "ow_macro_rates")}'`).join(",");
+        const days = lookbackDays ?? 30;
+        const rows = await pgJson(
+          env,
+          "ow_macro_rates",
+          `SELECT series_id, obs_date::text AS obs_date, value
+             FROM uw_scan.macro_series_daily
+            WHERE series_id IN (${list})
+              AND obs_date >= current_date - ${String(Math.trunc(days))}
+            ORDER BY series_id, obs_date DESC`,
+        );
+        if (rows.length === 0) {
+          throw new Error(
+            `ow_macro_rates: argon's macro store has no observation for ${wanted.join(", ")} ` +
+              `in the last ${String(days)} days; returning no rates rather than an empty curve that reads as flat`,
           );
         }
-        return JSON.stringify({
-          centralBankRates: await uwGet(env, tool, "/api/economy/fed-funds", {}, ctx),
-          yieldCurve,
-          asOf: new Date().toISOString(),
-        });
+        return JSON.stringify({ source: "argon.uw_scan.macro_series_daily", rows });
+      },
+    },
+    {
+      // apex serves the EOD-synced lake; it is the desk's only deep daily
+      // history and needs no credential (verified 2026-09-02: SPY 2026-08-25
+      // close 765.91 over a bare GET, no header).
+      //
+      // `start` MUST be offset-aware — a bare YYYY-MM-DD makes apex answer 500
+      // — and `price_mode=adjusted` is equity-only, both learned from argon's
+      // own client rather than rediscovered here.
+      name: "ow_apex_bars",
+      description:
+        "Historical daily/intraday OHLCV bars for one symbol from apex's market-data lake.",
+      paramsSchema: BarsParams,
+      mutating: false,
+      dshParams: {
+        symbol: { type: "string", required: true, description: "Ticker, e.g. SPY" },
+        assetClass: { type: "string", description: "equity (default), index, rates, crypto, futures" },
+        timeframe: { type: "string", description: "e.g. 1d (default), 1h, 5m" },
+        lookbackDays: { type: "number", description: "Calendar days back from today (default 180)" },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { symbol, assetClass, timeframe, lookbackDays } = BarsParams.parse(args);
+        const tool = "ow_apex_bars";
+        const base = need(env, "OW_APEX_API_BASE", tool);
+        const ticker = symbolLiteral(symbol, tool);
+        const klass = assetClass ?? "equity";
+        const back = lookbackDays ?? 180;
+        const start = new Date(Date.now() - back * 86_400_000).toISOString();
+        const url = new URL(`/v1/${encodeURIComponent(klass)}/${encodeURIComponent(ticker)}/bars`, base);
+        url.searchParams.set("timeframe", timeframe ?? "1d");
+        url.searchParams.set("start", start);
+        if (klass === "equity") url.searchParams.set("price_mode", "adjusted");
+        const doFetch = ctx?.fetchImpl ?? fetch;
+        let response: Response;
+        try {
+          response = await doFetch(url);
+        } catch (error: unknown) {
+          throw new Error(
+            `${tool}: apex unreachable at ${url.host} — ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        if (!response.ok) {
+          throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+        }
+        const body = (await response.json()) as { bars?: unknown[] };
+        if (!Array.isArray(body.bars) || body.bars.length === 0) {
+          throw new Error(
+            `${tool}: apex has no ${timeframe ?? "1d"} bar for ${ticker} since ${start}; ` +
+              "reporting the gap rather than an empty series",
+          );
+        }
+        return JSON.stringify(body);
       },
     },
     {
