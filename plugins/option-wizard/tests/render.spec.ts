@@ -281,3 +281,57 @@ describe("renderReport (text part)", () => {
     expect(text).not.toContain("Actually, let me");
   });
 });
+
+describe("renderReport (html part)", () => {
+  it("carries the computed numbers and none of the transcript", () => {
+    const html = renderReport(report(), SPEC).html ?? "";
+    expect(html).toContain("SPY");
+    expect(html).toContain("748.72");
+    expect(html).toContain("872");
+    expect(html).toContain("未定价");
+    expect(html).not.toContain("Actually, let me");
+    expect(html).not.toContain("quantity");
+    expect(html).not.toContain("run-84a83ad2");
+    expect(html).not.toContain("helium audit");
+  });
+
+  it("obeys the email constraints: no images, no svg, no box-shadow, no rem", () => {
+    const html = renderReport(report(), SPEC).html ?? "";
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("data:image");
+    expect(html).not.toContain("box-shadow");
+    expect(html).not.toMatch(/[0-9]rem/);
+  });
+
+  it("ships all three dark-mode layers and the 359px breakpoint", () => {
+    const html = renderReport(report(), SPEC).html ?? "";
+    expect(html).toContain("@media (prefers-color-scheme: dark)");
+    expect(html).toContain("[data-ogsc]");
+    expect(html).toContain("max-width: 359px");
+  });
+
+  it("escapes a rationale that contains markup", () => {
+    const withMarkup = report();
+    withMarkup.steps[3]!.text = REVIEW_TEXT.replace(
+      "Bond duration hedge: minimal cost insurance.",
+      "Bond <script>alert(1)</script> hedge",
+    );
+    const html = renderReport(withMarkup, SPEC).html ?? "";
+    expect(html).not.toContain("<script>");
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("renders the empty brief without any candidate section", () => {
+    const html =
+      renderReport(
+        report({
+          outcome: "failed",
+          failure: { class: "budget-exhausted", detail: "no room" },
+        }),
+        SPEC,
+      ).html ?? "";
+    expect(html).toContain("今日无候选");
+    expect(html).not.toContain("【候选结构】");
+  });
+});

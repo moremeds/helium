@@ -12,6 +12,7 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
+import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
 
 export interface CandidateView {
@@ -273,5 +274,6 @@ export default function renderReport(
   return {
     subject: `${view.tenant} ${view.dateHkt.slice(0, 10)}${tag}`,
     text: renderText(view),
+    html: renderHtml(view),
   };
 }
