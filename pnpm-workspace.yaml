@@ -3,7 +3,6 @@ packages:
   - plugins/*
   - contracts
   - contracts/fixtures/plugin-restrict-proof
-  - contracts/fixtures/senior-isolation
 allowBuilds:
   esbuild: true
   koffi: true

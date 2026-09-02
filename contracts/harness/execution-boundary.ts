@@ -12,7 +12,7 @@
  * arrives is not reusable. The minimal subject shape below is the contract
  * both sides meet at.
  *
- * The evidence comes from `contracts/fixtures/senior-isolation/fake-claude.mjs`,
+ * The evidence comes from `contracts/fixtures/execution-boundary/fake-claude.mjs`,
  * a fake `claude` binary the harness puts on the child's PATH. It reports what
  * actually reached the child; this file decides whether that is good enough.
  * @module @helium/contracts/harness/execution-boundary
