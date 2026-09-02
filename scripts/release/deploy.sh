@@ -236,7 +236,10 @@ reload_dsh() {
 # the environment the previous release actually ran with, not a re-render of it.
 install_dsh_plist() {
   mkdir -p "$PLIST_BACKUP_DIR" || return 1
-  if [ -f "$DSH_PLIST" ]; then
+  # Re-deploying the SAME version must not overwrite the backup with that
+  # version's own plist -- a later rollback would then restore the key set it
+  # is rolling away from.
+  if [ -f "$DSH_PLIST" ] && ! cmp -s "$DSH_PLIST" "$RENDERED_PLIST"; then
     cp -p "$DSH_PLIST" "$PLIST_BACKUP_DIR/pre-$VERSION.plist" || return 1
   fi
   cp "$RENDERED_PLIST" "$DSH_PLIST"
@@ -268,7 +271,6 @@ if [ -n "$prev_target" ]; then
   mv -fh "$RELEASES/.previous.$$" "$RELEASES/previous"
 fi
 
-flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 flip_to "$DEST"
 say "flipped current -> $VERSION; installing the plist and reloading the daemon"
 if ! install_dsh_plist; then
@@ -287,6 +289,10 @@ if ! reload_dsh; then
     exit 74
   fi
 fi
+# The health-window baseline starts HERE, not at the flip: the old daemon keeps
+# writing heartbeat rows until `reload_dsh` boots it out, and one of those stale
+# rows would satisfy the window on its own.
+flip_start_ms=$(node -e 'process.stdout.write(String(Date.now()))')
 if ! restart_opsd_if_loaded; then
   echo "FATAL: current=$VERSION but installed com.helium.opsd did not restart. The collector/plugin release pair may be inconsistent; inspect both launchd labels before continuing." >&2
   exit 76
