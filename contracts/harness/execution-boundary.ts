@@ -58,10 +58,10 @@ const RANK: Record<IsolationClass, number> = {
 };
 
 const FAKE_CLAUDE = fileURLToPath(
-  new URL("../fixtures/senior-isolation/fake-claude.mjs", import.meta.url),
+  new URL("../fixtures/execution-boundary/fake-claude.mjs", import.meta.url),
 );
 const FAKE_CODEX = fileURLToPath(
-  new URL("../fixtures/senior-isolation/fake-codex.mjs", import.meta.url),
+  new URL("../fixtures/execution-boundary/fake-codex.mjs", import.meta.url),
 );
 
 /**
