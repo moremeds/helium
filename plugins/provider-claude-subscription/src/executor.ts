@@ -130,7 +130,6 @@ export function registerCertifiedClaudeTargets(input: {
     pluginNamespace: "@helium/provider-claude-subscription@0.0.0",
     catalog: claudeSubscriptionCatalog,
     certification: input.certification,
-    isolationClass: "process",
     targetProfile: input.targetProfile,
     capabilityCatalog: input.capabilityCatalog,
     executorRegistry: input.executorRegistry,

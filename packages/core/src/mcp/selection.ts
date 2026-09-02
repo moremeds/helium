@@ -9,7 +9,7 @@
  * degradation report.
  * @module @helium/core/mcp/selection
  */
-import type { EcosystemTool, ToolVocabularyEntry } from "../tools/index.js";
+import type { EcosystemTool, ToolVocabularyEntry } from "../tools.js";
 
 /** The subset of process.env selected() reads. Both keys are domain-neutral. */
 export interface SelectionEnv {

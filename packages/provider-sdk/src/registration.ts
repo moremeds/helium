@@ -7,7 +7,6 @@ import {
   type CapabilityCatalog,
   type ConformanceRecord,
   type Executor,
-  type IsolationClass,
   type TargetProfile,
 } from "@helium/core";
 import type { ProviderCatalog, ProviderTarget } from "./catalog.js";
@@ -75,7 +74,7 @@ export type RegisteredProviderTargets = RegisteredProviderTarget[] & {
 
 export type ProviderTargetProfile = Omit<
   TargetProfile,
-  "targetId" | "isolationClass"
+  "targetId"
 >;
 
 export function stableProviderTargetId(
@@ -109,7 +108,6 @@ export function registerCertifiedTargets(input: {
   pluginNamespace: string;
   catalog: ProviderCatalog & { snapshotHash: string };
   certification: EntitlementCertification;
-  isolationClass: IsolationClass;
   targetProfile: ProviderTargetProfile;
   capabilityCatalog: CapabilityCatalog;
   executorRegistry: ExecutorRegistryPort;
@@ -144,7 +142,6 @@ export function registerCertifiedTargets(input: {
       );
       const profile = TargetProfileSchema.parse({
         targetId,
-        isolationClass: input.isolationClass,
         ...input.targetProfile,
       }) as TargetProfile;
       const native: ProviderNativeVariant = {

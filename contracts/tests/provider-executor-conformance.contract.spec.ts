@@ -6,7 +6,7 @@
 import { ExecutionTargetId } from "@helium/core";
 import { createClaudeExecutor } from "../../plugins/provider-claude-subscription/src/executor.js";
 import { createCodexExecutor } from "../../plugins/provider-codex-subscription/src/executor.js";
-import { asBoundarySubject } from "../../plugins/helium/src/executor-registry.js";
+import { asBoundarySubject } from "../../packages/provider-sdk/src/boundary.js";
 import { runExecutionBoundaryConformance } from "../harness/execution-boundary.js";
 
 const codex = createCodexExecutor({

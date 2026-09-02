@@ -236,7 +236,6 @@ export function registerCertifiedDeepSeekTargets(input: {
     pluginNamespace: "@helium/provider-deepseek-dsh@0.0.0",
     catalog: deepseekDshCatalog,
     certification: input.certification,
-    isolationClass: "in-process",
     targetProfile: input.targetProfile,
     capabilityCatalog: input.capabilityCatalog,
     executorRegistry: input.executorRegistry,

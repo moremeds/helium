@@ -1,15 +1,16 @@
 /**
  * The model-blind execution boundary: what an executor is, the context it is
- * handed, the lease that authorizes one run, and the conformance record that
- * admits it.
+ * handed, and the conformance record that admits it.
  *
  * The `Executor` interface first exists here. It INHERITS the
- * execution-boundary contract Phase 0 already shipped as a harness and does
- * not redefine it: the harness is still the only place the assertions live, so
- * a second execution backend cannot quietly grade itself on an easier exam.
+ * execution-boundary contract already shipped as a harness and does not
+ * redefine it: the harness is still the only place the assertions live, so a
+ * second execution backend cannot quietly grade itself on an easier exam.
+ *
+ * v2 note: leases are gone. They were mutual exclusion for a mutating ops lane
+ * that no longer exists; a run's blast radius is now the sandbox it runs in.
  * @module @helium/core/execution
  */
-import { randomUUID } from "node:crypto";
 import type { ExecutionTargetId } from "./capabilities.js";
 import {
   ISOLATION_CLASSES,
@@ -94,61 +95,4 @@ export function isConformant(
   record: ConformanceRecord,
 ): boolean {
   return RANK[record.provenClass] >= RANK[declared];
-}
-
-export interface ExecutionLease {
-  id: string;
-  targetId: ExecutionTargetId;
-  workId: string;
-  /** Reserved, not charged. Budget is charged on completion from the ledger. */
-  reservedCost: number;
-  expiresAt: string;
-}
-
-/**
- * Leases are consumed exactly once, in process, and append-audited by their
- * caller. The store itself keeps no history: it is the mutual-exclusion
- * primitive, not the audit trail.
- */
-export class LeaseStore {
-  readonly #open = new Map<string, ExecutionLease>();
-
-  issue(input: Omit<ExecutionLease, "id">): ExecutionLease {
-    const lease: ExecutionLease = { id: randomUUID(), ...input };
-    this.#open.set(lease.id, lease);
-    return lease;
-  }
-
-  /**
-   * @throws when the lease is unknown, already consumed, expired, or bound to
-   * different work. A lease that authorizes anything other than the work it
-   * names is not a lease.
-   */
-  consume(leaseId: string, workId: string, now: Date = new Date()): ExecutionLease {
-    const lease = this.#open.get(leaseId);
-    if (lease === undefined) {
-      throw new Error(
-        this.#consumed.has(leaseId)
-          ? `lease already consumed: ${leaseId}`
-          : `unknown lease: ${leaseId}`,
-      );
-    }
-    if (lease.workId !== workId) {
-      throw new Error(
-        `lease work mismatch: ${leaseId} authorizes ${lease.workId}, not ${workId}`,
-      );
-    }
-    if (Date.parse(lease.expiresAt) < now.getTime()) {
-      throw new Error(`lease expired at ${lease.expiresAt}: ${leaseId}`);
-    }
-    this.#open.delete(leaseId);
-    this.#consumed.add(leaseId);
-    return lease;
-  }
-
-  readonly #consumed = new Set<string>();
-
-  outstanding(): ExecutionLease[] {
-    return [...this.#open.values()];
-  }
 }

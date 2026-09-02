@@ -137,7 +137,6 @@ export function registerCertifiedCodexTargets(input: {
     pluginNamespace: "@helium/provider-codex-subscription@0.0.0",
     catalog: codexSubscriptionCatalog,
     certification: input.certification,
-    isolationClass: "process",
     targetProfile: input.targetProfile,
     capabilityCatalog: input.capabilityCatalog,
     executorRegistry: input.executorRegistry,
