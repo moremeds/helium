@@ -64,7 +64,7 @@ export interface DshSubagentRuntime {
       agentOptions: Record<string, unknown>;
       outputSchema?: object;
       maxDepth: number;
-      toolFilter: { allow: string[] };
+      toolFilter?: { allow: string[] };
       persona: string;
     },
   ): Promise<SubagentRun>;
@@ -101,10 +101,22 @@ export class DshHost {
     signal: AbortSignal,
   ): Promise<{ text: string; structured?: unknown; events: LogEvent[] }> {
     const parent = await this.#parent(runId, signal);
-    const providerName = String(selection.options?.providerName ?? "default");
+    // `providerName` is the subagent TRANSPORT the child is materialised on
+    // (the name `dsh-subagent-spawn-in-process` registers itself under), never
+    // an LLM vendor. It shipped once as "deepseek", which resolves to no
+    // transport at all. It is stripped from agentOptions for the same reason:
+    // the vendor there is `provider`.
+    // `tools` comes out too: those are the tool IMPLEMENTATIONS the provider
+    // registers, not a model option, and they must never be serialised into
+    // the child's agent options.
+    const { providerName, tools: _tools, ...agentOptions } = selection.options ?? {};
+    const transport = String(providerName ?? "default");
+    // An EMPTY allow-list is not "allow nothing" to dsh — `tools.restrict()`
+    // rejects an empty filter outright. A role with no tools gets no filter.
+    const allow = [...work.constraints.tools];
     let child: SubagentRun | undefined;
     try {
-      child = await this.deps.subagents.start(providerName, {
+      child = await this.deps.subagents.start(transport, {
         prompt: [
           {
             type: "text",
@@ -113,9 +125,9 @@ export class DshHost {
         ],
         parent: parent.parent,
         signal,
-        agentOptions: { model: selection.model, ...(selection.options ?? {}) },
+        agentOptions: { model: selection.model, ...agentOptions },
         maxDepth: this.deps.maxDepth,
-        toolFilter: { allow: [...work.constraints.tools] },
+        ...(allow.length === 0 ? {} : { toolFilter: { allow } }),
         persona: this.deps.persona ?? work.role,
       });
       const terminal = await child.result;

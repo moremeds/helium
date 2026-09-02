@@ -492,15 +492,31 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       // The provider decides effort and its own runtime options; the MODEL is
       // the router's, not a second choice made without the catalog. Letting
       // `select` re-pick here would re-offer a model this run already retired.
+      const chosen = provider.select({
+        role: task.role,
+        requires: [...task.requires],
+        projectedInputTokens: STEP_ESTIMATE.inputTokens,
+        projectedOutputTokens: STEP_ESTIMATE.outputTokens,
+      });
       const selection: ModelSelection = {
-        ...provider.select({
-          role: task.role,
-          requires: [...task.requires],
-          projectedInputTokens: STEP_ESTIMATE.inputTokens,
-          projectedOutputTokens: STEP_ESTIMATE.outputTokens,
-        }),
+        ...chosen,
         targetId: decision.selected,
         model: routedModel,
+        // A provider that executes a tool-using role needs the tool
+        // IMPLEMENTATIONS; the work order carries names only. `options` is the
+        // provider-opaque bag core never reads into, which makes it the right
+        // channel: the dataflow stays explicit and per-step, where a module or
+        // process global would leak between concurrent runs.
+        options: {
+          ...(chosen.options ?? {}),
+          ...(role.permissions.tools.length === 0
+            ? {}
+            : {
+                tools: role.permissions.tools
+                  .map((name) => toolsByName.get(name))
+                  .filter((tool) => tool !== undefined),
+              }),
+        },
       };
       const model = provider.models.find((entry) => entry.id === selection.model);
 
