@@ -37,4 +37,18 @@ env:
 triggers: []
 delivery: []
 
+# The tenant-owned opaque block; the host never reads inside it (spec §3).
+#
+# EMPTY DELIBERATELY. Every numeric threshold below was lost with the original
+# spec (§8.4, §9) and none of them is reconstructable from the desk's doctrine
+# alone. The preflight gate reads them from here and REFUSES by name when they
+# are absent, so an unconfigured risk limit is a refusal and never a pass. The
+# keys it looks for, for whoever fills them in:
+#
+#   gates:
+#     buying_power:      { maxMarginFractionOfNetLiq: <n>, minBuyingPowerUsd: <n> }
+#     liquidity:         { maxSpreadFractionOfMid: <n>, minOpenInterest: <n> }
+#     event_window:      { minDte: <n>, maxDte: <n> }
+#     position_conflict: { maxPerUnderlyingFractionOfNetLiq: <n>,
+#                          maxPortfolioFractionOfNetLiq: <n> }
 extensions: {}
