@@ -58,7 +58,12 @@ const provider: Provider = {
   capabilities: ["tool.use", "cheap.bulk"],
   overheadTokens: 0,
   models: [
-    { id: "cheap", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-6, usdOut: 2e-6 },
+    {
+      id: "cheap",
+      caps: ["tool.use", "cheap.bulk"],
+      usdIn: 1e-6,
+      usdOut: 2e-6,
+    },
   ],
   async probe() {
     return true;
@@ -82,7 +87,10 @@ const modelExecutor: ModelExecutor = {
           data: {
             turn: 1,
             step: 1,
-            chunk: { type: "usage", usage: { inputTokens: 3_000, outputTokens: 120 } },
+            chunk: {
+              type: "usage",
+              usage: { inputTokens: 3_000, outputTokens: 120 },
+            },
           },
         },
       ],
@@ -154,18 +162,82 @@ describe("runTenant", () => {
     audit.close();
   });
 
+  it("the routed model is what runs, not the provider's own pick", async () => {
+    // select() uses models.find(covering) and would land on "pricey" (listed
+    // first); the router ranks by price and must land on "bargain" instead.
+    const twoModels: Provider = {
+      ...provider,
+      id: "picky",
+      models: [
+        {
+          id: "pricey",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 9e-6,
+          usdOut: 9e-6,
+        },
+        {
+          id: "bargain",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 1e-9,
+          usdOut: 1e-9,
+        },
+      ],
+      select: () => ({ targetId: "picky:pricey" as never, model: "pricey" }),
+    };
+    let seenSelection: { targetId: unknown; model: string } | undefined;
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [twoModels],
+      tools: [echo],
+      catalog: catalogFor([twoModels]),
+      modelExecutor: {
+        async run(_work, selection) {
+          seenSelection = selection;
+          return { text: "hello", events: [] };
+        },
+      },
+    });
+    expect(report.steps[0]?.targetId).toBe("picky:bargain");
+    expect(seenSelection).toMatchObject({
+      targetId: "picky:bargain",
+      model: "bargain",
+    });
+    audit.close();
+  });
+
   it("fails budget-exhausted rather than running a step it cannot pay for", async () => {
     const audit = new AuditStore(":memory:");
     const spec = tenant(0.001);
     audit.append({
-      runId: "fixed", spanId: "s", tenant: "demo", role: "prober", provider: "fake",
-      model: "cheap", stepNo: 1, inputTokens: 10, outputTokens: 0, cacheReadTokens: 0,
-      contextSize: 10, latencyMs: 1, costUsd: 0.002, summarised: false,
+      runId: "fixed",
+      spanId: "s",
+      tenant: "demo",
+      role: "prober",
+      provider: "fake",
+      model: "cheap",
+      stepNo: 1,
+      inputTokens: 10,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      contextSize: 10,
+      latencyMs: 1,
+      costUsd: 0.002,
+      summarised: false,
       ts: "2026-09-02T00:00:00.000Z",
     });
     const report = await runTenant({
-      tenant: spec, audit, pluginsDir: "/nonexistent", stateRoot: "/tmp",
-      runId: "fixed", providers: [provider], tools: [echo], modelExecutor,
+      tenant: spec,
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      runId: "fixed",
+      providers: [provider],
+      tools: [echo],
+      modelExecutor,
       catalog: catalogFor([provider]),
     });
     expect(report.outcome).toBe("failed");
@@ -178,8 +250,13 @@ describe("runTenant", () => {
     const audit = new AuditStore(":memory:");
     let seen = "";
     await runTenant({
-      tenant: tenant(), audit, pluginsDir: "/nonexistent", stateRoot: "/tmp",
-      providers: [provider], tools: [echo], catalog: catalogFor([provider]),
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
       modelExecutor: {
         async run(work) {
           seen = work.inputs.prompt ?? "";
@@ -187,7 +264,9 @@ describe("runTenant", () => {
         },
       },
     });
-    expect(seen).toContain("[helium budget] remaining 1.0000 USD of 1.00 (100%)");
+    expect(seen).toContain(
+      "[helium budget] remaining 1.0000 USD of 1.00 (100%)",
+    );
     expect(seen).toContain("say hello");
     audit.close();
   });
@@ -203,12 +282,21 @@ describe("runTenant", () => {
       run: async () => ({
         text: "ran in the provider",
         events: [
-          { type: "step/start", seq: 1, time: 1_000, data: { turn: 1, step: 1 } },
+          {
+            type: "step/start",
+            seq: 1,
+            time: 1_000,
+            data: { turn: 1, step: 1 },
+          },
           {
             type: "assistant/message",
             seq: 2,
             time: 1_400,
-            data: { turn: 1, step: 1, usage: { inputTokens: 40, outputTokens: 4 } },
+            data: {
+              turn: 1,
+              step: 1,
+              usage: { inputTokens: 40, outputTokens: 4 },
+            },
           },
         ],
       }),
@@ -226,7 +314,11 @@ describe("runTenant", () => {
     expect(report.mode).toBe("model");
     expect(report.steps[0]?.text).toBe("ran in the provider");
     const rows = audit.runCost(report.runId);
-    expect(rows[0]).toMatchObject({ provider: "selfrun", inputTokens: 40, outputTokens: 4 });
+    expect(rows[0]).toMatchObject({
+      provider: "selfrun",
+      inputTokens: 40,
+      outputTokens: 4,
+    });
     audit.close();
   });
 
@@ -239,13 +331,21 @@ describe("runTenant", () => {
         id: "sub",
         overheadTokens: 21,
         models: [
-          { id: "flat", caps: ["tool.use"], usdIn: 0, usdOut: 0, unmetered: true },
+          {
+            id: "flat",
+            caps: ["tool.use"],
+            usdIn: 0,
+            usdOut: 0,
+            unmetered: true,
+          },
         ],
       },
       { ...provider, id: "metered", overheadTokens: 500 },
     ]);
     const targets = catalog.snapshot().targets;
-    expect(targets.find((t) => String(t.targetId) === "sub:flat")?.price).toBeUndefined();
+    expect(
+      targets.find((t) => String(t.targetId) === "sub:flat")?.price,
+    ).toBeUndefined();
     expect(
       targets.find((t) => String(t.targetId) === "metered:cheap")?.price,
     ).toEqual({ usdIn: 1e-6, usdOut: 2e-6, overheadInputTokens: 500 });
@@ -259,8 +359,20 @@ describe("runTenant", () => {
       ...provider,
       id: "pool",
       models: [
-        { id: "a", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-9, usdOut: 1e-9, quotaDomain: "shared" },
-        { id: "b", caps: ["tool.use", "cheap.bulk"], usdIn: 2e-9, usdOut: 2e-9, quotaDomain: "shared" },
+        {
+          id: "a",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 1e-9,
+          usdOut: 1e-9,
+          quotaDomain: "shared",
+        },
+        {
+          id: "b",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 2e-9,
+          usdOut: 2e-9,
+          quotaDomain: "shared",
+        },
       ],
       select: () => ({ targetId: "pool:a" as never, model: "a" }),
       run: async () => {
@@ -271,18 +383,33 @@ describe("runTenant", () => {
       ...provider,
       id: "own",
       models: [
-        { id: "c", caps: ["tool.use", "cheap.bulk"], usdIn: 9e-6, usdOut: 9e-6, quotaDomain: "separate" },
+        {
+          id: "c",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 9e-6,
+          usdOut: 9e-6,
+          quotaDomain: "separate",
+        },
       ],
       select: () => ({ targetId: "own:c" as never, model: "c" }),
       run: async () => ({
         text: "served by the separate allowance",
         events: [
-          { type: "step/start", seq: 1, time: 1_000, data: { turn: 1, step: 1 } },
+          {
+            type: "step/start",
+            seq: 1,
+            time: 1_000,
+            data: { turn: 1, step: 1 },
+          },
           {
             type: "assistant/message",
             seq: 2,
             time: 1_100,
-            data: { turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 2 } },
+            data: {
+              turn: 1,
+              step: 1,
+              usage: { inputTokens: 10, outputTokens: 2 },
+            },
           },
         ],
       }),
@@ -314,8 +441,20 @@ describe("runTenant", () => {
       ...provider,
       id: "pool",
       models: [
-        { id: "a", caps: ["tool.use", "cheap.bulk"], usdIn: 1e-9, usdOut: 1e-9, quotaDomain: "one" },
-        { id: "b", caps: ["tool.use", "cheap.bulk"], usdIn: 2e-9, usdOut: 2e-9, quotaDomain: "two" },
+        {
+          id: "a",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 1e-9,
+          usdOut: 1e-9,
+          quotaDomain: "one",
+        },
+        {
+          id: "b",
+          caps: ["tool.use", "cheap.bulk"],
+          usdIn: 2e-9,
+          usdOut: 2e-9,
+          quotaDomain: "two",
+        },
       ],
       select: () => ({ targetId: "pool:a" as never, model: "a" }),
       run: async () => {
@@ -373,8 +512,20 @@ describe("runTenant", () => {
         ...provider,
         id: "p",
         models: [
-          { id: "shared", caps: ["tool.use"], usdIn: 0, usdOut: 0, quotaDomain: "x" },
-          { id: "own", caps: ["tool.use"], usdIn: 0, usdOut: 0, quotaDomain: "y" },
+          {
+            id: "shared",
+            caps: ["tool.use"],
+            usdIn: 0,
+            usdOut: 0,
+            quotaDomain: "x",
+          },
+          {
+            id: "own",
+            caps: ["tool.use"],
+            usdIn: 0,
+            usdOut: 0,
+            quotaDomain: "y",
+          },
         ],
       },
     ]);

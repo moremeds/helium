@@ -318,14 +318,22 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         return report;
       }
 
-      const [providerId] = String(decision.selected).split(":");
+      const [providerId, ...rest] = String(decision.selected).split(":");
+      const routedModel = rest.join(":");
       const provider = discovered.live.find((entry) => entry.id === providerId)!;
-      const selection = provider.select({
-        role: task.role,
-        requires: [...task.requires],
-        projectedInputTokens: STEP_ESTIMATE.inputTokens,
-        projectedOutputTokens: STEP_ESTIMATE.outputTokens,
-      });
+      // The provider decides effort and its own runtime options; the MODEL is
+      // the router's, not a second choice made without the catalog. Letting
+      // `select` re-pick here would re-offer a model this run already retired.
+      const selection: ModelSelection = {
+        ...provider.select({
+          role: task.role,
+          requires: [...task.requires],
+          projectedInputTokens: STEP_ESTIMATE.inputTokens,
+          projectedOutputTokens: STEP_ESTIMATE.outputTokens,
+        }),
+        targetId: decision.selected,
+        model: routedModel,
+      };
       const model = provider.models.find((entry) => entry.id === selection.model);
 
       const executor: ModelExecutor =

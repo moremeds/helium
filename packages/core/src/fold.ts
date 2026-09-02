@@ -207,7 +207,13 @@ export function foldSessionLog(
   }
 
   const modelSpans: Span[] = [...steps.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0], "en"))
+    .sort((a, b) => {
+      // Numeric on both halves: "10:0" comes after "2:0", which a string
+      // comparison gets backwards and a step number must not.
+      const [aTurn = 0, aStep = 0] = a[0].split(":").map(Number);
+      const [bTurn = 0, bStep = 0] = b[0].split(":").map(Number);
+      return aTurn - bTurn || aStep - bStep;
+    })
     .map(([key, entry], index) => {
       const input = entry.usage.inputTokens ?? 0;
       const output = entry.usage.outputTokens ?? 0;

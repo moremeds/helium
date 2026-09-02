@@ -122,8 +122,12 @@ export async function curlPostJson(req: CurlRequest): Promise<CurlResponse> {
     if (req.signal?.aborted) onAbort();
     else req.signal?.addEventListener("abort", onAbort, { once: true });
 
-    child.stdout.on("data", (c: Buffer) => (out += c.toString()));
-    child.stderr.on("data", (c: Buffer) => (err += c.toString()));
+    // Decoded by the stream, not per chunk: a multi-byte character split across
+    // two reads would otherwise be corrupted on the seam.
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (c: string) => (out += c));
+    child.stderr.on("data", (c: string) => (err += c));
     child.on("error", (e) =>
       finish({ status: 0, body: "", terminal: "transport", error: e.message }),
     );
