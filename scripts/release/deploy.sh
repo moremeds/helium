@@ -245,9 +245,27 @@ install_dsh_plist() {
   cp "$RENDERED_PLIST" "$DSH_PLIST"
 }
 
+# opsd is versioned INDEPENDENTLY of the helium release: its own config pins the
+# directory it runs from (on the mini, a helium-ops-candidates/<sha> tree), and
+# its controller-cycle events carry THAT path as releaseRef. Comparing them
+# against the release being flipped can therefore never match, which made this
+# gate refuse every deploy and every rollback. Ask opsd's own config what it is
+# running, and fall back to the flip target when the config does not say.
+opsd_release_ref() {
+  local from_config
+  from_config="$(node -e '
+    const {readFileSync}=require("node:fs");
+    try{const c=JSON.parse(readFileSync(process.argv[1],"utf8"));
+      if(typeof c.releaseDir==="string"&&c.releaseDir)process.stdout.write(c.releaseDir);}
+    catch{}' "$OPSD_CONFIG")"
+  if [ -n "$from_config" ]; then printf '%s' "$from_config"; else printf '%s' "$1"; fi
+}
+
 opsd_cycle_after() {
-  local target="$1" since="$2"
-  node "$DEST/scripts/release/opsd-cycle-after.mjs" "$OPSD_EVENT_LOG" "$since" "$target"
+  local target since ref
+  target="$1"; since="$2"
+  ref="$(opsd_release_ref "$target")"
+  node "$DEST/scripts/release/opsd-cycle-after.mjs" "$OPSD_EVENT_LOG" "$since" "$ref"
 }
 
 opsd_required=0
