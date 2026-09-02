@@ -77,6 +77,22 @@ fi
 [ "$(value "$tmp/b.plist" HELIUM_MCP_BIN)" = "$releases/current/plugins/helium/lib/mcp/server.js" ] ||
   fail "release content was overwritten by installed state"
 
+echo "case 3b: review-only with no canary tenant is downgraded, not shipped"
+# The v1 plist named its canary with HELIUM_TEAM_CANARY_JOBS, a key the tenant
+# lane retired. Carrying review-only over from such a plist leaves the allow-list
+# empty, and the daemon refuses to boot on that combination.
+v1="$tmp/v1.plist"
+cp "$release/launchd/com.helium.dsh.plist.template" "$v1"
+sed -i '' 's|__RELEASE__|'"$releases/current"'|g; s|__HOME__|'"$HOME"'|g; s|__NODE_BIN_DIR__|/usr/bin|g; s|__EMAIL_TO__|ops@example.com|g' "$v1"
+plutil -replace EnvironmentVariables.HELIUM_TEAM_PROMOTION_MODE -string "review-only" "$v1"
+plutil -replace EnvironmentVariables.HELIUM_TEAM_CANARY_TENANTS -string "" "$v1"
+out=$(bash "$here/install-dsh-plist.sh" render --release-dir "$release" \
+  --releases-dir "$releases" --out "$tmp/d.plist" --installed "$v1" 2>&1)
+[ "$(value "$tmp/d.plist" HELIUM_TEAM_PROMOTION_MODE)" = "off" ] ||
+  fail "review-only with an empty canary allow-list was shipped instead of downgraded"
+printf '%s\n' "$out" | grep -q "downgrading to off" ||
+  fail "the downgrade was silent: $out"
+
 echo "case 4: a template plutil -lint accepts but launchd rejects is refused"
 bad="$tmp/bad-release"
 mkdir -p "$bad/launchd"
