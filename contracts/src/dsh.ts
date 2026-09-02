@@ -4,7 +4,6 @@
  * HELIUM_DSH_BIN at an isolated install; everything else defaults to the pin.
  * @module @helium/contracts/dsh
  */
-import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -31,17 +30,4 @@ export const dshBin: string =
 /** A throwaway `$DSH_HOME` — never the operator's default `~/.dsh` (spec §9.4). */
 export function makeDshHome(): string {
   return mkdtempSync(join(tmpdir(), "helium-dsh-home-"));
-}
-
-/** Install the helium profile into a throwaway home through the real deploy script. */
-export function deployHeliumProfile(dshHome: string): void {
-  execFileSync(
-    join(repoRoot, "scripts", "deploy-profile.sh"),
-    ["--dsh-home", dshHome],
-    {
-      cwd: repoRoot,
-      stdio: "pipe",
-      encoding: "utf8",
-    },
-  );
 }

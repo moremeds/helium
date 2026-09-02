@@ -39,79 +39,18 @@ importers:
       '@helium/fake-flat-rate':
         specifier: file:../packages/fake-flat-rate
         version: link:../packages/fake-flat-rate
-      '@helium/fake-metered':
-        specifier: file:../packages/fake-metered
-        version: link:../packages/fake-metered
-      '@helium/ops-controller-fixture':
-        specifier: file:./fixtures/ops-controller
-        version: link:fixtures/ops-controller
       '@helium/provider-claude-subscription':
         specifier: file:../plugins/provider-claude-subscription
         version: link:../plugins/provider-claude-subscription
       '@types/node':
         specifier: ^22
         version: 22.20.1
-      dsh-plugin-livewire-shepherd:
-        specifier: file:../plugins/livewire-shepherd
-        version: link:../plugins/livewire-shepherd
-      dsh-plugin-ops-agent:
-        specifier: file:../plugins/ops-agent
-        version: link:../plugins/ops-agent
       typescript:
         specifier: ^5
         version: 5.9.3
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
-
-  contracts/fixtures/mcp-ping:
-    dependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.30.0
-        version: 1.30.0(zod@4.4.3)
-
-  contracts/fixtures/ops-controller:
-    dependencies:
-      '@helium/core':
-        specifier: file:../../../packages/core
-        version: link:../../../packages/core
-      dsh-plugin-ops-agent:
-        specifier: file:../../../plugins/ops-agent
-        version: link:../../../plugins/ops-agent
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
-  contracts/fixtures/plugin-live-dispatch:
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: 4.0.2
-        version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
-      '@deepseek-ai/cordis-plugin-loader':
-        specifier: 1.0.3
-        version: 1.0.3(@deepseek-ai/cordis@4.0.2)(node-addon-require-builtin@0.1.5)
-      '@deepseek-ai/dsh-agent':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(6db40c898bf1f9c9361b38a9ea2de9a5)
-      '@deepseek-ai/dsh-agent-default-model':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-agent@0.1.2-alpha.3(6db40c898bf1f9c9361b38a9ea2de9a5))(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-llm@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-settings@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-session@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))))(@deepseek-ai/schemastery@3.18.2))
-      '@deepseek-ai/dsh-llm':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))
-      '@deepseek-ai/dsh-session':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
 
   contracts/fixtures/plugin-restrict-proof:
     devDependencies:
@@ -144,43 +83,6 @@ importers:
         version: 5.9.3
 
   contracts/fixtures/senior-isolation: {}
-
-  contracts/fixtures/team-host:
-    dependencies:
-      '@deepseek-ai/dsh-agent':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(6db40c898bf1f9c9361b38a9ea2de9a5)
-      '@deepseek-ai/dsh-session':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
-      '@deepseek-ai/dsh-session-persistence':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-brand@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-session@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-scope@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2))))(@deepseek-ai/dsh-timeout@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.2-alpha.3(@deepseek-ai/cordis@4.0.2)))
-      '@deepseek-ai/dsh-subagent':
-        specifier: 0.1.2-alpha.3
-        version: 0.1.2-alpha.3(f477649e63540270ff273de93f54f5c3)
-      '@helium/core':
-        specifier: file:../../../packages/core
-        version: link:../../../packages/core
-      '@helium/provider-deepseek-dsh':
-        specifier: file:../../../plugins/provider-deepseek-dsh
-        version: link:../../../plugins/provider-deepseek-dsh
-      dsh-plugin-helium:
-        specifier: file:../../../plugins/helium
-        version: link:../../../plugins/helium
-    devDependencies:
-      '@deepseek-ai/cordis':
-        specifier: 4.0.2
-        version: 4.0.2(@deepseek-ai/cordis-plugin-include@1.0.7)(@deepseek-ai/cordis-plugin-loader@1.0.3)
-      '@deepseek-ai/cordis-plugin-loader':
-        specifier: 1.0.3
-        version: 1.0.3(@deepseek-ai/cordis@4.0.2)(node-addon-require-builtin@0.1.5)
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
 
   packages/core:
     dependencies:
@@ -224,19 +126,6 @@ importers:
         version: 5.9.3
 
   packages/fake-flat-rate:
-    dependencies:
-      '@helium/core':
-        specifier: file:../core
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
-  packages/fake-metered:
     dependencies:
       '@helium/core':
         specifier: file:../core
@@ -353,50 +242,6 @@ importers:
       '@types/nodemailer':
         specifier: 8.0.1
         version: 8.0.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
-  plugins/livewire-shepherd:
-    dependencies:
-      '@helium/core':
-        specifier: file:../../packages/core
-        version: link:../../packages/core
-      dsh-plugin-helium:
-        specifier: file:../helium
-        version: link:../helium
-      dsh-plugin-ops-agent:
-        specifier: file:../ops-agent
-        version: link:../ops-agent
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
-      typescript:
-        specifier: ^5
-        version: 5.9.3
-
-  plugins/ops-agent:
-    dependencies:
-      '@helium/core':
-        specifier: file:../../packages/core
-        version: link:../../packages/core
-      yaml:
-        specifier: ^2.9.0
-        version: 2.9.0
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^22
-        version: 22.20.1
       typescript:
         specifier: ^5
         version: 5.9.3

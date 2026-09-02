@@ -11,9 +11,7 @@
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "vitest run --project unit",
-    "test:contracts": "vitest run --project contracts",
-    "test:livewire-deploy": "node scripts/ops/run-livewire-deploy-gate.mjs",
-    "test:e2e-local": "vitest run -c vitest.e2e.config.ts"
+    "test:contracts": "vitest run --project contracts"
   },
   "dependencies": {
     "nodemailer": "9.0.5",
