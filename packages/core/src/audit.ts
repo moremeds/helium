@@ -29,6 +29,12 @@ export interface Span {
   provider: string;
   /** The exact model route, as the plugin reported it. Opaque to core. */
   model: string;
+  /**
+   * Which build produced this row: the short commit sha of the deployed tree,
+   * or `"unknown"` when nothing could name it. Provenance is the whole point --
+   * a report nobody can tie back to a commit cannot be debugged.
+   */
+  codeVersion: string;
   stepNo: number;
   inputTokens: number;
   outputTokens: number;
@@ -62,6 +68,7 @@ CREATE TABLE IF NOT EXISTS span (
   span_id TEXT NOT NULL, parent_span_id TEXT,
   tenant TEXT NOT NULL, role TEXT NOT NULL,
   provider TEXT NOT NULL, model TEXT NOT NULL,
+  code_version TEXT NOT NULL DEFAULT 'unknown',
   step_no INTEGER NOT NULL,
   input_tokens INTEGER NOT NULL, output_tokens INTEGER NOT NULL,
   cache_read_tokens INTEGER NOT NULL DEFAULT 0, context_size INTEGER NOT NULL,
@@ -97,6 +104,19 @@ export class AuditStore {
     this.#db = new DatabaseSync(path);
     this.#db.exec("PRAGMA journal_mode = WAL");
     this.#db.exec(SCHEMA);
+    // audit.db outlives releases on purpose (see auditDbPath), so a database
+    // written before code_version existed is the normal case, not an edge one.
+    // CREATE TABLE IF NOT EXISTS silently leaves such a table alone; only an
+    // ALTER adds the column, and only a table_info check keeps that ALTER from
+    // throwing on every subsequent open.
+    const columns = this.#db
+      .prepare("PRAGMA table_info(span)")
+      .all() as unknown as Array<Record<string, unknown>>;
+    if (!columns.some((column) => String(column.name) === "code_version")) {
+      this.#db.exec(
+        "ALTER TABLE span ADD COLUMN code_version TEXT NOT NULL DEFAULT 'unknown'",
+      );
+    }
   }
 
   static open(env: NodeJS.ProcessEnv = process.env): AuditStore {
@@ -112,13 +132,15 @@ export class AuditStore {
     this.#db
       .prepare(
         `INSERT INTO span (run_id, span_id, parent_span_id, tenant, role, provider,
-           model, step_no, input_tokens, output_tokens, cache_read_tokens,
+           model, code_version, step_no, input_tokens, output_tokens,
+           cache_read_tokens,
            context_size, latency_ms, cost_usd, tool_name, tool_output_bytes,
            summarised, ts)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(run_id, span_id) DO UPDATE SET
            parent_span_id=excluded.parent_span_id, tenant=excluded.tenant,
            role=excluded.role, provider=excluded.provider, model=excluded.model,
+           code_version=excluded.code_version,
            step_no=excluded.step_no, input_tokens=excluded.input_tokens,
            output_tokens=excluded.output_tokens,
            cache_read_tokens=excluded.cache_read_tokens,
@@ -135,6 +157,7 @@ export class AuditStore {
         span.role,
         span.provider,
         span.model,
+        span.codeVersion,
         span.stepNo,
         span.inputTokens,
         span.outputTokens,
@@ -191,6 +214,7 @@ export class AuditStore {
       role: String(row.role),
       provider: String(row.provider),
       model: String(row.model),
+      codeVersion: String(row.code_version ?? "unknown"),
       stepNo: Number(row.step_no),
       inputTokens: Number(row.input_tokens),
       outputTokens: Number(row.output_tokens),
@@ -205,6 +229,21 @@ export class AuditStore {
       summarised: Number(row.summarised) === 1,
       ts: String(row.ts),
     }));
+  }
+
+  /**
+   * The distinct code versions that wrote a run's rows. Normally one; more
+   * than one means a deploy landed mid-run, which is exactly what this column
+   * exists to make visible.
+   */
+  codeVersions(runId: string): string[] {
+    return (
+      this.#db
+        .prepare(
+          "SELECT DISTINCT code_version FROM span WHERE run_id = ? ORDER BY code_version",
+        )
+        .all(runId) as unknown as Array<Record<string, unknown>>
+    ).map((row) => String(row.code_version));
   }
 
   /** Total USD and tokens spent so far by one run; what budget checks read. */

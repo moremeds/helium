@@ -18,7 +18,7 @@ function store(spans: Span[]): AuditStore {
 
 function span(id: string, usd: number, tokens: number): Span {
   return {
-    runId: "r", spanId: id, tenant: "t", role: "auditor", provider: "p", model: "m",
+    runId: "r", spanId: id, tenant: "t", role: "auditor", provider: "p", model: "m", codeVersion: "test",
     stepNo: 1, inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0,
     contextSize: tokens, latencyMs: 1, costUsd: usd, summarised: false,
     ts: "2026-09-02T00:00:00.000Z",

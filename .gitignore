@@ -20,6 +20,10 @@ CLAUDE.md
 # session scratch: build/test baselines captured during execution
 .baseline*.txt
 
+# Written by the deploy sender into the tarball, never committed: it names the
+# commit a release tree was built from, which a checkout answers from its repo.
+RELEASE
+
 # Run output: audit db, session logs and delivered reports.
 .helium-state/
 

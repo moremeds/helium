@@ -9,6 +9,7 @@ function span(overrides: Partial<Span> = {}): Span {
     role: "prober",
     provider: "p",
     model: "m",
+    codeVersion: "test",
     stepNo: 1,
     inputTokens: 1200,
     outputTokens: 300,
