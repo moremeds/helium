@@ -78,3 +78,27 @@ it("still refuses a converted zone even when fractions are dropped", async () =>
     ),
   ).resolves.toMatchObject({ pass: false });
 });
+
+it("accepts a timestamp whose only difference is dropped seconds", async () => {
+  // The real 2026-09-03 refusal: the clock preamble carried
+  // `now (UTC): 2026-09-03T01:12:44Z` and the briefing wrote `2026-09-03T01:12Z`.
+  // Same zone, same minute — a truncation, not a conversion.
+  await expect(
+    gate.check(
+      { text: "as of 2026-09-03T01:12Z" },
+      { ...ctx, toolOutputs: ["phase: premarket\nnow (UTC): 2026-09-03T01:12:44Z"] },
+    ),
+  ).resolves.toMatchObject({ pass: true });
+});
+
+it("refuses a converted zone that shares the wall-clock minute", async () => {
+  // The guarantee that must survive every precision relaxation: 12:45-04:00 and
+  // 16:45Z are the same instant, but writing the second when the tool said the
+  // first is exactly the 2026-09-02 bug. Same minute digits, different zone.
+  await expect(
+    gate.check(
+      { text: "as of 2026-09-02T16:45Z" },
+      { ...ctx, toolOutputs: ['{"timestamp":"2026-09-02T12:45:00-04:00"}'] },
+    ),
+  ).resolves.toMatchObject({ pass: false });
+});

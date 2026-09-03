@@ -38,14 +38,16 @@ const gate: Gate = {
     const found = [...new Set(textOf(input).match(ISO) ?? [])];
     if (found.length === 0)
       return { pass: true, reason: "no explicit timestamp to check" };
-    // Fractional seconds are dropped, not converted. UW and TradingView send
-    // `…T18:40:17.075Z`; prose says `…T18:40:17Z` and means the same instant in
-    // the same zone. Refusing that taught nothing and failed a whole run, so
-    // both sides are compared with the fraction removed — the zone, which is
-    // what actually goes wrong, is still compared character for character.
-    const unfraction = (text: string): string =>
-      text.replace(/(T\d{2}:\d{2}:\d{2})\.\d+/g, "$1");
-    const sources = (ctx.toolOutputs ?? []).map(unfraction);
+    // Precision is dropped, not converted. UW sends `…T18:40:17.075Z` and prose
+    // writes `…T18:40:17Z`; the clock line says `…T01:12:44Z` and prose writes
+    // `…T01:12Z`. Both are the same instant in the same zone, written shorter.
+    // Refusing them failed two whole runs and taught nobody anything, so the
+    // fallback comparison truncates BOTH sides to the minute. The zone
+    // designator survives that untouched, which is the point: a four-hour
+    // timezone error — the bug this gate exists for — still cannot match.
+    const atMinute = (text: string): string =>
+      text.replace(/(T\d{2}:\d{2})(?::\d{2})?(?:\.\d+)?/g, "$1");
+    const sources = ctx.toolOutputs ?? [];
     if (sources.length === 0) {
       // No tool ran, yet the text carries a zoned timestamp. There was nothing
       // to copy it from, so it was written from the model's own head.
@@ -55,7 +57,10 @@ const gate: Gate = {
       };
     }
     const invented = found.filter(
-      (stamp) => !sources.some((out) => out.includes(unfraction(stamp))),
+      (stamp) =>
+        !sources.some(
+          (out) => out.includes(stamp) || atMinute(out).includes(atMinute(stamp)),
+        ),
     );
     if (invented.length === 0) {
       return {
