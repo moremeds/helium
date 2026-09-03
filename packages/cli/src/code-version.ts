@@ -47,8 +47,3 @@ function resolveCodeVersion(env: NodeJS.ProcessEnv): string {
   }
   return "unknown";
 }
-
-/** Tests only: forget the memoised value. */
-export function resetCodeVersionCache(): void {
-  cached = undefined;
-}

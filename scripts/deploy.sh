@@ -27,7 +27,6 @@
 set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
-RECEIVER="${HELIUM_RECEIVER:-\$HOME/.config/helium/receive-deploy.sh}"
 PHASE="${1:-premarket}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -63,6 +62,6 @@ tar -cz \
   --exclude='./.playwright-mcp' \
   --exclude='.DS_Store' \
   . \
-  | ssh "$HELIUM_HOST" "$RECEIVER $SHA $PHASE"
+  | ssh "$HELIUM_HOST" "\$HOME/.config/helium/receive-deploy.sh $SHA $PHASE"
 
 say "done"
