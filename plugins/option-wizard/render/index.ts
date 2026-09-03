@@ -247,10 +247,16 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const regime =
     regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
 
+  // Every phase's content, resolved before any early return. Only premarket
+  // and close carry a review step; intraday reports drift, weekly settles a
+  // week and frank compares two documents. Treating "has candidates" as a
+  // synonym for "has content" emptied three of the five briefs.
+  const sections = sectionsFrom(report, regime);
+
   if (report.outcome === "failed") {
     const failure = report.failure;
     const detail = `${failure?.class ?? "unknown"} — ${failure?.detail ?? ""}`;
-    const done = sectionsFrom(report, regime);
+    const done = sections;
     // A run that failed one step out of four still did three steps' work, and
     // throwing it away is the same single-point failure the tenant is under
     // orders not to have: on 2026-09-02 a stale IB timestamp refused the
@@ -273,7 +279,14 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const review = report.steps.find((step) => step.task === "review");
   const parsed = review === undefined ? null : extractJson(review.text);
   if (parsed === null || !Array.isArray(parsed.proposals)) {
-    return { ...base, empty: "今日无候选：review 步骤没有可解析的 JSON" };
+    if (sections.length > 0) return { ...base, sections, regime };
+    return {
+      ...base,
+      empty:
+        review === undefined
+          ? "本次运行没有产出任何区块"
+          : "今日无候选：review 步骤没有可解析的 JSON",
+    };
   }
 
   const spots = spotsFrom(review?.text ?? "");
@@ -326,6 +339,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     : [];
 
   if (candidates.length === 0 && riskList.length === 0) {
+    if (sections.length > 0) return { ...base, sections, regime };
     const reason =
       typeof parsed.reason === "string" ? parsed.reason : "reviewer 未给出候选";
     return { ...base, empty: `今日无候选：${reason}` };
@@ -333,7 +347,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   // At most five reach the reader; the reviewer's own rule, enforced here too.
   return {
     ...base,
-    sections: sectionsFrom(report, regime),
+    sections,
     regime,
     candidates: candidates.slice(0, 5),
     riskList,

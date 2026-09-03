@@ -288,12 +288,53 @@ describe("buildView", () => {
     expect(view.empty).toBe("今日无候选：无可用 provider，本次没有任何模型推理");
   });
 
-  it("returns 今日无候选 when the review step's JSON cannot be parsed", () => {
+  it("keeps the narrative when the review step's JSON cannot be parsed", () => {
     const broken = report();
     broken.steps[3]!.text = "I could not produce proposals today.";
-    expect(buildView(broken, SPEC).empty).toBe(
+    const view = buildView(broken, SPEC);
+    expect(view.empty).toBeUndefined();
+    expect(view.candidates).toEqual([]);
+    expect(view.sections.length).toBeGreaterThan(0);
+  });
+
+  it("says 今日无候选 only when the reviewer failed AND nothing else was written", () => {
+    const bare = report({
+      steps: [
+        { task: "review", role: "risk-reviewer", mode: "model", text: "no proposals today" },
+      ],
+    } as never);
+    expect(buildView(bare, SPEC).empty).toBe(
       "今日无候选：review 步骤没有可解析的 JSON",
     );
+  });
+
+  it("renders a phase that has no review step at all", () => {
+    // intraday reports drift, weekly settles a week, frank compares two
+    // documents. None of them propose anything, and treating "has candidates"
+    // as a synonym for "has content" emptied three of the five briefs.
+    const drift = report({
+      steps: [
+        {
+          task: "drift",
+          role: "drift-watcher",
+          mode: "model",
+          text: '{"sections":[{"title":"读数结论：无变化","body":"六个价格逐位一致。"}]}',
+        },
+      ],
+    } as never);
+    const view = buildView(drift, SPEC);
+    expect(view.empty).toBeUndefined();
+    expect(view.sections.map((s) => s.title)).toEqual(["读数结论：无变化"]);
+    expect(renderText(view)).toContain("【读数结论：无变化】");
+  });
+
+  it("names the real reason when a run with no review step produced nothing", () => {
+    const nothing = report({
+      steps: [{ task: "frank", role: "frank-comparator", mode: "model", text: "I cannot complete this task." }],
+    } as never);
+    // "review 步骤没有可解析的 JSON" would be a lie: the frank phase has no
+    // review step to fail.
+    expect(buildView(nothing, SPEC).empty).toBe("本次运行没有产出任何区块");
   });
 });
 
