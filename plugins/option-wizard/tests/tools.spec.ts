@@ -285,7 +285,22 @@ describe("stale data", () => {
     const old = new Date(Date.now() - 35 * 86_400_000).toISOString();
     await expect(
       tool("ow_ib_positions", live).run({}, respond({ last_sync: old, bankroll: 1 })),
-    ).rejects.toThrow(/840\.\d+h old .*past the 24h bound/);
+    ).rejects.toThrow(/840\.\d+h old, past the 24h bound/);
+  });
+
+  it("names the age but never the zoneless last_sync", async () => {
+    // xenon writes last_sync without a zone. A role that copies it into a
+    // coverage table either repeats an undateable instant or appends the `Z`
+    // it thinks is right — and the as-of gate, which looks for the prose
+    // stamp verbatim in the tool output, refused that invented `Z` and failed
+    // the whole 2026-09-02 intraday run.
+    const naive = "2026-07-29T20:27:18.543065";
+    const message = await tool("ow_ib_positions", live)
+      .run({}, respond({ last_sync: naive, bankroll: 1 }))
+      .then(() => "resolved, which it must not")
+      .catch((err: unknown) => (err as Error).message);
+    expect(message).toMatch(/past the 24h bound/);
+    expect(message).not.toContain("2026-07-29T20:27:18");
   });
 
   it("passes a fresh snapshot and staples its age to the payload", async () => {

@@ -921,9 +921,17 @@ export function buildTools(cfg: {
           throw new Error("OW_IB_MAX_SNAPSHOT_AGE_HOURS is not a positive number; ow_ib_positions has no freshness bound to check against");
         }
         if (ageHours > maxAgeHours) {
+          // The raw `last_sync` is NOT quoted here on purpose. xenon writes it
+          // without a zone designator (`2026-07-29T20:27:18.543065`), and a
+          // role that copies it into a coverage table has two bad options:
+          // repeat it zoneless, or append the `Z` it believes is right. The
+          // second is what happened on 2026-09-02 — and the as-of gate, which
+          // looks for the prose stamp verbatim in the tool output, refused a
+          // `Z` the tool never wrote and failed the whole intraday run. The
+          // age is the actionable number; an undateable instant is not.
           throw new Error(
-            `ow_ib_positions: the account snapshot is ${ageHours.toFixed(1)}h old ` +
-              `(last_sync ${String(body.last_sync)}), past the ${String(maxAgeHours)}h bound. ` +
+            `ow_ib_positions: the account snapshot is ${ageHours.toFixed(1)}h old, ` +
+              `past the ${String(maxAgeHours)}h bound. ` +
               "xenon refreshes it with POST /portfolio/sync, which this read-only key cannot call. " +
               "No account figures are returned rather than dating today's risk from a stale book.",
           );
