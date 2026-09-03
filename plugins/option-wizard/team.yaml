@@ -282,6 +282,9 @@ tasks:
       returned. That is pitfall 07 and it is the exact bug that shipped on
       2026-09-02: a 09-02 yield printed as "live today" next to a 09-01 tide,
       in one paragraph, indistinguishable to the reader.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      — one entry per section you were asked for, in that order, no prose
+      outside the JSON. Your working notes are not a section.
 
   - id: scenarios
     role: scenario-analyst
@@ -292,6 +295,9 @@ tasks:
       Write A/B/C/D for the next dated event, each with its transmission order,
       then the explicit base case and the reason for it, then the 证实/证伪
       combination for each catalyst, then reverse risk as its own paragraph.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      — one entry per section you were asked for, in that order, no prose
+      outside the JSON. Your working notes are not a section.
 
   - id: design
     role: structure-designer
@@ -351,8 +357,13 @@ tasks:
     requires: [tool.use, long.context]
     prompt: >-
       Call ow_reports with days:7 phase:close and write the week from those
-      five reports alone. Settle each numbered call by name, then next week's
-      A/B/C/D with an explicit base case and its reason.
+      five reports alone. Two halves, both required: 上周总结 — settle each
+      numbered call by id, one section, and name the week's single largest
+      divergence; 下周展望 — next week's A/B/C/D with an explicit base case
+      and its reason, one section per path.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      — one entry per section you were asked for, in that order, no prose
+      outside the JSON. Your working notes are not a section.
 
   - id: frank
     role: frank-comparator
@@ -363,3 +374,6 @@ tasks:
       phase:weekly for ours. Compare his recap against our weekly markout and
       his outlook against our base case; settle each disagreement with the real
       prices already in our reports.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      — one entry per section you were asked for, in that order, no prose
+      outside the JSON. Your working notes are not a section.

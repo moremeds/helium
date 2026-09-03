@@ -125,3 +125,14 @@ describe("close settles the day it just watched", () => {
     expect(prompt).toContain("今日市场");
   });
 });
+
+it("every narrative task replies as one sections JSON", () => {
+  // The renderer shows the blocks a run produced. A task that answers in
+  // prose contributes nothing to the mail — which is exactly how a premarket
+  // run that had written four regime sections and four scenario paths
+  // delivered a brief with one paragraph in it.
+  for (const id of ["regime", "scenarios", "weekly", "frank", "drift", "markout", "recap"]) {
+    const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
+    expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
+  }
+});
