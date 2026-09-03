@@ -172,8 +172,12 @@ export function renderHtml(view: BriefView): string {
              <div style="margin-top:8px">${stances}</div>
            </td></tr>
          </table>
-         <div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【候选结构】每张合约，不含数量</div>
-         ${view.candidates.map(candidateCard).join("")}
+         ${
+           view.candidates.length === 0
+             ? ""
+             : `<div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【候选结构】每张合约，不含数量</div>
+         ${view.candidates.map(candidateCard).join("")}`
+         }
          ${riskSection}`;
 
   const degradationRow =

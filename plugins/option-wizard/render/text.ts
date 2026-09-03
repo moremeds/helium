@@ -85,9 +85,14 @@ export function renderText(view: BriefView): string {
     view.regime.hedge === undefined ? null : `hedge: ${view.regime.hedge}`,
   ].filter((entry): entry is string => entry !== null);
   if (stances.length > 0) lines.push(stances.join(" | "), "");
-  lines.push("【候选结构】每张合约，不含数量", "");
-  for (const candidate of view.candidates)
-    lines.push(...candidateLines(candidate));
+  // No header without rows under it. An intraday brief has no candidates by
+  // design, and a failed run's are withheld; a bare heading reads as content
+  // that got lost on the way.
+  if (view.candidates.length > 0) {
+    lines.push("【候选结构】每张合约，不含数量", "");
+    for (const candidate of view.candidates)
+      lines.push(...candidateLines(candidate));
+  }
   if (view.riskList.length > 0) {
     lines.push("【风险清单】");
     for (const entry of view.riskList)

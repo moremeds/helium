@@ -240,11 +240,27 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     ...(degradation === undefined ? {} : { degradation }),
   };
 
+  // Resolved before the failure branch: a failed run still renders the steps
+  // that finished, and the regime paragraph is the prose fallback for a step
+  // that answered outside JSON.
+  const regimeStep = report.steps.find((step) => step.task === "regime");
+  const regime =
+    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
+
   if (report.outcome === "failed") {
     const failure = report.failure;
+    const detail = `${failure?.class ?? "unknown"} — ${failure?.detail ?? ""}`;
+    const done = sectionsFrom(report, regime);
+    // A run that failed one step out of four still did three steps' work, and
+    // throwing it away is the same single-point failure the tenant is under
+    // orders not to have: on 2026-09-02 a stale IB timestamp refused the
+    // regime gate and voided an intraday brief whose drift step had already
+    // answered the only question that brief exists to answer.
+    if (done.length === 0)
+      return { ...base, empty: `今日无候选：${detail}` };
     return {
       ...base,
-      empty: `今日无候选：${failure?.class ?? "unknown"} — ${failure?.detail ?? ""}`,
+      sections: [{ title: "本次运行未完成", body: detail }, ...done],
     };
   }
   if (report.mode === "tool-only") {
@@ -260,9 +276,6 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     return { ...base, empty: "今日无候选：review 步骤没有可解析的 JSON" };
   }
 
-  const regimeStep = report.steps.find((step) => step.task === "regime");
-  const regime =
-    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
   const spots = spotsFrom(review?.text ?? "");
 
   const candidates: CandidateView[] = [];

@@ -246,7 +246,11 @@ describe("buildView", () => {
     );
   });
 
-  it("returns 今日无候选 with the reason when the run failed", () => {
+  it("a failed run still carries the steps that finished, under a banner", () => {
+    // Voiding the whole brief over one refused step is the same single-point
+    // failure the tenant is forbidden to have. 2026-09-02 intraday: a stale
+    // IB timestamp refused the regime gate and emptied a brief whose drift
+    // step had already answered the only question that brief exists for.
     const view = buildView(
       report({
         outcome: "failed",
@@ -255,6 +259,23 @@ describe("buildView", () => {
       SPEC,
     );
     expect(view.outcome).toBe("FAILED");
+    expect(view.empty).toBeUndefined();
+    expect(view.sections[0]).toEqual({
+      title: "本次运行未完成",
+      body: "budget-exhausted — no room",
+    });
+    expect(view.sections.length).toBeGreaterThan(1);
+  });
+
+  it("falls back to 今日无候选 only when the failed run produced nothing", () => {
+    const view = buildView(
+      report({
+        outcome: "failed",
+        failure: { class: "budget-exhausted", detail: "no room" },
+        steps: [],
+      } as never),
+      SPEC,
+    );
     expect(view.empty).toBe("今日无候选：budget-exhausted — no room");
   });
 
@@ -302,7 +323,7 @@ describe("renderReport (text part)", () => {
       }),
       SPEC,
     );
-    expect(text).toContain("今日无候选");
+    expect(text).toContain("本次运行未完成");
     expect(text).not.toContain("Actually, let me");
   });
 });
@@ -347,7 +368,7 @@ describe("renderReport (html part)", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("renders the empty brief without any candidate section", () => {
+  it("a failed run shows what finished, but withholds tradable structures", () => {
     const html =
       renderReport(
         report({
@@ -356,7 +377,9 @@ describe("renderReport (html part)", () => {
         }),
         SPEC,
       ).html ?? "";
-    expect(html).toContain("今日无候选");
+    expect(html).toContain("本次运行未完成");
+    // The narrative is information; a structure is a recommendation, and a run
+    // whose gate refused a step has not earned one.
     expect(html).not.toContain("【候选结构】");
   });
 });
