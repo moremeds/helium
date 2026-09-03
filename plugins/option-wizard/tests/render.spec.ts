@@ -342,10 +342,108 @@ describe("buildView", () => {
   });
 });
 
+describe("deterministic gates over what the tools answered", () => {
+  /** One NVDA leg, so the fixtures below differ only in expiry. */
+  const leg = (expiry: string) => ({
+    right: "call",
+    expiry,
+    strike: 200,
+    action: "sell",
+    ratio: 1,
+    mid: 4.2,
+  });
+  const nvda = (expiry: string) => ({
+    ticker: "NVDA",
+    invalidation: [{ level: 200, side: "above" }],
+    strategy: "covered_call",
+    legs: [leg(expiry)],
+    rationale: "premium against a held position",
+  });
+
+  it("drops a candidate whose expiry spans the earnings date the tool returned", () => {
+    // NVDA's next print, verified live 2026-09-03 against
+    // GET /api/stock/NVDA/info: next_earnings_date "2026-11-18".
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify({
+              proposals: [nvda("2026-11-20"), nvda("2026-11-06")],
+            }),
+            toolOutputs: [
+              JSON.stringify({
+                rows: [{ ticker: "NVDA", nextEarningsDate: "2026-11-18" }],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    // The 11-20 expiry lives through the print; the 11-06 one does not reach it.
+    expect(view.candidates.map((c) => c.expiry)).toEqual(["2026-11-06"]);
+    expect(view.riskList).toContainEqual({
+      ticker: "NVDA",
+      reason: "财报 2026-11-18 在到期日 2026-11-20 之前",
+    });
+  });
+
+  it("drops a settlement whose id was never in the ledger the run read, and names it", () => {
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "markout",
+            role: "markout-clerk",
+            mode: "model",
+            text: JSON.stringify({
+              settlements: [
+                { id: "SPY-2026-09-02-1", ticker: "SPY", state: "不变", note: "748.72" },
+                { id: "NFLX-2026-09-02-1", ticker: "NFLX", state: "加强", note: "凭空" },
+              ],
+              sections: [],
+            }),
+            toolOutputs: [
+              JSON.stringify({
+                dir: "/tmp/reports",
+                reports: [
+                  {
+                    date: "2026-09-02",
+                    phase: "premarket",
+                    candidates: [{ id: "SPY-2026-09-02-1", ticker: "SPY" }],
+                  },
+                ],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    const titles = view.sections.map((section) => section.title);
+    expect(titles).toContain("结算");
+    expect(titles).toContain("未在账本中的结算，已剔除");
+    const kept = view.sections.find((section) => section.title === "结算")!.body;
+    expect(kept).toContain("SPY-2026-09-02-1");
+    expect(kept).not.toContain("NFLX");
+    const cut = view.sections.find(
+      (section) => section.title === "未在账本中的结算，已剔除",
+    )!.body;
+    expect(cut).toContain("NFLX-2026-09-02-1");
+    expect(cut).toContain("NFLX");
+  });
+});
+
 describe("renderReport (text part)", () => {
   it("carries every computed number and none of the transcript", () => {
     const { subject, text } = renderReport(report(), SPEC);
-    expect(subject).toContain("option-wizard");
+    // NO subject: the renderer cannot know the phase, so a subject minted here
+    // buries the runner's `[TEST] intraday 2026-09-03` under one phaseless
+    // line that all five of the day's mails share.
+    expect(subject).toBeUndefined();
     expect(text).toContain("SPY");
     expect(text).toContain("748.72");
     expect(text).toContain("872");

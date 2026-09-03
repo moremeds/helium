@@ -148,10 +148,25 @@ it("every narrative task replies as one sections JSON", () => {
   // prose contributes nothing to the mail — which is exactly how a premarket
   // run that had written four regime sections and four scenario paths
   // delivered a brief with one paragraph in it.
-  for (const id of ["regime", "scenarios", "weekly", "frank", "drift", "markout", "recap"]) {
+  for (const id of ["regime", "scenarios", "weekly", "frank", "drift", "recap"]) {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
+});
+
+it("markout settles by id, in four states, so the renderer can check it", () => {
+  // Free prose cannot be gated: the 2026-09-02 close mail settled six theses
+  // that were never proposed and nothing in the pipeline could tell. A settled
+  // id is checkable against the ledger ow_reports returned; a sentence is not.
+  const prompt = manifest.tasks.find((t) => t.id === "markout")?.prompt ?? "";
+  expect(prompt).toContain(
+    '{"settlements":[{"id","ticker","state","note"}],"sections":[{"title","body"}]}',
+  );
+  // 未触发 is the state the three-state prompt had no room for, so a thesis
+  // whose entry never filled was written up as 加强 or 反转 — a judgement about
+  // a position that does not exist.
+  for (const state of ["反转", "加强", "不变", "未触发"])
+    expect(prompt, state).toContain(state);
 });
 
 it("the settlement level is demanded where a proposal is born, not only where it is checked", () => {

@@ -821,7 +821,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           : { price: { usdIn: model.usdIn, usdOut: model.usdOut } }),
       });
       options.audit.appendAll(spans);
-      toolOutputs.push(...toolResultTexts(result.events));
+      const stepToolOutputs = toolResultTexts(result.events);
+      toolOutputs.push(...stepToolOutputs);
       stepNo += spans.filter((span) => span.toolName === undefined).length;
 
       // A model step whose session log reported NO usage did not reach a
@@ -858,6 +859,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         task: taskId,
         role: task.role,
         mode: "model",
+        ...(stepToolOutputs.length === 0
+          ? {}
+          : { toolOutputs: stepToolOutputs }),
         targetId: String(decision.selected),
         ...(decision.downgradeReason === undefined
           ? {}
@@ -961,7 +965,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         {
           tenant: spec.tenant,
           runId,
-          subject: deliverySubject(report, reportDay),
+          subject: deliverySubject(report, reportDay, env),
           body: deliveryBody(report),
           day: reportDay,
           phase: report.phase,
@@ -1015,7 +1019,17 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
  * template work and never another model call — a role that only reformats an
  * earlier role's output is the kind of ceremony doctrine 6 deletes.
  */
-function deliverySubject(report: RunReport, day: string): string {
+function deliverySubject(
+  report: RunReport,
+  day: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  // Default-to-TEST is deliberate: a mail is marked real ONLY when the
+  // operator has said so on the machine that sends it. Forgetting to set
+  // HELIUM_DEPLOYMENT must produce a test-looking mail from production, never
+  // a real-looking mail from a laptop — the failure has to fall on the side
+  // that gets ignored, not the side that gets traded.
+  const test = env.HELIUM_DEPLOYMENT === "production" ? "" : "[TEST] ";
   const tag =
     report.outcome === "failed"
       ? "[FAILED] "
@@ -1026,7 +1040,7 @@ function deliverySubject(report: RunReport, day: string): string {
   // ("[option-wizard]"), so repeating it here read as "[option-wizard] helium
   // option-wizard 2026-09-03". Phase and date are what tell two of the day's
   // five emails apart.
-  return `${tag}${report.phase} ${day}`;
+  return `${test}${tag}${report.phase} ${day}`;
 }
 
 /**

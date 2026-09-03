@@ -19,6 +19,15 @@ export interface StepReport {
   failure?: string;
   /** Gates that said no. An input refusal means no model call was made. */
   gateRefusals?: Array<{ id: string; reason: string }>;
+  /**
+   * What this step's tools ANSWERED, verbatim, when it called any.
+   *
+   * The gates already receive these; a tenant renderer did not, and so had no
+   * way to check a model's claim against the data the model was looking at. A
+   * settlement citing an id no tool ever returned is indistinguishable from a
+   * real one until you can read the tool's own reply.
+   */
+  toolOutputs?: string[];
 }
 
 export interface DeliveryReport {
@@ -64,7 +73,16 @@ export interface RunReport {
 
 /** What a tenant's own renderer produces. `html` is optional; `text` is not. */
 export interface RenderedReport {
-  subject: string;
+  /**
+   * Optional, and omitting it is a real choice rather than an oversight.
+   *
+   * A renderer is handed the report, not the run label, so a subject minted
+   * here cannot say which of the day's runs produced it — and it OVERRIDES the
+   * one the runner built, which can. A tenant whose renderer set this had every
+   * run of the day arrive under one identical subject line. Leave it unset and
+   * the delivery channel uses the runner's.
+   */
+  subject?: string;
   text: string;
   html?: string;
 }

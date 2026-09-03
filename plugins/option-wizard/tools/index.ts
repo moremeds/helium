@@ -238,9 +238,17 @@ const DEFAULT_MACRO_SERIES = [
  * as its own index, and `note` says so.
  *
  * Everything else in the default set — breakevens, the 10y real yield, HY OAS,
- * financial conditions — has no TradingView ticker at all. Those stay daily,
- * and `staleSeries` names them with their age rather than letting a reader
- * assume the whole payload is as live as its liveliest field.
+ * financial conditions — has no TradingView ticker at all (checked 2026-09-03:
+ * there is no TV quote for FRED:BAMLH0A0HYM2). Their twin is FRED itself.
+ * `fredgraph.csv?id=<series>` needs no API key and runs 1–2 days behind, against
+ * the ~9 days argon's mirror was behind on 2026-09-03. Verified 2026-09-03 09:51
+ * UTC: `id=BAMLH0A0HYM2` answered `observation_date,BAMLH0A0HYM2` rows ending
+ * `2026-09-01,2.65`. That host answers from the mini directly and through its
+ * proxy, and NOT from the laptop (SSL fails) — so the fetch degrades to a named
+ * `skipped` reason, never to an estimate. So the daily row stays the HISTORY,
+ * `fredDirect` carries the fresher point, and `staleSeries` keeps naming the
+ * mirror's age rather than letting a reader assume the whole payload is as live
+ * as its liveliest field.
  */
 const TV_LIVE: ReadonlyArray<{
   ticker: string;
@@ -334,6 +342,11 @@ export async function tvLiveLevels(
   return { quotes, fetchedAt: new Date().toISOString() };
 }
 
+/** The FRED ids TradingView can quote. What is NOT in here is what
+ *  `staleSeries` names and what `fredDirect` fetches — one set, so the two
+ *  halves cannot drift into disagreeing about which series has a live twin. */
+const TV_TWIN_IDS = new Set(TV_LIVE.flatMap((e) => (e.fredId === undefined ? [] : [e.fredId])));
+
 /**
  * The series that have NO live twin, with how far behind each one is.
  *
@@ -346,13 +359,12 @@ export function staleSeries(
   rows: ReadonlyArray<{ series_id?: unknown; obs_date?: unknown }>,
   now = new Date(),
 ): Array<{ seriesId: string; latestObs: string; ageDays: number }> {
-  const live = new Set(TV_LIVE.flatMap((e) => (e.fredId === undefined ? [] : [e.fredId])));
   const newest = new Map<string, string>();
   for (const row of rows) {
     const id = row.series_id;
     const obs = row.obs_date;
     if (typeof id !== "string" || typeof obs !== "string") continue;
-    if (live.has(id)) continue;
+    if (TV_TWIN_IDS.has(id)) continue;
     const seen = newest.get(id);
     if (seen === undefined || obs > seen) newest.set(id, obs);
   }
@@ -365,6 +377,85 @@ export function staleSeries(
     }))
     .filter((entry) => entry.ageDays >= 1)
     .sort((a, b) => b.ageDays - a.ageDays || a.seriesId.localeCompare(b.seriesId, "en"));
+}
+
+/** No API key and no tier: FRED's own graph endpoint answers CSV. Verified
+ *  2026-09-03 09:51 UTC, `?id=BAMLH0A0HYM2` → `observation_date,BAMLH0A0HYM2`
+ *  rows ending `2026-09-01,2.65`. */
+const FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv";
+const FRED_SOURCE = "FRED direct (fredgraph.csv), ~1-2 day lag";
+
+type FredPoint = { series: string; value: number; asOf: string; source: string };
+type FredSkip = { series: string; reason: string };
+
+/**
+ * The last row that carries a NUMBER, not merely the last row.
+ *
+ * FRED dates every calendar row and writes `.` where there is no observation,
+ * so a holiday or a not-yet-published day sits at the bottom of the file.
+ * Taking the final line would hand back a NaN, or a date with nothing under
+ * it; scanning backwards for a parseable value is what keeps the date and the
+ * value the same observation.
+ */
+export function parseFredCsv(csv: string): { value: number; asOf: string } | undefined {
+  const lines = csv.split("\n");
+  for (let at = lines.length - 1; at >= 1; at -= 1) {
+    const [asOf, raw] = (lines[at] ?? "").trim().split(",");
+    if (asOf === undefined || raw === undefined) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(asOf)) continue;
+    const value = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(value)) continue;
+    return { value, asOf };
+  }
+  return undefined;
+}
+
+/**
+ * One FRED point per series TradingView cannot quote, fetched together.
+ *
+ * argon's mirror is the HISTORY and stays the primary result; this is the
+ * fresher point next to it, so it never throws — a failure comes back as a
+ * named `skipped` line and never as an estimate. The laptop cannot reach this
+ * host at all (SSL fails), the mini can, and that difference has to read as a
+ * reason rather than as a number.
+ *
+ * `Promise.all` because eight sequential round trips inside a launchd-timed
+ * phase is eight times the wall clock for the same eight answers.
+ */
+export async function fredDirect(
+  series: readonly string[],
+  ctx?: ToolRunContext,
+): Promise<{ points: FredPoint[]; skipped: FredSkip[] }> {
+  const doFetch = ctx?.fetchImpl ?? fetch;
+  const settled = await Promise.all(
+    series.slice(0, 8).map(async (id): Promise<FredPoint | FredSkip> => {
+      const url = new URL(FRED_CSV);
+      url.searchParams.set("id", symbolLiteral(id, "ow_macro_rates"));
+      try {
+        const response = await doFetch(url, { signal: AbortSignal.timeout(15_000) });
+        if (!response.ok) {
+          return {
+            series: id,
+            reason: `fredgraph.csv returned ${String(response.status)} ${response.statusText}`,
+          };
+        }
+        const point = parseFredCsv(await response.text());
+        if (point === undefined) {
+          return { series: id, reason: "fredgraph.csv carried no numeric observation" };
+        }
+        return { series: id, ...point, source: FRED_SOURCE };
+      } catch (error: unknown) {
+        return { series: id, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }),
+  );
+  const points: FredPoint[] = [];
+  const skipped: FredSkip[] = [];
+  for (const row of settled) {
+    if ("value" in row) points.push(row);
+    else skipped.push(row);
+  }
+  return { points, skipped };
 }
 
 /** Verified 2026-09-02 against argon's own client: base
@@ -385,6 +476,9 @@ async function uwGet(
   const doFetch = ctx?.fetchImpl ?? fetch;
   const response = await doFetch(url, {
     headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+    // ponytail: a bare fetch has no timeout at all, so one hung UW connection
+    // held a whole phase open until launchd gave up on it.
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
     throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
@@ -703,6 +797,28 @@ async function newestMarkdown(root: string): Promise<string | undefined> {
   return best === undefined ? undefined : readFile(best.path, "utf8");
 }
 
+/**
+ * Frank's real article slugs are date-prefixed — `/p/12292025-trading-recap-
+ * and-outlook`. The publication listing also carries evergreen index pages
+ * (`/p/weekly-recap-and-outlook`), which are a wall of "Read full story"
+ * links and no article at all; one of those returned as "Frank's newest note"
+ * is a whole run comparing our view against nothing.
+ */
+export function isDatedPostUrl(url: string): boolean {
+  const at = url.indexOf("/p/");
+  if (at < 0) return false;
+  return /^\d{6,8}(?:[^0-9]|$)/u.test(url.slice(at + 3));
+}
+
+/** The first dated article link on an index page, or undefined. */
+export function firstDatedPostUrl(markdown: string): string | undefined {
+  for (const match of markdown.matchAll(/https?:\/\/[^\s)\]"'>]+/gu)) {
+    const url = match[0].replace(/[.,)]+$/u, "");
+    if (isDatedPostUrl(url)) return url;
+  }
+  return undefined;
+}
+
 export function buildTools(cfg: {
   stateRoot: string;
   env: Record<string, string | undefined>;
@@ -881,21 +997,40 @@ export function buildTools(cfg: {
         // for SPY because this machine has no UW credential" are the same
         // sentence to a reader and different facts to an operator.
         const missing: Array<{ ticker: string; reason: string }> = [];
-        for (const raw of tickers) {
-          const ticker = symbolLiteral(raw, tool);
-          let hit: Awaited<ReturnType<typeof spotOf>>;
-          let why = "no quote from TradingView or Unusual Whales";
-          try {
-            hit = await spotOf(env, tool, ticker, ctx);
-          } catch (error: unknown) {
-            // One unreachable ticker must not take the other twenty-three with
-            // it: it goes on the noPrice list like any other unpriced name.
-            hit = undefined;
-            why = error instanceof Error ? error.message : String(error);
-          }
+        // ponytail: ceiling of 6 in flight. A ticker TradingView does not have
+        // costs three 30s subprocess timeouts, so 24 names in a row is a
+        // 36-minute worst case that outlives the phase window it feeds. Six is
+        // the whole fix — batches, not a queue, because the wall time that
+        // matters is the slowest ticker's, not the scheduler's elegance.
+        const SPOT_CONCURRENCY = 6;
+        const settled: Array<{ ticker: string; hit: Awaited<ReturnType<typeof spotOf>>; why: string }> = [];
+        for (let at = 0; at < tickers.length; at += SPOT_CONCURRENCY) {
+          // Order in = order out: each chunk is resolved in place, so the
+          // caller's ticker list and the returned quote list still line up.
+          settled.push(
+            ...(await Promise.all(
+              tickers.slice(at, at + SPOT_CONCURRENCY).map(async (raw) => {
+                const ticker = symbolLiteral(raw, tool);
+                try {
+                  return { ticker, hit: await spotOf(env, tool, ticker, ctx), why: "" };
+                } catch (error: unknown) {
+                  // One unreachable ticker must not take the other twenty-three
+                  // with it: it goes on the noPrice list like any other name.
+                  return {
+                    ticker,
+                    hit: undefined,
+                    why: error instanceof Error ? error.message : String(error),
+                  };
+                }
+              }),
+            )),
+          );
+        }
+        for (const { ticker, hit, why } of settled) {
           // A ticker with no price is NAMED, never dropped and never guessed at.
           // Silence here is what produced the 420 strike on a 707 underlying.
-          if (hit === undefined) missing.push({ ticker, reason: why });
+          if (hit === undefined)
+            missing.push({ ticker, reason: why === "" ? "no quote from TradingView or Unusual Whales" : why });
           else quotes.push({ ticker, source: hit.source, last: hit.close, ...(hit.marketTime === undefined ? {} : { marketTime: hit.marketTime }), ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }) });
         }
         if (quotes.length === 0) {
@@ -1327,7 +1462,8 @@ export function buildTools(cfg: {
       // sector, marketcap, outstanding, avg30_volume, short_description,
       // uw_tags, has_options, has_dividend, has_investment_arm. None of them
       // decide whether an expiry spans earnings, and all of them would eat the
-      // 2,000-character tool-output budget the ow_reports comment describes.
+      // context budget this tool imposes on itself — nothing downstream trims
+      // a tool result, so what is returned here is what a role reads.
       //
       // An ETF answers with `next_earnings_date: null` (verified: SMH, issue
       // type "ETF"). That is a real answer, not an outage, so it comes back as
@@ -1414,12 +1550,15 @@ export function buildTools(cfg: {
       // It returns the LEDGER, not the prose. The first version returned each
       // report's full markdown, and on 2026-09-02 that shipped a fabricated
       // settlement into a delivered email: the premarket report is 50,912
-      // bytes, core's output policy cuts a tool result at 2,000 characters
-      // with no summariser wired up (packages/core/src/budget.ts), and the
-      // surviving head is the run header and the GEX table — so markout was
-      // asked to settle proposals by id while holding nothing but a ticker
-      // table, and it settled the ticker table. The proposals it needs are
-      // ~2 KB; the prose that buried them was never what it wanted.
+      // bytes, and NOTHING in the harness trims a tool result before it
+      // reaches a context. `applyOutputPolicy` exists in
+      // packages/core/src/budget.ts, but its only caller is
+      // plugins/provider-dsh/src/hooks.ts, whose `installHeliumHooks` is never
+      // invoked and is not exported — dead code. So the 50 KB arrived whole,
+      // buried the proposals somewhere in the middle of a context, and markout
+      // settled the nearest table it could see. Size discipline is THIS
+      // TOOL'S choice and nobody else's. The proposals it needs are ~2 KB; the
+      // prose that buried them was never what it wanted.
       //
       // The ids are minted by `candidatesFrom`, the same function the renderer
       // builds the email with, so an id settled here is an id that was mailed.
@@ -1492,13 +1631,14 @@ export function buildTools(cfg: {
           });
         }
 
-        // Bound the payload HERE rather than let the output policy cut it
-        // downstream. Both drop text; only this one says which text went
-        // missing. A model told "the 09-01 close prose was dropped" reads the
-        // ledger it still has; a model handed a silent 2,000-character stump
-        // fills the gap from the nearest table on screen, which is exactly how
-        // the 2026-09-02 close email came to settle six theses that never
-        // existed. The candidates are never dropped — they are the ledger.
+        // Bound the payload HERE, because nothing downstream will. There is
+        // no output policy wired into any run (see the ow_reports comment
+        // above), so a tool that returns 50 KB puts 50 KB into a context. A
+        // model told "the 09-01 close prose was dropped" reads the ledger it
+        // still has; a model handed an unbounded wall of prose fills the gap
+        // from the nearest table on screen, which is exactly how the
+        // 2026-09-02 close email came to settle six theses that never existed.
+        // The candidates are never dropped — they are the ledger.
         const dropped: string[] = [];
         const payload = (): string =>
           JSON.stringify({
@@ -1545,6 +1685,26 @@ export function buildTools(cfg: {
         const bin = (env.OW_OPENCLI_BIN ?? "").trim() === "" ? "opencli" : env.OW_OPENCLI_BIN!;
         const cwd = join(cfg.stateRoot, "scratch", "frank");
         await mkdir(cwd, { recursive: true });
+        // Every `web read` gets its own directory, named for the url it was
+        // given. `newestMarkdown` used to scan the ONE shared web-articles
+        // tree, so the newest file by mtime could be last week's article that
+        // this run never fetched, returned as today's note with today's url
+        // stapled to it. A per-url directory makes the binding structural: the
+        // only .md in there is the one this call wrote.
+        const readPage = async (url: string): Promise<string | undefined> => {
+          const into = join(cwd, "reads", url.replace(/[^A-Za-z0-9]+/gu, "-").slice(-80));
+          await mkdir(into, { recursive: true });
+          const readArgv = ["web", "read", "--url", url];
+          try {
+            await execFileAsync(bin, readArgv, { cwd: into, timeout: 180_000 });
+          } catch (error: unknown) {
+            throw new Error(
+              `ow_frank: ${bin} ${readArgv.join(" ")} failed — ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          return newestMarkdown(join(into, "web-articles"));
+        };
         const listArgv = ["substack", "publication", FRANK_PUBLICATION, "--limit", "1", "-f", "json"];
         let listed: string;
         try {
@@ -1561,24 +1721,41 @@ export function buildTools(cfg: {
         if (typeof post?.url !== "string") {
           throw new Error(`ow_frank: no post url in ${bin} substack publication output`);
         }
-        const readArgv = ["web", "read", "--url", post.url];
-        try {
-          await execFileAsync(bin, readArgv, { cwd, timeout: 180_000 });
-        } catch (error: unknown) {
-          throw new Error(
-            `ow_frank: ${bin} ${readArgv.join(" ")} failed — ` +
-              `${error instanceof Error ? error.message : String(error)}`,
-          );
+        // An undated slug is an index page, not a note. Read it once for the
+        // links it carries and follow the newest dated one; never hand it back
+        // as the article.
+        let url = post.url;
+        if (!isDatedPostUrl(url)) {
+          const index = await readPage(url);
+          const dated = index === undefined ? undefined : firstDatedPostUrl(index);
+          if (dated === undefined) {
+            throw new Error(
+              `ow_frank: ${url} is not a dated article slug and its page carries no ` +
+                "dated article link — refusing to return an index page as Frank's note",
+            );
+          }
+          url = dated;
         }
         // `web read` names the directory and the file after the article title,
         // and the exact slugging is opencli's business, not ours — so find the
         // one .md it just wrote rather than reconstructing its name.
-        const markdown = await newestMarkdown(join(cwd, "web-articles"));
+        const markdown = await readPage(url);
         if (markdown === undefined) {
-          throw new Error(`ow_frank: ${bin} web read wrote no markdown under ${cwd}/web-articles`);
+          throw new Error(`ow_frank: ${bin} web read wrote no markdown for ${url}`);
+        }
+        // A real note runs tens of KB. A short body or a page of "Read full
+        // story" teasers is a paywall cut or an index that slipped the slug
+        // check — both look like an article and neither is one.
+        const teasers = markdown.split("Read full story").length - 1;
+        if (markdown.length < 500 || teasers >= 3) {
+          throw new Error(
+            `ow_frank: ${url} read as ${String(markdown.length)} chars with ` +
+              `${String(teasers)} "Read full story" links — that is an index or a ` +
+              "paywall cut, not the note",
+          );
         }
         return JSON.stringify({
-          url: post.url,
+          url,
           publishedAt: typeof post.publish_time === "string" ? post.publish_time : undefined,
           title: typeof post.title === "string" ? post.title : undefined,
           markdown,
@@ -1597,7 +1774,7 @@ export function buildTools(cfg: {
       // NFCI (financial conditions), BAMLH0A0HYM2 (HY OAS), DTWEXBGS (dollar).
       name: "ow_macro_rates",
       description:
-        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date, plus today's live levels from TradingView for the 2y/5y/10y/30y curve, VIX and DXY. `series` is the daily path; `liveNow` is the current level; `staleSeries` names the series that have no live twin and how many days behind each one is. Quote `liveNow` for today, `series` for the trend, and `staleSeries` whenever you cite a series listed there.",
+        "Rates, breakevens, credit spreads and financial-conditions series from argon's macro store, each with its observation date, plus today's live levels from TradingView for the 2y/5y/10y/30y curve, VIX and DXY. `series` is the daily path; `liveNow` is the current level; `fredDirect` is FRED's own observation, 1-2 days old, for the series TradingView cannot quote (HY OAS, breakevens, the 10y real yield, financial conditions, the dollar index) or the reason it was skipped; `staleSeries` says how far behind argon's daily mirror is. Quote `liveNow` for today, `fredDirect` for those series' latest level, `series` for the trend, and the lag whenever you cite a series listed in `staleSeries`.",
       paramsSchema: MacroParams,
       mutating: false,
       dshParams: {
@@ -1607,7 +1784,7 @@ export function buildTools(cfg: {
         },
         lookbackDays: { type: "number", description: "How far back to return observations (default 30)" },
       },
-      async run(args: Record<string, unknown>): Promise<string> {
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
         const { series, lookbackDays } = MacroParams.parse(args);
         const wanted = series ?? [...DEFAULT_MACRO_SERIES];
         const list = wanted.map((id) => `'${symbolLiteral(id, "ow_macro_rates")}'`).join(",");
@@ -1632,14 +1809,20 @@ export function buildTools(cfg: {
         // today's level. A single blended field would let a caller quote an
         // 8-day-old 10y as this morning's, which is exactly the mistake this
         // overlay exists to remove.
-        // Three keys, never merged: `series` is the daily path with its own
-        // observation dates, `liveNow` is today's level, and `staleSeries`
-        // names what has neither. A single blended field would let a caller
-        // quote an 8-day-old 10y as this morning's, which is exactly what this
-        // overlay exists to remove.
+        // Four keys, never merged: `series` is the daily path with its own
+        // observation dates, `liveNow` is today's level off TradingView,
+        // `fredDirect` is FRED's own 1–2 day-old point for the series
+        // TradingView cannot quote, and `staleSeries` is the age of argon's
+        // mirror. A single blended field would let a caller quote an 8-day-old
+        // 10y as this morning's, which is exactly what this overlay exists to
+        // remove.
         return JSON.stringify({
           series: { source: "argon.uw_scan.macro_series_daily", rows },
           liveNow: { source: "tradingview", ...(await tvLiveLevels(env, "ow_macro_rates")) },
+          fredDirect: await fredDirect(
+            wanted.filter((id) => !TV_TWIN_IDS.has(id)),
+            ctx,
+          ),
           staleSeries: staleSeries(rows as Array<{ series_id?: unknown; obs_date?: unknown }>),
         });
       },

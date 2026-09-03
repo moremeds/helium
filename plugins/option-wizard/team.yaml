@@ -85,8 +85,11 @@ roles:
       Then the Layer Coverage table: one row per layer — rates, credit, tape,
       flow/GEX, events — each with its SOURCE, its AS-OF (the tool's own
       string, copied) and ✓ or `skipped`. HY OAS comes from ow_macro_rates as
-      BAMLH0A0HYM2 — cite it with the lag `staleSeries` reports for it. CCC OAS
-      has no source: write `skipped — no CCC OAS source` for that one only.
+      BAMLH0A0HYM2: quote its `fredDirect` point (FRED direct, 1-2 days behind)
+      and copy that `asOf`; only if `fredDirect` skipped it do you fall back to
+      the `series` row with the lag `staleSeries` reports, and then you name the
+      skip reason. CCC OAS has no source: write `skipped — no CCC OAS source`
+      for that one only.
       Hike probabilities come from ow_argon_policy_path: cite them with the
       source and the snapshot date, and say they are futures-implied via
       Frenzy Capital, not CME FedWatch. Never estimate a number, and never
@@ -305,11 +308,25 @@ tasks:
       settle ONLY ids the tool returned — if a ticker is not in that list it
       had no proposal, whatever else you have seen it in today.
       Nothing comes due by the calendar; a thesis is open until a level breaks.
-      For each id compare today's price to its `invalidation`: breached on its
-      stated side → 反转, plus a 平仓建议 in the same line. Otherwise 加强 if
-      it has moved toward its `target`, 不变 if it has not. Quote the price
-      that decided it, every time.
-      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      For each id compare today's price to its `invalidation`. Exactly four
+      states, and they are not interchangeable:
+      反转 — the `invalidation` level was breached on its stated side; add a
+      平仓建议 in the same line.
+      加强 — the position was entered and has moved toward its `target`.
+      不变 — the position was entered and has not moved either way.
+      未触发 — the entry trigger was never met, so there is no position and
+      nothing has happened to it. A thesis that was never entered CANNOT be
+      加强 or 反转: those describe a position, and there is none. Say what
+      price the entry needed and where the price actually is.
+      Quote the price that decided it, every time.
+      Reply as ONE JSON object and nothing else:
+      {"settlements":[{"id","ticker","state","note"}],"sections":[{"title","body"}]}
+      One settlements entry per id the tool returned, `state` exactly one of
+      反转 / 加强 / 不变 / 未触发, `note` the price that decided it. An entry
+      whose id is not in what the tool returned is DROPPED by the renderer and
+      printed under “未在账本中的结算，已剔除” with your id on it — do not put
+      the per-id lines in `sections` as well, `sections` is for anything that is
+      not a settlement.
 
   - id: regime
     role: regime-analyst
