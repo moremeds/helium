@@ -172,6 +172,22 @@ roles:
       If there is nothing to review, reply {"proposals":[],"riskList":[],
       "reason":"..."}.
 
+  drift-watcher:
+    requires: [tool.use, reason.deep, long.context]
+    permissions:
+      mutations: forbidden
+      tools: [ow_reports, ow_spot]
+    persona: >-
+      You are re-reading a judgement you already made this morning, against
+      the tape that has happened since. You are not looking for new trades and
+      there is no design step behind you: the only question is whether each
+      thesis still holds. Three answers exist and no others — 加强, 不变,
+      反转 — and "无变化" is a complete, respectable answer for the whole run.
+      A quiet session reported as quiet is worth more than an invented change:
+      the reader acts on this mail, and a manufactured drift costs them a
+      trade. Anything you call 反转 gets a 平仓建议 in the same line, because
+      a reversal the reader cannot act on is just commentary.
+
   weekly-analyst:
     requires: [tool.use, reason.deep, long.context]
     permissions:
@@ -263,7 +279,7 @@ tasks:
 
   - id: design
     role: structure-designer
-    phases: [premarket, intraday, close]
+    phases: [premarket, close]
     dependsOn: [universe, regime]
     requires: [structured.output]
     prompt: >-
@@ -274,7 +290,7 @@ tasks:
 
   - id: review
     role: risk-reviewer
-    phases: [premarket, intraday, close]
+    phases: [premarket, close]
     dependsOn: [design]
     requires: [long.context]
     prompt: >-
@@ -285,6 +301,20 @@ tasks:
       YOUR call and it says when this thesis comes due to be settled — the
       close run looks for exactly that, and a proposal without one is dropped
       before it reaches the reader. Do NOT write an id; the harness mints it.
+
+  - id: drift
+    role: drift-watcher
+    phases: [intraday]
+    dependsOn: [gex, regime]
+    requires: [tool.use, reason.deep, long.context]
+    prompt: >-
+      Call ow_reports with days:1 phase:premarket for this morning's report.
+      For every proposal id in it, say whether the thesis is 加强 / 不变 /
+      反转 against the levels you were just handed, and why, in one line each,
+      quoting the price that decided it. When nothing moved, that IS the
+      answer: say 无变化 and name what you checked. Never invent a change to
+      fill the mail. Anything you call 反转 gets a 平仓建议 in the same line.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
 
   - id: weekly
     role: weekly-analyst

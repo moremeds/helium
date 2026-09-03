@@ -81,3 +81,25 @@ describe("option-wizard team.yaml", () => {
     expect(weeklyTasks).not.toContain("markout");
   });
 });
+
+describe("phase remits", () => {
+  const task = (id: string) => manifest.tasks.find((t) => t.id === id);
+  const runsIn = (id: string, phase: string) =>
+    task(id)?.phases?.includes(phase) ?? true;
+
+  it("intraday does not design or review — it only checks drift", () => {
+    // Leaving a design step in intraday is what made the model produce a
+    // fresh set of trades every run: hand it a design task and it will
+    // design something, whether or not anything moved.
+    expect(runsIn("design", "intraday")).toBe(false);
+    expect(runsIn("review", "intraday")).toBe(false);
+    expect(runsIn("drift", "intraday")).toBe(true);
+    expect(task("drift")?.phases).toEqual(["intraday"]);
+  });
+
+  it("drift reads this morning's own report", () => {
+    const prompt = task("drift")?.prompt ?? "";
+    expect(prompt).toContain("phase:premarket");
+    expect(prompt).toContain("无变化");
+  });
+});
