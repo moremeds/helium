@@ -146,6 +146,25 @@ describe("EmailChannel", () => {
     });
   });
 
+  it("keeps the runner's phase subject when the renderer minted none", async () => {
+    // The option-wizard renderer deliberately emits no subject: it does not
+    // know the phase, and the one it used to mint made the day's five mails
+    // arrive under one indistinguishable line.
+    const sendMail = vi.fn().mockResolvedValue({});
+    await channel(sendMail).deliver(
+      {
+        ...payload(),
+        subject: "[TEST] intraday 2026-09-03",
+        rendered: { text: "今日候选 5 个" },
+      },
+      CONFIG,
+    );
+    expect(sendMail.mock.calls[0]?.[0]).toMatchObject({
+      subject: "[helium] [TEST] intraday 2026-09-03",
+      text: "今日候选 5 个",
+    });
+  });
+
   it("sends text-only when the rendered form carries no html", async () => {
     const sendMail = vi.fn().mockResolvedValue({});
     await channel(sendMail).deliver(

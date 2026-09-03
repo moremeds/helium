@@ -11,6 +11,12 @@
 #
 # No version keying and no release directory: the v2 lane deploys the tip of
 # master in one checkout (doctrine 5 — deploy is minutes, not days).
+#
+# The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
+# alongside HELIUM_TENANT_DELIVERY=1. That variable is the ONLY thing that
+# removes the `[TEST] ` prefix from a delivered subject, and it defaults to
+# test on purpose: an unset variable makes a production mail look like a drill,
+# never the reverse.
 set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"

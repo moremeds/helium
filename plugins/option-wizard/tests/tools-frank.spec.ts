@@ -40,15 +40,18 @@ vi.mock("node:child_process", async (importOriginal) => {
 
 const { buildTools } = await import("../tools/index.js");
 
-/** The real observed post, 2026-08-31. */
+/** The real observed post, 2026-08-31. Frank's slugs are date-prefixed
+ *  (MMDDYYYY), which is what tells an article from an evergreen index page. */
 const LISTING = JSON.stringify([
   {
     title: "08/31/2026 复盘与展望",
-    url: "https://franktrading.substack.com/p/0831",
+    url: "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook",
     publish_time: "2026-08-31T12:37:14.509Z",
   },
 ]);
-const ARTICLE = "# 08/31/2026 复盘与展望\n\nSPY 收在 764 附近。\n";
+/** Long enough to clear the tool's body floor; a real note runs tens of KB. */
+const ARTICLE =
+  "# 08/31/2026 复盘与展望\n\nSPY 收在 764 附近。\n" + "市场结构没有改变。".repeat(80);
 
 let stateRoot: string;
 
@@ -99,14 +102,18 @@ describe("ow_frank", () => {
       "web",
       "read",
       "--url",
-      "https://franktrading.substack.com/p/0831",
+      "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook",
     ]);
-    expect(out.url).toBe("https://franktrading.substack.com/p/0831");
+    expect(out.url).toBe(
+      "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook",
+    );
     expect(out.publishedAt).toBe("2026-08-31T12:37:14.509Z");
     expect(out.title).toBe("08/31/2026 复盘与展望");
     expect(out.markdown).toContain("复盘与展望");
-    // The scratch dir is under the state root, never the checkout.
-    expect(existsSync(join(stateRoot, "scratch", "frank", "web-articles"))).toBe(true);
+    // The scratch dir is under the state root, never the checkout. Each read
+    // gets its own directory named for the url, so the .md the tool picks up
+    // can only be the one this call wrote.
+    expect(existsSync(join(stateRoot, "scratch", "frank", "reads"))).toBe(true);
   });
 
   it("honours OW_OPENCLI_BIN", async () => {
@@ -125,12 +132,70 @@ describe("ow_frank", () => {
   it("throws when web read wrote no markdown", async () => {
     state.handler = (call) =>
       call.argv[0] === "substack" ? LISTING : JSON.stringify({ status: "success" });
-    await expect(frankTool().run({})).rejects.toThrow(/wrote no markdown under/u);
+    await expect(frankTool().run({})).rejects.toThrow(/wrote no markdown for/u);
   });
 
   it("throws when the listing carries no post url", async () => {
     state.handler = (call) => (call.argv[0] === "substack" ? "[]" : "");
     await expect(frankTool().run({})).rejects.toThrow(/no post url in/u);
+  });
+
+  it("follows the first dated link when the listing hands back an index page", async () => {
+    // `/p/weekly-recap-and-outlook` is the evergreen index: a page of "Read
+    // full story" teasers and no body. Returning it as Frank's note makes the
+    // whole comparison run against nothing.
+    const INDEX =
+      "# Weekly Recap\n\n[Read full story](https://franktrading.substack.com/p/08312026-trading-recap-and-outlook)\n" +
+      "[Read full story](https://franktrading.substack.com/p/08242026-trading-recap-and-outlook)\n" +
+      "[Read full story](https://franktrading.substack.com/p/08172026-trading-recap-and-outlook)\n";
+    state.handler = (call) => {
+      if (call.argv[0] === "substack")
+        return JSON.stringify([
+          {
+            title: "Weekly Recap and Outlook",
+            url: "https://franktrading.substack.com/p/weekly-recap-and-outlook",
+            publish_time: "2026-08-31T12:37:14.509Z",
+          },
+        ]);
+      const url = call.argv[3];
+      const slug = url.split("/p/")[1];
+      const dir = join(call.cwd!, "web-articles", slug);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${slug}.md`), slug.startsWith("weekly") ? INDEX : ARTICLE);
+      return JSON.stringify({ status: "success" });
+    };
+    const out = JSON.parse(await frankTool().run({})) as { url: string; markdown: string };
+    expect(out.url).toBe(
+      "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook",
+    );
+    expect(out.markdown).toContain("复盘与展望");
+  });
+
+  it("refuses an index page with no dated article link on it", async () => {
+    state.handler = (call) => {
+      if (call.argv[0] === "substack")
+        return JSON.stringify([
+          { url: "https://franktrading.substack.com/p/weekly-recap-and-outlook" },
+        ]);
+      const dir = join(call.cwd!, "web-articles", "weekly");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "weekly.md"), "# Weekly\n\nnothing dated here.\n");
+      return JSON.stringify({ status: "success" });
+    };
+    await expect(frankTool().run({})).rejects.toThrow(
+      /not a dated article slug and its page carries no dated article link/u,
+    );
+  });
+
+  it("refuses a body too short to be a note", async () => {
+    state.handler = (call) => {
+      if (call.argv[0] === "substack") return LISTING;
+      const dir = join(call.cwd!, "web-articles", "cut");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "cut.md"), "# 08/31/2026\n\npaywalled.\n");
+      return JSON.stringify({ status: "success" });
+    };
+    await expect(frankTool().run({})).rejects.toThrow(/not the note/u);
   });
 
   it("names the failing command when opencli itself fails", async () => {

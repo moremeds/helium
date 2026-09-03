@@ -252,10 +252,51 @@ function degradationFrom(report: RunReport): string | undefined {
  * guessing is how a model's scratch notes ("Wait, I need to double-check…",
  * seen in the 2026-09-02 report) end up quoted to the reader.
  */
+/**
+ * markout's per-id settlements, split into the ones the run can prove it was
+ * asked to settle and the ones it invented.
+ *
+ * The check is the id and nothing else: an id is minted by `candidatesFrom`
+ * from a report file that already went out, so an id in the ledger is an id a
+ * reader was mailed. A settlement of anything else is dropped and NAMED —
+ * silently dropping it would leave a reader with a shorter list and no way to
+ * tell a quiet day from a broken look-back, the same reason rejected proposals
+ * land in the risk list instead of vanishing.
+ */
+function settlementSections(
+  raws: readonly unknown[],
+  ledger: ReadonlySet<string>,
+): Section[] {
+  const kept: string[] = [];
+  const dropped: string[] = [];
+  for (const raw of raws) {
+    if (raw === null || typeof raw !== "object") continue;
+    const { id, ticker, state, note } = raw as Record<string, unknown>;
+    if (typeof id !== "string" || typeof ticker !== "string") continue;
+    const line = `${id} ${ticker} ${typeof state === "string" ? state : "?"}${
+      typeof note === "string" && note.trim() !== "" ? ` — ${note.trim()}` : ""
+    }`;
+    if (ledger.has(id)) kept.push(line);
+    else dropped.push(line);
+  }
+  const sections: Section[] = [];
+  if (kept.length > 0)
+    sections.push({ title: "结算", body: kept.join("\n") });
+  if (dropped.length > 0)
+    sections.push({
+      title: "未在账本中的结算，已剔除",
+      body: dropped.join("\n"),
+    });
+  return sections;
+}
+
 function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
   const sections: Section[] = [];
+  const ledger = ledgerIds(report);
   for (const step of report.steps) {
     const parsed = extractJson(step.text);
+    if (parsed !== null && Array.isArray(parsed.settlements))
+      sections.push(...settlementSections(parsed.settlements, ledger));
     const raws = parsed !== null && Array.isArray(parsed.sections) ? parsed.sections : null;
     if (raws === null) {
       if (step.task === "regime" && regime.paragraph !== "")
@@ -319,6 +360,77 @@ function earningsDate(value: unknown, expiry: string): string | undefined {
     date <= expiry
     ? date
     : undefined;
+}
+
+/**
+ * Every JSON object a tool in this run returned, parsed. The tool that produced
+ * it is not recorded, so each reader below identifies its own payload by shape
+ * — which is why `ledgerIds` looks for `reports[].candidates[].id` and
+ * `earningsFromTools` for `rows[].nextEarningsDate` rather than for a tool
+ * name. A tool result that is not JSON is skipped, not guessed at.
+ */
+function toolPayloads(report: RunReport): Record<string, unknown>[] {
+  const payloads: Record<string, unknown>[] = [];
+  for (const step of report.steps) {
+    for (const raw of step.toolOutputs ?? []) {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+          payloads.push(parsed as Record<string, unknown>);
+      } catch {
+        continue;
+      }
+    }
+  }
+  return payloads;
+}
+
+/**
+ * The proposal ids `ow_reports` actually returned to this run.
+ *
+ * This is the denominator for a settlement. On 2026-09-02 the close mail
+ * settled six theses that were never proposed — the model was holding a ticker
+ * table and settled the ticker table. A settlement is a claim about a past
+ * promise, and the only thing that makes it checkable is the list of promises
+ * the run was handed.
+ */
+function ledgerIds(report: RunReport): Set<string> {
+  const ids = new Set<string>();
+  for (const payload of toolPayloads(report)) {
+    if (!Array.isArray(payload.reports)) continue;
+    for (const row of payload.reports) {
+      if (row === null || typeof row !== "object") continue;
+      const candidates = (row as Record<string, unknown>).candidates;
+      if (!Array.isArray(candidates)) continue;
+      for (const candidate of candidates) {
+        if (candidate === null || typeof candidate !== "object") continue;
+        const id = (candidate as Record<string, unknown>).id;
+        if (typeof id === "string") ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Next earnings date per ticker, as `ow_uw_earnings` answered it. A null date
+ *  (an ETF) and a ticker the tool could not answer for are both absent here:
+ *  only a date is grounds to drop anything. */
+function earningsFromTools(report: RunReport): Map<string, string> {
+  const dates = new Map<string, string>();
+  for (const payload of toolPayloads(report)) {
+    if (!Array.isArray(payload.rows)) continue;
+    for (const row of payload.rows) {
+      if (row === null || typeof row !== "object") continue;
+      const { ticker, nextEarningsDate } = row as Record<string, unknown>;
+      if (
+        typeof ticker === "string" &&
+        typeof nextEarningsDate === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/u.test(nextEarningsDate)
+      )
+        dates.set(ticker, nextEarningsDate);
+    }
+  }
+  return dates;
 }
 
 export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
@@ -457,7 +569,25 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     : [];
   riskList.push(...rejected);
 
-  if (candidates.length === 0 && riskList.length === 0) {
+  // A structure that expires AFTER the next earnings print carries an event the
+  // designer may not have priced. The declaration on the proposal is the
+  // model's own word for it; this is the tool's. An expiry that is not a plain
+  // date is left alone — a drop has to rest on two real dates, never on a
+  // parse that failed.
+  const earnings = earningsFromTools(report);
+  const survived = candidates.filter((candidate) => {
+    const when = earnings.get(candidate.ticker);
+    if (when === undefined || !/^\d{4}-\d{2}-\d{2}$/u.test(candidate.expiry))
+      return true;
+    if (when > candidate.expiry) return true;
+    riskList.push({
+      ticker: candidate.ticker,
+      reason: `财报 ${when} 在到期日 ${candidate.expiry} 之前`,
+    });
+    return false;
+  });
+
+  if (survived.length === 0 && riskList.length === 0) {
     if (sections.length > 0) return { ...base, sections, regime };
     const reason =
       typeof parsed.reason === "string" ? parsed.reason : "reviewer 未给出候选";
@@ -468,7 +598,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     ...base,
     sections,
     regime,
-    candidates: candidates.slice(0, 5),
+    candidates: survived.slice(0, 5),
     riskList,
   };
 }
@@ -478,9 +608,12 @@ export default function renderReport(
   cfg: TenantSpec,
 ): RenderedReport {
   const view = buildView(report, cfg);
-  const tag = view.outcome === "completed" ? "" : ` [${view.outcome}]`;
+  // NO SUBJECT. The renderer does not know the phase — render.spec.ts forbids
+  // it naming one — so every subject it could mint reads `option-wizard
+  // 2026-09-03`, and the day's five mails arrive indistinguishable. The runner
+  // already builds `[TEST] intraday 2026-09-03`; omitting the field is how the
+  // channel gets to use it.
   return {
-    subject: `${view.tenant} ${view.date}${tag}`,
     text: renderText(view),
     html: renderHtml(view),
   };

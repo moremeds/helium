@@ -536,8 +536,8 @@ describe("runTenant", () => {
   });
 });
 
-
-const DELIVERY_YAML = "delivery:\n  - channel: fake-mail\n    config: { to: nobody@example.invalid }\n";
+const DELIVERY_YAML =
+  "delivery:\n  - channel: fake-mail\n    config: { to: nobody@example.invalid }\n";
 
 function gate(over: Partial<Gate> & Pick<Gate, "id">): Gate {
   return {
@@ -637,7 +637,9 @@ describe("gates", () => {
     });
     expect(report.steps[0]?.failure).toBeUndefined();
     expect(
-      audit.spans(report.runId).some((s) => s.toolName === "gate:other-role-only"),
+      audit
+        .spans(report.runId)
+        .some((s) => s.toolName === "gate:other-role-only"),
     ).toBe(false);
     audit.close();
   });
@@ -732,6 +734,8 @@ describe("delivery", () => {
     // The subject is the phase and the date; the tenant name comes from the
     // channel's own configured prefix, not from here.
     expect(sent[0]?.subject).toContain("premarket");
+    // No HELIUM_DEPLOYMENT here, so the mail is marked a drill.
+    expect(sent[0]?.subject).toContain("[TEST] ");
     expect(sent[0]?.phase).toBe("premarket");
     // One day for the run: the subject's date IS the day the channel is handed,
     // so a file named for it and a counter charged for it cannot disagree. The
@@ -742,8 +746,30 @@ describe("delivery", () => {
     // The body is a report, not a transcript: the role's own words survive.
     expect(sent[0]?.body).toContain("hello");
     expect(
-      audit.spans(report.runId).some((s) => s.toolName === "delivery:fake-mail"),
+      audit
+        .spans(report.runId)
+        .some((s) => s.toolName === "delivery:fake-mail"),
     ).toBe(true);
+    audit.close();
+  });
+
+  it("drops the [TEST] mark only on a machine that declares itself production", async () => {
+    const audit = new AuditStore(":memory:");
+    sent.length = 0;
+    await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: { HELIUM_TENANT_DELIVERY: "1", HELIUM_DEPLOYMENT: "production" },
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [channel],
+    });
+    expect(sent[0]?.subject).not.toContain("[TEST]");
+    expect(sent[0]?.subject).toContain("premarket");
     audit.close();
   });
 

@@ -16,6 +16,8 @@ import {
   symbolLiteral,
   staleSeries,
   tvLiveLevels,
+  parseFredCsv,
+  fredDirect,
 } from "../tools/index.js";
 
 const EMPTY_ENV: Record<string, string | undefined> = {};
@@ -115,6 +117,27 @@ describe("absent environment", () => {
     expect(JSON.parse(json).quotes).toEqual([
       { ticker: "SPY", source: "unusualwhales", last: 761.21, marketTime: "premarket" },
     ]);
+  });
+
+  it("ow_spot prices more tickers than its concurrency ceiling, in the order asked", async () => {
+    // Eight names spans two batches of six, which is where an unordered
+    // Promise.all would show: the returned list must still line up with the
+    // list the role asked for, or a strike gets read against a neighbour's
+    // price.
+    const tickers = ["SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "TLT", "GLD"];
+    const priced = await tool("ow_spot", { OW_UW_API_KEY: "k" }).run(
+      { tickers },
+      {
+        fetchImpl: (async (url: URL) => {
+          const symbol = url.pathname.split("/").filter(Boolean)[2] ?? "";
+          return new Response(JSON.stringify({ data: { close: String(100 + tickers.indexOf(symbol)) } }));
+        }) as unknown as typeof fetch,
+      },
+    );
+    expect(JSON.parse(priced).quotes.map((q: { ticker: string }) => q.ticker)).toEqual(tickers);
+    expect(JSON.parse(priced).quotes.map((q: { last: number }) => q.last)).toEqual(
+      tickers.map((_, at) => 100 + at),
+    );
   });
 
   it("ow_uw_chain asks for the spot before the chain, and stops when there is none", async () => {
@@ -434,5 +457,61 @@ describe("staleSeries", () => {
 
   it("says nothing when argon has caught up", () => {
     expect(staleSeries([{ series_id: "T10YIE", obs_date: "2026-09-02" }], now)).toEqual([]);
+  });
+});
+
+describe("parseFredCsv", () => {
+  // Shape captured live 2026-09-03 09:51 UTC from
+  // fredgraph.csv?id=BAMLH0A0HYM2, with a `.` row appended: FRED dates every
+  // calendar day and writes `.` where there is no observation, so the last
+  // LINE is regularly not the last OBSERVATION.
+  const csv = [
+    "observation_date,BAMLH0A0HYM2",
+    "2026-08-28,2.71",
+    "2026-09-01,2.65",
+    "2026-09-02,.",
+    "",
+  ].join("\n");
+
+  it("takes the last row that carries a number, not the last row", () => {
+    expect(parseFredCsv(csv)).toEqual({ value: 2.65, asOf: "2026-09-01" });
+  });
+
+  it("returns undefined rather than a NaN when nothing is observed", () => {
+    expect(parseFredCsv("observation_date,ANFCI\n2026-09-02,.\n")).toBeUndefined();
+    expect(parseFredCsv("observation_date,ANFCI\n")).toBeUndefined();
+  });
+});
+
+describe("fredDirect", () => {
+  // The laptop cannot reach fred.stlouisfed.org at all (SSL fails) while the
+  // mini can. That difference must reach the report as a reason, never as a
+  // number and never as silence — the whole point of the fresher point is that
+  // it is honest about being absent.
+  it("reports why it has no point instead of throwing or estimating", async () => {
+    const result = await fredDirect(["BAMLH0A0HYM2", "ANFCI"], {
+      fetchImpl: (async () => {
+        throw new Error("unable to verify the first certificate");
+      }) as unknown as typeof fetch,
+    });
+    expect(result.points).toEqual([]);
+    expect(result.skipped.map((row) => row.series)).toEqual(["BAMLH0A0HYM2", "ANFCI"]);
+    for (const row of result.skipped) expect(row.reason).toContain("certificate");
+  });
+
+  it("labels the point with FRED direct and its lag when the fetch lands", async () => {
+    const result = await fredDirect(["BAMLH0A0HYM2"], {
+      fetchImpl: (async () =>
+        new Response("observation_date,BAMLH0A0HYM2\n2026-09-01,2.65\n")) as unknown as typeof fetch,
+    });
+    expect(result.skipped).toEqual([]);
+    expect(result.points).toEqual([
+      {
+        series: "BAMLH0A0HYM2",
+        value: 2.65,
+        asOf: "2026-09-01",
+        source: "FRED direct (fredgraph.csv), ~1-2 day lag",
+      },
+    ]);
   });
 });
