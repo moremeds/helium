@@ -26,6 +26,27 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { parseTenantYaml, type Gate, type GateCtx } from "@helium/core";
 
+/**
+ * A number a model wrote as a string. `"1.25"` is the number 1.25 with quotes
+ * around it, and refusing it is refusing on typography — it cost a whole live
+ * briefing on 2026-09-02 (`legs.1.mid: expected number, received string`).
+ *
+ * Nothing is defaulted and nothing is guessed: anything that is not exactly a
+ * number in string form ("n/a", "1,250", "") is handed back untouched and fails
+ * the `z.number()` with the honest "expected number" message. Only `mid` gets
+ * this, and no safety rule turns on `mid` — the defined-risk decision is made
+ * from right/expiry/strike/action/ratio, which stay strict, so a sloppy value
+ * there is still a parse failure and never an unevaluated proposal called safe.
+ */
+const numericLike = (schema: z.ZodNumber) =>
+  z.preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    if (trimmed === "") return value;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : value;
+  }, schema);
+
 const LegSchema = z.object({
   // Both spellings, normalised to IB's. A model asked for a "right" answers
   // "call" as readily as "C", and refusing that is refusing on vocabulary —
@@ -46,7 +67,7 @@ const LegSchema = z.object({
   // Optional because pricing is not this gate's job: a leg the market did not
   // quote still has a computable STRUCTURE, and refusing it here would turn a
   // missing quote into "no trades today" instead of the 未定价 the reader sees.
-  mid: z.number().nonnegative().optional(),
+  mid: numericLike(z.number().nonnegative()).optional(),
 });
 
 /** Spec §4. `.object` (not `.strictObject`) so a model's extra prose field is
@@ -56,7 +77,13 @@ export const ProposalSchema = z.object({
   ticker: z.string().min(1),
   strategy: z.string().min(1),
   legs: z.array(LegSchema),
-  rationale: z.string(),
+  // Prose for the reader, and nothing else reads it: no sub-gate consults it and
+  // the renderer already prints "" when it is absent. A proposal held out of the
+  // safety maths because its explanation was missing is a proposal nobody
+  // checked — strictly worse than one checked without a sentence attached
+  // (observed 2026-09-02: `rationale: expected string, received undefined` sank
+  // six sibling proposals that were fine).
+  rationale: z.string().optional(),
 });
 
 export type Proposal = z.infer<typeof ProposalSchema>;
@@ -108,7 +135,8 @@ const CONTRACT_MULTIPLIER = 100;
 /**
  * RFC-8785-flavoured canonicalisation: keys sorted, no whitespace. Only what
  * `JSON.stringify` already guarantees for numbers and strings is relied on —
- * the proposal schema admits no `undefined`, no `NaN` and no cycles.
+ * the proposal schema admits no `NaN` and no cycles, and an absent optional
+ * field (`mid`, `rationale`) is dropped below rather than hashed.
  */
 export function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -354,9 +382,9 @@ export function unfence(text: string): string {
 }
 
 /**
- * Output-gate input is whatever the role produced. A proposal that cannot be
- * parsed out of it is a refusal, not a skip: an unreadable proposal is
- * indistinguishable from an unsafe one.
+ * Output-gate input is whatever the role produced. When nothing can be read out
+ * of it the reason travels in `error`, and the gate reports that as UNCHECKED
+ * rather than as a refusal — `check` argues why.
  */
 export function extractProposals(input: unknown): { proposals: unknown[]; error?: string } {
   let candidate: unknown = input;
@@ -388,6 +416,14 @@ export function tenantThresholds(): GateThresholds {
   return readThresholds(TENANT_DIR);
 }
 
+/** Whatever identity an unparsed proposal still carries, so the reason names a
+ *  ticker the reader can find in the report rather than an index alone. */
+function labelOf(raw: unknown): string {
+  if (raw === null || typeof raw !== "object") return "";
+  const ticker = (raw as Record<string, unknown>).ticker;
+  return typeof ticker === "string" && ticker.trim() !== "" ? ` (${ticker.trim()})` : "";
+}
+
 const gate: Gate = {
   id: "ib-preflight",
   phase: "output",
@@ -395,7 +431,20 @@ const gate: Gate = {
   async check(input: unknown, _ctx: GateCtx): Promise<{ pass: boolean; reason: string }> {
     const extracted = extractProposals(input);
     if (extracted.error !== undefined) {
-      return { pass: false, reason: extracted.error };
+      // The argument the `no proposals to check` branch below makes, one step
+      // earlier. A refusal from this gate means "a proposal is unsafe"; output
+      // nothing could be read out of means NO proposal was judged, so there is
+      // nothing to call unsafe. Refusing does not withhold the text either — a
+      // gate answers pass/fail and never edits the role's output — it only
+      // fails the whole step over a formatting defect, which is exactly what
+      // `role output is not JSON` did to a live run on 2026-09-02.
+      return {
+        pass: true,
+        reason:
+          `UNCHECKED — ${extracted.error}. No proposal could be read out of this ` +
+          "role's output, so NONE was checked: nothing here has been through the " +
+          "safety sub-gates and this pass says nothing about it.",
+      };
     }
     if (extracted.proposals.length === 0) {
       // Nothing to gate is not a refusal. A gate refusal means "this proposal
@@ -408,14 +457,20 @@ const gate: Gate = {
     const thresholds = readThresholds(TENANT_DIR);
     const lines: string[] = [];
     let allPass = true;
-    for (const raw of extracted.proposals) {
+    for (const [index, raw] of extracted.proposals.entries()) {
       const parsed = ProposalSchema.safeParse(raw);
       if (!parsed.success) {
-        allPass = false;
+        // Not a step failure, for the reason given at the top of `check`: a
+        // proposal the schema cannot read is one the gate never judged, and
+        // sinking the step for it also sinks the siblings it DID judge — six of
+        // them, on 2026-09-02, over one `mid` that arrived in quotes. The line
+        // says UNCHECKED so no reader mistakes the step's pass for a verdict on
+        // this proposal.
         lines.push(
-          `malformed proposal: ${parsed.error.issues
-            .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-            .join("; ")}`,
+          `UNCHECKED — proposal ${index + 1}${labelOf(raw)} did not parse, so NO safety ` +
+            `check ran on it and this step's pass does not cover it: ${parsed.error.issues
+              .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+              .join("; ")}`,
         );
         continue;
       }
