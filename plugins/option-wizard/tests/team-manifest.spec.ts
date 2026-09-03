@@ -103,3 +103,25 @@ describe("phase remits", () => {
     expect(prompt).toContain("无变化");
   });
 });
+
+describe("close settles the day it just watched", () => {
+  const task = (id: string) => manifest.tasks.find((t) => t.id === id);
+
+  it("markout settles today's own calls, by horizon", () => {
+    // It used to read days:2 phase:close and days:8 phase:weekly — a fixed
+    // window, which can never contain this morning's report no matter what
+    // horizon a thesis declared.
+    const prompt = task("markout")?.prompt ?? "";
+    expect(prompt).toContain("phase:premarket");
+    expect(prompt).toContain("phase:intraday");
+    expect(prompt).toContain("horizon");
+    expect(prompt).toContain("平仓建议");
+  });
+
+  it("close writes today's story", () => {
+    expect(task("recap")?.phases).toEqual(["close"]);
+    const prompt = task("recap")?.prompt ?? "";
+    expect(prompt).toContain("今日故事");
+    expect(prompt).toContain("今日市场");
+  });
+});

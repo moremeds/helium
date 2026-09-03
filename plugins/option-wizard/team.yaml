@@ -39,7 +39,7 @@ roles:
       and catalyst.
 
   markout-clerk:
-    requires: [tool.use]
+    requires: [tool.use, long.context]
     permissions:
       mutations: forbidden
       tools: [ow_reports, ow_apex_bars, ow_spot]
@@ -188,6 +188,18 @@ roles:
       trade. Anything you call 反转 gets a 平仓建议 in the same line, because
       a reversal the reader cannot act on is just commentary.
 
+  recap-writer:
+    requires: [reason.deep, long.context]
+    permissions:
+      mutations: forbidden
+      tools: []
+    persona: >-
+      You write what today WAS, for someone who did not watch it. Two things
+      and no others: the story of the session in the order it transmitted,
+      and the state of the market it left behind. You have no tools; every
+      number you use is already in the steps you were handed, copied
+      verbatim. You do not propose anything — the day is over.
+
   weekly-analyst:
     requires: [tool.use, reason.deep, long.context]
     permissions:
@@ -238,12 +250,16 @@ tasks:
   - id: markout
     role: markout-clerk
     phases: [close]
-    requires: [tool.use]
+    requires: [tool.use, long.context]
     prompt: >-
-      Call ow_reports with days:2 phase:close for yesterday's close report, and
-      ow_reports with days:8 phase:weekly for the latest weekly. Settle every
-      numbered call in BOTH against today's close: the daily ones first, then
-      the weekly ones. One line per call, no commentary.
+      Call ow_reports with days:1 phase:premarket and days:1 phase:intraday
+      for today's own calls, then days:5 phase:close for the theses still open
+      from earlier in the week. Settle by horizon, not by age: an `intraday`
+      or a `day` thesis is due today and MUST get a verdict; a `multiday` one
+      stays open unless it 反转. Every thesis gets 加强 / 不变 / 反转 by its
+      id, one line, with the price that decided it. Anything you call 反转
+      gets a 平仓建议 in the same line.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
 
   - id: regime
     role: regime-analyst
@@ -314,6 +330,19 @@ tasks:
       quoting the price that decided it. When nothing moved, that IS the
       answer: say 无变化 and name what you checked. Never invent a change to
       fill the mail. Anything you call 反转 gets a 平仓建议 in the same line.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+
+  - id: recap
+    role: recap-writer
+    phases: [close]
+    dependsOn: [gex, regime, markout]
+    requires: [reason.deep, long.context]
+    prompt: >-
+      Two sections. 今日故事 — what actually drove the tape today, in the
+      order it transmitted, every number copied from the steps you were
+      handed. 今日市场 — breadth, vol, rates and where the money went, and
+      what that changed versus how this morning framed it; name the one thing
+      the morning got wrong, or say plainly that it got the day right.
       Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
 
   - id: weekly
