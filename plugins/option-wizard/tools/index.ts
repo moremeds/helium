@@ -51,6 +51,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_gex", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_earnings", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   // No `requiresEnv`: the state root is always known, and an empty reports
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
@@ -60,6 +61,15 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // (the note above ow_tv_watchlist is the precedent).
   ["ow_frank", { mutating: false }],
   ["ow_macro_rates", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  ["ow_uw_calendar", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_iv_term", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_headlines", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_argon_policy_path", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  // No `requiresEnv`: like ow_tv_watchlist these ride the local TradingView /
+  // Browser Bridge app through opencli, gated on OW_TV_ENABLED, and naming one
+  // key would report a working machine as broken.
+  ["ow_x_posts", { mutating: false }],
+  ["ow_tv_commodities", { mutating: false }],
   ["ow_ib_preflight", { mutating: false }],
 ]);
 
@@ -605,6 +615,10 @@ function stepsOf(markdown: string): Map<string, string> {
  *  not match is not one of our reports and is ignored rather than guessed at. */
 const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
 
+const EarningsParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
+});
+
 const GexParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(12).optional(),
 });
@@ -618,6 +632,47 @@ const BarsParams = z.object({
   timeframe: z.string().min(1).optional(),
   lookbackDays: z.number().int().positive().max(3650).optional(),
 });
+
+const IvTermParams = z.object({ tickers: z.array(z.string().min(1).max(8)).min(1).max(3) });
+const HeadlinesParams = z.object({
+  searchTerm: z.string().min(1).max(64).optional(),
+  ticker: z.string().min(1).max(8).optional(),
+  limit: z.number().int().positive().max(25).optional(),
+  majorOnly: z.boolean().optional(),
+});
+/**
+ * The only handles this tool will read. Free-form handles are forbidden
+ * because a wrong one answers confidently: `@gregip` (verified 2026-09-03)
+ * resolves to an unrelated Polish account, and its posts would have entered a
+ * macro read as a Fed reporter's. Every handle here was fetched live on
+ * 2026-09-03 and is the person the label claims.
+ */
+const X_HANDLES = [
+  "NickTimiraos",
+  "GregDaco",
+  "Claudia_Sahm",
+  "federalreserve",
+  "AnnaEconomist",
+] as const;
+const XPostsParams = z.object({
+  handle: z.enum(X_HANDLES),
+  limit: z.number().int().positive().max(20).optional(),
+});
+/**
+ * Commodities TradingView actually quotes, each verified live on 2026-09-03 on
+ * this laptop. TVC:USOIL, TVC:UKOIL and TVC:COPPER are NOT here: all three
+ * answered "No quote returned — verify the exchange", so the front futures
+ * contract is used for oil and copper instead. A symbol that stops answering
+ * is dropped from the payload rather than reported as zero.
+ */
+const TV_COMMODITIES: ReadonlyArray<{ label: string; ticker: string; exchange: string }> = [
+  { label: "gold", ticker: "GOLD", exchange: "TVC" },
+  { label: "silver", ticker: "SILVER", exchange: "TVC" },
+  { label: "WTI crude", ticker: "CL1!", exchange: "NYMEX" },
+  { label: "Brent crude", ticker: "BZ1!", exchange: "NYMEX" },
+  { label: "copper", ticker: "HG1!", exchange: "COMEX" },
+  { label: "natgas", ticker: "NG1!", exchange: "NYMEX" },
+];
 
 /** The most recently modified `.md` under `<root>/<dir>/`. Absent root, absent
  *  file and an empty tree are all "no article", reported by the caller as the
@@ -1261,6 +1316,97 @@ export function buildTools(cfg: {
       },
     },
     {
+      // Verified live 2026-09-03 against GET /api/stock/{ticker}/info: the
+      // response carries `next_earnings_date` ("2026-11-18" for NVDA) and
+      // `announce_time` ("postmarket" for SNOW, "unknown" for NVDA). There is
+      // no per-ticker "next earnings" endpoint in the UW public API — the
+      // earnings tag only exposes historical and by-date calendars — so the
+      // company-info row is the source of record for this question.
+      //
+      // Everything else on that row is excluded on purpose: logo, beta,
+      // sector, marketcap, outstanding, avg30_volume, short_description,
+      // uw_tags, has_options, has_dividend, has_investment_arm. None of them
+      // decide whether an expiry spans earnings, and all of them would eat the
+      // 2,000-character tool-output budget the ow_reports comment describes.
+      //
+      // An ETF answers with `next_earnings_date: null` (verified: SMH, issue
+      // type "ETF"). That is a real answer, not an outage, so it comes back as
+      // a row with a null date and its issue type — `missing` is reserved for
+      // "no data / request failed", the only kind of entry a caller must treat
+      // as an unanswered question. An ETF has no earnings and should not be
+      // asked about at all; this branch only keeps one that slips through from
+      // reading as an outage.
+      name: "ow_uw_earnings",
+      description:
+        "Next scheduled earnings date per single-name ticker (and premarket/postmarket report time when Unusual Whales knows it). A ticker with no scheduled earnings — an ETF, say — comes back as a row with `nextEarningsDate: null` and its `issueType`; `missing` means only that there was no data or the request failed.",
+      paramsSchema: EarningsParams,
+      mutating: false,
+      dshParams: {
+        tickers: {
+          type: "array",
+          description: 'Tickers to look up, e.g. ["NVDA","SNOW"].',
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const { tickers } = EarningsParams.parse(args);
+        const wanted = tickers.map((t) => symbolLiteral(t, "ow_uw_earnings"));
+        const rows: unknown[] = [];
+        const missing: Array<{ ticker: string; reason: string }> = [];
+        // A ticker with no earnings is an answer; a ticker UW would not talk
+        // about is not. Only the second kind may fail the whole tool.
+        let answered = 0;
+        for (const ticker of wanted) {
+          try {
+            const raw = (await uwGet(
+              env,
+              "ow_uw_earnings",
+              `/api/stock/${encodeURIComponent(ticker)}/info`,
+              {},
+              ctx,
+            )) as Record<string, unknown>;
+            const body = (raw.data ?? raw) as Record<string, unknown>;
+            const date = body.next_earnings_date;
+            if (typeof date !== "string" || date === "") {
+              answered += 1;
+              rows.push({
+                ticker,
+                issueType: String(body.issue_type ?? "unknown"),
+                nextEarningsDate: null,
+              });
+              continue;
+            }
+            // "unknown" is UW's own word for "we do not know the time of day";
+            // passing it through as a report time would read as a fact.
+            const time = body.announce_time;
+            answered += 1;
+            rows.push({
+              ticker,
+              nextEarningsDate: date,
+              ...(typeof time === "string" && time !== "" && time !== "unknown"
+                ? { reportTime: time }
+                : {}),
+            });
+          } catch (error: unknown) {
+            missing.push({
+              ticker,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        if (answered === 0) {
+          throw new Error(
+            `ow_uw_earnings: no ticker answered — ${missing
+              .map((entry) => `${entry.ticker}: ${entry.reason}`)
+              .join("; ")}`,
+          );
+        }
+        return JSON.stringify({ asOf: new Date().toISOString(), rows, missing });
+      },
+    },
+    {
       // Reads what THIS tenant wrote on earlier runs (delivery-markdown,
       // <stateRoot>/reports). It is the only way a later phase can grade an
       // earlier one, and it needs no database: the report file IS the record.
@@ -1551,6 +1697,312 @@ export function buildTools(cfg: {
           );
         }
         return JSON.stringify(body);
+      },
+    },
+    {
+      // Verified 2026-09-03 against the live response: GET
+      // /api/market/economic-calendar takes NO parameters and answers
+      // { data: [{ type, time (ISO Z), event, forecast, prev,
+      // reported_period }] } across a multi-week window, forecast/prev null
+      // for speeches. `reported_period` is excluded — the event name already
+      // carries the month, and it is empty on every non-report row.
+      name: "ow_uw_calendar",
+      description:
+        "The US economic calendar for the next 7 days from Unusual Whales: when each release or Fed speech lands (UTC), with the consensus forecast and the previous print where there is one. It says WHEN and WHO, never what the market expects.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(_args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const raw = (await uwGet(env, "ow_uw_calendar", "/api/market/economic-calendar", {}, ctx)) as {
+          data?: unknown;
+        };
+        const all = Array.isArray(raw.data) ? raw.data : [];
+        const now = Date.now();
+        const horizon = now + 7 * 86_400_000;
+        const rows = (all as Array<Record<string, unknown>>)
+          .filter((row) => {
+            const at = Date.parse(String(row.time ?? ""));
+            return Number.isFinite(at) && at >= now && at <= horizon;
+          })
+          .map((row) => ({
+            time: row.time,
+            type: row.type,
+            event: row.event,
+            forecast: row.forecast ?? null,
+            prev: row.prev ?? null,
+          }))
+          .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+        return JSON.stringify({ asOf: new Date().toISOString(), rows });
+      },
+    },
+    {
+      // argon's scanner writes a fed-funds-futures path nightly. Row shape
+      // verified live 2026-09-03:
+      //   snapshot_date  2026-09-02
+      //   meeting_date   2026-09-16
+      //   payload        { label:"9/16", source:"Frenzy Capital Fed Watch",
+      //                    stance:"HIKE", status:"ok", probability:60.0,
+      //                    implied_rate:"3.78", target_range:"3.75-4.00%",
+      //                    probabilities:{ "Hold":"0.4", "Cut 25 bp":"0.0",
+      //                      "Cut 50 bp":"0.0", "Hike 25 bp":"0.6",
+      //                      "Hike 50 bp":"0.0" } }
+      //   source, first_seen_at, last_seen_at (the scanner's own bookkeeping)
+      // This is FUTURES-IMPLIED via Frenzy Capital, not the CME FedWatch
+      // number, and `source` says so on every payload so a citation cannot
+      // silently become "CME says".
+      name: "ow_argon_policy_path",
+      description:
+        "The market-implied Fed path from argon: for each upcoming FOMC meeting, the implied rate, the target range and the full probability distribution over hold/cut/hike, with the snapshot date they were computed on. Futures-implied via Frenzy Capital — not CME FedWatch — and any citation must say so and carry the snapshot date.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(): Promise<string> {
+        const rows = await pgJson(
+          env,
+          "ow_argon_policy_path",
+          `SELECT DISTINCT ON (meeting_date)
+                  snapshot_date::text AS snapshot_date,
+                  meeting_date::text AS meeting_date,
+                  payload
+             FROM uw_scan.rates_policy_path
+            WHERE snapshot_date = (SELECT max(snapshot_date) FROM uw_scan.rates_policy_path)
+              AND meeting_date >= current_date
+            ORDER BY meeting_date, last_seen_at DESC`,
+        );
+        if (rows.length === 0) {
+          throw new Error(
+            "ow_argon_policy_path: argon holds no fed-funds path for a meeting on or after today; " +
+              "reporting the gap rather than a flat path that reads as a market pricing nothing",
+          );
+        }
+        const first = rows[0] as { snapshot_date?: unknown };
+        return JSON.stringify({
+          source: "frenzy_capital fed-funds futures via argon",
+          snapshotDate: first.snapshot_date,
+          meetings: rows,
+        });
+      },
+    },
+    {
+      // Verified 2026-09-03 against the live NVDA response: GET
+      // /api/stock/{ticker}/volatility/term-structure answers
+      // { data: [{ date, ticker, expiry, dte, volatility, implied_move,
+      // implied_move_perc }] }, every number a STRING.
+      //
+      // The dte 0 row is dropped. On 2026-09-02 NVDA's expiring-today row read
+      // volatility 5.31 — 531% — which is the arithmetic of an expiring
+      // contract, not a vol level anyone can trade an expiry choice off. It
+      // would be the single biggest number in the payload and read as a
+      // regime signal.
+      name: "ow_uw_iv_term",
+      description:
+        "Implied-volatility term structure per ticker from Unusual Whales: one row per expiry with its DTE, the implied volatility and the implied move. Same-day (0 DTE) expiries are excluded. At most 3 tickers.",
+      paramsSchema: IvTermParams,
+      mutating: false,
+      dshParams: {
+        tickers: { type: "array", description: 'At most 3 tickers, e.g. ["NVDA"].' },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const parsed = IvTermParams.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(
+            "ow_uw_iv_term: `tickers` must be 1 to 3 symbols — one request per ticker is a " +
+              "separate round trip, so ask for the expiries you will actually choose between",
+          );
+        }
+        const rows: unknown[] = [];
+        for (const raw of parsed.data.tickers) {
+          const ticker = symbolLiteral(raw, "ow_uw_iv_term");
+          const body = (await uwGet(
+            env,
+            "ow_uw_iv_term",
+            `/api/stock/${encodeURIComponent(ticker)}/volatility/term-structure`,
+            {},
+            ctx,
+          )) as { data?: unknown };
+          for (const row of (Array.isArray(body.data) ? body.data : []) as Array<
+            Record<string, unknown>
+          >) {
+            const dte = Number(row.dte);
+            if (!Number.isFinite(dte) || dte <= 0) continue;
+            rows.push({
+              ticker,
+              date: row.date,
+              expiry: row.expiry,
+              dte,
+              volatility: Number(row.volatility),
+              implied_move_perc: Number(row.implied_move_perc),
+            });
+          }
+        }
+        return JSON.stringify({ rows });
+      },
+    },
+    {
+      // Verified 2026-09-03 against the live response: GET
+      // /api/news/headlines answers { data: [{ created_at, headline, tickers,
+      // sentiment, is_major, source, tags, meta }] }. There is NO url field —
+      // 25 rows carried none — so this tool returns no link; inventing one
+      // would be a citation a reader could not check.
+      //
+      // `meta` (per-ticker quote blobs) and `tags` are excluded: they are the
+      // bulk of the payload and nothing here reads them. 25 rows of the kept
+      // fields is ~7.4 KB, under core's summariser cut, which is why 25 is the
+      // hard maximum rather than a page size.
+      name: "ow_uw_headlines",
+      description:
+        "Market headlines from Unusual Whales, newest first, with their timestamp, tickers and sentiment. Quotable ONLY as a citation (timestamp plus the headline verbatim); it is not evidence of what the market expects. No URL: the feed carries none.",
+      paramsSchema: HeadlinesParams,
+      mutating: false,
+      dshParams: {
+        searchTerm: { type: "string", description: "Free-text filter, e.g. \"Powell\"" },
+        ticker: { type: "string", description: "Restrict to headlines tagged with this ticker" },
+        limit: { type: "number", description: "Rows to return, default 15, max 25" },
+        majorOnly: { type: "boolean", description: "Major headlines only (default true)" },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { searchTerm, ticker, limit, majorOnly } = HeadlinesParams.parse(args);
+        const body = (await uwGet(
+          env,
+          "ow_uw_headlines",
+          "/api/news/headlines",
+          {
+            limit: String(Math.min(limit ?? 15, 25)),
+            major_only: String(majorOnly ?? true),
+            ...(searchTerm === undefined ? {} : { search_term: searchTerm }),
+            ...(ticker === undefined
+              ? {}
+              : { ticker: symbolLiteral(ticker, "ow_uw_headlines") }),
+          },
+          ctx,
+        )) as { data?: unknown };
+        const rows = ((Array.isArray(body.data) ? body.data : []) as Array<
+          Record<string, unknown>
+        >).map((row) => ({
+          created_at: row.created_at,
+          headline: row.headline,
+          tickers: row.tickers ?? [],
+          sentiment: row.sentiment ?? null,
+        }));
+        return JSON.stringify({ rows });
+      },
+    },
+    {
+      // opencli's twitter adapter, same Browser Bridge dependency as the
+      // TradingView tools and gated the same way on OW_TV_ENABLED. Field
+      // names verified 2026-09-03 against `opencli twitter tweets
+      // NickTimiraos -f json`: a bare ARRAY of { id, author, name, text,
+      // likes, retweets, replies, views, is_retweet, created_at, url,
+      // has_media, media_urls, quoted_tweet }.
+      //
+      // Engagement counts are excluded on purpose. A post is usable here as a
+      // citation of what a named person said at a named time — likes and views
+      // are the raw material of "the market thinks", which this tenant may not
+      // conclude from a timeline.
+      name: "ow_x_posts",
+      description:
+        "Recent posts from one of a fixed list of Fed reporters and economists on X. Quotable ONLY as a citation: author, timestamp, link and the text verbatim. It is never evidence of what the market expects, and free-form handles are refused.",
+      paramsSchema: XPostsParams,
+      mutating: false,
+      dshParams: {
+        handle: {
+          type: "string",
+          required: true,
+          description: `One of: ${X_HANDLES.join(", ")}`,
+        },
+        limit: { type: "number", description: "Posts to return, default 10, max 20" },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const parsed = XPostsParams.safeParse(args);
+        if (!parsed.success) {
+          throw new Error(
+            `ow_x_posts: handle must be one of ${X_HANDLES.join(", ")}. A handle that is not on ` +
+              "this list is refused rather than fetched: a near-miss answers confidently with " +
+              "the wrong person's posts.",
+          );
+        }
+        if (env.OW_TV_ENABLED !== "1") {
+          throw new Error('ow_x_posts: OW_TV_ENABLED is not "1"; this machine has no browser bridge');
+        }
+        const bin = env.OPENCLI_BIN;
+        if (bin === undefined || bin.trim() === "") {
+          throw new Error("ow_x_posts: OPENCLI_BIN is unset; there is no route to X");
+        }
+        const { handle, limit } = parsed.data;
+        const argv = ["twitter", "tweets", handle, "--limit", String(limit ?? 10), "-f", "json"];
+        let stdout: string;
+        try {
+          ({ stdout } = await execFileAsync(bin, argv, { timeout: 60_000 }));
+        } catch (error: unknown) {
+          throw new Error(
+            `ow_x_posts: ${bin} twitter tweets ${handle} failed — ` +
+              (error instanceof Error ? error.message.split("\n")[0] : String(error)),
+          );
+        }
+        const parsedOut: unknown = JSON.parse(stdout);
+        const rows = (Array.isArray(parsedOut) ? parsedOut : []).map(
+          (row: Record<string, unknown>) => ({
+            author: row.author,
+            created_at: row.created_at,
+            url: row.url,
+            text: row.text,
+          }),
+        );
+        return JSON.stringify({ rows });
+      },
+    },
+    {
+      // The same opencli TradingView quote route tvLiveLevels uses, over a
+      // fixed commodity list (see TV_COMMODITIES for what answered live on
+      // 2026-09-03 and what did not). Like tvLiveLevels it drops an instrument
+      // that answers without a numeric close rather than reporting a 0.00
+      // price, which would read as a real and catastrophic level.
+      name: "ow_tv_commodities",
+      description:
+        "Live commodity levels from TradingView: gold, silver, WTI and Brent crude, copper and natural gas, each with its percent change on the day. Cite when a commodity is actually part of the read; there is no obligation to mention it every run.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(): Promise<string> {
+        if (env.OW_TV_ENABLED !== "1") {
+          throw new Error(
+            'ow_tv_commodities: OW_TV_ENABLED is not "1"; this machine has no browser bridge',
+          );
+        }
+        const bin = env.OPENCLI_BIN;
+        if (bin === undefined || bin.trim() === "") {
+          throw new Error("ow_tv_commodities: OPENCLI_BIN is unset; there is no route to quotes");
+        }
+        const rows: unknown[] = [];
+        for (const entry of TV_COMMODITIES) {
+          let stdout: string;
+          try {
+            ({ stdout } = await execFileAsync(
+              bin,
+              ["tradingview", "quote", "--ticker", entry.ticker, "--exchange", entry.exchange, "-f", "json"],
+              { timeout: 30_000 },
+            ));
+          } catch {
+            continue;
+          }
+          const out: unknown = JSON.parse(stdout);
+          const row = (Array.isArray(out) ? out[0] : out) as
+            | { close?: unknown; change?: unknown }
+            | undefined;
+          if (typeof row?.close !== "number") continue;
+          rows.push({
+            label: entry.label,
+            symbol: `${entry.exchange}:${entry.ticker}`,
+            close: row.close,
+            ...(typeof row.change === "number" ? { change_pct: row.change } : {}),
+          });
+        }
+        if (rows.length === 0) {
+          throw new Error(
+            "ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?",
+          );
+        }
+        return JSON.stringify({ asOf: new Date().toISOString(), rows });
       },
     },
     {

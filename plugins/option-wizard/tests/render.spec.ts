@@ -591,6 +591,47 @@ describe("invalidation", () => {
     expect(rebuilt(three).map((c) => c.ticker)).not.toContain("SPY");
   });
 
+  it("shows a declared earnings date, and shows nothing when there is none", () => {
+    // Display only: the reviewer gates the declaration, the renderer just
+    // repeats the date. The fixture expires 2026-09-30, so the declared date
+    // sits inside the window; NVDA's real next print (2026-11-18, as-of
+    // 2026-09-03) is the after-expiry case, checked below.
+    const declared = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"}], "earnings": {"date":"2026-09-24","risk":"A gap through 740 prints the full width as a loss."}',
+    );
+    const withEarnings = buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text: declared },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(withEarnings.candidates[0]!.earnings).toBe("2026-09-24");
+    expect(renderText(withEarnings)).toContain("财报 2026-09-24");
+    // The unmodified fixture declares no earnings at all.
+    expect(buildView(report(), SPEC).candidates[0]!.earnings).toBeUndefined();
+    expect(renderText(buildView(report(), SPEC))).not.toContain("财报");
+  });
+
+  it("drops a declared earnings date the structure expires before", () => {
+    // 2026-09-03 premarket: META's 2026-11-04 print declared on a 2026-09-11
+    // spread. Here: NVDA's real 2026-11-18 print on the 2026-09-30 fixture.
+    const late = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"}], "earnings": {"date":"2026-11-18","risk":"A gap through 740 prints the full width as a loss."}',
+    );
+    const view = buildView(
+      report({
+        steps: [{ task: "review", role: "risk-reviewer", mode: "model", text: late }],
+      } as never),
+      SPEC,
+    );
+    expect(view.candidates[0]!.earnings).toBeUndefined();
+    expect(renderText(view)).not.toContain("财报");
+  });
+
   it("prints the id and the levels where a reader can quote them back", () => {
     const text = renderText(buildView(report(), SPEC));
     expect(text).toContain("[SPY-2026-09-02-1]");

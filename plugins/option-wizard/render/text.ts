@@ -51,8 +51,10 @@ function pricingLines(candidate: CandidateView): string[] {
 
 function candidateLines(candidate: CandidateView): string[] {
   const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
+  const earnings =
+    candidate.earnings === undefined ? "" : ` · 财报 ${candidate.earnings}`;
   return [
-    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · 失效 ${invalidationLabel(candidate.invalidation)}`,
+    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · 失效 ${invalidationLabel(candidate.invalidation)}${earnings}`,
     ...candidate.legs.map(
       (leg) =>
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +
