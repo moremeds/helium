@@ -5,7 +5,13 @@
  * direction was inverted.
  */
 import { describe, expect, it } from "vitest";
-import { priceStructure, width, type Leg } from "../render/math.js";
+import {
+  formatScheduleMagnitude,
+  priceStructure,
+  scheduleTimeLabel,
+  width,
+  type Leg,
+} from "../render/math.js";
 
 const EXP = "2026-09-30";
 const leg = (
@@ -82,23 +88,28 @@ describe("priceStructure", () => {
   it("refuses an uncovered short call as an invalid structure", () => {
     expect(priceStructure([leg("call", "sell", 100, 2.0)], 100)).toEqual({
       kind: "invalid",
-      reason: "结构不合规：call 腿净空头，短腿无同权利的长腿覆盖",
+      reason:
+        "Invalid structure: net short call leg with no covering long of the same right",
     });
   });
 
   it("refuses an uncovered short put as an invalid structure", () => {
     expect(priceStructure([leg("put", "sell", 100, 2.0)], 100)).toEqual({
       kind: "invalid",
-      reason: "结构不合规：put 腿净空头，短腿无同权利的长腿覆盖",
+      reason:
+        "Invalid structure: net short put leg with no covering long of the same right",
     });
   });
 
   it("returns unpriced, never an estimate, when a leg has no mid", () => {
     expect(
-      priceStructure([leg("put", "sell", 100, 2.0), leg("put", "buy", 95)], 100),
+      priceStructure(
+        [leg("put", "sell", 100, 2.0), leg("put", "buy", 95)],
+        100,
+      ),
     ).toEqual({
       kind: "unpriced",
-      reason: "未定价：put 95 缺少 mid",
+      reason: "Unpriced: put 95 has no mid",
     });
   });
 
@@ -112,7 +123,8 @@ describe("priceStructure", () => {
     };
     expect(priceStructure([leg("put", "sell", 100, 2.0), far], 100)).toEqual({
       kind: "unpriced",
-      reason: "未定价：多个到期日，无法按单一到期损益计算",
+      reason:
+        "Unpriced: multiple expiries, cannot compute a single payoff at expiry",
     });
   });
 
@@ -140,14 +152,79 @@ describe("priceStructure", () => {
     // must say "unbounded" instead of quietly reporting a far evaluation point
     // as if it were the maximum.
     const priced = priceStructure([leg("call", "buy", 100, 3.0)], 100);
-    expect(priced).toMatchObject({ kind: "priced", maxGain: null, maxLoss: 300 });
+    expect(priced).toMatchObject({
+      kind: "priced",
+      maxGain: null,
+      maxLoss: 300,
+    });
   });
 });
 
 describe("width", () => {
   it("is the widest strike span, per share", () => {
-    expect(width([leg("put", "sell", 100, 2.0), leg("put", "buy", 95, 0.8)])).toBe(
-      5,
+    expect(
+      width([leg("put", "sell", 100, 2.0), leg("put", "buy", 95, 0.8)]),
+    ).toBe(5);
+  });
+});
+
+describe("scheduleTimeLabel", () => {
+  // The bug this exists to close: the 2026-09-03 premarket schedule table
+  // showed "2026-09-03T19:00:00Z / 15:00 ET" — both the ISO and the ET the
+  // model had already converted, side by side. 19:00 UTC on 2026-09-03 is
+  // 15:00 ET (EDT, UTC-4 in September).
+  it("renders only the ET part when a full ISO utc is present", () => {
+    expect(
+      scheduleTimeLabel({ utc: "2026-09-03T19:00:00Z", et: "15:00 ET" }),
+    ).toBe("15:00 ET");
+  });
+
+  it("derives ET from utc via the IANA zone even when the model wrote no et", () => {
+    expect(scheduleTimeLabel({ utc: "2026-09-03T19:00:00Z" })).toBe("15:00 ET");
+  });
+
+  it("derives ET from utc across the DST boundary (January, EST, UTC-5)", () => {
+    expect(scheduleTimeLabel({ utc: "2026-01-15T19:00:00Z" })).toBe("14:00 ET");
+  });
+
+  it("falls back to the model's own et string when utc does not parse", () => {
+    // The real 2026-09-03 regime step wrote abbreviated "HH:MMZ" utc values
+    // ("12:30Z"), not full ISO — Date.parse cannot resolve those to an
+    // instant, so the model's own et string is trusted as written.
+    expect(scheduleTimeLabel({ utc: "12:30Z", et: "08:30 ET" })).toBe(
+      "08:30 ET",
     );
+  });
+
+  it("appends ET to a fallback et string that lacks it", () => {
+    expect(scheduleTimeLabel({ et: "08:30" })).toBe("08:30 ET");
+  });
+
+  it("is empty when neither utc nor et is present", () => {
+    expect(scheduleTimeLabel({})).toBe("");
+  });
+});
+
+describe("formatScheduleMagnitude", () => {
+  // Employment Report row, 2026-09-03 premarket briefing: payrolls forecast
+  // 50000, prior -23000.
+  it("formats a positive thousands value with a k suffix and a leading plus", () => {
+    expect(formatScheduleMagnitude("50000")).toBe("+50k");
+  });
+
+  it("formats a negative thousands value with a real minus sign and a k suffix", () => {
+    expect(formatScheduleMagnitude("-23000")).toBe("−23k");
+  });
+
+  it("leaves a percentage untouched", () => {
+    expect(formatScheduleMagnitude("4.1%")).toBe("4.1%");
+  });
+
+  it("leaves a non-numeric raw string untouched", () => {
+    expect(formatScheduleMagnitude("n/a")).toBe("n/a");
+  });
+
+  it("formats a sub-thousand integer without a k suffix", () => {
+    expect(formatScheduleMagnitude("205")).toBe("+205");
   });
 });

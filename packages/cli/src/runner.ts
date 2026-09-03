@@ -19,6 +19,8 @@
  * @module @helium/cli/runner
  */
 import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   AuditStore,
   ExecutionTargetId,
@@ -199,13 +201,111 @@ export interface RunOptions {
 function toolArgs(
   tool: EcosystemTool,
   text: string,
+  handoffText = "",
 ): Record<string, unknown> | undefined {
   const schema = tool.paramsSchema as unknown as {
     safeParse?: (value: unknown) => { success: boolean };
   };
   if (schema.safeParse?.({})?.success === true) return {};
   const key = singleStringParam(tool);
-  return key === undefined ? undefined : { [key]: text };
+  if (key !== undefined) return { [key]: text };
+  // A tool whose one parameter is an ARRAY of strings — `tickers: string[]`,
+  // ow_spot's and ow_argon_levels's shape — could not be fed at all: the
+  // single-string path above skips it (an array field rejects a bare
+  // string), so a deterministic step naming ow_spot in `tools:` always
+  // reported "skipped, needs parameters this step cannot supply". The
+  // tickers a step actually has are sitting in ITS OWN prompt or in a
+  // dependency's tool output (ow_tv_watchlist's `tickers`, ow_spot's
+  // `quotes[].ticker`) — both JSON, both already in this step's context —
+  // so they are pulled out of that text rather than invented.
+  const arrayKey = singleArrayOfStringsParam(tool);
+  if (arrayKey !== undefined) {
+    const tickers = tickersFromText(`${handoffText}\n\n${text}`);
+    const fitted = fittingSlice(schema, arrayKey, tickers);
+    if (fitted !== undefined) return { [arrayKey]: fitted };
+  }
+  return undefined;
+}
+
+/**
+ * The array-of-strings parameter of a tool, if it has exactly one param and
+ * that param accepts an array (not a bare string — `singleStringParam`
+ * already claims those). Detected the same way as `singleStringParam`, by
+ * probing the schema rather than reaching into zod internals.
+ */
+function singleArrayOfStringsParam(tool: EcosystemTool): string | undefined {
+  const shape = (
+    tool.paramsSchema as unknown as {
+      shape?: Record<
+        string,
+        { safeParse?: (value: unknown) => { success: boolean } }
+      >;
+    }
+  ).shape;
+  if (shape === undefined) return undefined;
+  const keys = Object.keys(shape);
+  if (keys.length !== 1) return undefined;
+  const field = shape[keys[0]!];
+  if (field?.safeParse?.("probe")?.success === true) return undefined;
+  return field?.safeParse?.(["probe"])?.success === true ? keys[0] : undefined;
+}
+
+/**
+ * Every `"ticker"`/`"tickers"` JSON field found in a blob of tool-output
+ * text, deduped and upper-cased. This is deliberately dumb pattern matching
+ * over already-produced JSON, not a re-parse of it: the text can be several
+ * tools' outputs concatenated, and only the one field name that every ticker
+ * list in this file actually uses is worth trusting.
+ */
+const TICKER_FIELD =
+  /"tickers?"\s*:\s*(?:\[([^\]]*)\]|"([A-Za-z][A-Za-z.]{0,9})")/gu;
+
+function tickersFromText(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(TICKER_FIELD)) {
+    const single = match[2];
+    if (single !== undefined) {
+      found.add(single.toUpperCase());
+      continue;
+    }
+    const arrayBody = match[1];
+    if (arrayBody === undefined) continue;
+    for (const item of arrayBody.matchAll(/"([A-Za-z][A-Za-z.]{0,9})"/gu)) {
+      found.add(item[1]!.toUpperCase());
+    }
+  }
+  return [...found];
+}
+
+/**
+ * The longest PREFIX of `tickers` (order preserved, so SPY/QQQ-first stays
+ * first) that the schema accepts for `key` — a tool's own `.max(N)` is never
+ * re-read here, only probed by trying to parse, which stays correct across a
+ * zod major version the way reaching into `_def` would not. `undefined` when
+ * even one ticker does not fit (an empty-array-forbidding schema, say).
+ */
+function fittingSlice(
+  schema: { safeParse?: (value: unknown) => { success: boolean } },
+  key: string,
+  tickers: readonly string[],
+): string[] | undefined {
+  if (tickers.length === 0) return undefined;
+  if (schema.safeParse?.({ [key]: tickers })?.success === true)
+    return [...tickers];
+  let lo = 1;
+  let hi = tickers.length;
+  let best: string[] | undefined;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const candidate = tickers.slice(0, mid);
+    if (schema.safeParse?.({ [key]: candidate })?.success === true) {
+      best = candidate;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return best;
 }
 
 /**
@@ -308,6 +408,8 @@ async function runGates(
     stepNo: number;
     remainingUsd: number;
     toolOutputs?: string[];
+    toolCalls?: string[];
+    stepToolOutputs?: string[];
   },
 ): Promise<{ ran: number; refusals: Array<{ id: string; reason: string }> }> {
   const refusals: Array<{ id: string; reason: string }> = [];
@@ -329,6 +431,10 @@ async function runGates(
         ...(ctx.toolOutputs === undefined
           ? {}
           : { toolOutputs: ctx.toolOutputs }),
+        ...(ctx.toolCalls === undefined ? {} : { toolCalls: ctx.toolCalls }),
+        ...(ctx.stepToolOutputs === undefined
+          ? {}
+          : { stepToolOutputs: ctx.stepToolOutputs }),
       });
     } catch (error: unknown) {
       verdict = {
@@ -610,13 +716,21 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     if (mode === "tool-only" || deterministic) {
       stepNo += 1;
       const outputs: string[] = [];
+      /** Tools this step actually invoked — not the ones it was allowed. */
+      const stepToolCalls: string[] = [];
+      /** Same step scope as `stepToolCalls`: the raw values, not "name -> value". */
+      const stepToolOutputs: string[] = [];
       for (const name of role.permissions.tools) {
         const tool = toolsByName.get(name);
         if (tool === undefined) {
           outputs.push(`${name}: not built by this tenant`);
           continue;
         }
-        const args = toolArgs(tool, task.prompt ?? taskId);
+        const args = toolArgs(
+          tool,
+          task.prompt ?? taskId,
+          handoff(task, produced),
+        );
         if (args === undefined) {
           outputs.push(
             `${name}: skipped, needs parameters this step cannot supply`,
@@ -657,6 +771,11 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         options.audit.append(span);
         outputs.push(`${name} -> ${value}`);
         toolOutputs.push(value);
+        // Recorded where the call actually happened: the two `continue`s above
+        // skip a tool that was declared but never invoked, and counting those
+        // would tell a gate a tool ran when nothing called it.
+        stepToolCalls.push(name);
+        stepToolOutputs.push(value);
       }
       // A step that ran no tool has nothing OF ITS OWN to say — but it is still
       // in the chain, and its output is what every dependent receives instead
@@ -685,6 +804,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           stepNo: stepNo + 1,
           remainingUsd: budget.usd,
           toolOutputs,
+          toolCalls: stepToolCalls,
+          stepToolOutputs,
         },
       );
       if (out.ran > 0) stepNo += 1;
@@ -823,6 +944,14 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       options.audit.appendAll(spans);
       const stepToolOutputs = toolResultTexts(result.events);
       toolOutputs.push(...stepToolOutputs);
+      // No new plumbing: `foldSessionLog` already turned every tool call in
+      // this step's session log into a span carrying its name (a span without
+      // one is the model step itself). Reading the names back off the spans is
+      // the same fact the audit table stores, so a gate and `helium audit`
+      // can never disagree about what the step called.
+      const stepToolCalls = spans
+        .map((span) => span.toolName)
+        .filter((name): name is string => name !== undefined);
       stepNo += spans.filter((span) => span.toolName === undefined).length;
 
       // A model step whose session log reported NO usage did not reach a
@@ -852,6 +981,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         stepNo: stepNo + 1,
         remainingUsd: budget.usd,
         toolOutputs,
+        toolCalls: stepToolCalls,
+        stepToolOutputs,
       });
       if (out.ran > 0) stepNo += 1;
       produced.set(taskId, result.text);
@@ -932,6 +1063,21 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         reason: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  // Local-run inspection only: the runner otherwise renders HTML and lets it
+  // fall on the floor (only the .md transcript is written to disk). Opt-in
+  // via a domain-free env var so a laptop run can dump the exact HTML a
+  // delivery channel would have sent, without adding a persistence path core
+  // doesn't already have a reason to want.
+  const renderDumpDir = env.HELIUM_RENDER_DUMP;
+  if (renderDumpDir !== undefined && rendered?.html !== undefined) {
+    mkdirSync(renderDumpDir, { recursive: true });
+    const dumpPath = join(
+      renderDumpDir,
+      `${report.tenant}-${report.day}-${report.phase}.html`,
+    );
+    writeFileSync(dumpPath, rendered.html, "utf8");
   }
 
   const brake = env.HELIUM_TENANT_DELIVERY === "1";

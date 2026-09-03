@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import type { RunReport, TenantSpec } from "@helium/core";
 import renderReport, { buildView } from "../render/index.js";
 import { renderText } from "../render/text.js";
+import { renderHtml } from "../render/html.js";
 import type { BriefView } from "../render/index.js";
 
 const REVIEW_JSON = {
@@ -78,7 +79,8 @@ const REVIEW_JSON = {
       ],
       quantity: 4,
       limitPrice: 5.75,
-      rationale: "Tech hedge: elevated IV rank (24%), sensitive to yield moves.",
+      rationale:
+        "Tech hedge: elevated IV rank (24%), sensitive to yield moves.",
     },
     {
       ticker: "TLT",
@@ -159,9 +161,19 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
         mode: "deterministic",
         text: "SPY QQQ TLT",
       },
-      { task: "regime", role: "regime-analyst", mode: "model", text: REGIME_TEXT },
+      {
+        task: "regime",
+        role: "regime-analyst",
+        mode: "model",
+        text: REGIME_TEXT,
+      },
       { task: "design", role: "structure-designer", mode: "model", text: "{}" },
-      { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+      {
+        task: "review",
+        role: "risk-reviewer",
+        mode: "model",
+        text: REVIEW_TEXT,
+      },
     ],
     ...overrides,
   } as RunReport;
@@ -199,7 +211,7 @@ describe("buildView", () => {
     const tlt = buildView(report(), SPEC).candidates[2]!;
     expect(tlt.pricing).toEqual({
       kind: "unpriced",
-      reason: "未定价：put 80 缺少 mid",
+      reason: "Unpriced: put 80 has no mid",
     });
   });
 
@@ -242,7 +254,9 @@ describe("buildView", () => {
             text: REVIEW_TEXT,
             toolOutputs: [
               JSON.stringify({
-                quotes: [{ ticker: "SPY", source: "tradingview", last: 761.78 }],
+                quotes: [
+                  { ticker: "SPY", source: "tradingview", last: 761.78 },
+                ],
               }),
             ],
           },
@@ -252,8 +266,11 @@ describe("buildView", () => {
     );
     const spy = view.candidates[0]!.pricing;
     const qqq = view.candidates[1]!.pricing;
-    if (spy.kind !== "priced" || qqq.kind !== "priced") throw new Error("priced");
-    expect(spy.pnlAt.map((point) => point.pct)).toEqual([-20, -10, -5, 5, 10, 20]);
+    if (spy.kind !== "priced" || qqq.kind !== "priced")
+      throw new Error("priced");
+    expect(spy.pnlAt.map((point) => point.pct)).toEqual([
+      -20, -10, -5, 5, 10, 20,
+    ]);
     expect(spy.pnlAt[0]!.spot).toBe(609.42);
     expect(qqq.pnlAt.every((point) => point.pct === null)).toBe(true);
     expect(qqq.pnlAt.map((point) => point.spot)).toEqual([680, 695]);
@@ -272,7 +289,7 @@ describe("buildView", () => {
       SPEC,
     );
     expect(view.degradation).toBe(
-      "数据降级：provider local-llm 不可用（no credential）；gate ib-preflight 未加载（module threw）",
+      "Data degraded: provider local-llm unavailable (no credential); gate ib-preflight not loaded (module threw)",
     );
   });
 
@@ -291,7 +308,7 @@ describe("buildView", () => {
     expect(view.outcome).toBe("FAILED");
     expect(view.empty).toBeUndefined();
     expect(view.sections[0]).toEqual({
-      title: "本次运行未完成",
+      title: "This run did not finish",
       body: "budget-exhausted — no room",
     });
     expect(view.sections.length).toBeGreaterThan(1);
@@ -306,7 +323,7 @@ describe("buildView", () => {
       } as never),
       SPEC,
     );
-    expect(view.empty).toBe("今日无候选：budget-exhausted — no room");
+    expect(view.empty).toBe("No candidates today: budget-exhausted — no room");
   });
 
   it("returns 今日无候选 when no model ran", () => {
@@ -315,7 +332,9 @@ describe("buildView", () => {
       SPEC,
     );
     expect(view.outcome).toBe("DEGRADED");
-    expect(view.empty).toBe("今日无候选：无可用 provider，本次没有任何模型推理");
+    expect(view.empty).toBe(
+      "No candidates today: no provider available, no model reasoning ran",
+    );
   });
 
   it("keeps the narrative when the review step's JSON cannot be parsed", () => {
@@ -330,11 +349,16 @@ describe("buildView", () => {
   it("says 今日无候选 only when the reviewer failed AND nothing else was written", () => {
     const bare = report({
       steps: [
-        { task: "review", role: "risk-reviewer", mode: "model", text: "no proposals today" },
+        {
+          task: "review",
+          role: "risk-reviewer",
+          mode: "model",
+          text: "no proposals today",
+        },
       ],
     } as never);
     expect(buildView(bare, SPEC).empty).toBe(
-      "今日无候选：review 步骤没有可解析的 JSON",
+      "No candidates today: the review step had no parseable JSON",
     );
   });
 
@@ -360,11 +384,18 @@ describe("buildView", () => {
 
   it("names the real reason when a run with no review step produced nothing", () => {
     const nothing = report({
-      steps: [{ task: "frank", role: "frank-comparator", mode: "model", text: "I cannot complete this task." }],
+      steps: [
+        {
+          task: "frank",
+          role: "frank-comparator",
+          mode: "model",
+          text: "I cannot complete this task.",
+        },
+      ],
     } as never);
     // "review 步骤没有可解析的 JSON" would be a lie: the frank phase has no
     // review step to fail.
-    expect(buildView(nothing, SPEC).empty).toBe("本次运行没有产出任何区块");
+    expect(buildView(nothing, SPEC).empty).toBe("This run produced no blocks");
   });
 });
 
@@ -413,7 +444,7 @@ describe("deterministic gates over what the tools answered", () => {
     expect(view.candidates.map((c) => c.expiry)).toEqual(["2026-11-06"]);
     expect(view.riskList).toContainEqual({
       ticker: "NVDA",
-      reason: "财报 2026-11-18 在到期日 2026-11-20 之前",
+      reason: "earnings 2026-11-18 is before expiry 2026-11-20",
     });
   });
 
@@ -427,8 +458,18 @@ describe("deterministic gates over what the tools answered", () => {
             mode: "model",
             text: JSON.stringify({
               settlements: [
-                { id: "SPY-2026-09-02-1", ticker: "SPY", state: "不变", note: "748.72" },
-                { id: "NFLX-2026-09-02-1", ticker: "NFLX", state: "加强", note: "凭空" },
+                {
+                  id: "SPY-2026-09-02-1",
+                  ticker: "SPY",
+                  state: "不变",
+                  note: "748.72",
+                },
+                {
+                  id: "NFLX-2026-09-02-1",
+                  ticker: "NFLX",
+                  state: "加强",
+                  note: "凭空",
+                },
               ],
               sections: [],
             }),
@@ -450,13 +491,15 @@ describe("deterministic gates over what the tools answered", () => {
       SPEC,
     );
     const titles = view.sections.map((section) => section.title);
-    expect(titles).toContain("结算");
-    expect(titles).toContain("未在账本中的结算，已剔除");
-    const kept = view.sections.find((section) => section.title === "结算")!.body;
+    expect(titles).toContain("Settlements");
+    expect(titles).toContain("Settlements not in the ledger, dropped");
+    const kept = view.sections.find(
+      (section) => section.title === "Settlements",
+    )!.body;
     expect(kept).toContain("SPY-2026-09-02-1");
     expect(kept).not.toContain("NFLX");
     const cut = view.sections.find(
-      (section) => section.title === "未在账本中的结算，已剔除",
+      (section) => section.title === "Settlements not in the ledger, dropped",
     )!.body;
     expect(cut).toContain("NFLX-2026-09-02-1");
     expect(cut).toContain("NFLX");
@@ -473,12 +516,12 @@ describe("renderReport (text part)", () => {
     expect(text).toContain("SPY");
     expect(text).toContain("748.72");
     expect(text).toContain("872");
-    expect(text).toContain("未定价");
+    expect(text).toContain("Unpriced");
     // No ow_spot output in this report, so no ticker gets a % grid — not even
     // SPY, whose spot the reviewer typed into its own prose. That prose number
     // is exactly what the grid must not be anchored on.
-    expect(text).toContain("到期损益（按行权价，无 ow_spot 现货）");
-    expect(text).not.toContain("到期损益（spot ±%）");
+    expect(text).toContain("Payoff at expiry (by strike, no ow_spot quote)");
+    expect(text).not.toContain("Payoff at expiry (spot ±%)");
     expect(REVIEW_TEXT).toContain("(spot 761.78)");
     // The reader never sees the model thinking out loud, its quantity guess, or
     // any run metadata.
@@ -496,7 +539,7 @@ describe("renderReport (text part)", () => {
       }),
       SPEC,
     );
-    expect(text).toContain("本次运行未完成");
+    expect(text).toContain("This run did not finish");
     expect(text).not.toContain("Actually, let me");
   });
 });
@@ -507,7 +550,7 @@ describe("renderReport (html part)", () => {
     expect(html).toContain("SPY");
     expect(html).toContain("748.72");
     expect(html).toContain("872");
-    expect(html).toContain("未定价");
+    expect(html).toContain("Unpriced");
     expect(html).not.toContain("Actually, let me");
     expect(html).not.toContain("quantity");
     expect(html).not.toContain("run-84a83ad2");
@@ -550,10 +593,50 @@ describe("renderReport (html part)", () => {
         }),
         SPEC,
       ).html ?? "";
-    expect(html).toContain("本次运行未完成");
+    expect(html).toContain("This run did not finish");
     // The narrative is information; a structure is a recommendation, and a run
     // whose gate refused a step has not earned one.
     expect(html).not.toContain("【候选结构】");
+  });
+});
+
+describe("tape", () => {
+  const view = (tape: BriefView["tape"]): BriefView => ({
+    date: "2026-09-02",
+    tenant: "option-wizard",
+    outcome: "completed",
+    headline: "",
+    tape,
+    schedule: [],
+    overnight: [],
+    sections: [],
+    regime: { paragraph: "" },
+    candidates: [],
+    riskList: [],
+  });
+
+  it("omits the trailing <span> entirely when change is an empty string", () => {
+    const html = renderHtml(
+      view([{ label: "SPY", value: "765.16", change: "" }]),
+    );
+    expect(html).not.toContain("<span");
+    expect(html).toContain("765.16");
+  });
+
+  it("omits the parenthesised change in text when change is an empty string", () => {
+    const text = renderText(
+      view([{ label: "SPY", value: "765.16", change: "" }]),
+    );
+    expect(text).toContain("SPY 765.16");
+    expect(text).not.toContain("()");
+  });
+
+  it("still prints the <span> for a real change value", () => {
+    const html = renderHtml(
+      view([{ label: "VIX", value: "15.41", change: "+0.22", positive: true }]),
+    );
+    expect(html).toContain("<span");
+    expect(html).toContain("+0.22");
   });
 });
 
@@ -562,6 +645,10 @@ describe("sections", () => {
     date: "2026-09-02",
     tenant: "option-wizard",
     outcome: "completed",
+    headline: "",
+    tape: [],
+    schedule: [],
+    overnight: [],
     sections,
     regime: { paragraph: "" },
     candidates: [],
@@ -600,12 +687,21 @@ describe("sections", () => {
             mode: "model",
             text: '{"sections":[{"title":"Path A","body":"hot CPI"},{"title":"Path B","body":"in line"}]}',
           },
-          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: REVIEW_TEXT,
+          },
         ],
       } as never),
       SPEC,
     );
-    expect(built.sections.map((s) => s.title)).toEqual(["利率", "Path A", "Path B"]);
+    expect(built.sections.map((s) => s.title)).toEqual([
+      "利率",
+      "Path A",
+      "Path B",
+    ]);
   });
 
   it("recovers the regime paragraph when the model answered in prose", () => {
@@ -623,7 +719,12 @@ describe("sections", () => {
             mode: "model",
             text: '{"sections":[{"title":"利率","body":"   "},{"title":"分化","body":"real"}]}',
           },
-          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: REVIEW_TEXT,
+          },
         ],
       } as never),
       SPEC,
@@ -653,9 +754,7 @@ describe("invalidation", () => {
   const rebuilt = (text: string) =>
     buildView(
       report({
-        steps: [
-          { task: "review", role: "risk-reviewer", mode: "model", text },
-        ],
+        steps: [{ task: "review", role: "risk-reviewer", mode: "model", text }],
       } as never),
       SPEC,
     ).candidates;
@@ -664,7 +763,9 @@ describe("invalidation", () => {
     const spy = buildView(report(), SPEC).candidates[0]!;
     expect(spy.id).toBe("SPY-2026-09-02-1");
     expect(spy.invalidation).toEqual([{ level: 750, side: "above" }]);
-    expect(buildView(report(), SPEC).candidates[1]!.id).toBe("QQQ-2026-09-02-2");
+    expect(buildView(report(), SPEC).candidates[1]!.id).toBe(
+      "QQQ-2026-09-02-2",
+    );
   });
 
   it("says which thesis it dropped instead of an unexplained empty brief", () => {
@@ -684,8 +785,13 @@ describe("invalidation", () => {
     );
     // GLD is the reviewer's own rejection; the gate's three land beside it, in
     // one list, so the reader sees every proposal that did not make it and why.
-    expect(built.riskList.map((row) => row.ticker)).toEqual(["GLD", "SPY", "QQQ", "TLT"]);
-    expect(built.riskList[3]!.reason).toContain("失效价");
+    expect(built.riskList.map((row) => row.ticker)).toEqual([
+      "GLD",
+      "SPY",
+      "QQQ",
+      "TLT",
+    ]);
+    expect(built.riskList[3]!.reason).toContain("invalidation");
   });
 
   it("drops a thesis whose 失效价 is prose — nobody can ever settle it", () => {
@@ -700,7 +806,9 @@ describe("invalidation", () => {
   });
 
   it("drops a thesis with no invalidation at all", () => {
-    expect(rebuilt(REVIEW_TEXT.replace(/\s*"invalidation": \[[^\]]*\],\n/g, ""))).toEqual([]);
+    expect(
+      rebuilt(REVIEW_TEXT.replace(/\s*"invalidation": \[[^\]]*\],\n/g, "")),
+    ).toEqual([]);
   });
 
   it("keeps two levels for a two-sided structure", () => {
@@ -731,16 +839,21 @@ describe("invalidation", () => {
     const withEarnings = buildView(
       report({
         steps: [
-          { task: "review", role: "risk-reviewer", mode: "model", text: declared },
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: declared,
+          },
         ],
       } as never),
       SPEC,
     );
     expect(withEarnings.candidates[0]!.earnings).toBe("2026-09-24");
-    expect(renderText(withEarnings)).toContain("财报 2026-09-24");
+    expect(renderText(withEarnings)).toContain("earnings 2026-09-24");
     // The unmodified fixture declares no earnings at all.
     expect(buildView(report(), SPEC).candidates[0]!.earnings).toBeUndefined();
-    expect(renderText(buildView(report(), SPEC))).not.toContain("财报");
+    expect(renderText(buildView(report(), SPEC))).not.toContain("earnings ");
   });
 
   it("drops a declared earnings date the structure expires before", () => {
@@ -752,34 +865,39 @@ describe("invalidation", () => {
     );
     const view = buildView(
       report({
-        steps: [{ task: "review", role: "risk-reviewer", mode: "model", text: late }],
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text: late },
+        ],
       } as never),
       SPEC,
     );
     expect(view.candidates[0]!.earnings).toBeUndefined();
-    expect(renderText(view)).not.toContain("财报");
+    expect(renderText(view)).not.toContain("earnings ");
   });
 
   it("prints the id and the levels where a reader can quote them back", () => {
     const text = renderText(buildView(report(), SPEC));
     expect(text).toContain("[SPY-2026-09-02-1]");
-    expect(text).toContain("失效 750↑");
+    expect(text).toContain("stop 750↑");
   });
 });
 
-describe("决策块", () => {
-  /** The eight keys team.yaml asks the reviewer for. Values are drawn from the
-   *  fixture's own numbers (its 750 strike, the regime step's 4.772% and
-   *  16.02) so nothing here is a price this file invented. */
+describe("decision block", () => {
+  /** The eight English keys team.yaml now asks the reviewer for (the
+   *  2026-09-03 newsletter redesign moved the block to "Bottom line", near
+   *  the top, and translated its keys out of Chinese along with the rest of
+   *  the mail). Values are drawn from the fixture's own numbers (its 750
+   *  strike, the regime step's 4.772% and 16.02) so nothing here is a price
+   *  this file invented. */
   const DECISION = {
-    判断: "偏防守，方向不明",
-    行动: "只留对冲，不加方向性多头",
-    进攻程度: "2/5",
-    为什么现在: "10y 4.772%，整条曲线仍在被买",
-    最大风险: "利率回落带来的轧空",
-    失效条件: "SPY 收在 750 上方",
-    下一步触发器: "VIX 自 16.02 站上 20",
-    数据可信度: "IB 层 skipped，其余齐备",
+    Call: "Cautiously defensive, direction unclear",
+    Action: "Hedges only, no directional long added",
+    Aggression: "2/5",
+    WhyNow: "10y at 4.772%, the whole curve is still being bought",
+    MaxRisk: "A short squeeze on a rates pullback",
+    Invalidation: "SPY closes above 750",
+    NextTrigger: "VIX clears 20 from 16.02",
+    Confidence: "IB layer skipped, everything else covered",
   };
 
   const built = (json: unknown) =>
@@ -813,28 +931,42 @@ describe("决策块", () => {
       } as never),
       SPEC,
     ).html;
-    expect(text).toContain("【决策块】");
-    expect(html).toContain("【决策块】");
+    expect(text).toContain("【Bottom line】");
+    expect(html).toContain("Bottom line");
     for (const [label, value] of Object.entries(DECISION)) {
       expect(text).toContain(`${label}: ${value}`);
-      expect(html).toContain(label);
+      // The html spaces a camelCase label ("WhyNow" -> "Why Now") for
+      // readability; the text part keeps the raw key, checked above.
+      expect(html).toContain(label.replace(/([a-z0-9])([A-Z])/gu, "$1 $2"));
       expect(html).toContain(value);
     }
   });
 
   it("survives the day nothing survived — that is when it matters most", () => {
-    // No proposals, no risk list: the brief is one 今日无候选 line, and the
-    // block is the only thing in it that says what to do.
-    const view = built({ proposals: [], riskList: [], reason: "无可交易结构", decision: DECISION });
+    // No proposals, no risk list: the brief is one "no candidates today"
+    // line, and the block is the only thing in it that says what to do.
+    const view = built({
+      proposals: [],
+      riskList: [],
+      reason: "no tradeable structure",
+      decision: DECISION,
+    });
     expect(view.empty).toBeDefined();
-    expect(renderText(view)).toContain("最大风险: 利率回落带来的轧空");
+    expect(renderText(view)).toContain(
+      "MaxRisk: A short squeeze on a rates pullback",
+    );
   });
 
   it("prints no heading when the reviewer wrote no block, and skips a blank line", () => {
-    expect(renderText(built(REVIEW_JSON))).not.toContain("【决策块】");
-    const partial = built({ ...REVIEW_JSON, decision: { 判断: "偏防守", 最大风险: "  " } });
-    expect(partial.decision).toEqual([{ label: "判断", value: "偏防守" }]);
-    expect(renderText(partial)).not.toContain("最大风险");
+    expect(renderText(built(REVIEW_JSON))).not.toContain("【Bottom line】");
+    const partial = built({
+      ...REVIEW_JSON,
+      decision: { Call: "Cautiously defensive", MaxRisk: "  " },
+    });
+    expect(partial.decision).toEqual([
+      { label: "Call", value: "Cautiously defensive" },
+    ]);
+    expect(renderText(partial)).not.toContain("MaxRisk");
   });
 });
 
@@ -878,13 +1010,25 @@ describe("arithmetic gate", () => {
     const view = withSpot([
       spy({
         legs: [
-          { right: "put", expiry: "2026-09-30", strike: 765, action: "sell", mid: 12.1 },
-          { right: "put", expiry: "2026-09-30", strike: 755, action: "buy", mid: 7.4 },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 765,
+            action: "sell",
+            mid: 12.1,
+          },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 755,
+            action: "buy",
+            mid: 7.4,
+          },
         ],
       }),
     ]);
     expect(view.candidates).toEqual([]);
-    expect(view.riskList[0]!.reason).toContain("空头 put 765 已价内");
+    expect(view.riskList[0]!.reason).toContain("short put 765 is already ITM");
     expect(view.riskList[0]!.reason).toContain("761.78");
   });
 
@@ -893,8 +1037,20 @@ describe("arithmetic gate", () => {
       spy({
         strategy: "bull_call_spread",
         legs: [
-          { right: "call", expiry: "2026-09-30", strike: 770, action: "buy", mid: 8.2 },
-          { right: "call", expiry: "2026-09-30", strike: 780, action: "sell", mid: 4.6 },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 770,
+            action: "buy",
+            mid: 8.2,
+          },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 780,
+            action: "sell",
+            mid: 4.6,
+          },
         ],
       }),
     ]);
@@ -905,8 +1061,20 @@ describe("arithmetic gate", () => {
       spy({
         strategy: "bull_call_spread",
         legs: [
-          { right: "call", expiry: "2026-09-30", strike: 780, action: "buy", mid: 4.6 },
-          { right: "call", expiry: "2026-09-30", strike: 770, action: "sell", mid: 8.2 },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 780,
+            action: "buy",
+            mid: 4.6,
+          },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 770,
+            action: "sell",
+            mid: 8.2,
+          },
         ],
       }),
     ]);
@@ -920,8 +1088,10 @@ describe("arithmetic gate", () => {
     // with QQQ at 707 looked exactly like a pass.
     const view = buildView(report(), SPEC);
     expect(view.candidates.map((c) => c.ticker)).toEqual(["SPY", "QQQ", "TLT"]);
-    expect(view.candidates[0]!.unchecked).toContain("无工具现货，未校验");
-    expect(renderText(view)).toContain("无工具现货，未校验");
+    expect(view.candidates[0]!.unchecked).toContain(
+      "no tool spot; not verified",
+    );
+    expect(renderText(view)).toContain("no tool spot; not verified");
   });
 
   it("takes the spot from ow_strike_check too, not only from ow_spot", () => {
@@ -940,8 +1110,20 @@ describe("arithmetic gate", () => {
               proposals: [
                 spy({
                   legs: [
-                    { right: "put", expiry: "2026-09-30", strike: 765, action: "sell", mid: 12.1 },
-                    { right: "put", expiry: "2026-09-30", strike: 755, action: "buy", mid: 7.4 },
+                    {
+                      right: "put",
+                      expiry: "2026-09-30",
+                      strike: 765,
+                      action: "sell",
+                      mid: 12.1,
+                    },
+                    {
+                      right: "put",
+                      expiry: "2026-09-30",
+                      strike: 755,
+                      action: "buy",
+                      mid: 7.4,
+                    },
                   ],
                 }),
               ],
@@ -952,7 +1134,15 @@ describe("arithmetic gate", () => {
                 ticker: "SPY",
                 spot: 761.78,
                 spotSource: "tradingview",
-                rows: [{ strike: 765, right: "put", spot: 761.78, distPct: 0.42, moneyness: "ITM" }],
+                rows: [
+                  {
+                    strike: 765,
+                    right: "put",
+                    spot: 761.78,
+                    distPct: 0.42,
+                    moneyness: "ITM",
+                  },
+                ],
               }),
             ],
           },
@@ -961,7 +1151,9 @@ describe("arithmetic gate", () => {
       SPEC,
     );
     expect(view.candidates).toEqual([]);
-    expect(view.riskList[0]!.reason).toContain("空头 put 765 已价内：现货 761.78");
+    expect(view.riskList[0]!.reason).toContain(
+      "short put 765 is already ITM: spot 761.78",
+    );
   });
 
   it("reads direction out of a debit/credit structure name, not only bull/bear", () => {
@@ -1006,7 +1198,7 @@ describe("arithmetic gate", () => {
     const inverted = built([put(85, "sell"), put(80, "buy")]);
     expect(inverted.candidates).toEqual([]);
     expect(inverted.riskList[0]!.reason).toContain(
-      "bear put spread 的多头 80 不高于空头 85",
+      "bear put spread: long 80 is not above short 85",
     );
     const correct = built([put(85, "buy"), put(80, "sell")]);
     expect(correct.candidates.map((c) => c.ticker)).toEqual(["TLT"]);
@@ -1028,7 +1220,10 @@ describe("arithmetic gate", () => {
             mode: "model",
             text: JSON.stringify({
               proposals: [
-                { ...REVIEW_JSON.proposals[0], strategy: "put_debit_spread_hedge" },
+                {
+                  ...REVIEW_JSON.proposals[0],
+                  strategy: "put_debit_spread_hedge",
+                },
               ],
               riskList: [],
             }),
@@ -1039,7 +1234,7 @@ describe("arithmetic gate", () => {
     );
     expect(mislabelled.candidates).toEqual([]);
     expect(mislabelled.riskList[0]!.reason).toContain(
-      "bear put spread 的多头 740 不高于空头 750",
+      "bear put spread: long 740 is not above short 750",
     );
   });
 
@@ -1049,12 +1244,24 @@ describe("arithmetic gate", () => {
         strategy: "bull_call_spread",
         entry: { level: 790, side: "above" },
         legs: [
-          { right: "call", expiry: "2026-09-30", strike: 770, action: "buy", mid: 8.2 },
-          { right: "call", expiry: "2026-09-30", strike: 780, action: "sell", mid: 4.6 },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 770,
+            action: "buy",
+            mid: 8.2,
+          },
+          {
+            right: "call",
+            expiry: "2026-09-30",
+            strike: 780,
+            action: "sell",
+            mid: 4.6,
+          },
         ],
       }),
     ]);
     expect(view.candidates).toEqual([]);
-    expect(view.riskList[0]!.reason).toContain("越过空头 call 780");
+    expect(view.riskList[0]!.reason).toContain("is past short call 780");
   });
 });

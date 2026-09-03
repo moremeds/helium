@@ -30,6 +30,9 @@ env:
   - OW_UNIVERSE
   - OW_ARGON_PG_URL
   - OW_APEX_API_BASE
+  # argon's FastAPI, for ow_argon_levels — real technical/gamma/options-
+  # structure levels, not the Postgres tables OW_ARGON_PG_URL reads.
+  - OW_ARGON_API_BASE
   - OW_PSQL_BIN
   - OW_IB_API_BASE
   - OW_IB_API_KEY

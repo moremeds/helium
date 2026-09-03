@@ -71,6 +71,7 @@ describe("absent environment", () => {
     ["ow_ib_positions", {}, "OW_IB_API_BASE is unset"],
     ["ow_argon_metrics", { tickers: ["SPY"] }, "OW_ARGON_PG_URL is unset"],
     ["ow_apex_bars", { symbol: "SPY" }, "OW_APEX_API_BASE is unset"],
+    ["ow_argon_levels", { tickers: ["SPY"] }, "OW_ARGON_API_BASE is unset"],
     ["ow_uw_ticker_metrics", { tickers: ["AAPL"] }, "OW_UW_API_KEY is unset"],
     ["ow_uw_market_state", { sector: "Technology", etf: "XLK" }, "OW_UW_API_KEY is unset"],
     ["ow_macro_rates", { series: ["DGS10"] }, "OW_ARGON_PG_URL is unset"],
@@ -363,6 +364,150 @@ describe("absent environment", () => {
     );
     expect(seen?.get("x-api-key")).toBe("secret-key");
     expect(seen?.get("authorization")).toBeNull();
+  });
+});
+
+describe("ow_argon_levels", () => {
+  // Frozen from argon's live FastAPI on the mac mini, 2026-09-03 (verified via
+  // `ssh macmini curl -s http://localhost:8400/api/regime/dealer?ticker=SPY`
+  // and the sibling endpoints; this laptop has no local argon on :8400).
+  const DEALER_SPY = {
+    status: "ok",
+    ticker: "SPY",
+    spot: 768.86,
+    net_gex: 280354.25139999995,
+    closest_levels: [
+      { label: "Call Wall", direction: "up", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848, gamma: 75477.6864 },
+      { label: "Gamma Flip", direction: "down", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926, gamma: 0 },
+    ],
+    odte_share_pct: 1.0,
+  };
+  const GEX_SPY = {
+    data_date: "2026-09-03",
+    spot: 768.8999,
+    levels: {
+      gex_flip: { strike: 770.0, gamma: 0.0 },
+      max_magnet: { strike: 770.0, gamma: 399851.57 },
+      second_magnet: { strike: 775.0, gamma: 286304.97 },
+      max_accelerator: { strike: 760.0, gamma: -407341.53 },
+      put_wall: { strike: 765.0, gamma: -282810.37 },
+      call_wall: { strike: 770.0, gamma: 399851.57 },
+    },
+    expected_range: { low: 762.99, high: 774.81, iv_1d: 0.7685 },
+    mq: null,
+  };
+  const MAGNETS_SPY = {
+    ticker: "SPY",
+    as_of: "2026-09-02",
+    levels: {
+      resistance: 759.57,
+      support: 725.43,
+      stretch: 780.6685200000001,
+      down: 704.3314799999999,
+      sma20: 768.976,
+      last: 765.16,
+      pivot_a: { index: 284, kind: "top", price: 759.57 },
+      pivot_b: { index: 290, kind: "bottom", price: 725.43 },
+    },
+  };
+  const TECHNICALS_SPY = {
+    ticker: "SPY",
+    available: true,
+    captured_at: "2026-09-03T22:22:15.989000+08:00",
+    spot: 768.72,
+    spot_source: "xenon_ws",
+  };
+
+  function routedFetch(byPath: Record<string, unknown | "404">) {
+    return (async (url: URL) => {
+      const hit = byPath[url.pathname];
+      if (hit === undefined) throw new Error(`unexpected path in test: ${url.pathname}`);
+      if (hit === "404") return new Response("not found", { status: 404, statusText: "Not Found" });
+      return new Response(JSON.stringify(hit), { status: 200 });
+    }) as unknown as typeof fetch;
+  }
+
+  it("parses the frozen real argon response into compact per-ticker levels", async () => {
+    const json = await tool("ow_argon_levels", { OW_ARGON_API_BASE: "http://argon.test" }).run(
+      { tickers: ["SPY"] },
+      {
+        fetchImpl: routedFetch({
+          "/api/regime/dealer": DEALER_SPY,
+          "/api/regime/gex": GEX_SPY,
+          "/api/stock/SPY/magnets": MAGNETS_SPY,
+          "/api/stock/SPY/technicals/live": TECHNICALS_SPY,
+        }),
+      },
+    );
+    const parsed = JSON.parse(json);
+    expect(parsed.source).toBe("argon");
+    expect(parsed.levels).toHaveLength(1);
+    const row = parsed.levels[0];
+    expect(row.ticker).toBe("SPY");
+    // The freshest read wins: technicals/live over the scan's own spot.
+    expect(row.spot).toEqual({ value: 768.72, source: "technicals/live" });
+    expect(row.technical).toEqual({
+      support: 725.43,
+      resistance: 759.57,
+      pivot_a: 759.57,
+      pivot_b: 725.43,
+      sma20: 768.976,
+    });
+    expect(row.technicalAsOf).toBe("2026-09-02");
+    expect(row.gamma).toEqual({
+      gex_flip: 770.0,
+      call_wall: 770.0,
+      put_wall: 765.0,
+      max_magnet: 770.0,
+      // mq was null on this live scan — hvl is absent, never invented as 0.
+    });
+    expect(row.gamma.hvl).toBeUndefined();
+    expect(row.gammaAsOf).toBe("2026-09-03");
+    expect(row.closest_levels).toEqual([
+      { label: "Call Wall", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848 },
+      { label: "Gamma Flip", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926 },
+    ]);
+    expect(row.expected_range).toEqual({ low: 762.99, high: 774.81 });
+    expect(row.as_of).toBe("2026-09-03");
+    expect(row.unavailable).toBeUndefined();
+  });
+
+  it("returns a partial row, never throws, when one sub-endpoint 404s", async () => {
+    const json = await tool("ow_argon_levels", { OW_ARGON_API_BASE: "http://argon.test" }).run(
+      { tickers: ["SPY"] },
+      {
+        fetchImpl: routedFetch({
+          "/api/regime/dealer": DEALER_SPY,
+          "/api/regime/gex": GEX_SPY,
+          "/api/stock/SPY/magnets": "404",
+          "/api/stock/SPY/technicals/live": TECHNICALS_SPY,
+        }),
+      },
+    );
+    const row = JSON.parse(json).levels[0];
+    // The three live endpoints still answer — a downed magnets service
+    // degrades this ticker's row, it does not blank it.
+    expect(row.gamma.call_wall).toBe(770.0);
+    expect(row.closest_levels).toBeDefined();
+    expect(row.technical).toBeUndefined();
+    expect(row.unavailable).toHaveLength(1);
+    expect(row.unavailable[0]).toContain("404");
+  });
+
+  it("throws only when every sub-endpoint fails for every ticker", async () => {
+    await expect(
+      tool("ow_argon_levels", { OW_ARGON_API_BASE: "http://argon.test" }).run(
+        { tickers: ["SPY"] },
+        {
+          fetchImpl: routedFetch({
+            "/api/regime/dealer": "404",
+            "/api/regime/gex": "404",
+            "/api/stock/SPY/magnets": "404",
+            "/api/stock/SPY/technicals/live": "404",
+          }),
+        },
+      ),
+    ).rejects.toThrow("ow_argon_levels: argon returned nothing usable for any of SPY");
   });
 });
 

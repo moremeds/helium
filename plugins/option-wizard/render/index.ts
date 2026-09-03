@@ -61,6 +61,11 @@ export interface CandidateView {
    *  silent pass and a real pass look identical to a reader, and the run that
    *  shipped a QQQ 420/410 spread with QQQ at 707 looked like a pass. */
   unchecked?: string;
+  /** The spot `ow_spot` (or an equivalent tool) priced this ticker at, so the
+   *  card can print the level every strike was actually checked against.
+   *  Absent means the arithmetic gate could not check this candidate either —
+   *  the same condition `unchecked` already reports. */
+  spot?: number;
   rationale: string;
   /** The next earnings date this structure spans, when the designer declared
    *  one. Display only: a malformed or absent declaration drops the field and
@@ -82,6 +87,28 @@ export interface Section {
   body: string;
 }
 
+/** One tile in the masthead's tape strip — an index level, a rate, a
+ *  commodity — as the regime step read it off a tool, never estimated. */
+export interface TapeItem {
+  label: string;
+  value: string;
+  /** Signed change string as the model wrote it, e.g. "+0.8bp" or "-0.36". */
+  change?: string;
+  /** Colour hint only. Absent means render neutral. */
+  positive?: boolean;
+}
+
+/** One row of the day's dated calendar, as `ow_uw_calendar` answered it. */
+export interface ScheduleRow {
+  utc?: string;
+  et?: string;
+  event: string;
+  consensus?: string;
+  prior?: string;
+  /** Grouping label the model chose, e.g. "Today" / "Tomorrow". */
+  group?: string;
+}
+
 export interface BriefView {
   /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
    *  printed the HK date beside the ET one made the reader do the conversion
@@ -89,22 +116,43 @@ export interface BriefView {
   date: string;
   tenant: string;
   outcome: "completed" | "DEGRADED" | "FAILED";
+  /** The masthead's one-sentence daily call, from the regime step's own
+   *  `headline` field. Empty on a run that never reached regime — the
+   *  masthead then falls back to the tenant/date line alone rather than
+   *  printing a constant that would make every mail look the same. */
+  headline: string;
+  /** The tape strip: index/rate/commodity levels the regime step already
+   *  read off its tools, surfaced structurally instead of only in prose. */
+  tape: TapeItem[];
+  /** Today's dated calendar rows — claims, NFP, Fed speech — with
+   *  consensus/prior, from the regime step's `schedule` field. */
+  schedule: ScheduleRow[];
+  /** Earnings (universe + index-weight names) and overnight macro headlines,
+   *  at most five, newest first. Empty means nothing was flagged, and the
+   *  renderer prints one line saying so rather than omitting the section. */
+  overnight: string[];
   /** The narrative blocks the run actually produced, in task order.
    *
    *  The renderer does not know what a phase is, and must not learn: which
    *  blocks exist is the team manifest's business. A premarket run returns
    *  its four regime sections and four scenario paths; an intraday run
-   *  returns one "无变化" line. Both render through the same loop because
-   *  both are just a list. */
+   *  returns one "no change" line. Both render through the same loop because
+   *  both are just a list. Excludes the Layer Coverage block, which is
+   *  pulled out into `coverage` so it always lands as the final section. */
   sections: Section[];
+  /** The regime step's own data-coverage table, held apart from `sections`
+   *  so "data coverage (compact)" can always render last regardless of what
+   *  task order produced it. */
+  coverage?: Section;
   regime: RegimeView;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
-  /** The reviewer's 决策块, in the order it wrote it: every key it filled and
-   *  no key it did not. This block is the only part of the reply that says
-   *  what to DO, and a line invented here would be the harness's opinion
-   *  wearing the reviewer's name. Carried on the no-candidate day too, where
-   *  it is the only thing the reader gets. */
+  /** The reviewer's decision block, in the order it wrote it: every key it
+   *  filled and no key it did not. This block is the only part of the reply
+   *  that says what to DO, and a line invented here would be the harness's
+   *  opinion wearing the reviewer's name. Carried on the no-candidate day
+   *  too, where it is the only thing the reader gets. Rendered as "Bottom
+   *  line", near the top — this is the block a reader most needs. */
   decision?: Array<{ label: string; value: string }>;
   /** ONE line, present only when something actually failed. */
   degradation?: string;
@@ -127,7 +175,8 @@ export function extractJson(text: string): Record<string, unknown> | null {
   // gets read rather than costing the reader the whole brief.
   const first = text.indexOf("{");
   const last = text.lastIndexOf("}");
-  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1));
+  if (first !== -1 && last > first)
+    candidates.push(text.slice(first, last + 1));
   for (const candidate of candidates.reverse()) {
     try {
       const parsed: unknown = JSON.parse(candidate);
@@ -219,22 +268,132 @@ function regimeFrom(text: string): RegimeView {
 function degradationFrom(report: RunReport): string | undefined {
   const parts = [
     ...report.providersSkipped.map(
-      (skip) => `provider ${skip.id} 不可用（${skip.reason}）`,
+      (skip) => `provider ${skip.id} unavailable (${skip.reason})`,
     ),
     ...report.gatesSkipped.map(
-      (skip) => `gate ${skip.id} 未加载（${skip.reason}）`,
+      (skip) => `gate ${skip.id} not loaded (${skip.reason})`,
     ),
     ...report.steps
       .flatMap((step) => step.gateRefusals ?? [])
-      .map((refusal) => `gate ${refusal.id} 拒绝（${refusal.reason}）`),
+      .map((refusal) => `gate ${refusal.id} refused (${refusal.reason})`),
     ...report.steps
       .filter((step) => step.failure !== undefined)
-      .map((step) => `${step.task} 步骤失败（${step.failure ?? ""}）`),
+      .map((step) => `step ${step.task} failed (${step.failure ?? ""})`),
   ];
   // `toolsUnconfigured` is NOT here. It is a known false positive today and its
   // root fix belongs to sub-project B; printing it would train the reader to
   // ignore the one line that is supposed to mean something.
-  return parts.length === 0 ? undefined : `数据降级：${parts.join("；")}`;
+  return parts.length === 0 ? undefined : `Data degraded: ${parts.join("; ")}`;
+}
+
+/** The masthead's one-sentence daily call, straight from the regime step's
+ *  own `headline` field. Nothing here is invented — an absent or blank
+ *  headline is simply undefined, and the masthead falls back to the
+ *  tenant/date line. */
+function headlineFrom(
+  regimeJson: Record<string, unknown> | null,
+): string | undefined {
+  const headline = regimeJson?.headline;
+  return typeof headline === "string" && headline.trim() !== ""
+    ? headline.trim()
+    : undefined;
+}
+
+/** The tape strip: whatever tiles the regime step reported, kept only when
+ *  both `label` and `value` are strings it actually wrote. */
+function tapeFrom(raw: unknown): TapeItem[] {
+  if (!Array.isArray(raw)) return [];
+  const out: TapeItem[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    // Models emit numbers as JSON numbers as often as strings; accept both.
+    const value =
+      typeof row.value === "string"
+        ? row.value
+        : typeof row.value === "number" && Number.isFinite(row.value)
+          ? String(row.value)
+          : undefined;
+    if (typeof row.label !== "string" || value === undefined) continue;
+    const change =
+      typeof row.change === "string"
+        ? row.change
+        : typeof row.change === "number" && Number.isFinite(row.change)
+          ? String(row.change)
+          : undefined;
+    out.push({
+      label: row.label,
+      value,
+      ...(change !== undefined ? { change } : {}),
+      ...(typeof row.positive === "boolean" ? { positive: row.positive } : {}),
+    });
+  }
+  return out;
+}
+
+/** The dated calendar rows the regime step read off `ow_uw_calendar`. A row
+ *  with no `event` string is not a row — the whole point is that a reader can
+ *  see what is dated, and a blank event says nothing. */
+function scheduleFrom(raw: unknown): ScheduleRow[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ScheduleRow[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    if (typeof row.event !== "string" || row.event.trim() === "") continue;
+    out.push({
+      event: row.event.trim(),
+      ...(typeof row.utc === "string" ? { utc: row.utc } : {}),
+      ...(typeof row.et === "string" ? { et: row.et } : {}),
+      ...(typeof row.consensus === "string"
+        ? { consensus: row.consensus }
+        : {}),
+      ...(typeof row.prior === "string" ? { prior: row.prior } : {}),
+      ...(typeof row.group === "string" ? { group: row.group } : {}),
+    });
+  }
+  return out;
+}
+
+/** Earnings and overnight-macro items from the `overnight` task's own JSON —
+ *  never guessed at from the regime step, which has no earnings tool.
+ *  Missing task, unparseable reply, or an empty array all mean the same
+ *  thing to the reader: nothing was flagged, and the renderer says so with
+ *  one line rather than an absent section. Capped at five here too, not only
+ *  in the prompt — a prompt is not a boundary.
+ *
+ *  Item shape is `{ticker?, what, why_it_matters, source}` — `what` and
+ *  `why_it_matters` are required prose, `source` is the citation (a
+ *  headline's timestamp, or the earnings tool), `ticker` is absent for a
+ *  macro headline. Flattened here into one line per item because that is
+ *  all `overnightSection`/`overnightLines` render — a struct with nowhere
+ *  downstream to read its fields would be a boundary drawn for no reader. */
+function overnightFrom(report: RunReport): string[] {
+  const step = report.steps.find((entry) => entry.task === "overnight");
+  if (step === undefined) return [];
+  const parsed = extractJson(step.text);
+  const raw = parsed === null ? null : parsed.overnight;
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const {
+      ticker,
+      what,
+      why_it_matters: why,
+      source,
+    } = entry as Record<string, unknown>;
+    if (typeof what !== "string" || what.trim() === "") continue;
+    let line = what.trim();
+    if (typeof why === "string" && why.trim() !== "")
+      line = `${line} — ${why.trim()}`;
+    if (typeof ticker === "string" && ticker.trim() !== "")
+      line = `${ticker.trim()} — ${line}`;
+    if (typeof source === "string" && source.trim() !== "")
+      line = `${line} (${source.trim()})`;
+    out.push(line);
+  }
+  return out.slice(0, 5);
 }
 
 /**
@@ -283,10 +442,10 @@ function settlementSections(
   }
   const sections: Section[] = [];
   if (kept.length > 0)
-    sections.push({ title: "结算", body: kept.join("\n") });
+    sections.push({ title: "Settlements", body: kept.join("\n") });
   if (dropped.length > 0)
     sections.push({
-      title: "未在账本中的结算，已剔除",
+      title: "Settlements not in the ledger, dropped",
       body: dropped.join("\n"),
     });
   return sections;
@@ -299,7 +458,10 @@ function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
     const parsed = extractJson(step.text);
     if (parsed !== null && Array.isArray(parsed.settlements))
       sections.push(...settlementSections(parsed.settlements, ledger));
-    const raws = parsed !== null && Array.isArray(parsed.sections) ? parsed.sections : null;
+    const raws =
+      parsed !== null && Array.isArray(parsed.sections)
+        ? parsed.sections
+        : null;
     if (raws === null) {
       if (step.task === "regime" && regime.paragraph !== "")
         sections.push({ title: "今日 regime", body: regime.paragraph });
@@ -377,7 +539,11 @@ function toolPayloads(report: RunReport): Record<string, unknown>[] {
     for (const raw of step.toolOutputs ?? []) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+        if (
+          parsed !== null &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed)
+        )
           payloads.push(parsed as Record<string, unknown>);
       } catch {
         continue;
@@ -450,13 +616,21 @@ function spotsFromTools(report: RunReport): Map<string, number> {
   const spots = new Map<string, number>();
   for (const payload of toolPayloads(report)) {
     const { ticker, spot } = payload;
-    if (typeof ticker === "string" && typeof spot === "number" && Number.isFinite(spot))
+    if (
+      typeof ticker === "string" &&
+      typeof spot === "number" &&
+      Number.isFinite(spot)
+    )
       spots.set(ticker, spot);
     if (!Array.isArray(payload.quotes)) continue;
     for (const row of payload.quotes) {
       if (row === null || typeof row !== "object") continue;
       const { ticker: symbol, last } = row as Record<string, unknown>;
-      if (typeof symbol === "string" && typeof last === "number" && Number.isFinite(last))
+      if (
+        typeof symbol === "string" &&
+        typeof last === "number" &&
+        Number.isFinite(last)
+      )
         spots.set(symbol, last);
     }
   }
@@ -486,13 +660,25 @@ function declaredShape(
   name: string,
 ): "condor" | "bull-call" | "bear-put" | "bear-call" | "bull-put" | null {
   if (name.includes("condor")) return "condor";
-  if (name.includes("call debit") || (name.includes("bull") && name.includes("call")))
+  if (
+    name.includes("call debit") ||
+    (name.includes("bull") && name.includes("call"))
+  )
     return "bull-call";
-  if (name.includes("put debit") || (name.includes("bear") && name.includes("put")))
+  if (
+    name.includes("put debit") ||
+    (name.includes("bear") && name.includes("put"))
+  )
     return "bear-put";
-  if (name.includes("call credit") || (name.includes("bear") && name.includes("call")))
+  if (
+    name.includes("call credit") ||
+    (name.includes("bear") && name.includes("call"))
+  )
     return "bear-call";
-  if (name.includes("put credit") || (name.includes("bull") && name.includes("put")))
+  if (
+    name.includes("put credit") ||
+    (name.includes("bull") && name.includes("put"))
+  )
     return "bull-put";
   return null;
 }
@@ -510,7 +696,8 @@ function geometryFaults(
   );
   const faults: string[] = [];
   const strike = (right: "call" | "put", action: "buy" | "sell") =>
-    candidate.legs.find((leg) => leg.right === right && leg.action === action)?.strike;
+    candidate.legs.find((leg) => leg.right === right && leg.action === action)
+      ?.strike;
   const ordered = (
     right: "call" | "put",
     label: string,
@@ -521,7 +708,7 @@ function geometryFaults(
     if (long === undefined || short === undefined) return [];
     if (longIsHigher ? long > short : long < short) return [];
     return [
-      `${label} 的多头 ${String(long)} 不${longIsHigher ? "高" : "低"}于空头 ${String(short)}`,
+      `${label}: long ${String(long)} is not ${longIsHigher ? "above" : "below"} short ${String(short)}`,
     ];
   };
   switch (shape) {
@@ -529,24 +716,39 @@ function geometryFaults(
       if (spot === undefined) return { faults, unchecked: [] };
       for (const leg of candidate.legs) {
         if (leg.right === "put" && leg.strike >= spot)
-          faults.push(`condor 的 put ${String(leg.strike)} 不在现货 ${String(spot)} 下方`);
+          faults.push(
+            `condor put ${String(leg.strike)} is not below spot ${String(spot)}`,
+          );
         if (leg.right === "call" && leg.strike <= spot)
-          faults.push(`condor 的 call ${String(leg.strike)} 不在现货 ${String(spot)} 上方`);
+          faults.push(
+            `condor call ${String(leg.strike)} is not above spot ${String(spot)}`,
+          );
       }
       return { faults, unchecked: [] };
     }
     case "bull-call":
-      return { faults: ordered("call", "bull call spread", false), unchecked: [] };
+      return {
+        faults: ordered("call", "bull call spread", false),
+        unchecked: [],
+      };
     case "bear-put":
       return { faults: ordered("put", "bear put spread", true), unchecked: [] };
     case "bear-call":
-      return { faults: ordered("call", "bear call spread", true), unchecked: [] };
+      return {
+        faults: ordered("call", "bear call spread", true),
+        unchecked: [],
+      };
     case "bull-put":
-      return { faults: ordered("put", "bull put spread", false), unchecked: [] };
+      return {
+        faults: ordered("put", "bull put spread", false),
+        unchecked: [],
+      };
     default:
       return {
         faults,
-        unchecked: [`结构名 ${candidate.strategy} 未识别，腿序未校验`],
+        unchecked: [
+          `strategy name ${candidate.strategy} not recognised; leg order not checked`,
+        ],
       };
   }
 }
@@ -567,22 +769,26 @@ function arithmeticFaults(
   // A structure that expires on the report day is not a position anyone can
   // take. An unparseable expiry is left alone: a drop rests on two real dates.
   if (candidate.dte !== null && candidate.dte < 1)
-    faults.push(`到期日 ${candidate.expiry} 不晚于报告日`);
+    faults.push(`expiry ${candidate.expiry} is not after the report day`);
   const shorts = candidate.legs.filter((leg) => leg.action === "sell");
   if (spot === undefined) {
-    unchecked.push("无工具现货，未校验");
+    unchecked.push("no tool spot; not verified");
   } else {
     for (const leg of candidate.legs) {
       if (Math.abs(leg.strike - spot) / spot > STRIKE_BAND)
         faults.push(
-          `行权价 ${String(leg.strike)} 距现货 ${String(spot)} 超过 ${String(STRIKE_BAND * 100)}%`,
+          `strike ${String(leg.strike)} is more than ${String(STRIKE_BAND * 100)}% from spot ${String(spot)}`,
         );
     }
     for (const leg of shorts) {
       if (leg.right === "put" && leg.strike >= spot)
-        faults.push(`空头 put ${String(leg.strike)} 已价内：现货 ${String(spot)}`);
+        faults.push(
+          `short put ${String(leg.strike)} is already ITM: spot ${String(spot)}`,
+        );
       if (leg.right === "call" && leg.strike <= spot)
-        faults.push(`空头 call ${String(leg.strike)} 已价内：现货 ${String(spot)}`);
+        faults.push(
+          `short call ${String(leg.strike)} is already ITM: spot ${String(spot)}`,
+        );
     }
   }
   const geometry = geometryFaults(candidate, spot);
@@ -593,13 +799,21 @@ function arithmeticFaults(
   const entry = candidate.entry;
   if (entry !== undefined) {
     for (const leg of shorts) {
-      if (leg.right === "call" && entry.side === "above" && entry.level > leg.strike)
+      if (
+        leg.right === "call" &&
+        entry.side === "above" &&
+        entry.level > leg.strike
+      )
         faults.push(
-          `入场触发 ${String(entry.level)}↑ 越过空头 call ${String(leg.strike)}`,
+          `entry trigger ${String(entry.level)}↑ is past short call ${String(leg.strike)}`,
         );
-      if (leg.right === "put" && entry.side === "below" && entry.level < leg.strike)
+      if (
+        leg.right === "put" &&
+        entry.side === "below" &&
+        entry.level < leg.strike
+      )
         faults.push(
-          `入场触发 ${String(entry.level)}↓ 越过空头 put ${String(leg.strike)}`,
+          `entry trigger ${String(entry.level)}↓ is past short put ${String(leg.strike)}`,
         );
     }
   }
@@ -634,7 +848,8 @@ export function candidatesFrom(
     if (invalidation === null) {
       rejected.push({
         ticker: proposal.ticker,
-        reason: "失效价不是可结算的价位（需要 level + side），渲染层丢弃",
+        reason:
+          "invalidation is not a settleable level (needs level + side); dropped by the renderer",
       });
       continue;
     }
@@ -693,6 +908,33 @@ function decisionFrom(raw: unknown): Array<{ label: string; value: string }> {
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const dateEtDay = report.day;
   const degradation = degradationFrom(report);
+
+  // Resolved before the failure branch: a failed run still renders the steps
+  // that finished, and the regime paragraph is the prose fallback for a step
+  // that answered outside JSON. The regime step's own JSON is also where the
+  // masthead headline, the tape strip and the day's schedule come from.
+  const regimeStep = report.steps.find((step) => step.task === "regime");
+  const regime =
+    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
+  const regimeJson =
+    regimeStep === undefined ? null : extractJson(regimeStep.text);
+
+  // Every phase's content, resolved before any early return. Only premarket
+  // and close carry a review step; intraday reports drift, weekly settles a
+  // week and frank compares two documents. Treating "has candidates" as a
+  // synonym for "has content" emptied three of the five briefs.
+  const rawSections = sectionsFrom(report, regime);
+  // The Layer Coverage block is pulled out so "data coverage (compact)" can
+  // always render last, regardless of which task actually produced it.
+  const coverageIdx = rawSections.findIndex((entry) =>
+    /layer coverage/iu.test(entry.title),
+  );
+  const coverage = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
+  const sections =
+    coverageIdx === -1
+      ? rawSections
+      : rawSections.filter((_entry, index) => index !== coverageIdx);
+
   const base: BriefView = {
     date: dateEtDay,
     tenant: cfg.tenant,
@@ -702,25 +944,17 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
         : report.mode === "tool-only"
           ? "DEGRADED"
           : "completed",
+    headline: headlineFrom(regimeJson) ?? "",
+    tape: tapeFrom(regimeJson?.tape),
+    schedule: scheduleFrom(regimeJson?.schedule),
+    overnight: overnightFrom(report),
     sections: [],
+    ...(coverage === undefined ? {} : { coverage }),
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
     ...(degradation === undefined ? {} : { degradation }),
   };
-
-  // Resolved before the failure branch: a failed run still renders the steps
-  // that finished, and the regime paragraph is the prose fallback for a step
-  // that answered outside JSON.
-  const regimeStep = report.steps.find((step) => step.task === "regime");
-  const regime =
-    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
-
-  // Every phase's content, resolved before any early return. Only premarket
-  // and close carry a review step; intraday reports drift, weekly settles a
-  // week and frank compares two documents. Treating "has candidates" as a
-  // synonym for "has content" emptied three of the five briefs.
-  const sections = sectionsFrom(report, regime);
 
   if (report.outcome === "failed") {
     const failure = report.failure;
@@ -732,24 +966,26 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     // regime gate and voided an intraday brief whose drift step had already
     // answered the only question that brief exists to answer.
     if (done.length === 0)
-      return { ...base, empty: `今日无候选：${detail}` };
+      return { ...base, empty: `No candidates today: ${detail}` };
     return {
       ...base,
-      sections: [{ title: "本次运行未完成", body: detail }, ...done],
+      sections: [{ title: "This run did not finish", body: detail }, ...done],
     };
   }
   if (report.mode === "tool-only") {
     return {
       ...base,
-      empty: "今日无候选：无可用 provider，本次没有任何模型推理",
+      empty:
+        "No candidates today: no provider available, no model reasoning ran",
     };
   }
 
   const review = report.steps.find((step) => step.task === "review");
   const parsed = review === undefined ? null : extractJson(review.text);
-  // Resolved before every early return below. The block matters MOST on the day
-  // nothing survived: "今日无候选" alone does not tell the reader whether to
-  // sit still or to cut, and the reviewer already wrote which it is.
+  // Resolved before every early return below. The block matters MOST on the
+  // day nothing survived: "no candidates today" alone does not tell the
+  // reader whether to sit still or to cut, and the reviewer already wrote
+  // which it is.
   const rows = decisionFrom(parsed === null ? null : parsed.decision);
   const decision = rows.length === 0 ? {} : { decision: rows };
   if (parsed === null || !Array.isArray(parsed.proposals)) {
@@ -759,8 +995,8 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       ...decision,
       empty:
         review === undefined
-          ? "本次运行没有产出任何区块"
-          : "今日无候选：review 步骤没有可解析的 JSON",
+          ? "This run produced no blocks"
+          : "No candidates today: the review step had no parseable JSON",
     };
   }
 
@@ -795,7 +1031,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     if (when > candidate.expiry) return true;
     riskList.push({
       ticker: candidate.ticker,
-      reason: `财报 ${when} 在到期日 ${candidate.expiry} 之前`,
+      reason: `earnings ${when} is before expiry ${candidate.expiry}`,
     });
     return false;
   });
@@ -805,26 +1041,31 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   // carried with the reason it could not, never as a quiet pass.
   const checked: CandidateView[] = [];
   for (const candidate of survived) {
-    const verdict = arithmeticFaults(candidate, toolSpots.get(candidate.ticker));
+    const spot = toolSpots.get(candidate.ticker);
+    const verdict = arithmeticFaults(candidate, spot);
     if (verdict.faults.length > 0) {
       riskList.push({
         ticker: candidate.ticker,
-        reason: verdict.faults.join("；"),
+        reason: verdict.faults.join("; "),
       });
       continue;
     }
-    checked.push(
-      verdict.unchecked.length === 0
-        ? candidate
-        : { ...candidate, unchecked: verdict.unchecked.join("；") },
-    );
+    checked.push({
+      ...candidate,
+      ...(spot === undefined ? {} : { spot }),
+      ...(verdict.unchecked.length === 0
+        ? {}
+        : { unchecked: verdict.unchecked.join("; ") }),
+    });
   }
 
   if (checked.length === 0 && riskList.length === 0) {
     if (sections.length > 0) return { ...base, ...decision, sections, regime };
     const reason =
-      typeof parsed.reason === "string" ? parsed.reason : "reviewer 未给出候选";
-    return { ...base, ...decision, empty: `今日无候选：${reason}` };
+      typeof parsed.reason === "string"
+        ? parsed.reason
+        : "the reviewer gave no candidates";
+    return { ...base, ...decision, empty: `No candidates today: ${reason}` };
   }
   // At most five reach the reader; the reviewer's own rule, enforced here too.
   return {

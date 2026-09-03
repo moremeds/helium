@@ -45,6 +45,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_tv_watchlist", { mutating: false }],
   ["ow_spot", { mutating: false }],
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  ["ow_argon_levels", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -511,6 +512,150 @@ async function uwGet(
   return response.json();
 }
 
+/** One argon FastAPI call. No credential — argon's own API takes none for
+ *  these routes — so the only failure modes are "unreachable" and a non-2xx
+ *  status, both named with the host and path so a gap is actionable rather
+ *  than a bare network error. */
+async function argonGet(
+  tool: string,
+  base: string,
+  path: string,
+  ctx?: ToolRunContext,
+): Promise<unknown> {
+  const url = new URL(path, base);
+  const doFetch = ctx?.fetchImpl ?? fetch;
+  let response: Response;
+  try {
+    response = await doFetch(url, { signal: AbortSignal.timeout(15_000) });
+  } catch (error: unknown) {
+    throw new Error(
+      `${tool}: argon unreachable at ${url.host}${url.pathname} — ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!response.ok) {
+    throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+/** One ticker's compact price-anchor row for ow_argon_levels. Every one of
+ *  the four argon calls is awaited independently (Promise.allSettled) so a
+ *  single sub-endpoint being down (404, timeout, argon mid-deploy) degrades
+ *  that ticker's row rather than the whole call — `unavailable` names which
+ *  ones did not answer and why. */
+async function argonLevelsForTicker(
+  tool: string,
+  base: string,
+  ticker: string,
+  ctx?: ToolRunContext,
+): Promise<Record<string, unknown> & { ticker: string; unavailable?: string[] }> {
+  const encoded = encodeURIComponent(ticker);
+  const calls: Array<[string, string]> = [
+    ["dealer", `/api/regime/dealer?ticker=${encoded}`],
+    ["gex", `/api/regime/gex?ticker=${encoded}`],
+    ["magnets", `/api/stock/${encoded}/magnets`],
+    ["technicals", `/api/stock/${encoded}/technicals/live`],
+  ];
+  const settled = await Promise.allSettled(
+    calls.map(([key, path]) => argonGet(tool, base, path, ctx).then((body) => [key, body] as const)),
+  );
+  const ok = new Map<string, Record<string, unknown>>();
+  const unavailable: string[] = [];
+  for (const outcome of settled) {
+    if (outcome.status === "fulfilled") {
+      const [key, body] = outcome.value;
+      ok.set(key, body as Record<string, unknown>);
+    } else {
+      unavailable.push(
+        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+      );
+    }
+  }
+  const dealer = ok.get("dealer") as
+    | { spot?: number; closest_levels?: Array<Record<string, unknown>>; odte_share_pct?: number }
+    | undefined;
+  const gex = ok.get("gex") as
+    | {
+        spot?: number;
+        data_date?: string;
+        levels?: Record<string, { strike?: number } | undefined>;
+        expected_range?: { low?: number; high?: number };
+        mq?: { hvl?: number } | null;
+      }
+    | undefined;
+  const magnets = ok.get("magnets") as
+    | {
+        as_of?: string;
+        levels?: {
+          support?: number;
+          resistance?: number;
+          sma20?: number;
+          pivot_a?: { price?: number };
+          pivot_b?: { price?: number };
+        };
+      }
+    | undefined;
+  const technicals = ok.get("technicals") as { spot?: number } | undefined;
+
+  const out: Record<string, unknown> & { ticker: string; unavailable?: string[] } = { ticker };
+
+  // Freshest spot wins: technicals/live is a live tape read, gex/dealer are
+  // the same scan's own spot, magnets carries only yesterday's close.
+  if (technicals?.spot !== undefined) out.spot = { value: technicals.spot, source: "technicals/live" };
+  else if (gex?.spot !== undefined) out.spot = { value: gex.spot, source: "gex" };
+  else if (dealer?.spot !== undefined) out.spot = { value: dealer.spot, source: "dealer" };
+
+  const ml = magnets?.levels;
+  if (ml !== undefined) {
+    const technical: Record<string, unknown> = {};
+    if (ml.support !== undefined) technical.support = ml.support;
+    if (ml.resistance !== undefined) technical.resistance = ml.resistance;
+    if (ml.pivot_a?.price !== undefined) technical.pivot_a = ml.pivot_a.price;
+    if (ml.pivot_b?.price !== undefined) technical.pivot_b = ml.pivot_b.price;
+    if (ml.sma20 !== undefined) technical.sma20 = ml.sma20;
+    if (Object.keys(technical).length > 0) {
+      out.technical = technical;
+      out.technicalAsOf = magnets?.as_of;
+    }
+  }
+
+  const gl = gex?.levels;
+  if (gl !== undefined) {
+    const gamma: Record<string, unknown> = {};
+    if (gl.gex_flip?.strike !== undefined) gamma.gex_flip = gl.gex_flip.strike;
+    if (gl.call_wall?.strike !== undefined) gamma.call_wall = gl.call_wall.strike;
+    if (gl.put_wall?.strike !== undefined) gamma.put_wall = gl.put_wall.strike;
+    if (gl.max_magnet?.strike !== undefined) gamma.max_magnet = gl.max_magnet.strike;
+    // mq (ManaQuant's own hvl snapshot) is nullable per-ticker on argon's own
+    // schema — absent here, not zero, when argon has none for this scan.
+    if (gex?.mq?.hvl !== undefined && gex.mq.hvl !== null) gamma.hvl = gex.mq.hvl;
+    if (Object.keys(gamma).length > 0) {
+      out.gamma = gamma;
+      out.gammaAsOf = gex?.data_date;
+    }
+  }
+
+  if (Array.isArray(dealer?.closest_levels)) {
+    out.closest_levels = dealer.closest_levels.map((level) => ({
+      label: level.label,
+      role: level.role,
+      strike: level.strike,
+      distance_pct: level.distance_pct,
+    }));
+  }
+  if (dealer?.odte_share_pct !== undefined) out.odte_share_pct = dealer.odte_share_pct;
+
+  if (gex?.expected_range?.low !== undefined && gex.expected_range.high !== undefined) {
+    out.expected_range = { low: gex.expected_range.low, high: gex.expected_range.high };
+  }
+
+  const asOf = gex?.data_date ?? magnets?.as_of;
+  if (asOf !== undefined) out.as_of = asOf;
+  if (unavailable.length > 0) out.unavailable = unavailable;
+  return out;
+}
 
 /**
  * One TradingView quote, trying the exchanges a US listing can be on. There is
@@ -792,6 +937,9 @@ const EarningsParams = z.object({
 
 const GexParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(12).optional(),
+});
+const ArgonLevelsParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
 });
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
@@ -2125,6 +2273,70 @@ export function buildTools(cfg: {
           snapshotDate: first.snapshot_date,
           meetings: rows,
         });
+      },
+    },
+    {
+      // argon's HTTP API, not its Postgres — these four responses are
+      // computed views (dealer regime, options-implied levels, the
+      // technical-support/resistance model, live technicals), not table rows
+      // a SELECT can reproduce.
+      //
+      // Verified live 2026-09-03 on the mini (`ssh macmini curl … :8400`;
+      // this laptop has no local argon):
+      //   GET /api/regime/dealer?ticker=SPY ->
+      //     {"status":"ok","ticker":"SPY","spot":768.86,"net_gex":280354.25,
+      //      "closest_levels":[{"label":"Call Wall","role":"resistance",
+      //      "strike":770.0,"distance_pct":0.00148,"gamma":75477.69},
+      //      {"label":"Gamma Flip","role":"flip","strike":766.0,...}],
+      //      "odte_share_pct":1.0}
+      //   GET /api/regime/gex?ticker=SPY ->
+      //     {"data_date":"2026-09-03","spot":768.90,
+      //      "levels":{"gex_flip":{"strike":770.0,...},
+      //      "call_wall":{"strike":770.0,...},"put_wall":{"strike":765.0,...},
+      //      "max_magnet":{"strike":770.0,...}},
+      //      "expected_range":{"low":762.99,"high":774.81,"iv_1d":0.7685},
+      //      "mq":null}
+      //   GET /api/stock/SPY/magnets ->
+      //     {"as_of":"2026-09-02","levels":{"resistance":759.57,
+      //      "support":725.43,"sma20":768.976,
+      //      "pivot_a":{"price":759.57},"pivot_b":{"price":725.43}}}
+      //   GET /api/stock/SPY/technicals/live ->
+      //     {"spot":768.72,"spot_source":"xenon_ws",
+      //      "captured_at":"2026-09-03T22:22:15.989000+08:00"}
+      // `mq` (ManaQuant's own hvl/expected-range snapshot) was null on this
+      // scan — GexResponse.mq is nullable and only some tickers carry it —
+      // so `gamma.hvl` is simply absent rather than guessed at.
+      //
+      // Every sub-endpoint is fetched independently and one 404/timeout does
+      // not fail the others: a ticker with a live dealer regime but a down
+      // magnets service still gets a partial row, named as partial, rather
+      // than the whole ticker disappearing.
+      name: "ow_argon_levels",
+      description:
+        "Real price anchors from argon per ticker: spot, technical support/resistance/pivots, dealer-gamma levels (flip, call/put wall, max magnet, hvl), the nearest options-structure levels with their role (support/resistance/accelerator/flip), and today's expected range. A structure's strikes must sit ON one of these levels or inside expected_range — never on a level this tool did not return.",
+      paramsSchema: ArgonLevelsParams,
+      mutating: false,
+      dshParams: {
+        tickers: {
+          type: "array",
+          required: true,
+          description: 'Tickers to fetch levels for, e.g. ["SPY","QQQ"]. Up to 12 per call.',
+        },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { tickers } = ArgonLevelsParams.parse(args);
+        const tool = "ow_argon_levels";
+        const base = need(env, "OW_ARGON_API_BASE", tool);
+        const results = await Promise.all(
+          tickers.map((raw) => argonLevelsForTicker(tool, base, symbolLiteral(raw, tool), ctx)),
+        );
+        if (results.every((row) => row.spot === undefined && row.technical === undefined && row.gamma === undefined && row.closest_levels === undefined)) {
+          throw new Error(
+            `${tool}: argon returned nothing usable for any of ${tickers.join(", ")} — ` +
+              `${results.map((row) => `${row.ticker}: ${(row.unavailable ?? []).join("; ")}`).join(" | ")}`,
+          );
+        }
+        return JSON.stringify({ source: "argon", levels: results });
       },
     },
     {
