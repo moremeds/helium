@@ -16,7 +16,7 @@ import { invalidationLabel } from "./math.js";
  * saying so is what stops a reader reading a strike as a percentage.
  */
 export function payoffLabel(quoted: boolean): string {
-  return quoted ? "到期损益（spot ±%）" : "到期损益（按行权价，reviewer 未报 spot）";
+  return quoted ? "到期损益（spot ±%）" : "到期损益（按行权价，无 ow_spot 现货）";
 }
 
 /** One column of the payoff row: "+10%: 320" or "750: -290". */
@@ -61,7 +61,20 @@ function candidateLines(candidate: CandidateView): string[] {
         (leg.mid === undefined ? " mid —" : ` mid ${leg.mid.toFixed(2)}`),
     ),
     ...pricingLines(candidate),
+    ...(candidate.unchecked === undefined
+      ? []
+      : [`  ⚠ ${candidate.unchecked}`]),
     `  ${candidate.rationale}`,
+    "",
+  ];
+}
+
+/** The 决策块, under its own heading. Same block, same order, in both parts. */
+function decisionLines(view: BriefView): string[] {
+  if (view.decision === undefined || view.decision.length === 0) return [];
+  return [
+    "【决策块】",
+    ...view.decision.map((row) => `- ${row.label}: ${row.value}`),
     "",
   ];
 }
@@ -73,6 +86,7 @@ export function renderText(view: BriefView): string {
   ];
   if (view.empty !== undefined) {
     lines.push(view.empty, "");
+    lines.push(...decisionLines(view));
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
@@ -102,6 +116,7 @@ export function renderText(view: BriefView): string {
       lines.push(`- ${entry.ticker}: ${entry.reason}`);
     lines.push("");
   }
+  lines.push(...decisionLines(view));
   if (view.degradation !== undefined) lines.push(view.degradation, "");
   return lines.join("\n");
 }

@@ -125,6 +125,11 @@ function candidateCard(candidate: CandidateView): string {
           ${legRows(candidate)}
         </table>
         ${pricingBlock(candidate)}
+        ${
+          candidate.unchecked === undefined
+            ? ""
+            : `<div class="ink-dim" style="color:${AMBER};font-size:12px;margin-top:8px">⚠ ${esc(candidate.unchecked)}</div>`
+        }
         <div class="ink-dim" style="color:${DIM};font-size:13px;margin-top:8px">${esc(candidate.rationale)}</div>
       </td></tr>
     </table>`;
@@ -147,6 +152,20 @@ export function renderHtml(view: BriefView): string {
     view.regime.hedge === undefined ? "" : badge(`hedge: ${view.regime.hedge}`),
   ].join("");
 
+  // The 决策块 renders on the no-candidate day too, which is why it sits
+  // outside the empty/full branch below.
+  const decisionSection =
+    view.decision === undefined || view.decision.length === 0
+      ? ""
+      : `<div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【决策块】</div>
+         <table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px">
+           ${view.decision
+             .map(
+               (row) => `<tr><td class="pad ink" style="padding:10px 15px;border-top:1px solid ${RULE};color:${INK};font-size:13px"><strong>${esc(row.label)}</strong> — ${esc(row.value)}</td></tr>`,
+             )
+             .join("")}
+         </table>`;
+
   const riskSection =
     view.riskList.length === 0
       ? ""
@@ -163,7 +182,8 @@ export function renderHtml(view: BriefView): string {
     view.empty !== undefined
       ? `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px">
            <tr><td class="pad ink" style="padding:15px;color:${INK};font-size:15px">${esc(view.empty)}</td></tr>
-         </table>`
+         </table>
+         ${decisionSection}`
       : `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px;margin-bottom:12px">
            <tr><td class="pad" style="padding:12px 15px">
              ${view.sections
@@ -181,7 +201,8 @@ export function renderHtml(view: BriefView): string {
              : `<div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【候选结构】每张合约，不含数量</div>
          ${view.candidates.map(candidateCard).join("")}`
          }
-         ${riskSection}`;
+         ${riskSection}
+         ${decisionSection}`;
 
   const degradationRow =
     view.degradation === undefined

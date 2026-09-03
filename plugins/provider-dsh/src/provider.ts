@@ -14,6 +14,7 @@
  * cost error and never as a token error.
  * @module dsh-plugin-provider-dsh/provider
  */
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
@@ -27,6 +28,7 @@ import type {
 } from "@helium/core";
 import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { CordisRunParentFactory, CordisSubagentRuntime, DshHost } from "./host.js";
+import { installHeliumHooks } from "./hooks.js";
 import {
   SUBAGENT_TRANSPORT,
   authHeaders,
@@ -141,6 +143,7 @@ export class DshProvider implements Provider {
 
   #ctx: Promise<Context> | undefined;
   #host: DshHost | undefined;
+  #workspacesDir: string | undefined;
 
   constructor(
     private readonly env: NodeJS.ProcessEnv = process.env,
@@ -220,6 +223,33 @@ export class DshProvider implements Provider {
       ctx,
       selectedTools(selection.options).filter((tool) => wanted.has(tool.name)),
     );
+    // Nothing trimmed a tool result before this line existed: `applyOutputPolicy`
+    // had no caller, and a 50 KB report went into a context whole. SPILL, not
+    // summarise — the full bytes are written beside the run's own workspace and
+    // only the head plus that path enter the context. No second model call, so
+    // the fix cannot itself cost tokens.
+    //
+    // No `audit`/`budget`: `Provider.run` is handed a work order, never the
+    // run's audit store, so the two budget-aware seams stay uninstalled rather
+    // than being fed a number this file would have to invent.
+    // Beside the run's host workspace, which is the parent agent's own cwd —
+    // the nearest thing to a directory the run owns. Whether the CHILD can read
+    // it back depends on the role's tool list: a role restricted to a tenant's
+    // ow_* tools has no file reader, and for it the path is the operator's
+    // handle on what was cut, not the model's.
+    const spillDir = join(this.#workspacesDir!, runId, "spill");
+    let spilled = 0;
+    const disposeHooks = installHeliumHooks(ctx, {
+      runId,
+      role: work.role,
+      spill: (bytes: string) => {
+        mkdirSync(spillDir, { recursive: true });
+        spilled += 1;
+        const path = join(spillDir, `tool-output-${String(spilled)}.txt`);
+        writeFileSync(path, bytes, "utf8");
+        return path;
+      },
+    });
     try {
       return await host.run(runId, work, selection, signal);
     } catch (error: unknown) {
@@ -236,6 +266,7 @@ export class DshProvider implements Provider {
       }
       throw new ProviderRunFailure("provider-error", message);
     } finally {
+      disposeHooks();
       dispose();
       await host.close(runId).catch(() => undefined);
     }
@@ -253,10 +284,11 @@ export class DshProvider implements Provider {
       apiKeyEnv: keyEnv,
       headers: authHeaders(this.env[keyEnv]),
     }).then((ctx) => {
+      this.#workspacesDir = join(root, "workspaces");
       this.#host = new DshHost({
         subagents: new CordisSubagentRuntime(ctx.subagents),
         parents: new CordisRunParentFactory(ctx),
-        workspacesDir: join(root, "workspaces"),
+        workspacesDir: this.#workspacesDir,
         maxDepth: 1,
       });
       return ctx;

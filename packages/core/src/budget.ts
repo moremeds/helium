@@ -93,8 +93,33 @@ export class BudgetExhausted extends Error {
   }
 }
 
-/** Default byte ceiling above which a tool result is summarised (design §5). */
-export const SUMMARISE_OVER_BYTES = 8 * 1024;
+/** Default byte ceiling above which a tool result is summarised (design §5).
+ *
+ *  Set from measurement, not from taste. Every `ow_*` tool result in the 250
+ *  recorded laptop sessions was sized on 2026-09-03; the distribution has a
+ *  gap, and the ceiling sits in it:
+ *
+ *    output a persona actually reads      max bytes   over 64 KiB / calls
+ *      ow_uw_ticker_metrics                 111,513          7 / 13
+ *      ow_argon_metrics                      61,944          0 / 69
+ *      ow_reports                            52,866          0 / 35
+ *      ow_uw_chain                           32,520          0 / 97
+ *    output that is bulk, not signal
+ *      ow_macro_rates                       270,981   (4,391 rows, 145 unique)
+ *      ow_uw_market_state                   139,512   (390 per-minute prints)
+ *
+ *  8 KB spilled 6 of the 7 tools above — including the IV term structure and
+ *  the chain the structure-designer quotes strike by strike — so it did not
+ *  bound cost, it deleted inputs. 64 KB still spills 7 of 13 ticker-metrics
+ *  calls. 128 KiB clears the largest legitimate output by ~17% and still
+ *  catches both blowups, which is the whole job of this number: it is a net
+ *  under unbounded output, not a substitute for trimming a chatty tool
+ *  (issue #81). */
+export const SUMMARISE_OVER_BYTES = 128 * 1024;
+
+/** How much of an oversized output still enters the context. Enough to see
+ *  WHAT the output is and decide whether to go read the rest. */
+export const HEAD_CHARS = 2000;
 
 export interface SummariseDecision {
   summarised: boolean;
@@ -130,9 +155,13 @@ export async function applyOutputPolicy(
 
   const spillPath =
     options.spill === undefined ? undefined : await options.spill(output);
+  // The notice has to be unambiguous about what the head IS. A 2000-character
+  // slice of prose is a readable opening; the same slice of a structured
+  // payload ends wherever the 2000th character fell, mid-object, and a reader
+  // that treats it as the whole answer answers from half a record.
   const summary =
     options.summarise === undefined
-      ? `${output.slice(0, 2000)}\n…[${bytes} bytes truncated]`
+      ? `${output.slice(0, HEAD_CHARS)}\n…[HEAD ONLY — first ${HEAD_CHARS} characters of ${bytes} bytes, cut at a fixed offset and possibly mid-record, so it is not necessarily complete or parseable]`
       : await options.summarise(output);
   return {
     summarised: true,

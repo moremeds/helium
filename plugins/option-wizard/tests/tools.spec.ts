@@ -140,6 +140,20 @@ describe("absent environment", () => {
     );
   });
 
+  it("tells an over-long ow_spot call to batch, instead of a bare Zod path", async () => {
+    // The 2026-09-03 premarket run: gex-reporter sent 63 tickers, read
+    // `too_big` off `tickers`, and re-sent the same 63 — one wasted model turn
+    // per phase. The refusal has to say what to do next, in the refusal.
+    const tickers = [
+      "SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "SLV", "XLF", "XLE", "XLK",
+      "XLV", "XLI", "XLP", "XLU", "XLY", "XLB", "XLC", "XLRE", "AAPL", "MSFT",
+      "NVDA", "AMZN", "GOOGL", "META", "TSLA",
+    ];
+    expect(tickers).toHaveLength(25);
+    await expect(tool("ow_spot").run({ tickers })).rejects.toThrow(/24/u);
+    await expect(tool("ow_spot").run({ tickers })).rejects.toThrow(/split/u);
+  });
+
   it("ow_uw_chain asks for the spot before the chain, and stops when there is none", async () => {
     // The spot is not decoration on a chain — it is what makes a strike mean
     // anything. So the ordering is load-bearing: TradingView is consulted
@@ -160,6 +174,92 @@ describe("absent environment", () => {
         },
       ),
     ).rejects.toThrow("no spot for SPY");
+  });
+
+  it("ow_uw_chain signs otmPct: positive out of the money on both rights", async () => {
+    // SPY at 761.78 is the real spot of the 2026-09-02 run this repo's render
+    // fixture comes from. The two contracts carry no NBBO here because the sign
+    // of the distance is what is under test, and a quote nobody recorded would
+    // be an invented price. The expiry is built from today so the DTE band
+    // stays satisfied instead of expiring into a failing test.
+    const expiry = new Date(Date.now() + 43 * 86_400_000);
+    const yymmdd =
+      String(expiry.getUTCFullYear() % 100).padStart(2, "0") +
+      String(expiry.getUTCMonth() + 1).padStart(2, "0") +
+      String(expiry.getUTCDate()).padStart(2, "0");
+    const iso = `${String(expiry.getUTCFullYear())}-${String(expiry.getUTCMonth() + 1).padStart(2, "0")}-${String(expiry.getUTCDate()).padStart(2, "0")}`;
+    const json = await tool("ow_uw_chain", { OW_UW_API_KEY: "k" }).run(
+      { ticker: "SPY", minDte: 21, maxDte: 60 },
+      {
+        fetchImpl: (async (url: URL) => {
+          if (url.pathname.endsWith("/stock-state"))
+            return new Response(JSON.stringify({ data: { close: 761.78 } }));
+          if (url.pathname.endsWith("/expiry-breakdown"))
+            return new Response(
+              JSON.stringify({ data: [{ expires: iso, open_interest: 100000, volume: 5000 }] }),
+            );
+          return new Response(
+            JSON.stringify({
+              data: [
+                { option_symbol: `SPY${yymmdd}P00740000`, open_interest: 1000 },
+                { option_symbol: `SPY${yymmdd}C00780000`, open_interest: 1000 },
+              ],
+            }),
+          );
+        }) as unknown as typeof fetch,
+      },
+    );
+    const contracts = JSON.parse(json).expiries[0].contracts as Array<{
+      right: string;
+      strike: number;
+      otmPct: number;
+    }>;
+    // (761.78 - 740) / 761.78 = +2.86%; (780 - 761.78) / 761.78 = +2.39%.
+    // Both are OUT of the money, so both are positive — a put below spot and a
+    // call above it, which is the pair a signed field has to get right.
+    expect(contracts.find((c) => c.right === "P")!.otmPct).toBe(2.86);
+    expect(contracts.find((c) => c.right === "C")!.otmPct).toBe(2.39);
+  });
+
+  it("ow_price_structure prices a debit spread's max loss as the debit, not the width", async () => {
+    // The exact error that reached a reader on 09-02. Hand-computed, in the
+    // convention of math.spec.ts: buy 555C @4.00 / sell 565C @1.50 is a 2.50
+    // debit on a 10-wide spread, so max loss is 250 and max gain 750 — a model
+    // that "knows" max loss = width writes 1000 and sizes the trade wrong.
+    const json = await tool("ow_price_structure").run({
+      spot: 560,
+      legs: [
+        { right: "call", action: "buy", strike: 555, expiry: "2026-09-30", mid: 4.0 },
+        { right: "call", action: "sell", strike: 565, expiry: "2026-09-30", mid: 1.5 },
+      ],
+    });
+    expect(JSON.parse(json)).toMatchObject({
+      kind: "priced",
+      net: -2.5,
+      maxLoss: 250,
+      maxGain: 750,
+      breakevens: [557.5],
+      width: 10,
+      // The exits, multiplied out by the tool: half of the 750 max gain, and
+      // for a DEBIT the stop is the debit paid (250), not twice a credit that
+      // was never received. Same per-spread dollars as maxGain/maxLoss.
+      exit: { takeProfit: 375, stop: 250 },
+    });
+  });
+
+  it("ow_strike_check reads moneyness off the spot instead of asking a model", async () => {
+    // A 180 put under a 183.60 spot was called in the money on 09-03. It is a
+    // comparison; comparisons belong in code.
+    const json = await tool("ow_strike_check", { OW_UW_API_KEY: "k" }).run(
+      { ticker: "SPY", strikes: [{ strike: 740, right: "put" }, { strike: 780, right: "put" }] },
+      {
+        fetchImpl: (async () =>
+          new Response(JSON.stringify({ data: { close: 761.78 } }))) as unknown as typeof fetch,
+      },
+    );
+    const rows = JSON.parse(json).rows as Array<{ moneyness: string; distPct: number }>;
+    expect(rows[0]).toMatchObject({ moneyness: "OTM", distPct: -2.86 });
+    expect(rows[1]).toMatchObject({ moneyness: "ITM", distPct: 2.39 });
   });
 
   it("ow_tv_watchlist refuses rather than returning an empty universe", async () => {
