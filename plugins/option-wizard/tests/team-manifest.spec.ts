@@ -107,15 +107,25 @@ describe("phase remits", () => {
 describe("close settles the day it just watched", () => {
   const task = (id: string) => manifest.tasks.find((t) => t.id === id);
 
-  it("markout settles today's own calls, by horizon", () => {
+  it("markout settles today's own calls against their own levels", () => {
     // It used to read days:2 phase:close and days:8 phase:weekly — a fixed
-    // window, which can never contain this morning's report no matter what
-    // horizon a thesis declared.
+    // window, which can never contain this morning's report.
     const prompt = task("markout")?.prompt ?? "";
     expect(prompt).toContain("phase:premarket");
     expect(prompt).toContain("phase:intraday");
-    expect(prompt).toContain("horizon");
+    expect(prompt).toContain("invalidation");
     expect(prompt).toContain("平仓建议");
+  });
+
+  it("markout may settle only ids the tool returned", () => {
+    // 2026-09-02 close: markout reported six intraday theses settled — MSFT
+    // 505/510, AVGO 375/385, IWM 290/285, TLT 82/81.5 — against a premarket
+    // that proposed none of them. Every one of those tickers appears in that
+    // report's GEX table, which is what survived the tool-output cut. Handed a
+    // ticker table and told to settle proposals, it settled the ticker table,
+    // and recap carried it into the delivered mail verbatim.
+    const prompt = task("markout")?.prompt ?? "";
+    expect(prompt).toContain("ONLY ids the tool returned");
   });
 
   it("close writes today's story", () => {
@@ -137,13 +147,20 @@ it("every narrative task replies as one sections JSON", () => {
   }
 });
 
-it("horizon is declared where a proposal is born, not only where it is checked", () => {
+it("the settlement level is demanded where a proposal is born, not only where it is checked", () => {
   // 2026-09-02 premarket: the contract lived only in the review prompt, the
-  // designer emitted no horizon, and the reviewer correctly dropped all eight
-  // proposals — "Missing `horizon` field; thesis settlement timeline
-  // undefined", eight times. A field is declared where it originates.
+  // designer emitted nothing, and the reviewer correctly dropped all eight
+  // proposals — eight identical rejections. A field is demanded where it
+  // originates.
+  //
+  // What is demanded changed on 2026-09-03. `horizon` asked for one of three
+  // words and got `multiday` thirteen times out of thirteen: the model took
+  // the value with the least resistance, the close run's three-state
+  // settlement degraded to "not due yet", and the field carried no
+  // information. A level and a side cannot be shrugged at the same way, and
+  // unlike a word it can be checked against a spot.
   for (const id of ["design", "review"])
     expect(manifest.tasks.find((t) => t.id === id)?.prompt ?? "", id).toContain(
-      "intraday / day / multiday",
+      '"side": "above"|"below"',
     );
 });

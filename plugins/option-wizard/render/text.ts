@@ -8,6 +8,7 @@
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
+import { invalidationLabel } from "./math.js";
 
 /**
  * The header of the payoff row, which says what its columns ARE. With a quoted
@@ -51,7 +52,7 @@ function pricingLines(candidate: CandidateView): string[] {
 function candidateLines(candidate: CandidateView): string[] {
   const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
   return [
-    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · horizon ${candidate.horizon}`,
+    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · 失效 ${invalidationLabel(candidate.invalidation)}`,
     ...candidate.legs.map(
       (leg) =>
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +

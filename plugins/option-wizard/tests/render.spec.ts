@@ -1,4 +1,8 @@
 /**
+ * `invalidation` is the fixture's own addition — the field did not exist on
+ * 2026-09-02. Each level is one of the proposal's OWN strikes, already in this
+ * file and unchanged from the run; no market value is invented or implied.
+ *
  * Fixture built from the real successful run of 2026-09-02 (`run-84a83ad2`):
  * the review step's JSON, verbatim except for the `mid` fields, which that run
  * did not yet carry and which are taken from the same proposals' own quoted
@@ -21,7 +25,7 @@ const REVIEW_JSON = {
   proposals: [
     {
       ticker: "SPY",
-      horizon: "multiday",
+      invalidation: [{ level: 750, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -47,7 +51,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "QQQ",
-      horizon: "day",
+      invalidation: [{ level: 695, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -73,7 +77,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "TLT",
-      horizon: "multiday",
+      invalidation: [{ level: 81, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -517,43 +521,79 @@ it("the renderer never branches on phase", () => {
   expect(offenders).toEqual([]);
 });
 
-describe("horizon", () => {
-  it("mints the id here and carries the model's horizon", () => {
+describe("invalidation", () => {
+  const rebuilt = (text: string) =>
+    buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text },
+        ],
+      } as never),
+      SPEC,
+    ).candidates;
+
+  it("mints the id here and carries the levels the thesis dies at", () => {
     const spy = buildView(report(), SPEC).candidates[0]!;
     expect(spy.id).toBe("SPY-2026-09-02-1");
-    expect(spy.horizon).toBe("multiday");
+    expect(spy.invalidation).toEqual([{ level: 750, side: "above" }]);
     expect(buildView(report(), SPEC).candidates[1]!.id).toBe("QQQ-2026-09-02-2");
   });
 
-  it("drops a proposal with no horizon — a thesis that never comes due cannot be settled", () => {
-    const stripped = REVIEW_TEXT.replace(/\s*"horizon": "[a-z]+",\n/g, "");
+  it("says which thesis it dropped instead of an unexplained empty brief", () => {
+    // The failure this guards is 2026-09-02's, one layer down: an empty brief
+    // that looks the same whether the gate worked or the pipeline broke.
+    const prose = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/g,
+      '"invalidation": "SPY breaks below 560"',
+    );
     const built = buildView(
       report({
         steps: [
-          { task: "review", role: "risk-reviewer", mode: "model", text: stripped },
+          { task: "review", role: "risk-reviewer", mode: "model", text: prose },
         ],
       } as never),
       SPEC,
     );
-    expect(built.candidates).toEqual([]);
+    // GLD is the reviewer's own rejection; the gate's three land beside it, in
+    // one list, so the reader sees every proposal that did not make it and why.
+    expect(built.riskList.map((row) => row.ticker)).toEqual(["GLD", "SPY", "QQQ", "TLT"]);
+    expect(built.riskList[3]!.reason).toContain("失效价");
   });
 
-  it("refuses a horizon the close run would not know how to settle", () => {
-    const bogus = REVIEW_TEXT.replace(/"horizon": "[a-z]+"/g, '"horizon": "soon"');
-    const built = buildView(
-      report({
-        steps: [
-          { task: "review", role: "risk-reviewer", mode: "model", text: bogus },
-        ],
-      } as never),
-      SPEC,
+  it("drops a thesis whose 失效价 is prose — nobody can ever settle it", () => {
+    // The shape the 2026-09-02 premarket designer actually emitted, verbatim.
+    // It reads well and it is unsettleable: no run can compare a spot to a
+    // sentence, so the thesis would stay open forever.
+    const prose = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/g,
+      '"invalidation": "SPY breaks below 560; broad market reprices off rate fears"',
     );
-    expect(built.candidates).toEqual([]);
+    expect(rebuilt(prose)).toEqual([]);
   });
 
-  it("prints the id and horizon where a reader can quote them back", () => {
+  it("drops a thesis with no invalidation at all", () => {
+    expect(rebuilt(REVIEW_TEXT.replace(/\s*"invalidation": \[[^\]]*\],\n/g, ""))).toEqual([]);
+  });
+
+  it("keeps two levels for a two-sided structure", () => {
+    const condor = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"},{"level":720,"side":"below"}]',
+    );
+    expect(rebuilt(condor)[0]!.invalidation).toHaveLength(2);
+  });
+
+  it("refuses a third level — a thesis with three exits has no shape", () => {
+    const three = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"},{"level":720,"side":"below"},{"level":700,"side":"below"}]',
+    );
+    expect(rebuilt(three).map((c) => c.ticker)).not.toContain("SPY");
+  });
+
+  it("prints the id and the levels where a reader can quote them back", () => {
     const text = renderText(buildView(report(), SPEC));
     expect(text).toContain("[SPY-2026-09-02-1]");
-    expect(text).toContain("horizon multiday");
+    expect(text).toContain("失效 750↑");
   });
 });

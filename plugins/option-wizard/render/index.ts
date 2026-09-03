@@ -15,15 +15,31 @@ import { priceStructure, width, type Leg, type Pricing } from "./math.js";
 import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
 
+/**
+ * One price that ends a thesis, and which way it has to go to do it.
+ *
+ * A number rather than the model's prose because this is the only field a
+ * settlement can be CHECKED against: the close run compares it to a spot, and
+ * a gate can ask whether a settled level ever appeared in the report. The
+ * prose form it replaced ("XLK breaks 186 to upside OR breaks 175 to
+ * downside") reads well and settles nothing.
+ */
+export interface Invalidation {
+  level: number;
+  side: "above" | "below";
+}
+
 export interface CandidateView {
   /** `<TICKER>-<report day>-<n>`, minted here, never written by the model.
    *  An id is bookkeeping, not judgement: asking the model to spell one
    *  invites typos and collisions, and those are the only two errors that
    *  can break a look-back. */
   id: string;
-  /** When this thesis is due to be settled — the model's own call. The close
-   *  run looks for exactly this. */
-  horizon: "intraday" | "day" | "multiday";
+  /** The levels that kill this thesis, as the model committed to them in
+   *  writing. This is what a later run settles against: 反转 is a breach of one
+   *  of these on its own side, and nothing else. Usually one; a two-sided
+   *  structure gets two. */
+  invalidation: Invalidation[];
   ticker: string;
   strategy: string;
   expiry: string;
@@ -33,6 +49,11 @@ export interface CandidateView {
   pricing: Pricing;
   /** Widest strike span, per share; 0 when single-strike. */
   width: number;
+  /** Where the thesis is trying to get to, in the model's own words. Prose,
+   *  deliberately: 反转 triggers a 平仓建议 and so must be mechanical, while
+   *  加强 / 不变 are judgement and read better as the sentence the designer
+   *  actually wrote. */
+  target: string;
   rationale: string;
 }
 
@@ -73,7 +94,6 @@ export interface BriefView {
   empty?: string;
 }
 
-const HORIZONS = new Set(["intraday", "day", "multiday"]);
 const RIGHTS = new Set(["call", "put"]);
 const ACTIONS = new Set(["buy", "sell"]);
 
@@ -127,6 +147,35 @@ function toLegs(raw: unknown): Leg[] | null {
     });
   }
   return legs;
+}
+
+/**
+ * The model's `invalidation`, kept only when it is a level and a side.
+ *
+ * This replaced `horizon`, and the swap is the point: `horizon` asked the model
+ * to pick one of three words, so it picked the one with least resistance —
+ * thirteen of thirteen proposals came back `multiday` and the close run's
+ * three-state settlement degraded to "not due yet". A level is not a word the
+ * model can shrug at; it either states a number and a direction or it does not
+ * get through.
+ */
+function toInvalidation(raw: unknown): Invalidation[] | null {
+  // A single object rather than an array is the one shape worth tolerating:
+  // it is the model writing the common case (one level) the natural way, and
+  // dropping an otherwise-sound proposal over a bracket is a worse trade.
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const out: Invalidation[] = [];
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const side = row.side;
+    if (typeof row.level !== "number" || !Number.isFinite(row.level)) continue;
+    if (side !== "above" && side !== "below") continue;
+    out.push({ level: row.level, side });
+  }
+  // Two is a two-sided structure; a third level means the thesis has no shape,
+  // and settling against the wrong one of three is worse than not shipping it.
+  return out.length === 0 || out.length > 2 ? null : out;
 }
 
 /** Spot as the reviewer quoted it, e.g. "**SPY (spot 761.78):**". */
@@ -221,6 +270,83 @@ function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
   return sections;
 }
 
+/**
+ * The reviewer's surviving proposals, as the ledger a later run settles.
+ *
+ * Exported because `ow_reports` calls it too. That is not tidiness: the id is
+ * minted here from a positional counter, so if the tool re-implemented the
+ * formula the two could silently drift and a settlement would cite an id that
+ * was never mailed. One function over one immutable report file means the id
+ * the reader saw and the id the close run settles are the same bytes by
+ * construction.
+ */
+/**
+ * A rejection is not a silent `continue`.
+ *
+ * On 2026-09-02 the reviewer itself dropped eight proposals for a missing
+ * `horizon` and wrote all eight into its own risk list, so the reader could see
+ * why the brief was empty. A drop that happens HERE has no such author, and an
+ * unexplained 今日无候选 is the one output that looks identical whether the
+ * gate worked or the pipeline broke. So the gate reports its own refusals and
+ * the brief prints them beside the model's.
+ */
+export interface Ledger {
+  candidates: CandidateView[];
+  rejected: Array<{ ticker: string; reason: string }>;
+}
+
+export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
+  const parsed = extractJson(reviewText);
+  if (parsed === null || !Array.isArray(parsed.proposals))
+    return { candidates: [], rejected: [] };
+  const spots = spotsFrom(reviewText);
+
+  const candidates: CandidateView[] = [];
+  const rejected: Array<{ ticker: string; reason: string }> = [];
+  for (const entry of parsed.proposals) {
+    if (entry === null || typeof entry !== "object") continue;
+    const proposal = entry as Record<string, unknown>;
+    const legs = toLegs(proposal.legs);
+    if (legs === null || typeof proposal.ticker !== "string") continue;
+    // A thesis with no level to breach cannot be settled: the close run would
+    // not know whether silence about it means "still open" or "nobody looked".
+    // Refusing it here is cheaper than carrying a debt nobody can collect.
+    const invalidation = toInvalidation(proposal.invalidation);
+    if (invalidation === null) {
+      rejected.push({
+        ticker: proposal.ticker,
+        reason: "失效价不是可结算的价位（需要 level + side），渲染层丢弃",
+      });
+      continue;
+    }
+    const expiry = legs[0]!.expiry;
+    const spot = spots.get(proposal.ticker);
+    const days = Math.round(
+      (Date.parse(`${expiry}T00:00:00Z`) -
+        Date.parse(`${dateEtDay}T00:00:00Z`)) /
+        86_400_000,
+    );
+    candidates.push({
+      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
+      invalidation,
+      ticker: proposal.ticker,
+      strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
+      expiry,
+      dte: Number.isFinite(days) ? days : null,
+      legs,
+      // Without a quoted spot the extremes and breakevens are still exact —
+      // only the +/-% row needs one, and priceStructure prints the payoff at
+      // the strikes instead of inventing a price to measure from.
+      pricing: priceStructure(legs, spot),
+      width: width(legs),
+      target: typeof proposal.target === "string" ? proposal.target : "",
+      rationale:
+        typeof proposal.rationale === "string" ? proposal.rationale : "",
+    });
+  }
+  return { candidates, rejected };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const dateEtDay = report.day;
   const degradation = degradationFrom(report);
@@ -289,44 +415,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     };
   }
 
-  const spots = spotsFrom(review?.text ?? "");
-
-  const candidates: CandidateView[] = [];
-  for (const entry of parsed.proposals) {
-    if (entry === null || typeof entry !== "object") continue;
-    const proposal = entry as Record<string, unknown>;
-    const legs = toLegs(proposal.legs);
-    if (legs === null || typeof proposal.ticker !== "string") continue;
-    // A thesis that does not say when it comes due cannot be settled: the
-    // close run would not know whether silence about it means "still open"
-    // or "nobody looked". Refusing it here is cheaper than carrying a debt
-    // nobody can ever collect.
-    const horizon = proposal.horizon;
-    if (typeof horizon !== "string" || !HORIZONS.has(horizon)) continue;
-    const expiry = legs[0]!.expiry;
-    const spot = spots.get(proposal.ticker);
-    const days = Math.round(
-      (Date.parse(`${expiry}T00:00:00Z`) -
-        Date.parse(`${dateEtDay}T00:00:00Z`)) /
-        86_400_000,
-    );
-    candidates.push({
-      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
-      horizon: horizon as CandidateView["horizon"],
-      ticker: proposal.ticker,
-      strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
-      expiry,
-      dte: Number.isFinite(days) ? days : null,
-      legs,
-      // Without a quoted spot the extremes and breakevens are still exact —
-      // only the +/-% row needs one, and priceStructure prints the payoff at
-      // the strikes instead of inventing a price to measure from.
-      pricing: priceStructure(legs, spot),
-      width: width(legs),
-      rationale:
-        typeof proposal.rationale === "string" ? proposal.rationale : "",
-    });
-  }
+  const { candidates, rejected } = candidatesFrom(review?.text ?? "", dateEtDay);
 
   const riskList = Array.isArray(parsed.riskList)
     ? parsed.riskList.flatMap((entry) => {
@@ -337,6 +426,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
           : [];
       })
     : [];
+  riskList.push(...rejected);
 
   if (candidates.length === 0 && riskList.length === 0) {
     if (sections.length > 0) return { ...base, sections, regime };

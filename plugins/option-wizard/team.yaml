@@ -252,13 +252,17 @@ tasks:
     phases: [close]
     requires: [tool.use, long.context]
     prompt: >-
-      Call ow_reports with days:1 phase:premarket and days:1 phase:intraday
-      for today's own calls, then days:5 phase:close for the theses still open
-      from earlier in the week. Settle by horizon, not by age: an `intraday`
-      or a `day` thesis is due today and MUST get a verdict; a `multiday` one
-      stays open unless it 反转. Every thesis gets 加强 / 不变 / 反转 by its
-      id, one line, with the price that decided it. Anything you call 反转
-      gets a 平仓建议 in the same line.
+      Call ow_reports with days:1 phase:premarket for today's own calls,
+      days:1 phase:intraday steps:["drift"] for what the midday check already
+      settled, and days:5 phase:close for the theses still open from earlier
+      in the week. Every id the tool returns gets exactly one line, and you
+      settle ONLY ids the tool returned — if a ticker is not in that list it
+      had no proposal, whatever else you have seen it in today.
+      Nothing comes due by the calendar; a thesis is open until a level breaks.
+      For each id compare today's price to its `invalidation`: breached on its
+      stated side → 反转, plus a 平仓建议 in the same line. Otherwise 加强 if
+      it has moved toward its `target`, 不变 if it has not. Quote the price
+      that decided it, every time.
       Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
 
   - id: regime
@@ -309,10 +313,13 @@ tasks:
       screening step and there is not meant to be one. Propose defined-risk
       structures consistent with the regime verdict, with legs, a real NBBO mid
       per leg, and all four of entry trigger, add level, 失效价 and target.
-      Every proposal also carries `horizon`: one of intraday / day / multiday.
-      It is YOUR call and it says when this thesis comes due to be settled —
-      the close run looks for exactly that, and the reviewer drops a proposal
-      that does not declare one. Do NOT write an id; the harness mints it.
+      Write 失效价 as `invalidation`: a list of {"level": <number>, "side":
+      "above"|"below"} — the price that kills this thesis and which way it has
+      to go to do it. One entry normally, two for a two-sided structure, never
+      three. A proposal whose invalidation is prose instead of a level is
+      dropped before it reaches the reader, because a later run settles a
+      thesis by comparing a spot to this number and nothing else can be
+      checked. Do NOT write an id; the harness mints it.
 
   - id: review
     role: risk-reviewer
@@ -321,12 +328,13 @@ tasks:
     requires: [long.context]
     prompt: >-
       Keep at most five proposals, numbered. Move the rest to the risk list
-      with the reason each was dropped, drop anything missing a 失效价, and end
-      with the 决策块.
-      Every proposal carries `horizon`: one of intraday / day / multiday. It is
-      YOUR call and it says when this thesis comes due to be settled — the
-      close run looks for exactly that, and a proposal without one is dropped
-      before it reaches the reader. Do NOT write an id; the harness mints it.
+      with the reason each was dropped, and end with the 决策块.
+      Every proposal you keep carries `invalidation`: a list of {"level":
+      <number>, "side": "above"|"below"}. One entry normally, two for a
+      two-sided structure. Drop any proposal that states its 失效价 as prose
+      rather than a level — the close run settles a thesis by comparing a spot
+      to this number, so a sentence there is a thesis nobody can ever settle.
+      Do NOT write an id; the harness mints it.
 
   - id: drift
     role: drift-watcher
@@ -335,9 +343,11 @@ tasks:
     requires: [tool.use, reason.deep, long.context]
     prompt: >-
       Call ow_reports with days:1 phase:premarket for this morning's report.
-      For every proposal id in it, say whether the thesis is 加强 / 不变 /
-      反转 against the levels you were just handed, and why, in one line each,
-      quoting the price that decided it. When nothing moved, that IS the
+      For every proposal id it returns — and no ticker it does not — say
+      whether the thesis is 加强 / 不变 / 反转 against the levels you were
+      just handed, in one line each, quoting the price that decided it. 反转
+      is its `invalidation` breached on the stated side; 加强 is movement
+      toward its `target`. When nothing moved, that IS the
       answer: say 无变化 and name what you checked. Never invent a change to
       fill the mail. Anything you call 反转 gets a 平仓建议 in the same line.
       Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
@@ -360,8 +370,10 @@ tasks:
     phases: [weekly]
     requires: [tool.use, long.context]
     prompt: >-
-      Call ow_reports with days:7 phase:close and write the week from those
-      five reports alone. Two halves, both required: 上周总结 — settle each
+      Call ow_reports with days:7 phase:close steps:["markout","recap"] and
+      write the week from those five reports alone. If the tool reports
+      `dropped`, say so in 上周总结 and settle from the proposals it did
+      return — never reconstruct a dropped narrative. Two halves, both required: 上周总结 — settle each
       numbered call by id, one section, and name the week's single largest
       divergence; 下周展望 — next week's A/B/C/D with an explicit base case
       and its reason, one section per path.
@@ -375,7 +387,7 @@ tasks:
     requires: [tool.use, long.context]
     prompt: >-
       Call ow_frank for his newest note, and ow_reports with days:3
-      phase:weekly for ours. Compare his recap against our weekly markout and
+      phase:weekly steps:["weekly"] for ours. Compare his recap against our weekly markout and
       his outlook against our base case; settle each disagreement with the real
       prices already in our reports.
       Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}

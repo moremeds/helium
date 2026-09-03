@@ -192,3 +192,14 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
           }),
   };
 }
+
+/** "失效 215↑" — or "失效 186↑ / 175↓" for a two-sided structure. The arrow is
+ *  the side the price has to reach to kill the thesis, so a reader settles it
+ *  by eye without re-reading the rationale. */
+export function invalidationLabel(
+  levels: Array<{ level: number; side: "above" | "below" }>,
+): string {
+  return levels
+    .map((row) => `${String(row.level)}${row.side === "above" ? "↑" : "↓"}`)
+    .join(" / ");
+}

@@ -16,6 +16,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
+import { SUMMARISE_OVER_BYTES } from "@helium/core";
+import { candidatesFrom, type CandidateView } from "../render/index.js";
 import {
   ProposalSchema,
   evaluateProposal,
@@ -578,7 +580,26 @@ const FRANK_PUBLICATION = "https://franktrading.substack.com";
 const ReportsParams = z.object({
   phase: z.string().min(1).max(64).optional(),
   days: z.number().int().min(1).max(10),
+  /** Task ids whose prose to include on top of the ledger. Absent means the
+   *  ledger alone, which is what a settlement step wants. */
+  steps: z.array(z.string().min(1).max(64)).max(6).optional(),
 });
+
+/** `## <task> — <role>`, written by the CLI's own report writer. Splitting on
+ *  it is not guesswork about a model's formatting: both ends of this are ours. */
+const STEP_HEADING = /^## ([a-z0-9-]+) — .*$/gmu;
+
+function stepsOf(markdown: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const found = [...markdown.matchAll(STEP_HEADING)];
+  for (let i = 0; i < found.length; i += 1) {
+    const here = found[i]!;
+    const start = here.index + here[0].length;
+    const end = i + 1 < found.length ? found[i + 1]!.index : markdown.length;
+    out.set(here[1]!, markdown.slice(start, end).trim());
+  }
+  return out;
+}
 
 /** `option-wizard-2026-09-02-premarket.md` -> {date, phase}. Anything that does
  *  not match is not one of our reports and is ignored rather than guessed at. */
@@ -1241,22 +1262,37 @@ export function buildTools(cfg: {
     },
     {
       // Reads what THIS tenant wrote on earlier runs (delivery-markdown,
-      // <stateRoot>/reports). It is the only way a later phase can grade
-      // an earlier one, and it needs no database: the report file IS the
-      // record. `days` is capped at 10 because the whole point of the cap is
-      // to keep a markout step from pulling a fortnight of prose into context
-      // (doctrine 4).
+      // <stateRoot>/reports). It is the only way a later phase can grade an
+      // earlier one, and it needs no database: the report file IS the record.
+      //
+      // It returns the LEDGER, not the prose. The first version returned each
+      // report's full markdown, and on 2026-09-02 that shipped a fabricated
+      // settlement into a delivered email: the premarket report is 50,912
+      // bytes, core's output policy cuts a tool result at 2,000 characters
+      // with no summariser wired up (packages/core/src/budget.ts), and the
+      // surviving head is the run header and the GEX table — so markout was
+      // asked to settle proposals by id while holding nothing but a ticker
+      // table, and it settled the ticker table. The proposals it needs are
+      // ~2 KB; the prose that buried them was never what it wanted.
+      //
+      // The ids are minted by `candidatesFrom`, the same function the renderer
+      // builds the email with, so an id settled here is an id that was mailed.
       name: "ow_reports",
       description:
-        "This tenant's own past daily reports, newest first. Filter by phase; `days` bounds how far back to look.",
+        "This tenant's own past calls, newest first: each report's numbered proposals with the id, the 失效 levels and the target. `steps` adds named steps' prose on top (e.g. drift, markout, recap) when the narrative is what you need.",
       paramsSchema: ReportsParams,
       mutating: false,
       dshParams: {
         phase: { type: "string", description: "premarket | intraday | close | weekly | frank" },
         days: { type: "number", required: true, description: "How many days back, 1-10." },
+        steps: {
+          type: "array",
+          description:
+            "Task ids whose prose to include, e.g. [\"drift\"] or [\"markout\",\"recap\"]. Omit for the proposals alone.",
+        },
       },
       async run(args: Record<string, unknown>): Promise<string> {
-        const { phase, days } = ReportsParams.parse(args);
+        const { phase, days, steps } = ReportsParams.parse(args);
         const dir = join(cfg.stateRoot, "reports");
         let names: string[];
         try {
@@ -1273,7 +1309,12 @@ export function buildTools(cfg: {
         // disagrees with them by a whole day whenever the two are on different
         // dates — which, for a HK-scheduled run reading ET-dated files, is
         // most of the day.
-        const rows = [];
+        const rows: Array<{
+          date: string;
+          phase: string;
+          candidates: CandidateView[];
+          steps?: Record<string, string>;
+        }> = [];
         const seen = new Set<string>();
         for (const name of names.sort().reverse()) {
           const match = REPORT_NAME.exec(name);
@@ -1284,9 +1325,55 @@ export function buildTools(cfg: {
             seen.add(date);
           }
           if (phase !== undefined && found !== phase) continue;
-          rows.push({ date, phase: found, text: await readFile(join(dir, name), "utf8") });
+          const byStep = stepsOf(await readFile(join(dir, name), "utf8"));
+          rows.push({
+            date,
+            phase: found,
+            // A report with no `review` step (intraday, weekly, frank) has no
+            // proposals of its own, and an empty list is the honest answer —
+            // its content is prose and `steps` is how to ask for it.
+            candidates: candidatesFrom(byStep.get("review") ?? "", date).candidates,
+            ...(steps === undefined
+              ? {}
+              : {
+                  steps: Object.fromEntries(
+                    steps.flatMap((task) => {
+                      const text = byStep.get(task);
+                      return text === undefined ? [] : [[task, text] as const];
+                    }),
+                  ),
+                }),
+          });
         }
-        return JSON.stringify({ dir, reports: rows });
+
+        // Bound the payload HERE rather than let the output policy cut it
+        // downstream. Both drop text; only this one says which text went
+        // missing. A model told "the 09-01 close prose was dropped" reads the
+        // ledger it still has; a model handed a silent 2,000-character stump
+        // fills the gap from the nearest table on screen, which is exactly how
+        // the 2026-09-02 close email came to settle six theses that never
+        // existed. The candidates are never dropped — they are the ledger.
+        const dropped: string[] = [];
+        const payload = (): string =>
+          JSON.stringify({
+            dir,
+            reports: rows,
+            ...(dropped.length === 0
+              ? {}
+              : {
+                  dropped,
+                  note: "Prose dropped to fit the tool-output ceiling; the proposals above are complete. Do not infer the dropped narrative — read fewer days if you need it.",
+                }),
+          });
+        const over = (): boolean =>
+          Buffer.byteLength(payload(), "utf8") > SUMMARISE_OVER_BYTES;
+        for (let i = rows.length - 1; i >= 0 && over(); i -= 1) {
+          const row = rows[i]!;
+          if (row.steps === undefined) continue;
+          delete row.steps;
+          dropped.push(`${row.date}-${row.phase}`);
+        }
+        return payload();
       },
     },
     {
