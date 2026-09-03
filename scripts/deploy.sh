@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy the v2 lane (option-wizard) to the mini. Run from the laptop:
-#   scripts/deploy-v2.sh [phase]
+# Deploy the option-wizard lane (option-wizard) to the mini. Run from the laptop:
+#   scripts/deploy.sh [phase]
 #
 # The optional argument names the phase to kickstart after install (default
 # `premarket`); the five agents themselves are always installed.
@@ -9,7 +9,7 @@
 # there is exactly one copy of this script to maintain; everything below the
 # HELIUM_REMOTE guard runs on the mini and never on the laptop.
 #
-# No version keying and no release directory: the v2 lane deploys the tip of
+# No version keying and no release directory: the option-wizard lane deploys the tip of
 # master in one checkout (doctrine 5 — deploy is minutes, not days).
 #
 # The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
@@ -21,7 +21,7 @@ set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
 # These expand on the MINI: they are read only after the re-exec.
-CHECKOUT="$HOME/projects/helium-v2"
+CHECKOUT="${HELIUM_CHECKOUT:-$HOME/projects/helium-v2}"  # TODO(release-rewrite): drop -v2 suffix when release flow lands
 STATE_ROOT="${HELIUM_STATE_ROOT:-$HOME/.helium/state-v2}"
 COUNTERS="$STATE_ROOT/reports/email-counters.json"
 # The five phased agents. Adding a phase is a new plist plus an entry here --
@@ -40,7 +40,7 @@ if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
 fi
 
 # ---- everything below runs ON the mini ----
-say() { printf '[deploy-v2] %s\n' "$*"; }
+say() { printf '[deploy] %s\n' "$*"; }
 
 # Printed, never assumed: a binary reported "absent" because a non-login ssh
 # dropped /opt/homebrew/bin has already cost this project a debugging session.
