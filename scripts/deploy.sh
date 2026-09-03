@@ -58,6 +58,7 @@ say "sending $SHA ($PHASE) to $HELIUM_HOST"
 tar -cz \
   --exclude='./.git' \
   --exclude='./.worktrees' \
+  --exclude='./.claude' \
   --exclude='./.helium*' \
   --exclude='./.playwright-mcp' \
   --exclude='.DS_Store' \
