@@ -101,7 +101,9 @@ describe("phase remits", () => {
     // ow_macro_rates carries HY OAS and ow_argon_policy_path the hike
     // probabilities; a persona still saying "NO TOOL" would make a role write
     // `skipped` over data it was handed.
-    expect(manifest.roles["regime-analyst"]?.persona ?? "").not.toContain("NO TOOL");
+    expect(manifest.roles["regime-analyst"]?.persona ?? "").not.toContain(
+      "NO TOOL",
+    );
   });
 
   it("drift reads this morning's own report", () => {
@@ -148,10 +150,23 @@ it("every narrative task replies as one sections JSON", () => {
   // prose contributes nothing to the mail — which is exactly how a premarket
   // run that had written four regime sections and four scenario paths
   // delivered a brief with one paragraph in it.
-  for (const id of ["regime", "scenarios", "weekly", "frank", "drift", "recap"]) {
+  for (const id of ["scenarios", "weekly", "frank", "drift", "recap"]) {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
+  // regime's reply is no longer JUST a sections object: the 2026-09-03
+  // newsletter redesign has it also emit `headline`, `tape` and `schedule` —
+  // the fields the masthead, tape strip and today's-schedule section render
+  // from — so its `sections` key sits inside a larger object rather than at
+  // the top. The tail of the same shape is still the load-bearing part: one
+  // `sections` array of `{title, body}` entries, checked here without the
+  // leading brace that no longer immediately precedes it.
+  const regimePrompt =
+    manifest.tasks.find((t) => t.id === "regime")?.prompt ?? "";
+  expect(regimePrompt).toContain('"sections":[{"title","body"}]}');
+  expect(regimePrompt).toContain('"headline"');
+  expect(regimePrompt).toContain('"tape":[...]');
+  expect(regimePrompt).toContain('"schedule":[...]');
 });
 
 it("markout settles by id, in four states, so the renderer can check it", () => {
@@ -167,6 +182,24 @@ it("markout settles by id, in four states, so the renderer can check it", () => 
   // a position that does not exist.
   for (const state of ["反转", "加强", "不变", "未触发"])
     expect(prompt, state).toContain(state);
+});
+
+it("the two judgement steps declare reason.deep on the TASK, which is what routes", () => {
+  // The router prices `task.requires`, not `role.requires` (runner.ts builds
+  // the WorkOrder from the task). `design` declared `[structured.output]`
+  // alone and the cheapest structured-output model won it every time — 24 of
+  // 42 runs proposed strikes with no ow_spot call and landed 15-84% off spot.
+  // The roles already declared reason.deep; the tasks did not, and only the
+  // task is read.
+  for (const id of ["design", "review"]) {
+    const task = manifest.tasks.find((t) => t.id === id);
+    expect(task?.requires ?? [], id).toContain("reason.deep");
+    // The manifest is only self-consistent if the role can serve what the
+    // task asks for; parseTeamYaml enforces it, and this names the reason.
+    expect(manifest.roles[task!.role]?.requires ?? [], id).toContain(
+      "reason.deep",
+    );
+  }
 });
 
 it("the settlement level is demanded where a proposal is born, not only where it is checked", () => {

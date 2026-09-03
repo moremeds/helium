@@ -124,6 +124,23 @@ export interface GateCtx {
    * output must be supported by what a tool said" means for its own domain.
    */
   toolOutputs?: string[];
+  /**
+   * The names of the tools called during THIS step, in call order. Distinct
+   * from `toolOutputs`, which accumulates over the whole run: a gate asking
+   * "did the step that produced this text actually consult X" cannot answer it
+   * from a run-wide list, because an earlier step's call would satisfy it.
+   * Core does not read the names either — a tool name is a tenant's word.
+   */
+  toolCalls?: string[];
+  /**
+   * The raw strings the tools called during THIS step returned, in call
+   * order — same step scope as `toolCalls`, and for the same reason:
+   * `toolOutputs` accumulates over the whole run, so a gate reading a value
+   * out of it cannot tell a number THIS step's tools reported from one an
+   * earlier step's did. Core does not parse these either — the JSON shape
+   * inside is a tenant's tool's word, not core's.
+   */
+  stepToolOutputs?: string[];
 }
 
 /**

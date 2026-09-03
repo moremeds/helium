@@ -90,7 +90,7 @@ function pnlAtSpot(legs: Leg[], net: number, spot: number): number {
 
 export function priceStructure(legs: Leg[], spot?: number): Pricing {
   if (legs.length === 0)
-    return { kind: "invalid", reason: "结构不合规：没有任何腿" };
+    return { kind: "invalid", reason: "Invalid structure: no legs" };
 
   // Defined-risk only. This duplicates the ib-preflight gate on purpose: the
   // renderer is the LAST reader-facing check, and a structure that slipped past
@@ -102,7 +102,7 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
     if (net < 0) {
       return {
         kind: "invalid",
-        reason: `结构不合规：${right} 腿净空头，短腿无同权利的长腿覆盖`,
+        reason: `Invalid structure: net short ${right} leg with no covering long of the same right`,
       };
     }
   }
@@ -110,7 +110,8 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
   if (new Set(legs.map((leg) => leg.expiry)).size > 1) {
     return {
       kind: "unpriced",
-      reason: "未定价：多个到期日，无法按单一到期损益计算",
+      reason:
+        "Unpriced: multiple expiries, cannot compute a single payoff at expiry",
     };
   }
 
@@ -120,13 +121,16 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
   if (missing !== undefined) {
     return {
       kind: "unpriced",
-      reason: `未定价：${missing.right} ${String(missing.strike)} 缺少 mid`,
+      reason: `Unpriced: ${missing.right} ${String(missing.strike)} has no mid`,
     };
   }
 
   // Sell brings cash in, buy takes it out.
   const net = round2(
-    legs.reduce((total, leg) => total - side(leg) * qty(leg) * (leg.mid ?? 0), 0),
+    legs.reduce(
+      (total, leg) => total - side(leg) * qty(leg) * (leg.mid ?? 0),
+      0,
+    ),
   );
 
   const strikes = [...new Set(legs.map((leg) => leg.strike))].sort(
@@ -202,4 +206,58 @@ export function invalidationLabel(
   return levels
     .map((row) => `${String(row.level)}${row.side === "above" ? "↑" : "↓"}`)
     .join(" / ");
+}
+
+/**
+ * The schedule row's time column, ET only — no more "2026-09-03T19:00:00Z /
+ * 15:00 ET" forcing the reader to do the conversion the harness already did.
+ * `utc` is trusted over the model's own `et` field whenever it parses: a
+ * timezone conversion is arithmetic, and this tenant does not let a model's
+ * arithmetic reach the mail (the same reason this module computes the payoff
+ * instead of printing a role's own number). A fixed UTC-ET offset table is
+ * not acceptable either — DST moves the true offset twice a year — so this
+ * uses `Intl.DateTimeFormat` against the IANA zone, which knows the calendar.
+ * Falls back to the model's own `et` string only when `utc` is absent or does
+ * not parse, appending " ET" unless the model already wrote it.
+ */
+export function scheduleTimeLabel(row: { utc?: string; et?: string }): string {
+  if (typeof row.utc === "string") {
+    const at = Date.parse(row.utc);
+    if (Number.isFinite(at)) {
+      const et = new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(new Date(at));
+      return `${et} ET`;
+    }
+  }
+  if (typeof row.et === "string" && row.et.trim() !== "") {
+    const et = row.et.trim();
+    return /\bET\b/u.test(et) ? et : `${et} ET`;
+  }
+  return "";
+}
+
+/**
+ * Consensus/prior as a reader scans a table, not as a tool prints them:
+ * "50000" / "-23000" become "+50k" / "−23k" (real minus sign, not a hyphen —
+ * a hyphen at 12px reads as a dash on a schedule table). A string that is not
+ * a bare integer or decimal — a percentage, "n/a", anything with its own unit
+ * — is returned exactly as the tool wrote it: this only reformats what it can
+ * prove is a plain number, never guesses at one.
+ */
+export function formatScheduleMagnitude(raw: string): string {
+  const trimmed = raw.trim();
+  if (!/^-?\d+(?:\.\d+)?$/u.test(trimmed)) return raw;
+  const value = Number(trimmed);
+  const sign = value < 0 ? "−" : "+";
+  const abs = Math.abs(value);
+  const trimZeros = (n: number): string => {
+    const rounded = Math.round(n * 10) / 10;
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  };
+  const magnitude = abs >= 1000 ? `${trimZeros(abs / 1000)}k` : trimZeros(abs);
+  return `${sign}${magnitude}`;
 }

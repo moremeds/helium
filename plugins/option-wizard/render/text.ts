@@ -8,7 +8,11 @@
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
-import { invalidationLabel } from "./math.js";
+import {
+  formatScheduleMagnitude,
+  invalidationLabel,
+  scheduleTimeLabel,
+} from "./math.js";
 
 /**
  * The header of the payoff row, which says what its columns ARE. With a quoted
@@ -16,11 +20,17 @@ import { invalidationLabel } from "./math.js";
  * saying so is what stops a reader reading a strike as a percentage.
  */
 export function payoffLabel(quoted: boolean): string {
-  return quoted ? "到期损益（spot ±%）" : "到期损益（按行权价，无 ow_spot 现货）";
+  return quoted
+    ? "Payoff at expiry (spot ±%)"
+    : "Payoff at expiry (by strike, no ow_spot quote)";
 }
 
 /** One column of the payoff row: "+10%: 320" or "750: -290". */
-export function payoffCell(point: { pct: number | null; spot: number; pnl: number }): string {
+export function payoffCell(point: {
+  pct: number | null;
+  spot: number;
+  pnl: number;
+}): string {
   const head =
     point.pct === null
       ? point.spot.toFixed(2)
@@ -29,21 +39,21 @@ export function payoffCell(point: { pct: number | null; spot: number; pnl: numbe
 }
 
 const money = (value: number | null): string =>
-  value === null ? "无上限" : `$${value.toFixed(2)}`;
+  value === null ? "unlimited" : `$${value.toFixed(2)}`;
 
 function pricingLines(candidate: CandidateView): string[] {
   const pricing = candidate.pricing;
   if (pricing.kind !== "priced") return [`  ${pricing.reason}`];
-  const flow = pricing.net >= 0 ? "净收权利金" : "净付权利金";
+  const flow = pricing.net >= 0 ? "Net credit" : "Net debit";
   const breakevens =
     pricing.breakevens.length === 0
-      ? "无"
+      ? "none"
       : pricing.breakevens.map((value) => value.toFixed(2)).join(" / ");
   return [
-    `  ${flow} $${Math.abs(pricing.net).toFixed(2)}/股`,
-    `  max gain ${money(pricing.maxGain)} · max loss ${money(pricing.maxLoss)}`,
+    `  ${flow} $${Math.abs(pricing.net).toFixed(2)}/share`,
+    `  max gain ${money(pricing.maxGain)} · max loss ${money(pricing.maxLoss)} · spread width ${candidate.width.toFixed(2)}`,
     `  breakeven ${breakevens}`,
-    `  ${payoffLabel(pricing.pnlAt[0]?.pct !== null)}${pricing.pnlAt
+    `  ${payoffLabel(pricing.pnlAt[0]?.pct !== null)}: ${pricing.pnlAt
       .map((point) => payoffCell(point))
       .join("  ")}`,
   ];
@@ -52,9 +62,12 @@ function pricingLines(candidate: CandidateView): string[] {
 function candidateLines(candidate: CandidateView): string[] {
   const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
   const earnings =
-    candidate.earnings === undefined ? "" : ` · 财报 ${candidate.earnings}`;
+    candidate.earnings === undefined ? "" : ` · earnings ${candidate.earnings}`;
+  const spot =
+    candidate.spot === undefined ? "" : ` · spot ${candidate.spot.toFixed(2)}`;
   return [
-    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · 失效 ${invalidationLabel(candidate.invalidation)}${earnings}`,
+    `${candidate.ticker} — ${candidate.strategy}${dte}${spot}${earnings}`,
+    `  entry ${candidate.entry === undefined ? "—" : invalidationLabel([candidate.entry])} · target ${candidate.target || "—"} · stop ${invalidationLabel(candidate.invalidation)}`,
     ...candidate.legs.map(
       (leg) =>
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +
@@ -65,28 +78,80 @@ function candidateLines(candidate: CandidateView): string[] {
       ? []
       : [`  ⚠ ${candidate.unchecked}`]),
     `  ${candidate.rationale}`,
+    `  [${candidate.id}]`,
     "",
   ];
 }
 
-/** The 决策块, under its own heading. Same block, same order, in both parts. */
+/** The decision block, under its own heading. Same block, same order, in
+ *  both parts — rendered near the top as "Bottom line" because it is the one
+ *  block that says what to DO. */
 function decisionLines(view: BriefView): string[] {
   if (view.decision === undefined || view.decision.length === 0) return [];
   return [
-    "【决策块】",
+    "【Bottom line】",
     ...view.decision.map((row) => `- ${row.label}: ${row.value}`),
     "",
   ];
 }
 
+function tapeLine(view: BriefView): string[] {
+  if (view.tape.length === 0) return [];
+  return [
+    view.tape
+      .map(
+        (item) =>
+          `${item.label} ${item.value}${
+            item.change === undefined || item.change.trim() === ""
+              ? ""
+              : ` (${item.change})`
+          }`,
+      )
+      .join(" | "),
+    "",
+  ];
+}
+
+function overnightLines(view: BriefView): string[] {
+  const lines = ["【Overnight】"];
+  if (view.overnight.length === 0) {
+    lines.push("Nothing flagged overnight.");
+  } else {
+    for (const item of view.overnight) lines.push(`- ${item}`);
+  }
+  lines.push("");
+  return lines;
+}
+
+function scheduleLines(view: BriefView): string[] {
+  if (view.schedule.length === 0) return [];
+  const lines = ["【Today's schedule】"];
+  for (const row of view.schedule) {
+    const when = scheduleTimeLabel(row);
+    const cp = [row.consensus, row.prior]
+      .filter((entry): entry is string => entry !== undefined)
+      .map(formatScheduleMagnitude)
+      .join(" / ");
+    lines.push(
+      `- ${when === "" ? "" : `${when} `}${row.event}${cp === "" ? "" : ` (${cp})`}`,
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
 export function renderText(view: BriefView): string {
   const lines: string[] = [
+    view.headline === "" ? view.tenant : view.headline,
     `${view.date} — ${view.tenant} [${view.outcome}]`,
     "",
   ];
+  lines.push(...tapeLine(view));
+  lines.push(...decisionLines(view));
+  lines.push(...overnightLines(view));
+  lines.push(...scheduleLines(view));
   if (view.empty !== undefined) {
     lines.push(view.empty, "");
-    lines.push(...decisionLines(view));
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
@@ -106,17 +171,18 @@ export function renderText(view: BriefView): string {
   // design, and a failed run's are withheld; a bare heading reads as content
   // that got lost on the way.
   if (view.candidates.length > 0) {
-    lines.push("【候选结构】每张合约，不含数量", "");
+    lines.push("【Candidates】per contract, no size", "");
     for (const candidate of view.candidates)
       lines.push(...candidateLines(candidate));
   }
   if (view.riskList.length > 0) {
-    lines.push("【风险清单】");
+    lines.push("【Risk register】");
     for (const entry of view.riskList)
       lines.push(`- ${entry.ticker}: ${entry.reason}`);
     lines.push("");
   }
-  lines.push(...decisionLines(view));
+  if (view.coverage !== undefined)
+    lines.push(`【${view.coverage.title}】`, view.coverage.body, "");
   if (view.degradation !== undefined) lines.push(view.degradation, "");
   return lines.join("\n");
 }
