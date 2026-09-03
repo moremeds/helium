@@ -162,7 +162,12 @@ export function renderHtml(view: BriefView): string {
          </table>`
       : `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px;margin-bottom:12px">
            <tr><td class="pad" style="padding:12px 15px">
-             <div class="ink" style="color:${INK};font-size:14px;line-height:1.55">${esc(view.regime.paragraph)}</div>
+             ${view.sections
+               .map(
+                 (section) =>
+                   `<div class="ink" style="color:${INK};font-size:14px;line-height:1.55;margin-bottom:10px"><strong>${esc(section.title)}</strong><br>${esc(section.body).replace(/\n/g, "<br>")}</div>`,
+               )
+               .join("")}
              <div style="margin-top:8px">${stances}</div>
            </td></tr>
          </table>

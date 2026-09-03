@@ -73,7 +73,8 @@ export function renderText(view: BriefView): string {
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
-  lines.push("【今日 regime】", view.regime.paragraph, "");
+  for (const section of view.sections)
+    lines.push(`【${section.title}】`, section.body, "");
   const stances = [
     view.regime.direction === undefined
       ? null

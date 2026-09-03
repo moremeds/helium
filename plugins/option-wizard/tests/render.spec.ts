@@ -9,9 +9,13 @@
  * in the OLD shape still renders, with those fields ignored rather than
  * rejected. Do not tidy them away.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunReport, TenantSpec } from "@helium/core";
 import renderReport, { buildView } from "../render/index.js";
+import { renderText } from "../render/text.js";
+import type { BriefView } from "../render/index.js";
 
 const REVIEW_JSON = {
   proposals: [
@@ -352,4 +356,96 @@ describe("renderReport (html part)", () => {
     expect(html).toContain("今日无候选");
     expect(html).not.toContain("【候选结构】");
   });
+});
+
+describe("sections", () => {
+  const view = (sections: BriefView["sections"]): BriefView => ({
+    date: "2026-09-02",
+    tenant: "option-wizard",
+    outcome: "completed",
+    sections,
+    regime: { paragraph: "" },
+    candidates: [],
+    riskList: [],
+  });
+
+  it("renders whatever sections the run produced, in task order", () => {
+    const text = renderText(
+      view([
+        { title: "利率是第一因", body: "10y 4.21%，曲线 bear-flatten。" },
+        { title: "Path B — In-line CPI", body: "base case。" },
+      ]),
+    );
+    expect(text).toContain("【利率是第一因】");
+    expect(text).toContain("【Path B — In-line CPI】");
+    expect(text.indexOf("利率是第一因")).toBeLessThan(text.indexOf("Path B"));
+  });
+
+  it("renders a run with no narrative sections at all", () => {
+    expect(renderText(view([])).includes("【今日 regime】")).toBe(false);
+  });
+
+  it("collects sections from every step, in step order", () => {
+    const built = buildView(
+      report({
+        steps: [
+          {
+            task: "regime",
+            role: "regime-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"利率","body":"10y 4.21%"}]}',
+          },
+          {
+            task: "scenarios",
+            role: "scenario-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"Path A","body":"hot CPI"},{"title":"Path B","body":"in line"}]}',
+          },
+          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.sections.map((s) => s.title)).toEqual(["利率", "Path A", "Path B"]);
+  });
+
+  it("recovers the regime paragraph when the model answered in prose", () => {
+    // One disobedient model must not empty the mail.
+    expect(buildView(report(), SPEC).sections[0]?.title).toBe("今日 regime");
+  });
+
+  it("drops a section whose body is empty — a bare title reads as lost content", () => {
+    const built = buildView(
+      report({
+        steps: [
+          {
+            task: "regime",
+            role: "regime-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"利率","body":"   "},{"title":"分化","body":"real"}]}',
+          },
+          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.sections.map((s) => s.title)).toEqual(["分化"]);
+  });
+});
+
+it("the renderer never branches on phase", () => {
+  // The load-bearing claim of this design: which blocks a brief contains is
+  // the team manifest's business, decided by which tasks ran. The moment the
+  // renderer learns the word, five phases become five layouts to maintain.
+  // Comments are exempt — the one in index.ts exists to say exactly this.
+  const dir = new URL("../render/", import.meta.url).pathname;
+  const offenders: string[] = [];
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
+    readFileSync(join(dir, name), "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        const code = line.replace(/^\s*(\*|\/\/).*$/, "");
+        if (code.includes("phase")) offenders.push(`${name}:${String(i + 1)}`);
+      });
+  expect(offenders).toEqual([]);
 });

@@ -35,6 +35,12 @@ export interface RegimeView {
   hedge?: string;
 }
 
+/** One narrative block: whatever the run chose to say, under its own title. */
+export interface Section {
+  title: string;
+  body: string;
+}
+
 export interface BriefView {
   /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
    *  printed the HK date beside the ET one made the reader do the conversion
@@ -42,6 +48,14 @@ export interface BriefView {
   date: string;
   tenant: string;
   outcome: "completed" | "DEGRADED" | "FAILED";
+  /** The narrative blocks the run actually produced, in task order.
+   *
+   *  The renderer does not know what a phase is, and must not learn: which
+   *  blocks exist is the team manifest's business. A premarket run returns
+   *  its four regime sections and four scenario paths; an intraday run
+   *  returns one "无变化" line. Both render through the same loop because
+   *  both are just a list. */
+  sections: Section[];
   regime: RegimeView;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
@@ -166,6 +180,38 @@ function degradationFrom(report: RunReport): string | undefined {
  * opinion about what day it is, and near either midnight it would be a
  * different one.
  */
+/**
+ * Every `sections` array the run's steps returned, concatenated in task order.
+ *
+ * A step that answered in prose instead of JSON is not dropped silently: the
+ * regime paragraph is recovered, because one disobedient model must not empty
+ * the mail. Nothing else is recoverable without guessing at structure, and
+ * guessing is how a model's scratch notes ("Wait, I need to double-check…",
+ * seen in the 2026-09-02 report) end up quoted to the reader.
+ */
+function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
+  const sections: Section[] = [];
+  for (const step of report.steps) {
+    const parsed = extractJson(step.text);
+    const raws = parsed !== null && Array.isArray(parsed.sections) ? parsed.sections : null;
+    if (raws === null) {
+      if (step.task === "regime" && regime.paragraph !== "")
+        sections.push({ title: "今日 regime", body: regime.paragraph });
+      continue;
+    }
+    for (const raw of raws) {
+      if (raw === null || typeof raw !== "object") continue;
+      const { title, body } = raw as Record<string, unknown>;
+      if (typeof title !== "string" || typeof body !== "string") continue;
+      // An empty body under a title is worse than no block at all: the reader
+      // reads it as content that got lost on the way.
+      if (title.trim() === "" || body.trim() === "") continue;
+      sections.push({ title: title.trim(), body: body.trim() });
+    }
+  }
+  return sections;
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const dateEtDay = report.day;
   const degradation = degradationFrom(report);
@@ -178,6 +224,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
         : report.mode === "tool-only"
           ? "DEGRADED"
           : "completed",
+    sections: [],
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
@@ -254,7 +301,13 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     return { ...base, empty: `今日无候选：${reason}` };
   }
   // At most five reach the reader; the reviewer's own rule, enforced here too.
-  return { ...base, regime, candidates: candidates.slice(0, 5), riskList };
+  return {
+    ...base,
+    sections: sectionsFrom(report, regime),
+    regime,
+    candidates: candidates.slice(0, 5),
+    riskList,
+  };
 }
 
 export default function renderReport(

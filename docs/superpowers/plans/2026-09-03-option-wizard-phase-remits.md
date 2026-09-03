@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **不新建存储。** thesis 台账 = 报告文件;读回靠已有的 `ow_reports`(支持 `days` + `phase`)和 `extractJson`。
-- **渲染器不得出现 phase 分支。** `grep -rn 'phase' plugins/option-wizard/render/*.ts` 必须保持 **0 匹配**。
+- **渲染器不得出现 phase 分支。** 由 `render.spec.ts` 的 "the renderer never branches on phase" 守护(注释行豁免——`index.ts` 里那句注释存在的目的就是说明这条不变式)。
 - **候选结构保持强类型。** 价格、腿、失效价走 JSON 解析,永远不透传模型自由文本。原因:2026-09-02 的报告第 263 行漏出了模型草稿(`Wait, I need to double-check the exit rule text...`)。
 - **叙述区块走 JSON**(`{"sections":[{"title","body"}]}`),不从 markdown 正则抠标题——JSON 里没有地方放草稿思维。
 - **不含 quantity / 仓位大小**,任何地方。
@@ -127,8 +127,7 @@ stance 行、候选结构、风险清单保持原样。`html.ts` 做同一处替
 - [ ] **Step 6: 跑测试并确认 phase 匹配数为 0**
 
 ```bash
-pnpm vitest run --project unit plugins/option-wizard/tests/render.spec.ts
-test $(grep -rc 'phase' plugins/option-wizard/render/*.ts | grep -v ':0$' | wc -l) -eq 0 && echo "renderer is phase-blind"
+pnpm vitest run --project unit plugins/option-wizard/tests/render.spec.ts -t "never branches on phase"
 ```
 
 - [ ] **Step 7: Commit**
@@ -154,25 +153,27 @@ git commit -m "feat(option-wizard): the brief renders the sections the run produ
 
 **为什么需要 id:** 复盘要说"AVGO 那条反转了",下一次运行必须能精确指认是哪一条。没有 id,look-back 只能靠字符串模糊匹配。
 
+**但 id 由 harness 铸造,不由模型写。** id 是记账,不是判断:`<TICKER>-<report day>-<n>`,n 是它在 proposals 里的序号。让模型自己拼 id 只会引入拼错和撞号,而这两种错误恰好会毁掉 look-back。`horizon` 相反——它是判断,必须模型自己声明,缺了就丢弃。
+
 - [ ] **Step 1: 写失败的测试**
 
 ```ts
 it("carries the proposal id and horizon into the brief", () => {
   const view = buildView(reportWithReview({
     proposals: [{
-      id: "AVGO-2026-09-02-premarket-1", horizon: "multiday",
+      horizon: "multiday",
       ticker: "AVGO", strategy: "put spread",
       legs: [{ right: "put", expiry: "2026-09-25", strike: 370, action: "sell", ratio: 1, mid: 20.58 },
              { right: "put", expiry: "2026-09-25", strike: 360, action: "buy", ratio: 1, mid: 15.30 }],
       invalidation: "closes above 375", target: "50%", rationale: "skew",
     }],
   }), cfg);
-  expect(view.candidates[0]?.id).toBe("AVGO-2026-09-02-premarket-1");
+  expect(view.candidates[0]?.id).toBe("AVGO-2026-09-02-1");
   expect(view.candidates[0]?.horizon).toBe("multiday");
 });
 
-it("drops a proposal with no id — an unidentifiable thesis cannot be reviewed", () => {
-  const view = buildView(reportWithReview({ proposals: [{ ticker: "AVGO", legs: [] }] }), cfg);
+it("drops a proposal with no horizon — a thesis that never comes due cannot be settled", () => {
+  const view = buildView(reportWithReview({ proposals: [{ ticker: "AVGO", legs: LEGS }] }), cfg);
   expect(view.candidates).toHaveLength(0);
 });
 ```
@@ -188,7 +189,7 @@ Expected: FAIL — `id` 不在 `CandidateView` 上。
 const HORIZONS = new Set(["intraday", "day", "multiday"]);
 ```
 
-`CandidateView` 增加 `id: string` 与 `horizon: "intraday" | "day" | "multiday"`。在 proposal 循环里,`id` 非空字符串、`horizon` 属于 `HORIZONS`,否则 `continue`——理由写成注释:一条无法被指认的 thesis 复盘不了,收盘时没人知道该结算哪一条。
+`CandidateView` 增加 `id: string` 与 `horizon: "intraday" | "day" | "multiday"`。在 proposal 循环里:`horizon` 必须属于 `HORIZONS`,否则 `continue`;`id` 由 harness 铸造成 `${ticker}-${dateEtDay}-${n}`,n 从 1 起。理由写成注释:一条不声明何时到期的 thesis,收盘时没人知道该不该结算它。
 
 - [ ] **Step 4: 邮件里印出 horizon**
 
@@ -203,11 +204,10 @@ const HORIZONS = new Set(["intraday", "day", "multiday"]);
 `team.yaml` 的 `review` 任务 prompt 追加:
 
 ```
-Every proposal carries `id` and `horizon`. `id` is
-`<TICKER>-<report day>-<phase>-<n>`, n starting at 1. `horizon` is one of
-intraday / day / multiday and it is YOUR call: it says when this thesis is
-due to be settled, and the close run will look for exactly that. A proposal
-without both is dropped before it reaches the reader.
+Every proposal carries `horizon`: one of intraday / day / multiday. It is
+YOUR call and it says when this thesis is due to be settled — the close run
+looks for exactly that. A proposal without one is dropped before it reaches
+the reader. Do NOT write an id; the harness mints it.
 ```
 
 - [ ] **Step 6: 跑测试**
@@ -470,7 +470,7 @@ done
 - [ ] **Step 4: 确认渲染器仍不认识 phase**
 
 ```bash
-grep -rn 'phase' plugins/option-wizard/render/*.ts; echo "exit=$?  (期望 1 = 零匹配)"
+pnpm vitest run --project unit plugins/option-wizard/tests/render.spec.ts -t "never branches on phase"
 ```
 
 - [ ] **Step 5: 推送并更新 PR #77**
