@@ -220,6 +220,7 @@ describe("runTenant", () => {
       role: "prober",
       provider: "fake",
       model: "cheap",
+      codeVersion: "test",
       stepNo: 1,
       inputTokens: 10,
       outputTokens: 0,

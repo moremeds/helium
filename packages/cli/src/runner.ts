@@ -56,6 +56,7 @@ import {
   tenantToolGaps,
   type Skipped,
 } from "./discovery.js";
+import { codeVersion } from "./code-version.js";
 
 // These moved to `@helium/core` so a tenant's own renderer can name them
 // without depending on the CLI. Re-exported here because every existing
@@ -449,6 +450,7 @@ async function runGates(
       role: ctx.role,
       provider: "none",
       model: "none",
+      codeVersion: codeVersion(),
       stepNo: ctx.stepNo,
       inputTokens: 0,
       outputTokens: 0,
@@ -756,6 +758,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           role: task.role,
           provider: "none",
           model: "none",
+          codeVersion: codeVersion(),
           stepNo,
           inputTokens: 0,
           outputTokens: 0,
@@ -932,6 +935,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         role: task.role,
         provider: provider.id,
         model: selection.model,
+        codeVersion: codeVersion(),
         stepOffset: stepNo,
         // Span ids repeat across sessions; the task is what makes them unique
         // within a run. Without this the audit table silently drops every step
@@ -1139,6 +1143,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       role: "delivery",
       provider: "none",
       model: "none",
+      codeVersion: codeVersion(),
       stepNo,
       inputTokens: 0,
       outputTokens: 0,

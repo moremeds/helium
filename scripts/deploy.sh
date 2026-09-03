@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Deploy the option-wizard lane (option-wizard) to the mini. Run from the laptop:
+# Deploy the option-wizard lane to the mini. Run from the laptop:
 #   scripts/deploy.sh [phase]
 #
 # The optional argument names the phase to kickstart after install (default
 # `premarket`); the five agents themselves are always installed.
 #
-# Re-execs itself on the deploy host over stdin (`ssh "$HOST" ... bash -s`) so
-# there is exactly one copy of this script to maintain; everything below the
-# HELIUM_REMOTE guard runs on the mini and never on the laptop.
+# This is the SENDER and nothing else. It refuses a dirty tree, builds, tests,
+# stamps the tree with a RELEASE file naming the commit, and pipes a tar of
+# that tree over ssh into scripts/receive-deploy.sh on the mini. The receiver
+# does everything else — extract into a release directory, flip `current`,
+# reset the daily cap, reinstall the plists, kickstart, prune.
 #
-# No version keying and no release directory: the option-wizard lane deploys the tip of
-# master in one checkout (doctrine 5 — deploy is minutes, not days).
+# The tar SHIPS node_modules and every lib/. Laptop and mini are both arm64
+# macOS on node 25.x, so the installed tree — native addons included — is
+# portable between them as-is. That is why the mini needs no pnpm, no node
+# install step and no network during a deploy: it untars and points a symlink.
+# If either machine ever stops being arm64 macOS on the same major node, this
+# assumption is what breaks first, and the fix is an install step on the
+# receiver, not a smarter tar.
 #
 # The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
 # alongside HELIUM_TENANT_DELIVERY=1. That variable is the ONLY thing that
@@ -20,72 +27,42 @@
 set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
-# These expand on the MINI: they are read only after the re-exec.
-CHECKOUT="${HELIUM_CHECKOUT:-$HOME/projects/helium-v2}"  # TODO(release-rewrite): drop -v2 suffix when release flow lands
-STATE_ROOT="${HELIUM_STATE_ROOT:-$HOME/.helium/state-v2}"
-COUNTERS="$STATE_ROOT/reports/email-counters.json"
-# The five phased agents. Adding a phase is a new plist plus an entry here --
-# never an edit anywhere else in this script.
-PHASES=(premarket frank intraday close weekly)
-KICK_PHASE="${1:-premarket}"
+PHASE="${1:-premarket}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
-if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
-  # A non-interactive ssh gets PATH=/usr/bin:/bin:/usr/sbin:/sbin — no Homebrew,
-  # so no node and no pnpm. Both prefixes are listed so this does not silently
-  # depend on the CPU architecture.
-  ssh "$HELIUM_HOST" \
-    "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- \"$KICK_PHASE\"" \
-    < "$0"
-  exit $?
-fi
-
-# ---- everything below runs ON the mini ----
 say() { printf '[deploy] %s\n' "$*"; }
 
-# Printed, never assumed: a binary reported "absent" because a non-login ssh
-# dropped /opt/homebrew/bin has already cost this project a debugging session.
-say "PATH=$PATH"
-say "node=$(command -v node || echo MISSING) pnpm=$(command -v pnpm || echo MISSING)"
-command -v node >/dev/null || { echo "node not on PATH" >&2; exit 127; }
-command -v pnpm >/dev/null || { echo "pnpm not on PATH" >&2; exit 127; }
+# The sha names what was built, so an uncommitted edit would make the audit
+# table's code_version a lie. Refusing is cheaper than wrong provenance.
+if [ -n "$(git status --porcelain)" ]; then
+  echo "refusing to deploy a dirty tree; commit or stash first" >&2
+  git status --short >&2
+  exit 1
+fi
 
-[ -d "$CHECKOUT/.git" ] || { echo "no checkout at $CHECKOUT" >&2; exit 66; }
-say "updating $CHECKOUT"
-git -C "$CHECKOUT" pull --ff-only
-say "at $(git -C "$CHECKOUT" rev-parse --short HEAD) on $(git -C "$CHECKOUT" rev-parse --abbrev-ref HEAD)"
+say "building"
+pnpm build
+say "testing"
+pnpm test
 
-say "installing and building"
-pnpm --dir "$CHECKOUT" install --frozen-lockfile
-pnpm --dir "$CHECKOUT" build
+SHA="$(git rev-parse --short HEAD)"
+# Read by packages/cli at startup: the mini has no repository to ask, so the
+# tarball has to carry its own provenance. Gitignored; never committed.
+printf '%s\n' "$SHA" > RELEASE
+say "sending $SHA ($PHASE) to $HELIUM_HOST"
 
-# The daily cap is counted from this one file, so deleting it IS the reset. A
-# missing file caps LOW by design (it re-counts from zero), which is why
-# removing it is safe and why nobody has to hand-edit a counter again.
-say "resetting the email daily cap: $COUNTERS"
-rm -f "$COUNTERS"
+# `git archive` cannot do this: lib/ and node_modules/ are both gitignored, and
+# both are exactly what a release tree is. Excluded are the repository itself,
+# the worktree backlog, the mini's own run state, and browser scratch.
+tar -cz \
+  --exclude='./.git' \
+  --exclude='./.worktrees' \
+  --exclude='./.claude' \
+  --exclude='./.helium*' \
+  --exclude='./.playwright-mcp' \
+  --exclude='.DS_Store' \
+  . \
+  | ssh "$HELIUM_HOST" "\$HOME/.config/helium/receive-deploy.sh $SHA $PHASE"
 
-say "installing launch agents"
-mkdir -p "$HOME/Library/LaunchAgents"
-for phase in "${PHASES[@]}"; do
-  label="com.helium.option-wizard-$phase"
-  src="$CHECKOUT/launchd/$label.plist"
-  dst="$HOME/Library/LaunchAgents/$label.plist"
-  [ -f "$src" ] || { echo "missing $src" >&2; exit 66; }
-  # plutil accepts files launchd rejects, so the file is parsed with plistlib
-  # too before it is installed. This has already cost a debugging session.
-  plutil -lint "$src" >/dev/null
-  python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$src"
-  cp "$src" "$dst"
-  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$dst"
-done
-
-# The single old agent is replaced by the five phased ones. Unloading it here
-# rather than by hand is what keeps a second scheduler from firing an unphased
-# run alongside them.
-launchctl bootout "gui/$(id -u)/com.helium.option-wizard" 2>/dev/null || true
-rm -f "$HOME/Library/LaunchAgents/com.helium.option-wizard.plist"
-
-say "kicking com.helium.option-wizard-$KICK_PHASE"
-launchctl kickstart -k "gui/$(id -u)/com.helium.option-wizard-$KICK_PHASE"
 say "done"

@@ -42,6 +42,8 @@ export interface FoldContext {
   provider: string;
   model: string;
   parentSpanId?: string;
+  /** Short sha of the build that produced these rows. Defaults to `"unknown"`. */
+  codeVersion?: string;
   /** USD per token for the route, from the owning plugin's catalog. */
   price?: { usdIn: number; usdOut: number };
   /** Step numbers already folded, so a re-fold continues rather than repeats. */
@@ -119,6 +121,7 @@ export function foldSessionLog(
 ): Span[] {
   const offset = context.stepOffset ?? 0;
   const scope = context.scope ?? String(offset);
+  const codeVersion = context.codeVersion ?? "unknown";
   let provider = context.provider;
   let model = context.model;
 
@@ -206,6 +209,7 @@ export function foldSessionLog(
         role: context.role,
         provider,
         model,
+        codeVersion,
         stepNo: offset + Number(call.key.split(":")[1] ?? 0),
         inputTokens: 0,
         outputTokens: 0,
@@ -246,6 +250,7 @@ export function foldSessionLog(
         role: context.role,
         provider: entry.provider,
         model: entry.model,
+        codeVersion,
         stepNo: offset + index + 1,
         inputTokens: input,
         outputTokens: output,

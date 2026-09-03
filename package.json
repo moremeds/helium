@@ -1,6 +1,5 @@
 {
   "name": "helium",
-  "version": "0.2.0",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -11,7 +10,8 @@
     "build": "pnpm -r --if-present run build",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "vitest run --project unit",
-    "test:contracts": "vitest run --project contracts"
+    "test:contracts": "vitest run --project contracts",
+    "test:scripts": "bash scripts/receive-deploy.test.sh"
   },
   "dependencies": {
     "nodemailer": "9.0.5",

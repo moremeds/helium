@@ -79,6 +79,9 @@ function printAudit(store: AuditStore, runId: string): number {
     console.log(`no audit rows for run ${runId}`);
     return 1;
   }
+  // First line, before the table: which build produced these rows. More than
+  // one sha means a deploy landed mid-run.
+  console.log(`code: ${store.codeVersions(runId).join(", ")}`);
   const header = ["role", "provider", "model", "tool", "spans", "tin", "tout", "cache", "usd", "sec"];
   const body = rows.map((row) => [
     row.role,
