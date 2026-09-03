@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
-import { SUMMARISE_OVER_BYTES } from "@helium/core";
 import { candidatesFrom, type CandidateView } from "../render/index.js";
 import { priceStructure, width } from "../render/math.js";
 import {
@@ -676,6 +675,27 @@ export function thinAcross<T>(rows: readonly T[], cap: number): T[] {
   for (let i = 0; i < cap; i += 1) kept.push(rows[Math.round(i * step)]!);
   return [...new Set(kept)];
 }
+
+/** A UW tide is one print per minute for the whole RTH session -- 390 of them,
+ *  ~139 KB across the three tides, and no persona in team.yaml reads a single
+ *  minute: they read the SHAPE and the last level. Thinned across (never a tail
+ *  window, see thinAcross) the shape and both ends survive at a fifth the size.
+ *  Trimming the tool is issue #81's job; this is the one field measured at
+ *  2026-09-03 sizes to sit above the 128 KiB spill ceiling with no reader. */
+const TIDE_PRINTS = 80;
+
+function thinTide(tide: unknown): unknown {
+  if (tide === null || typeof tide !== "object") return tide;
+  const body = tide as { data?: unknown };
+  if (!Array.isArray(body.data)) return tide;
+  return { ...body, data: thinAcross(body.data, TIDE_PRINTS) };
+}
+
+/** The bound on how much prior PROSE ow_reports may hand back. It rode on the
+ *  context-spill ceiling until that ceiling was measured and raised to 128 KiB;
+ *  this number is about a model filling a gap from a wall of narrative, not
+ *  about context cost, so it keeps its own 8 KB. */
+const REPORTS_PROSE_CEILING_BYTES = 8 * 1024;
 
 function round4(value: number | undefined): number | undefined {
   return value === undefined ? undefined : Number(value.toFixed(4));
@@ -1434,20 +1454,27 @@ export function buildTools(cfg: {
         const { sector, etf } = MarketStateParams.parse(args);
         const tool = "ow_uw_market_state";
         return JSON.stringify({
-          marketTide: await uwGet(env, tool, "/api/market/market-tide", {}, ctx),
-          sectorTide: await uwGet(
-            env,
-            tool,
-            `/api/market/${encodeURIComponent(sector)}/sector-tide`,
-            {},
-            ctx,
+          tidePrints: `thinned across the session to <=${String(TIDE_PRINTS)} prints per tide`,
+          marketTide: thinTide(
+            await uwGet(env, tool, "/api/market/market-tide", {}, ctx),
           ),
-          etfTide: await uwGet(
-            env,
-            tool,
-            `/api/market/${encodeURIComponent(etf)}/etf-tide`,
-            {},
-            ctx,
+          sectorTide: thinTide(
+            await uwGet(
+              env,
+              tool,
+              `/api/market/${encodeURIComponent(sector)}/sector-tide`,
+              {},
+              ctx,
+            ),
+          ),
+          etfTide: thinTide(
+            await uwGet(
+              env,
+              tool,
+              `/api/market/${encodeURIComponent(etf)}/etf-tide`,
+              {},
+              ctx,
+            ),
           ),
         });
       },
@@ -1729,7 +1756,7 @@ export function buildTools(cfg: {
                 }),
           });
         const over = (): boolean =>
-          Buffer.byteLength(payload(), "utf8") > SUMMARISE_OVER_BYTES;
+          Buffer.byteLength(payload(), "utf8") > REPORTS_PROSE_CEILING_BYTES;
         for (let i = rows.length - 1; i >= 0 && over(); i -= 1) {
           const row = rows[i]!;
           if (row.steps === undefined) continue;
@@ -1869,7 +1896,11 @@ export function buildTools(cfg: {
         const rows = await pgJson(
           env,
           "ow_macro_rates",
-          `SELECT series_id, obs_date::text AS obs_date, value
+          // DISTINCT ON: argon's mirror holds ~30 copies of every (series, day)
+          // row, and 2026-09-03 measured 4,391 rows for 145 distinct
+          // observations -- 271 KB for what is 8 lines a day. One row per day.
+          `SELECT DISTINCT ON (series_id, obs_date)
+                  series_id, obs_date::text AS obs_date, value
              FROM uw_scan.macro_series_daily
             WHERE series_id IN (${list})
               AND obs_date >= current_date - ${String(Math.trunc(days))}

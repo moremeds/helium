@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AuditStore,
+  SUMMARISE_OVER_BYTES,
   applyOutputPolicy,
   budgetLine,
   remaining,
@@ -54,13 +55,16 @@ describe("budget", () => {
   });
 
   it("summarises a tool result over the ceiling and hands over the spill path", async () => {
-    const big = "x".repeat(9000);
+    // Sized off the ceiling so the case survives the ceiling moving; a literal
+    // 9000 stopped exercising the spill the moment it rose past 8 KB.
+    const overBytes = SUMMARISE_OVER_BYTES + 1;
+    const big = "x".repeat(overBytes);
     const decision = await applyOutputPolicy(big, {
       spill: () => "/tmp/out.txt",
       summarise: async () => "nine thousand x characters",
     });
     expect(decision.summarised).toBe(true);
-    expect(decision.bytes).toBe(9000);
+    expect(decision.bytes).toBe(overBytes);
     expect(decision.text).toBe("nine thousand x characters\n[full output: /tmp/out.txt]");
     expect(decision.spillPath).toBe("/tmp/out.txt");
   });

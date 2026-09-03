@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@deepseek-ai/cordis";
+import { SUMMARISE_OVER_BYTES } from "@helium/core";
 import { describe, expect, it } from "vitest";
 import { installHeliumHooks } from "./hooks.js";
 
@@ -57,13 +58,17 @@ function harness() {
 describe("tool output policy", () => {
   it("spills an oversized result and hands back the head, the size and the path", async () => {
     const { run, written } = harness();
-    const big = "y".repeat(20 * 1024);
+    // Sized off the ceiling, not off a literal: the ceiling moved from 8 KB to
+    // 128 KiB on 2026-09-03 and a hardcoded 20 KB silently stopped testing the
+    // spilling side at all -- it just re-tested the pass-through one.
+    const overBytes = SUMMARISE_OVER_BYTES + 1;
+    const big = "y".repeat(overBytes);
     const decision = await run(big);
     const text = decision.content[0]!.text;
     expect(written).toHaveLength(1);
     expect(readFileSync(written[0]!, "utf8")).toBe(big);
     expect(text).toContain(written[0]!);
-    expect(text).toContain(String(20 * 1024));
+    expect(text).toContain(String(overBytes));
     // The head is a fixed-offset cut, and the notice says so — a reader that
     // took it for the whole answer would answer from half a record.
     expect(text).toContain("HEAD ONLY");
@@ -72,7 +77,7 @@ describe("tool output policy", () => {
 
   it("leaves a result under the ceiling exactly as the tool wrote it", async () => {
     const { run, written } = harness();
-    const small = "z".repeat(1024);
+    const small = "z".repeat(SUMMARISE_OVER_BYTES);
     expect((await run(small)).content[0]!.text).toBe(small);
     expect(written).toEqual([]);
   });
