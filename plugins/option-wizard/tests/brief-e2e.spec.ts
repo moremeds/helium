@@ -21,6 +21,7 @@ const REVIEW_TEXT = JSON.stringify({
   proposals: [
     {
       ticker: "SPY",
+      horizon: "multiday",
       strategy: "put debit spread",
       legs: [
         { right: "put", expiry: "2026-09-30", strike: 750, action: "buy", ratio: 1, mid: 4.92 },
@@ -30,6 +31,7 @@ const REVIEW_TEXT = JSON.stringify({
     },
     {
       ticker: "QQQ",
+      horizon: "day",
       strategy: "call debit spread",
       legs: [
         { right: "call", expiry: "2026-09-30", strike: 710, action: "buy", ratio: 1, mid: 13.68 },
@@ -39,6 +41,7 @@ const REVIEW_TEXT = JSON.stringify({
     },
     {
       ticker: "TLT",
+      horizon: "multiday",
       strategy: "put debit spread",
       legs: [
         { right: "put", expiry: "2026-09-30", strike: 82, action: "buy", ratio: 1, mid: 0.95 },

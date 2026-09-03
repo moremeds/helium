@@ -21,6 +21,7 @@ const REVIEW_JSON = {
   proposals: [
     {
       ticker: "SPY",
+      horizon: "multiday",
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -46,6 +47,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "QQQ",
+      horizon: "day",
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -71,6 +73,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "TLT",
+      horizon: "multiday",
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -448,4 +451,45 @@ it("the renderer never branches on phase", () => {
         if (code.includes("phase")) offenders.push(`${name}:${String(i + 1)}`);
       });
   expect(offenders).toEqual([]);
+});
+
+describe("horizon", () => {
+  it("mints the id here and carries the model's horizon", () => {
+    const spy = buildView(report(), SPEC).candidates[0]!;
+    expect(spy.id).toBe("SPY-2026-09-02-1");
+    expect(spy.horizon).toBe("multiday");
+    expect(buildView(report(), SPEC).candidates[1]!.id).toBe("QQQ-2026-09-02-2");
+  });
+
+  it("drops a proposal with no horizon — a thesis that never comes due cannot be settled", () => {
+    const stripped = REVIEW_TEXT.replace(/\s*"horizon": "[a-z]+",\n/g, "");
+    const built = buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text: stripped },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.candidates).toEqual([]);
+  });
+
+  it("refuses a horizon the close run would not know how to settle", () => {
+    const bogus = REVIEW_TEXT.replace(/"horizon": "[a-z]+"/g, '"horizon": "soon"');
+    const built = buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text: bogus },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.candidates).toEqual([]);
+  });
+
+  it("prints the id and horizon where a reader can quote them back", () => {
+    const text = renderText(buildView(report(), SPEC));
+    expect(text).toContain("[SPY-2026-09-02-1]");
+    expect(text).toContain("horizon multiday");
+  });
 });

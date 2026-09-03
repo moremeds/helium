@@ -16,6 +16,14 @@ import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
 
 export interface CandidateView {
+  /** `<TICKER>-<report day>-<n>`, minted here, never written by the model.
+   *  An id is bookkeeping, not judgement: asking the model to spell one
+   *  invites typos and collisions, and those are the only two errors that
+   *  can break a look-back. */
+  id: string;
+  /** When this thesis is due to be settled — the model's own call. The close
+   *  run looks for exactly this. */
+  horizon: "intraday" | "day" | "multiday";
   ticker: string;
   strategy: string;
   expiry: string;
@@ -65,6 +73,7 @@ export interface BriefView {
   empty?: string;
 }
 
+const HORIZONS = new Set(["intraday", "day", "multiday"]);
 const RIGHTS = new Set(["call", "put"]);
 const ACTIONS = new Set(["buy", "sell"]);
 
@@ -262,6 +271,12 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     const proposal = entry as Record<string, unknown>;
     const legs = toLegs(proposal.legs);
     if (legs === null || typeof proposal.ticker !== "string") continue;
+    // A thesis that does not say when it comes due cannot be settled: the
+    // close run would not know whether silence about it means "still open"
+    // or "nobody looked". Refusing it here is cheaper than carrying a debt
+    // nobody can ever collect.
+    const horizon = proposal.horizon;
+    if (typeof horizon !== "string" || !HORIZONS.has(horizon)) continue;
     const expiry = legs[0]!.expiry;
     const spot = spots.get(proposal.ticker);
     const days = Math.round(
@@ -270,6 +285,8 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
         86_400_000,
     );
     candidates.push({
+      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
+      horizon: horizon as CandidateView["horizon"],
       ticker: proposal.ticker,
       strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
       expiry,

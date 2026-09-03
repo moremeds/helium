@@ -51,7 +51,7 @@ function pricingLines(candidate: CandidateView): string[] {
 function candidateLines(candidate: CandidateView): string[] {
   const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
   return [
-    `${candidate.ticker} — ${candidate.strategy}${dte}`,
+    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · horizon ${candidate.horizon}`,
     ...candidate.legs.map(
       (leg) =>
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +

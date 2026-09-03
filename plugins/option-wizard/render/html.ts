@@ -109,7 +109,8 @@ function candidateCard(candidate: CandidateView): string {
   return `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px;margin-bottom:12px">
       <tr><td class="pad" style="padding:12px 15px">
         <div class="ink" style="color:${INK};font-size:16px;font-weight:700">${esc(candidate.ticker)}</div>
-        <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(candidate.strategy)}${esc(dte)}</div>
+        <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(candidate.strategy)}${esc(dte)} · horizon ${esc(candidate.horizon)}</div>
+        <div class="ink-dim" style="color:${DIM};font-size:11px;font-family:ui-monospace,Menlo,monospace">${esc(candidate.id)}</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ink" style="margin-top:8px;color:${INK}">
           <tr>
             <th align="left" style="padding:0 6px 4px;color:${DIM};font-size:11px;font-weight:400">action</th>

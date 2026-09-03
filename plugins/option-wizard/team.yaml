@@ -281,6 +281,10 @@ tasks:
       Keep at most five proposals, numbered. Move the rest to the risk list
       with the reason each was dropped, drop anything missing a 失效价, and end
       with the 决策块.
+      Every proposal carries `horizon`: one of intraday / day / multiday. It is
+      YOUR call and it says when this thesis comes due to be settled — the
+      close run looks for exactly that, and a proposal without one is dropped
+      before it reaches the reader. Do NOT write an id; the harness mints it.
 
   - id: weekly
     role: weekly-analyst
