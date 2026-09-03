@@ -1490,11 +1490,28 @@ export function buildTools(cfg: {
       // model quotes the level it was given, and a Number() round-trip is how
       // "764.77" becomes 764.7699999 in a trading email.
       // `source=vol` is volume-derived exposure — the same basis UW's own
-      // levels page shows. There is no net GEX/DEX total on this endpoint;
-      // those stay in ow_argon_metrics (uw_scan.greek_exposure_daily).
+      // levels page shows. There is no net GEX/DEX total on this endpoint.
+      //
+      // GET /api/stock/{ticker}/spot-exposures
+      // Verified live 2026-09-03 (SPY): {"data":[{"time":
+      //   "2026-09-03T10:30:40.099000Z","ticker":"SPY","start_time":
+      //   "2026-09-03T10:30:00.000000Z","price":"764.55",
+      //   "gamma_per_one_percent_move_oi":"-17753186963.86",
+      //   "charm_per_one_percent_move_oi":"-656557390747.5",
+      //   "vanna_per_one_percent_move_oi":"563446443.17", ...}, ...]} — plus
+      // *_dir/*_vol variants that were "0" in that snapshot. Every value is a
+      // STRING and stays one here for the same reason as the levels above.
+      // `limit` is IGNORED by this endpoint: `?limit=1` and `?limit=3` both
+      // returned the full session, ~180 rows, OLDEST FIRST. There is no
+      // server-side way to ask for only the latest row, so the tool fetches
+      // the whole array and picks the row with the max `time` itself — the
+      // array is never returned to the caller, only that one row. This is
+      // the only real timestamp for net gamma exposure UW exposes; the old
+      // ow_argon_metrics net GEX/DEX row carried `trade_date` only (a date,
+      // no time), which fails the as-of-verbatim gate.
       name: "ow_uw_gex",
       description:
-        "Unusual Whales GEX levels per ticker: call wall, put wall, gamma flip, gamma magnet, nearby flips, with the as-of time UW returned.",
+        "Unusual Whales GEX levels per ticker: call wall, put wall, gamma flip, gamma magnet, nearby flips, and spot gamma exposure per 1% move, each with the as-of time UW returned.",
       paramsSchema: GexParams,
       mutating: false,
       dshParams: {
@@ -1509,6 +1526,7 @@ export function buildTools(cfg: {
         const levels: unknown[] = [];
         const unavailable: Array<{ ticker: string; reason: string }> = [];
         for (const ticker of wanted) {
+          let level: Record<string, unknown>;
           try {
             const raw = (await uwGet(
               env,
@@ -1518,7 +1536,7 @@ export function buildTools(cfg: {
               ctx,
             )) as Record<string, unknown>;
             const body = (raw.data ?? raw) as Record<string, unknown>;
-            levels.push({
+            level = {
               ticker,
               // Untouched, in UW's own words and UW's own types.
               date: body.date,
@@ -1529,7 +1547,7 @@ export function buildTools(cfg: {
               gammaFlip: body.gamma_flip,
               gammaMagnet: body.gamma_magnet,
               nearbyFlips: body.nearby_flips,
-            });
+            };
           } catch (error: unknown) {
             // One ticker's outage is not the tool's outage; a fabricated level
             // would be. The absent one is NAMED so the reader can see the gap.
@@ -1537,7 +1555,42 @@ export function buildTools(cfg: {
               ticker,
               reason: error instanceof Error ? error.message : String(error),
             });
+            continue;
           }
+          try {
+            const rawSpot = (await uwGet(
+              env,
+              "ow_uw_gex",
+              `/api/stock/${encodeURIComponent(ticker)}/spot-exposures`,
+              {},
+              ctx,
+            )) as Record<string, unknown>;
+            const rows = (rawSpot.data ?? rawSpot) as Array<Record<string, unknown>>;
+            if (!Array.isArray(rows) || rows.length === 0) {
+              throw new Error(`${ticker}: spot-exposures returned no rows`);
+            }
+            // `limit` is ignored server-side (verified 2026-09-03) — fetch the
+            // whole session and pick the row with the max `time` ourselves.
+            let latest = rows[0];
+            for (const row of rows) {
+              if (typeof row.time === "string" && typeof latest.time === "string" && row.time > latest.time) {
+                latest = row;
+              }
+            }
+            level.spotGamma = {
+              time: latest.time,
+              price: latest.price,
+              gammaPer1PctOi: latest.gamma_per_one_percent_move_oi,
+              charmPer1PctOi: latest.charm_per_one_percent_move_oi,
+              vannaPer1PctOi: latest.vanna_per_one_percent_move_oi,
+            };
+          } catch (error: unknown) {
+            unavailable.push({
+              ticker,
+              reason: `spotGamma: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+          levels.push(level);
         }
         if (levels.length === 0) {
           throw new Error(
