@@ -20,13 +20,24 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
 
-/** `<dir>/<tenant>-<yyyy-mm-dd>-<runId>.md`. The run id is in the NAME, not
- *  only in the body: two runs on one day must not overwrite each other, and a
- *  reader who sees a surprising number needs the audit query for that exact
- *  run without opening the file. */
-function reportPath(dir: string, payload: DeliveryPayload, now: Date): string {
-  const day = now.toISOString().slice(0, 10);
-  return join(dir, `${payload.tenant}-${day}-${payload.runId}.md`);
+/** `<dir>/<tenant>-<yyyy-mm-dd>-<phase>.md`.
+ *
+ *  The PHASE is in the name, not the run id. Five scheduled runs a day need
+ *  five stable names a later run can find by name (that is what the tenant's
+ *  own report-reading tool does), and a second run of the SAME phase is a
+ *  correction of that report — overwriting is the intent, not a collision.
+ *  The run id lives in the file's header line and in the audit table, which is
+ *  where a reader chasing a surprising number goes anyway. A run with no phase
+ *  falls back to the run id, so a tenant that never sets one is unchanged.
+ *
+ *  The DAY comes from the payload, not from a clock in here. The runner reads
+ *  it once per run in the tenant's declared report zone; a channel that asked
+ *  the system clock instead would name the file for a different day than the
+ *  subject and the email counter whenever the two zones disagree, which for a
+ *  tenant whose subject matter is a US afternoon is most of the evening. */
+function reportPath(dir: string, payload: DeliveryPayload): string {
+  const tail = payload.phase ?? payload.runId;
+  return join(dir, `${payload.tenant}-${payload.day}-${tail}.md`);
 }
 
 export class MarkdownChannel implements Channel {
@@ -34,7 +45,7 @@ export class MarkdownChannel implements Channel {
   /** Stays on this machine, so the egress brake does not apply. */
   readonly external = false;
 
-  constructor(private readonly deps: { now?: () => Date; stateRoot?: string } = {}) {}
+  constructor(private readonly deps: { stateRoot?: string } = {}) {}
 
   async deliver(
     payload: DeliveryPayload,
@@ -54,7 +65,7 @@ export class MarkdownChannel implements Channel {
         : isAbsolute(configured)
           ? configured
           : resolve(root, configured);
-    const path = reportPath(dir, payload, (this.deps.now ?? (() => new Date()))());
+    const path = reportPath(dir, payload);
     const lines = [
       `# ${payload.subject}`,
       "",

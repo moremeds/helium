@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Deploy the v2 lane (option-wizard) to the mini. Run from the laptop:
-#   scripts/deploy-v2.sh
+#   scripts/deploy-v2.sh [phase]
+#
+# The optional argument names the phase to kickstart after install (default
+# `premarket`); the five agents themselves are always installed.
 #
 # Re-execs itself on the deploy host over stdin (`ssh "$HOST" ... bash -s`) so
 # there is exactly one copy of this script to maintain; everything below the
@@ -15,14 +18,17 @@ HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
 CHECKOUT="$HOME/projects/helium-v2"
 STATE_ROOT="${HELIUM_STATE_ROOT:-$HOME/.helium/state-v2}"
 COUNTERS="$STATE_ROOT/reports/email-counters.json"
-LABEL="com.helium.option-wizard"
+# The five phased agents. Adding a phase is a new plist plus an entry here --
+# never an edit anywhere else in this script.
+PHASES=(premarket frank intraday close weekly)
+KICK_PHASE="${1:-premarket}"
 
 if [ "${HELIUM_REMOTE:-0}" != "1" ]; then
   # A non-interactive ssh gets PATH=/usr/bin:/bin:/usr/sbin:/sbin — no Homebrew,
   # so no node and no pnpm. Both prefixes are listed so this does not silently
   # depend on the CPU architecture.
   ssh "$HELIUM_HOST" \
-    "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s" \
+    "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$HOME/.local/bin:\$PATH\"; HELIUM_REMOTE=1 bash -s -- \"$KICK_PHASE\"" \
     < "$0"
   exit $?
 fi
@@ -52,6 +58,28 @@ pnpm --dir "$CHECKOUT" build
 say "resetting the email daily cap: $COUNTERS"
 rm -f "$COUNTERS"
 
-say "kicking $LABEL"
-launchctl kickstart -k "gui/$(id -u)/$LABEL"
+say "installing launch agents"
+mkdir -p "$HOME/Library/LaunchAgents"
+for phase in "${PHASES[@]}"; do
+  label="com.helium.option-wizard-$phase"
+  src="$CHECKOUT/launchd/$label.plist"
+  dst="$HOME/Library/LaunchAgents/$label.plist"
+  [ -f "$src" ] || { echo "missing $src" >&2; exit 66; }
+  # plutil accepts files launchd rejects, so the file is parsed with plistlib
+  # too before it is installed. This has already cost a debugging session.
+  plutil -lint "$src" >/dev/null
+  python3 -c 'import plistlib,sys; plistlib.load(open(sys.argv[1],"rb"))' "$src"
+  cp "$src" "$dst"
+  launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$dst"
+done
+
+# The single old agent is replaced by the five phased ones. Unloading it here
+# rather than by hand is what keeps a second scheduler from firing an unphased
+# run alongside them.
+launchctl bootout "gui/$(id -u)/com.helium.option-wizard" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.helium.option-wizard.plist"
+
+say "kicking com.helium.option-wizard-$KICK_PHASE"
+launchctl kickstart -k "gui/$(id -u)/com.helium.option-wizard-$KICK_PHASE"
 say "done"

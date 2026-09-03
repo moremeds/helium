@@ -8,6 +8,7 @@
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
+import { invalidationLabel } from "./math.js";
 
 /**
  * The header of the payoff row, which says what its columns ARE. With a quoted
@@ -51,7 +52,7 @@ function pricingLines(candidate: CandidateView): string[] {
 function candidateLines(candidate: CandidateView): string[] {
   const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
   return [
-    `${candidate.ticker} — ${candidate.strategy}${dte}`,
+    `[${candidate.id}] ${candidate.ticker} — ${candidate.strategy}${dte} · 失效 ${invalidationLabel(candidate.invalidation)}`,
     ...candidate.legs.map(
       (leg) =>
         `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +
@@ -65,7 +66,7 @@ function candidateLines(candidate: CandidateView): string[] {
 
 export function renderText(view: BriefView): string {
   const lines: string[] = [
-    `${view.dateHkt} / ${view.dateEt} — ${view.tenant} [${view.outcome}]`,
+    `${view.date} — ${view.tenant} [${view.outcome}]`,
     "",
   ];
   if (view.empty !== undefined) {
@@ -73,7 +74,8 @@ export function renderText(view: BriefView): string {
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
-  lines.push("【今日 regime】", view.regime.paragraph, "");
+  for (const section of view.sections)
+    lines.push(`【${section.title}】`, section.body, "");
   const stances = [
     view.regime.direction === undefined
       ? null
@@ -84,9 +86,14 @@ export function renderText(view: BriefView): string {
     view.regime.hedge === undefined ? null : `hedge: ${view.regime.hedge}`,
   ].filter((entry): entry is string => entry !== null);
   if (stances.length > 0) lines.push(stances.join(" | "), "");
-  lines.push("【候选结构】每张合约，不含数量", "");
-  for (const candidate of view.candidates)
-    lines.push(...candidateLines(candidate));
+  // No header without rows under it. An intraday brief has no candidates by
+  // design, and a failed run's are withheld; a bare heading reads as content
+  // that got lost on the way.
+  if (view.candidates.length > 0) {
+    lines.push("【候选结构】每张合约，不含数量", "");
+    for (const candidate of view.candidates)
+      lines.push(...candidateLines(candidate));
+  }
   if (view.riskList.length > 0) {
     lines.push("【风险清单】");
     for (const entry of view.riskList)

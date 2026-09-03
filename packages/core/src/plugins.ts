@@ -118,6 +118,12 @@ export interface GateCtx {
   role: string;
   /** Remaining budget at the moment the gate runs. */
   remainingUsd?: number;
+  /**
+   * Everything the tools in this run returned, as raw strings, in order. Core
+   * does not read inside them: it is the tenant's gate that decides what "the
+   * output must be supported by what a tool said" means for its own domain.
+   */
+  toolOutputs?: string[];
 }
 
 /**
@@ -141,6 +147,15 @@ export interface DeliveryPayload {
   runId: string;
   subject: string;
   body: string;
+  /**
+   * `yyyy-mm-dd`: the calendar day this run's output is filed under, in the
+   * tenant's `reportTimezone`. The runner computes it ONCE per run and every
+   * channel copies it — a channel that reads its own clock instead would name
+   * a file for one day while the counter beside it charged another, which is
+   * exactly the drift this field removes. Required, so a new channel cannot
+   * quietly reintroduce a second date.
+   */
+  day: string;
   /** Absolute paths of files the channel may attach or reference. */
   artifacts?: string[];
   /**
@@ -150,6 +165,9 @@ export interface DeliveryPayload {
    * readable form opts in, and one that wants the record does nothing.
    */
   rendered?: RenderedReport;
+  /** The run label. A channel may name its artifact after it; core does not
+   *  interpret it. */
+  phase?: string;
 }
 
 export interface DeliveryOutcome {

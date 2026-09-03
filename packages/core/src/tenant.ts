@@ -55,6 +55,18 @@ export interface TenantSpec {
   env?: string[];
   /** Path, relative to the tenant dir, of the run-level prompt. */
   promptFile?: string;
+  /**
+   * The IANA zone whose calendar day labels this tenant's output: the report
+   * file name, the delivery subject and the per-day delivery counter all take
+   * their date from it, and the runner tells the agent the same date.
+   *
+   * It is NOT the trigger timezone. A trigger's zone answers "when does this
+   * run start" for whoever reads the schedule; this one answers "which day is
+   * this run's output about", and a tenant whose subject matter lives in
+   * another zone than its operator needs both. Absent means UTC, which is what
+   * every surface used before this field existed.
+   */
+  reportTimezone?: string;
   /** The tenant-owned opaque block; the host never interprets its contents. */
   extensions: Record<string, unknown>;
 }
@@ -82,6 +94,10 @@ const CronTriggerSchema = z.strictObject({
   kind: z.literal("cron"),
   schedule: z.string().min(1).max(200),
   timezone: z.string().min(1).max(64),
+  // An opaque label core never reads, compares or acts on. Nothing here runs a
+  // cron loop, so a trigger is documentation of a schedule kept elsewhere; the
+  // label lets that documentation say WHICH scheduled entry it describes.
+  phase: z.string().min(1).max(64).optional(),
 });
 
 const DeliverySchema = z.strictObject({
@@ -107,6 +123,7 @@ const TenantShape = z.strictObject({
     .max(32)
     .optional(),
   promptFile: z.string().min(1).max(200).optional(),
+  reportTimezone: z.string().min(1).max(64).optional(),
   // ONE opaque block, not a host-maintained allow-list of tenant key names. A
   // tenant adding a fourth block edits only its own file; a typo in a HOST key
   // still fails loudly, because strictObject rejects it.
@@ -169,6 +186,9 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
     sandbox: raw.sandbox,
     ...(raw.env === undefined ? {} : { env: [...raw.env] }),
     ...(raw.promptFile === undefined ? {} : { promptFile: raw.promptFile }),
+    ...(raw.reportTimezone === undefined
+      ? {}
+      : { reportTimezone: raw.reportTimezone }),
     extensions: raw.extensions ?? {},
   };
 }
@@ -176,13 +196,15 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
 /** Every directory under `dir` that carries a `tenant.yaml`, name-ordered. */
 export function tenantDirs(dir: string): string[] {
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    // A symlinked tenant directory is a directory for our purposes; without
-    // this it is skipped silently (isDirectory() does not follow links).
-    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-    .map((entry) => entry.name)
-    .sort()
-    .filter((name) => existsSync(join(dir, name, "tenant.yaml")));
+  return (
+    readdirSync(dir, { withFileTypes: true })
+      // A symlinked tenant directory is a directory for our purposes; without
+      // this it is skipped silently (isDirectory() does not follow links).
+      .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+      .map((entry) => entry.name)
+      .sort()
+      .filter((name) => existsSync(join(dir, name, "tenant.yaml")))
+  );
 }
 
 export function loadTenants(dir: string): TenantLoadResult {
@@ -198,7 +220,9 @@ export function loadTenants(dir: string): TenantLoadResult {
       );
       const previous = seen.get(spec.tenant);
       if (previous !== undefined) {
-        throw new Error(`duplicate tenant: ${spec.tenant} (also in ${previous})`);
+        throw new Error(
+          `duplicate tenant: ${spec.tenant} (also in ${previous})`,
+        );
       }
       seen.set(spec.tenant, name);
       const manifest = parseTeamYaml(

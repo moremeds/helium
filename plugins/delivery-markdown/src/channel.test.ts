@@ -4,13 +4,16 @@ import { isAbsolute, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import channel, { MarkdownChannel } from "./channel.js";
 
+// 2026-09-02 is the day the runner resolved in the tenant's report zone. It is
+// a payload field, not a clock: 2026-09-03T02:40+08:00 in the launcher's zone
+// is still 2026-09-02 in America/New_York, and the file must say so.
 const payload = {
   tenant: "option-wizard",
   runId: "run-1",
   subject: "helium option-wizard 2026-09-02",
   body: "line one\nline two",
+  day: "2026-09-02",
 };
-const now = (): Date => new Date("2026-09-02T12:00:00Z");
 
 describe("markdown channel", () => {
   it("is exported as an instance, which is what discovery imports", () => {
@@ -27,7 +30,7 @@ describe("markdown channel", () => {
 
   it("writes the report and returns the path it wrote", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
-    const result = await new MarkdownChannel({ now, stateRoot }).deliver(payload, {});
+    const result = await new MarkdownChannel({ stateRoot }).deliver(payload, {});
     expect(result.state).toBe("sent");
     expect(isAbsolute(result.detail!)).toBe(true);
     const written = readFileSync(result.detail!, "utf8");
@@ -37,20 +40,32 @@ describe("markdown channel", () => {
     expect(written).toContain("helium audit run-1");
   });
 
-  it("puts the run id in the FILENAME so two runs in a day cannot overwrite", async () => {
+  it("names the file by PHASE, so a rerun of one phase corrects it in place", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
-    const channelUnderTest = new MarkdownChannel({ now, stateRoot });
-    await channelUnderTest.deliver(payload, {});
-    await channelUnderTest.deliver({ ...payload, runId: "run-2" }, {});
+    const channelUnderTest = new MarkdownChannel({ stateRoot });
+    await channelUnderTest.deliver({ ...payload, phase: "premarket" }, {});
+    await channelUnderTest.deliver({ ...payload, phase: "close", runId: "run-2" }, {});
+    await channelUnderTest.deliver({ ...payload, phase: "premarket", runId: "run-3" }, {});
     expect(readdirSync(join(stateRoot, "reports")).sort()).toEqual([
+      "option-wizard-2026-09-02-close.md",
+      "option-wizard-2026-09-02-premarket.md",
+    ]);
+    expect(
+      readFileSync(join(stateRoot, "reports", "option-wizard-2026-09-02-premarket.md"), "utf8"),
+    ).toContain("run-3");
+  });
+
+  it("falls back to the run id when no phase is set", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
+    await new MarkdownChannel({ stateRoot }).deliver(payload, {});
+    expect(readdirSync(join(stateRoot, "reports"))).toEqual([
       "option-wizard-2026-09-02-run-1.md",
-      "option-wizard-2026-09-02-run-2.md",
     ]);
   });
 
   it("resolves a relative `dir` against the state root, not the cwd", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
-    const result = await new MarkdownChannel({ now, stateRoot }).deliver(payload, {
+    const result = await new MarkdownChannel({ stateRoot }).deliver(payload, {
       dir: "reports/daily",
     });
     expect(result.detail).toBe(
@@ -60,7 +75,7 @@ describe("markdown channel", () => {
 
   it("refuses a non-string `dir` rather than writing somewhere surprising", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "helium-md-"));
-    const result = await new MarkdownChannel({ now, stateRoot }).deliver(payload, { dir: 7 });
+    const result = await new MarkdownChannel({ stateRoot }).deliver(payload, { dir: 7 });
     expect(result).toEqual({ state: "failed", detail: "markdown channel `dir` must be a string" });
   });
 
@@ -68,15 +83,13 @@ describe("markdown channel", () => {
     // The markdown file is the durable record. If it followed the email into
     // the rendered form, the run's own metadata would exist nowhere on disk.
     const dir = mkdtempSync(join(tmpdir(), "helium-md-"));
-    const outcome = await new MarkdownChannel({
-      stateRoot: dir,
-      now: () => new Date("2026-09-02T12:00:00Z"),
-    }).deliver(
+    const outcome = await new MarkdownChannel({ stateRoot: dir }).deliver(
       {
         tenant: "demo",
         runId: "r1",
         subject: "generic subject",
         body: "**Outcome:** completed, 4 steps.",
+        day: "2026-09-02",
         rendered: { subject: "pretty", text: "pretty text", html: "<p>x</p>" },
       },
       {},

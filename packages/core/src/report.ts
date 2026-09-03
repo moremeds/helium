@@ -31,6 +31,16 @@ export interface RunReport {
   runId: string;
   tenant: string;
   mode: "model" | "tool-only";
+  /** The run label this run was started with. Opaque to core; the tenant and
+   *  the delivery channels are the only things that know what it means. */
+  phase: string;
+  /**
+   * `yyyy-mm-dd`: the day this run's output is filed under, in the tenant's
+   * `reportTimezone`. Resolved once at the start of the run and carried, so the
+   * report file name, the delivery subject, the per-day delivery counter and
+   * whatever the tenant's own renderer prints all name the same date.
+   */
+  day: string;
   providersLive: string[];
   providersSkipped: Array<{ id: string; reason: string }>;
   steps: StepReport[];

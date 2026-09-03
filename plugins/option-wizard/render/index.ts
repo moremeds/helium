@@ -15,7 +15,31 @@ import { priceStructure, width, type Leg, type Pricing } from "./math.js";
 import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
 
+/**
+ * One price that ends a thesis, and which way it has to go to do it.
+ *
+ * A number rather than the model's prose because this is the only field a
+ * settlement can be CHECKED against: the close run compares it to a spot, and
+ * a gate can ask whether a settled level ever appeared in the report. The
+ * prose form it replaced ("XLK breaks 186 to upside OR breaks 175 to
+ * downside") reads well and settles nothing.
+ */
+export interface Invalidation {
+  level: number;
+  side: "above" | "below";
+}
+
 export interface CandidateView {
+  /** `<TICKER>-<report day>-<n>`, minted here, never written by the model.
+   *  An id is bookkeeping, not judgement: asking the model to spell one
+   *  invites typos and collisions, and those are the only two errors that
+   *  can break a look-back. */
+  id: string;
+  /** The levels that kill this thesis, as the model committed to them in
+   *  writing. This is what a later run settles against: 反转 is a breach of one
+   *  of these on its own side, and nothing else. Usually one; a two-sided
+   *  structure gets two. */
+  invalidation: Invalidation[];
   ticker: string;
   strategy: string;
   expiry: string;
@@ -25,6 +49,11 @@ export interface CandidateView {
   pricing: Pricing;
   /** Widest strike span, per share; 0 when single-strike. */
   width: number;
+  /** Where the thesis is trying to get to, in the model's own words. Prose,
+   *  deliberately: 反转 triggers a 平仓建议 and so must be mechanical, while
+   *  加强 / 不变 are judgement and read better as the sentence the designer
+   *  actually wrote. */
+  target: string;
   rationale: string;
 }
 
@@ -35,11 +64,27 @@ export interface RegimeView {
   hedge?: string;
 }
 
+/** One narrative block: whatever the run chose to say, under its own title. */
+export interface Section {
+  title: string;
+  body: string;
+}
+
 export interface BriefView {
-  dateHkt: string;
-  dateEt: string;
+  /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
+   *  printed the HK date beside the ET one made the reader do the conversion
+   *  the harness had already done. */
+  date: string;
   tenant: string;
   outcome: "completed" | "DEGRADED" | "FAILED";
+  /** The narrative blocks the run actually produced, in task order.
+   *
+   *  The renderer does not know what a phase is, and must not learn: which
+   *  blocks exist is the team manifest's business. A premarket run returns
+   *  its four regime sections and four scenario paths; an intraday run
+   *  returns one "无变化" line. Both render through the same loop because
+   *  both are just a list. */
+  sections: Section[];
   regime: RegimeView;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
@@ -51,16 +96,6 @@ export interface BriefView {
 
 const RIGHTS = new Set(["call", "put"]);
 const ACTIONS = new Set(["buy", "sell"]);
-
-function dayIn(zone: string, now: Date): string {
-  // en-CA gives YYYY-MM-DD, which is the only reason that locale is named here.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
 
 /** The last JSON object in a step's text, fenced or bare. */
 export function extractJson(text: string): Record<string, unknown> | null {
@@ -112,6 +147,35 @@ function toLegs(raw: unknown): Leg[] | null {
     });
   }
   return legs;
+}
+
+/**
+ * The model's `invalidation`, kept only when it is a level and a side.
+ *
+ * This replaced `horizon`, and the swap is the point: `horizon` asked the model
+ * to pick one of three words, so it picked the one with least resistance —
+ * thirteen of thirteen proposals came back `multiday` and the close run's
+ * three-state settlement degraded to "not due yet". A level is not a word the
+ * model can shrug at; it either states a number and a direction or it does not
+ * get through.
+ */
+function toInvalidation(raw: unknown): Invalidation[] | null {
+  // A single object rather than an array is the one shape worth tolerating:
+  // it is the model writing the common case (one level) the natural way, and
+  // dropping an otherwise-sound proposal over a bracket is a worse trade.
+  const entries = Array.isArray(raw) ? raw : [raw];
+  const out: Invalidation[] = [];
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    const side = row.side;
+    if (typeof row.level !== "number" || !Number.isFinite(row.level)) continue;
+    if (side !== "above" && side !== "below") continue;
+    out.push({ level: row.level, side });
+  }
+  // Two is a two-sided structure; a third level means the thesis has no shape,
+  // and settling against the wrong one of three is worse than not shipping it.
+  return out.length === 0 || out.length > 2 ? null : out;
 }
 
 /** Spot as the reviewer quoted it, e.g. "**SPY (spot 761.78):**". */
@@ -166,16 +230,128 @@ function degradationFrom(report: RunReport): string | undefined {
   return parts.length === 0 ? undefined : `数据降级：${parts.join("；")}`;
 }
 
-export function buildView(
-  report: RunReport,
-  cfg: TenantSpec,
-  now: Date,
-): BriefView {
-  const dateEtDay = dayIn("America/New_York", now);
+/**
+ * The DAY is `report.day`, never a clock read in here: the runner resolves it
+ * once per run in the tenant's `reportTimezone` (America/New_York), and the
+ * report file name, the mail subject and the daily mail counter all carry that
+ * same date. A renderer that formatted `new Date()` itself would be a fifth
+ * opinion about what day it is, and near either midnight it would be a
+ * different one.
+ */
+/**
+ * Every `sections` array the run's steps returned, concatenated in task order.
+ *
+ * A step that answered in prose instead of JSON is not dropped silently: the
+ * regime paragraph is recovered, because one disobedient model must not empty
+ * the mail. Nothing else is recoverable without guessing at structure, and
+ * guessing is how a model's scratch notes ("Wait, I need to double-check…",
+ * seen in the 2026-09-02 report) end up quoted to the reader.
+ */
+function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
+  const sections: Section[] = [];
+  for (const step of report.steps) {
+    const parsed = extractJson(step.text);
+    const raws = parsed !== null && Array.isArray(parsed.sections) ? parsed.sections : null;
+    if (raws === null) {
+      if (step.task === "regime" && regime.paragraph !== "")
+        sections.push({ title: "今日 regime", body: regime.paragraph });
+      continue;
+    }
+    for (const raw of raws) {
+      if (raw === null || typeof raw !== "object") continue;
+      const { title, body } = raw as Record<string, unknown>;
+      if (typeof title !== "string" || typeof body !== "string") continue;
+      // An empty body under a title is worse than no block at all: the reader
+      // reads it as content that got lost on the way.
+      if (title.trim() === "" || body.trim() === "") continue;
+      sections.push({ title: title.trim(), body: body.trim() });
+    }
+  }
+  return sections;
+}
+
+/**
+ * The reviewer's surviving proposals, as the ledger a later run settles.
+ *
+ * Exported because `ow_reports` calls it too. That is not tidiness: the id is
+ * minted here from a positional counter, so if the tool re-implemented the
+ * formula the two could silently drift and a settlement would cite an id that
+ * was never mailed. One function over one immutable report file means the id
+ * the reader saw and the id the close run settles are the same bytes by
+ * construction.
+ */
+/**
+ * A rejection is not a silent `continue`.
+ *
+ * On 2026-09-02 the reviewer itself dropped eight proposals for a missing
+ * `horizon` and wrote all eight into its own risk list, so the reader could see
+ * why the brief was empty. A drop that happens HERE has no such author, and an
+ * unexplained 今日无候选 is the one output that looks identical whether the
+ * gate worked or the pipeline broke. So the gate reports its own refusals and
+ * the brief prints them beside the model's.
+ */
+export interface Ledger {
+  candidates: CandidateView[];
+  rejected: Array<{ ticker: string; reason: string }>;
+}
+
+export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
+  const parsed = extractJson(reviewText);
+  if (parsed === null || !Array.isArray(parsed.proposals))
+    return { candidates: [], rejected: [] };
+  const spots = spotsFrom(reviewText);
+
+  const candidates: CandidateView[] = [];
+  const rejected: Array<{ ticker: string; reason: string }> = [];
+  for (const entry of parsed.proposals) {
+    if (entry === null || typeof entry !== "object") continue;
+    const proposal = entry as Record<string, unknown>;
+    const legs = toLegs(proposal.legs);
+    if (legs === null || typeof proposal.ticker !== "string") continue;
+    // A thesis with no level to breach cannot be settled: the close run would
+    // not know whether silence about it means "still open" or "nobody looked".
+    // Refusing it here is cheaper than carrying a debt nobody can collect.
+    const invalidation = toInvalidation(proposal.invalidation);
+    if (invalidation === null) {
+      rejected.push({
+        ticker: proposal.ticker,
+        reason: "失效价不是可结算的价位（需要 level + side），渲染层丢弃",
+      });
+      continue;
+    }
+    const expiry = legs[0]!.expiry;
+    const spot = spots.get(proposal.ticker);
+    const days = Math.round(
+      (Date.parse(`${expiry}T00:00:00Z`) -
+        Date.parse(`${dateEtDay}T00:00:00Z`)) /
+        86_400_000,
+    );
+    candidates.push({
+      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
+      invalidation,
+      ticker: proposal.ticker,
+      strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
+      expiry,
+      dte: Number.isFinite(days) ? days : null,
+      legs,
+      // Without a quoted spot the extremes and breakevens are still exact —
+      // only the +/-% row needs one, and priceStructure prints the payoff at
+      // the strikes instead of inventing a price to measure from.
+      pricing: priceStructure(legs, spot),
+      width: width(legs),
+      target: typeof proposal.target === "string" ? proposal.target : "",
+      rationale:
+        typeof proposal.rationale === "string" ? proposal.rationale : "",
+    });
+  }
+  return { candidates, rejected };
+}
+
+export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+  const dateEtDay = report.day;
   const degradation = degradationFrom(report);
   const base: BriefView = {
-    dateHkt: `${dayIn("Asia/Hong_Kong", now)} (HKT)`,
-    dateEt: `${dateEtDay} (ET)`,
+    date: dateEtDay,
     tenant: cfg.tenant,
     outcome:
       report.outcome === "failed"
@@ -183,17 +359,40 @@ export function buildView(
         : report.mode === "tool-only"
           ? "DEGRADED"
           : "completed",
+    sections: [],
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
     ...(degradation === undefined ? {} : { degradation }),
   };
 
+  // Resolved before the failure branch: a failed run still renders the steps
+  // that finished, and the regime paragraph is the prose fallback for a step
+  // that answered outside JSON.
+  const regimeStep = report.steps.find((step) => step.task === "regime");
+  const regime =
+    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
+
+  // Every phase's content, resolved before any early return. Only premarket
+  // and close carry a review step; intraday reports drift, weekly settles a
+  // week and frank compares two documents. Treating "has candidates" as a
+  // synonym for "has content" emptied three of the five briefs.
+  const sections = sectionsFrom(report, regime);
+
   if (report.outcome === "failed") {
     const failure = report.failure;
+    const detail = `${failure?.class ?? "unknown"} — ${failure?.detail ?? ""}`;
+    const done = sections;
+    // A run that failed one step out of four still did three steps' work, and
+    // throwing it away is the same single-point failure the tenant is under
+    // orders not to have: on 2026-09-02 a stale IB timestamp refused the
+    // regime gate and voided an intraday brief whose drift step had already
+    // answered the only question that brief exists to answer.
+    if (done.length === 0)
+      return { ...base, empty: `今日无候选：${detail}` };
     return {
       ...base,
-      empty: `今日无候选：${failure?.class ?? "unknown"} — ${failure?.detail ?? ""}`,
+      sections: [{ title: "本次运行未完成", body: detail }, ...done],
     };
   }
   if (report.mode === "tool-only") {
@@ -206,42 +405,17 @@ export function buildView(
   const review = report.steps.find((step) => step.task === "review");
   const parsed = review === undefined ? null : extractJson(review.text);
   if (parsed === null || !Array.isArray(parsed.proposals)) {
-    return { ...base, empty: "今日无候选：review 步骤没有可解析的 JSON" };
+    if (sections.length > 0) return { ...base, sections, regime };
+    return {
+      ...base,
+      empty:
+        review === undefined
+          ? "本次运行没有产出任何区块"
+          : "今日无候选：review 步骤没有可解析的 JSON",
+    };
   }
 
-  const regimeStep = report.steps.find((step) => step.task === "regime");
-  const regime =
-    regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
-  const spots = spotsFrom(review?.text ?? "");
-
-  const candidates: CandidateView[] = [];
-  for (const entry of parsed.proposals) {
-    if (entry === null || typeof entry !== "object") continue;
-    const proposal = entry as Record<string, unknown>;
-    const legs = toLegs(proposal.legs);
-    if (legs === null || typeof proposal.ticker !== "string") continue;
-    const expiry = legs[0]!.expiry;
-    const spot = spots.get(proposal.ticker);
-    const days = Math.round(
-      (Date.parse(`${expiry}T00:00:00Z`) -
-        Date.parse(`${dateEtDay}T00:00:00Z`)) /
-        86_400_000,
-    );
-    candidates.push({
-      ticker: proposal.ticker,
-      strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
-      expiry,
-      dte: Number.isFinite(days) ? days : null,
-      legs,
-      // Without a quoted spot the extremes and breakevens are still exact —
-      // only the +/-% row needs one, and priceStructure prints the payoff at
-      // the strikes instead of inventing a price to measure from.
-      pricing: priceStructure(legs, spot),
-      width: width(legs),
-      rationale:
-        typeof proposal.rationale === "string" ? proposal.rationale : "",
-    });
-  }
+  const { candidates, rejected } = candidatesFrom(review?.text ?? "", dateEtDay);
 
   const riskList = Array.isArray(parsed.riskList)
     ? parsed.riskList.flatMap((entry) => {
@@ -252,24 +426,32 @@ export function buildView(
           : [];
       })
     : [];
+  riskList.push(...rejected);
 
   if (candidates.length === 0 && riskList.length === 0) {
+    if (sections.length > 0) return { ...base, sections, regime };
     const reason =
       typeof parsed.reason === "string" ? parsed.reason : "reviewer 未给出候选";
     return { ...base, empty: `今日无候选：${reason}` };
   }
   // At most five reach the reader; the reviewer's own rule, enforced here too.
-  return { ...base, regime, candidates: candidates.slice(0, 5), riskList };
+  return {
+    ...base,
+    sections,
+    regime,
+    candidates: candidates.slice(0, 5),
+    riskList,
+  };
 }
 
 export default function renderReport(
   report: RunReport,
   cfg: TenantSpec,
 ): RenderedReport {
-  const view = buildView(report, cfg, new Date());
+  const view = buildView(report, cfg);
   const tag = view.outcome === "completed" ? "" : ` [${view.outcome}]`;
   return {
-    subject: `${view.tenant} ${view.dateHkt.slice(0, 10)}${tag}`,
+    subject: `${view.tenant} ${view.date}${tag}`,
     text: renderText(view),
     html: renderHtml(view),
   };

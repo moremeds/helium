@@ -100,7 +100,6 @@ export class EmailChannel implements Channel {
       stateDir?: string;
       smtp?: SmtpConfig | null;
       env?: NodeJS.ProcessEnv;
-      now?: () => Date;
       sleep?: (ms: number) => Promise<void>;
       transport?: Transporter;
     } = {},
@@ -117,7 +116,11 @@ export class EmailChannel implements Channel {
       return { state: "skipped", detail: "no SMTP configured" };
     }
 
-    const day = this.#now().toISOString().slice(0, 10);
+    // The runner's day, in the tenant's declared report zone -- never a clock
+    // read in here. The cap is "how many for THIS day's report", and a channel
+    // rolling its counter at a different midnight than the reports are named
+    // for would ration one day's mail against another day's count.
+    const day = payload.day;
     const counters = this.#read();
     const used = counters[payload.tenant]?.[day] ?? 0;
     if (used >= email.maxPerDay) {
@@ -189,10 +192,6 @@ export class EmailChannel implements Channel {
       ...(smtp.user === undefined ? {} : { auth: { user: smtp.user, pass: smtp.pass } }),
     });
     return this.#transport;
-  }
-
-  #now(): Date {
-    return (this.deps.now ?? (() => new Date()))();
   }
 
   #sleep(ms: number): Promise<void> {

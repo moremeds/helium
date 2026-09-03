@@ -668,11 +668,21 @@ describe("gates", () => {
 });
 
 describe("delivery", () => {
-  const sent: Array<{ subject: string; body: string }> = [];
+  const sent: Array<{
+    subject: string;
+    body: string;
+    phase?: string;
+    day: string;
+  }> = [];
   const channel: Channel = {
     id: "fake-mail",
     deliver: async (payload) => {
-      sent.push({ subject: payload.subject, body: payload.body });
+      sent.push({
+        subject: payload.subject,
+        body: payload.body,
+        phase: payload.phase,
+        day: payload.day,
+      });
       return { state: "sent", detail: "1 recipient" };
     },
   };
@@ -719,7 +729,15 @@ describe("delivery", () => {
       channels: [channel],
     });
     expect(report.delivery[0]?.state).toBe("sent");
-    expect(sent[0]?.subject).toContain("helium demo");
+    // The subject is the phase and the date; the tenant name comes from the
+    // channel's own configured prefix, not from here.
+    expect(sent[0]?.subject).toContain("premarket");
+    expect(sent[0]?.phase).toBe("premarket");
+    // One day for the run: the subject's date IS the day the channel is handed,
+    // so a file named for it and a counter charged for it cannot disagree. The
+    // tenant here declares no report zone, so that day is UTC.
+    expect(sent[0]?.day).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(sent[0]?.subject).toContain(sent[0]!.day);
     expect(sent[0]?.body).toContain("**Outcome:** completed");
     // The body is a report, not a transcript: the role's own words survive.
     expect(sent[0]?.body).toContain("hello");

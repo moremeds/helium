@@ -21,6 +21,7 @@ const REVIEW_TEXT = JSON.stringify({
   proposals: [
     {
       ticker: "SPY",
+      invalidation: [{ level: 750, side: "above" }],
       strategy: "put debit spread",
       legs: [
         { right: "put", expiry: "2026-09-30", strike: 750, action: "buy", ratio: 1, mid: 4.92 },
@@ -30,6 +31,7 @@ const REVIEW_TEXT = JSON.stringify({
     },
     {
       ticker: "QQQ",
+      invalidation: [{ level: 710, side: "below" }],
       strategy: "call debit spread",
       legs: [
         { right: "call", expiry: "2026-09-30", strike: 710, action: "buy", ratio: 1, mid: 13.68 },
@@ -39,6 +41,7 @@ const REVIEW_TEXT = JSON.stringify({
     },
     {
       ticker: "TLT",
+      invalidation: [{ level: 82, side: "above" }],
       strategy: "put debit spread",
       legs: [
         { right: "put", expiry: "2026-09-30", strike: 82, action: "buy", ratio: 1, mid: 0.95 },
@@ -56,6 +59,8 @@ function report(): RunReport {
   return {
     runId: "run-ec962c3e-d57a-4b80-99fe-c5f4e67899f9",
     tenant: "option-wizard",
+    // The runner's day, resolved in the tenant's reportTimezone (ET).
+    day: "2026-09-02",
     mode: "model",
     outcome: "completed",
     providersLive: ["codex-subscription"],

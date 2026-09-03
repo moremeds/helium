@@ -50,6 +50,13 @@ export const TeamTaskSchema = z.strictObject({
   dependsOn: z.array(z.string().min(1)).default([]),
   requires: CapabilityList,
   prompt: z.string().max(20000).optional(),
+  /**
+   * Run labels this task belongs to. ABSENT means every label — a task that
+   * does not care must not have to enumerate the ones it does not know about.
+   * Core never interprets a label; it only compares strings, which is why a
+   * tenant can add a sixth one without editing this file (doctrine 3).
+   */
+  phases: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
 });
 
 const TeamManifestShape = z.strictObject({

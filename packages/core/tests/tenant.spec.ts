@@ -66,6 +66,20 @@ describe("tenant discovery", () => {
     expect(() => loadTenants(dir)).toThrow(/duplicate tenant: demo/);
   });
 
+  it("carries the tenant's report timezone, which is not its trigger timezone", () => {
+    // The two answer different questions: a trigger's zone says when the run
+    // starts, `reportTimezone` says which day its output is about. A tenant
+    // scheduled in one zone about a market in another needs both, and dropping
+    // this field would not fail loudly — the tenant would just quietly go back
+    // to filing its day under UTC.
+    const spec = parseTenantYaml(
+      `${TENANT}reportTimezone: America/New_York\n`,
+      "tenant.yaml",
+    );
+    expect(spec.reportTimezone).toBe("America/New_York");
+    expect(parseTenantYaml(TENANT, "tenant.yaml").reportTimezone).toBeUndefined();
+  });
+
   it("refuses a vendor routing key anywhere in a declaration", () => {
     expect(() => parseTenantYaml(`${TENANT}extensions: { model: some-model }\n`, "x")).toThrow(
       /unrecognized key "model"/,

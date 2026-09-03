@@ -7,8 +7,11 @@ import channel_, { EmailChannel, smtpFromEnv } from "./channel.js";
 const SMTP = { host: "smtp.example.test", port: 587, secure: false, from: "helium@example.test" };
 const CONFIG = { to: "ops@example.test", subjectPrefix: "[helium]", maxPerDay: 2 };
 
-function payload(runId = "r1") {
-  return { tenant: "demo", runId, subject: "daily", body: "body" };
+// `day` is the runner's, resolved once in the tenant's report zone. The cap
+// counts against THAT day, so a channel clock reading a different midnight
+// cannot ration one day's mail against another day's count.
+function payload(runId = "r1", day = "2026-09-02") {
+  return { tenant: "demo", runId, subject: "daily", body: "body", day };
 }
 
 function channel(sendMail: ReturnType<typeof vi.fn>, env: NodeJS.ProcessEnv = {}) {
@@ -16,7 +19,6 @@ function channel(sendMail: ReturnType<typeof vi.fn>, env: NodeJS.ProcessEnv = {}
     stateDir: mkdtempSync(join(tmpdir(), "helium-email-")),
     smtp: SMTP,
     env,
-    now: () => new Date("2026-09-02T12:00:00Z"),
     sleep: async () => {},
     transport: { sendMail } as never,
   });
@@ -61,6 +63,20 @@ describe("EmailChannel", () => {
     expect(third.state).toBe("rate-capped");
     expect(third.detail).toBe("2/2 already sent today");
     expect(sendMail).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts against the payload's day, so the next report day starts clean", async () => {
+    // The two days below are one calendar day apart in the tenant's report
+    // zone. Before the day came from the payload this channel read its own
+    // clock, and a run whose report was filed on 2026-09-02 could be capped
+    // against 2026-09-03's count.
+    const sendMail = vi.fn().mockResolvedValue({});
+    const c = channel(sendMail);
+    expect((await c.deliver(payload("a", "2026-09-02"), CONFIG)).state).toBe("sent");
+    expect((await c.deliver(payload("b", "2026-09-02"), CONFIG)).state).toBe("sent");
+    expect((await c.deliver(payload("c", "2026-09-02"), CONFIG)).state).toBe("rate-capped");
+    expect((await c.deliver(payload("d", "2026-09-03"), CONFIG)).state).toBe("sent");
+    expect(sendMail).toHaveBeenCalledTimes(3);
   });
 
   it("retries three times then reports failed, and does not consume the cap", async () => {

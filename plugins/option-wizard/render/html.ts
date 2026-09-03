@@ -19,6 +19,7 @@
  */
 import type { BriefView, CandidateView } from "./index.js";
 import { payoffCell, payoffLabel } from "./text.js";
+import { invalidationLabel } from "./math.js";
 
 const INK = "#232830";
 const DIM = "#6b7484";
@@ -109,7 +110,8 @@ function candidateCard(candidate: CandidateView): string {
   return `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px;margin-bottom:12px">
       <tr><td class="pad" style="padding:12px 15px">
         <div class="ink" style="color:${INK};font-size:16px;font-weight:700">${esc(candidate.ticker)}</div>
-        <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(candidate.strategy)}${esc(dte)}</div>
+        <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(candidate.strategy)}${esc(dte)} · 失效 ${esc(invalidationLabel(candidate.invalidation))}</div>
+        <div class="ink-dim" style="color:${DIM};font-size:11px;font-family:ui-monospace,Menlo,monospace">${esc(candidate.id)}</div>
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ink" style="margin-top:8px;color:${INK}">
           <tr>
             <th align="left" style="padding:0 6px 4px;color:${DIM};font-size:11px;font-weight:400">action</th>
@@ -162,12 +164,21 @@ export function renderHtml(view: BriefView): string {
          </table>`
       : `<table role="presentation" class="card" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:${CARD};border:1px solid ${RULE};border-radius:10px;margin-bottom:12px">
            <tr><td class="pad" style="padding:12px 15px">
-             <div class="ink" style="color:${INK};font-size:14px;line-height:1.55">${esc(view.regime.paragraph)}</div>
+             ${view.sections
+               .map(
+                 (section) =>
+                   `<div class="ink" style="color:${INK};font-size:14px;line-height:1.55;margin-bottom:10px"><strong>${esc(section.title)}</strong><br>${esc(section.body).replace(/\n/g, "<br>")}</div>`,
+               )
+               .join("")}
              <div style="margin-top:8px">${stances}</div>
            </td></tr>
          </table>
-         <div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【候选结构】每张合约，不含数量</div>
-         ${view.candidates.map(candidateCard).join("")}
+         ${
+           view.candidates.length === 0
+             ? ""
+             : `<div class="ink-dim" style="color:${DIM};font-size:12px;margin:14px 0 8px">【候选结构】每张合约，不含数量</div>
+         ${view.candidates.map(candidateCard).join("")}`
+         }
          ${riskSection}`;
 
   const degradationRow =
@@ -180,7 +191,7 @@ export function renderHtml(view: BriefView): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta name="color-scheme" content="light dark" />
-<title>${esc(view.tenant)} ${esc(view.dateHkt)}</title>
+<title>${esc(view.tenant)} ${esc(view.date)}</title>
 <style>
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
@@ -204,7 +215,7 @@ export function renderHtml(view: BriefView): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif">
    <tr><td class="pad" style="padding:0 4px 12px">
      <div class="ink" style="color:${INK};font-size:20px;font-weight:700">${esc(view.tenant)}</div>
-     <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(view.dateHkt)} · ${esc(view.dateEt)}
+     <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(view.date)}
        <span class="chip" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background-color:${CHIP};border:1px solid ${RULE};color:${outcomeColour};font-size:12px">${esc(view.outcome)}</span>
      </div>
    </td></tr>

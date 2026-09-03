@@ -136,7 +136,23 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "run") {
     if (argument === undefined) {
-      console.error("usage: helium run <tenant>");
+      console.error("usage: helium run <tenant> [--phase <phase>]");
+      return 2;
+    }
+    let phase = "premarket";
+    const rest = argv.slice(2);
+    for (let i = 0; i < rest.length; i += 1) {
+      if (rest[i] === "--phase") {
+        const value = rest[i + 1];
+        if (value === undefined || value.startsWith("--")) {
+          console.error("--phase needs a value, e.g. --phase premarket");
+          return 2;
+        }
+        phase = value;
+        i += 1;
+        continue;
+      }
+      console.error(`unknown argument: ${rest[i]}`);
       return 2;
     }
     const tenantsRoot = tenantsDir(env);
@@ -172,6 +188,7 @@ async function main(argv: string[]): Promise<number> {
         providers: providers.live,
         providersSkipped: providers.skipped,
         catalog,
+        phase,
       });
       printRun(report);
       return report.outcome === "completed" ? 0 : 1;
@@ -183,7 +200,7 @@ async function main(argv: string[]): Promise<number> {
   console.error(
     [
       "usage:",
-      "  helium run <tenant>     run one tenant's team once",
+      "  helium run <tenant> [--phase <phase>]   run one tenant's team once",
       "  helium audit <run-id>   per-step cost and token rows for a run",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,

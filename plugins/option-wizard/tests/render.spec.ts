@@ -1,4 +1,8 @@
 /**
+ * `invalidation` is the fixture's own addition — the field did not exist on
+ * 2026-09-02. Each level is one of the proposal's OWN strikes, already in this
+ * file and unchanged from the run; no market value is invented or implied.
+ *
  * Fixture built from the real successful run of 2026-09-02 (`run-84a83ad2`):
  * the review step's JSON, verbatim except for the `mid` fields, which that run
  * did not yet carry and which are taken from the same proposals' own quoted
@@ -9,14 +13,19 @@
  * in the OLD shape still renders, with those fields ignored rather than
  * rejected. Do not tidy them away.
  */
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunReport, TenantSpec } from "@helium/core";
 import renderReport, { buildView } from "../render/index.js";
+import { renderText } from "../render/text.js";
+import type { BriefView } from "../render/index.js";
 
 const REVIEW_JSON = {
   proposals: [
     {
       ticker: "SPY",
+      invalidation: [{ level: 750, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -42,6 +51,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "QQQ",
+      invalidation: [{ level: 695, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -67,6 +77,7 @@ const REVIEW_JSON = {
     },
     {
       ticker: "TLT",
+      invalidation: [{ level: 81, side: "above" }],
       strategy: "put_debit_spread_hedge",
       legs: [
         {
@@ -125,6 +136,10 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-84a83ad2-a5cd-49d9-b41d-1fbc55236128",
     tenant: "option-wizard",
+    // The day the RUNNER resolved, in the tenant's reportTimezone
+    // (America/New_York). A run fired 2026-09-03T02:40+08:00 is 14:40 on the
+    // 2nd in ET, and the brief is about the 2nd.
+    day: "2026-09-02",
     mode: "model",
     providersLive: ["dsh"],
     providersSkipped: [],
@@ -147,11 +162,9 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   } as RunReport;
 }
 
-const NOW = new Date("2026-09-02T10:00:00Z");
-
 describe("buildView", () => {
   it("parses the fenced JSON out of the reviewer's prose", () => {
-    const view = buildView(report(), SPEC, NOW);
+    const view = buildView(report(), SPEC);
     expect(view.candidates.map((c) => c.ticker)).toEqual(["SPY", "QQQ", "TLT"]);
     expect(view.riskList).toEqual([
       {
@@ -167,7 +180,7 @@ describe("buildView", () => {
     // max gain 128, max loss (10 - 1.28) x 100 = 872, breakeven 748.72.
     // The role called this a debit spread and wrote limitPrice 3.80; both are
     // wrong, and neither reaches the reader.
-    const spy = buildView(report(), SPEC, NOW).candidates[0]!;
+    const spy = buildView(report(), SPEC).candidates[0]!;
     expect(spy.pricing).toMatchObject({
       kind: "priced",
       net: 1.28,
@@ -178,7 +191,7 @@ describe("buildView", () => {
   });
 
   it("marks a leg with no mid as unpriced instead of estimating it", () => {
-    const tlt = buildView(report(), SPEC, NOW).candidates[2]!;
+    const tlt = buildView(report(), SPEC).candidates[2]!;
     expect(tlt.pricing).toEqual({
       kind: "unpriced",
       reason: "未定价：put 80 缺少 mid",
@@ -186,21 +199,22 @@ describe("buildView", () => {
   });
 
   it("takes the regime verdict paragraph and the three stances", () => {
-    const view = buildView(report(), SPEC, NOW).regime;
+    const view = buildView(report(), SPEC).regime;
     expect(view.paragraph).toContain("Direction bias: cautiously risk-off");
     expect(view.direction).toBe("cautiously risk-off / defensive");
     expect(view.volatility).toBe("neutral-to-firming, cheap but rising");
     expect(view.hedge).toBe("keep hedges on, modest");
   });
 
-  it("dates the brief in both HKT and ET", () => {
-    const view = buildView(report(), SPEC, NOW);
-    expect(view.dateHkt).toBe("2026-09-02 (HKT)");
-    expect(view.dateEt).toBe("2026-09-02 (ET)");
+  it("dates the brief with the run's report day, one date in one zone", () => {
+    // Two dates in two zones was the reader doing a conversion the harness had
+    // already done, and it is the same conversion the model got wrong in prose.
+    const view = buildView(report(), SPEC);
+    expect(view.date).toBe("2026-09-02");
   });
 
   it("computes DTE from the expiry against the ET date", () => {
-    expect(buildView(report(), SPEC, NOW).candidates[0]!.dte).toBe(28);
+    expect(buildView(report(), SPEC).candidates[0]!.dte).toBe(28);
   });
 
   it("measures the payoff row in % only where a spot was quoted", () => {
@@ -209,7 +223,7 @@ describe("buildView", () => {
     // nobody stated, and in the first live brief every sampled point then fell
     // outside the spread, printing max-gain three times and max-loss three
     // times. Without a spot the columns are the strikes themselves.
-    const view = buildView(report(), SPEC, NOW);
+    const view = buildView(report(), SPEC);
     const spy = view.candidates[0]!.pricing;
     const qqq = view.candidates[1]!.pricing;
     if (spy.kind !== "priced" || qqq.kind !== "priced") throw new Error("priced");
@@ -220,7 +234,7 @@ describe("buildView", () => {
   });
 
   it("never shows toolsUnconfigured, which is a known false positive", () => {
-    expect(buildView(report(), SPEC, NOW).degradation).toBeUndefined();
+    expect(buildView(report(), SPEC).degradation).toBeUndefined();
   });
 
   it("says so in one line when a gate or a provider actually failed", () => {
@@ -230,23 +244,42 @@ describe("buildView", () => {
         gatesSkipped: [{ id: "ib-preflight", reason: "module threw" }],
       }),
       SPEC,
-      NOW,
     );
     expect(view.degradation).toBe(
       "数据降级：provider local-llm 不可用（no credential）；gate ib-preflight 未加载（module threw）",
     );
   });
 
-  it("returns 今日无候选 with the reason when the run failed", () => {
+  it("a failed run still carries the steps that finished, under a banner", () => {
+    // Voiding the whole brief over one refused step is the same single-point
+    // failure the tenant is forbidden to have. 2026-09-02 intraday: a stale
+    // IB timestamp refused the regime gate and emptied a brief whose drift
+    // step had already answered the only question that brief exists for.
     const view = buildView(
       report({
         outcome: "failed",
         failure: { class: "budget-exhausted", detail: "no room" },
       }),
       SPEC,
-      NOW,
     );
     expect(view.outcome).toBe("FAILED");
+    expect(view.empty).toBeUndefined();
+    expect(view.sections[0]).toEqual({
+      title: "本次运行未完成",
+      body: "budget-exhausted — no room",
+    });
+    expect(view.sections.length).toBeGreaterThan(1);
+  });
+
+  it("falls back to 今日无候选 only when the failed run produced nothing", () => {
+    const view = buildView(
+      report({
+        outcome: "failed",
+        failure: { class: "budget-exhausted", detail: "no room" },
+        steps: [],
+      } as never),
+      SPEC,
+    );
     expect(view.empty).toBe("今日无候选：budget-exhausted — no room");
   });
 
@@ -254,18 +287,58 @@ describe("buildView", () => {
     const view = buildView(
       report({ mode: "tool-only", providersLive: [] }),
       SPEC,
-      NOW,
     );
     expect(view.outcome).toBe("DEGRADED");
     expect(view.empty).toBe("今日无候选：无可用 provider，本次没有任何模型推理");
   });
 
-  it("returns 今日无候选 when the review step's JSON cannot be parsed", () => {
+  it("keeps the narrative when the review step's JSON cannot be parsed", () => {
     const broken = report();
     broken.steps[3]!.text = "I could not produce proposals today.";
-    expect(buildView(broken, SPEC, NOW).empty).toBe(
+    const view = buildView(broken, SPEC);
+    expect(view.empty).toBeUndefined();
+    expect(view.candidates).toEqual([]);
+    expect(view.sections.length).toBeGreaterThan(0);
+  });
+
+  it("says 今日无候选 only when the reviewer failed AND nothing else was written", () => {
+    const bare = report({
+      steps: [
+        { task: "review", role: "risk-reviewer", mode: "model", text: "no proposals today" },
+      ],
+    } as never);
+    expect(buildView(bare, SPEC).empty).toBe(
       "今日无候选：review 步骤没有可解析的 JSON",
     );
+  });
+
+  it("renders a phase that has no review step at all", () => {
+    // intraday reports drift, weekly settles a week, frank compares two
+    // documents. None of them propose anything, and treating "has candidates"
+    // as a synonym for "has content" emptied three of the five briefs.
+    const drift = report({
+      steps: [
+        {
+          task: "drift",
+          role: "drift-watcher",
+          mode: "model",
+          text: '{"sections":[{"title":"读数结论：无变化","body":"六个价格逐位一致。"}]}',
+        },
+      ],
+    } as never);
+    const view = buildView(drift, SPEC);
+    expect(view.empty).toBeUndefined();
+    expect(view.sections.map((s) => s.title)).toEqual(["读数结论：无变化"]);
+    expect(renderText(view)).toContain("【读数结论：无变化】");
+  });
+
+  it("names the real reason when a run with no review step produced nothing", () => {
+    const nothing = report({
+      steps: [{ task: "frank", role: "frank-comparator", mode: "model", text: "I cannot complete this task." }],
+    } as never);
+    // "review 步骤没有可解析的 JSON" would be a lie: the frank phase has no
+    // review step to fail.
+    expect(buildView(nothing, SPEC).empty).toBe("本次运行没有产出任何区块");
   });
 });
 
@@ -295,7 +368,7 @@ describe("renderReport (text part)", () => {
       }),
       SPEC,
     );
-    expect(text).toContain("今日无候选");
+    expect(text).toContain("本次运行未完成");
     expect(text).not.toContain("Actually, let me");
   });
 });
@@ -340,7 +413,7 @@ describe("renderReport (html part)", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("renders the empty brief without any candidate section", () => {
+  it("a failed run shows what finished, but withholds tradable structures", () => {
     const html =
       renderReport(
         report({
@@ -349,7 +422,178 @@ describe("renderReport (html part)", () => {
         }),
         SPEC,
       ).html ?? "";
-    expect(html).toContain("今日无候选");
+    expect(html).toContain("本次运行未完成");
+    // The narrative is information; a structure is a recommendation, and a run
+    // whose gate refused a step has not earned one.
     expect(html).not.toContain("【候选结构】");
+  });
+});
+
+describe("sections", () => {
+  const view = (sections: BriefView["sections"]): BriefView => ({
+    date: "2026-09-02",
+    tenant: "option-wizard",
+    outcome: "completed",
+    sections,
+    regime: { paragraph: "" },
+    candidates: [],
+    riskList: [],
+  });
+
+  it("renders whatever sections the run produced, in task order", () => {
+    const text = renderText(
+      view([
+        { title: "利率是第一因", body: "10y 4.21%，曲线 bear-flatten。" },
+        { title: "Path B — In-line CPI", body: "base case。" },
+      ]),
+    );
+    expect(text).toContain("【利率是第一因】");
+    expect(text).toContain("【Path B — In-line CPI】");
+    expect(text.indexOf("利率是第一因")).toBeLessThan(text.indexOf("Path B"));
+  });
+
+  it("renders a run with no narrative sections at all", () => {
+    expect(renderText(view([])).includes("【今日 regime】")).toBe(false);
+  });
+
+  it("collects sections from every step, in step order", () => {
+    const built = buildView(
+      report({
+        steps: [
+          {
+            task: "regime",
+            role: "regime-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"利率","body":"10y 4.21%"}]}',
+          },
+          {
+            task: "scenarios",
+            role: "scenario-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"Path A","body":"hot CPI"},{"title":"Path B","body":"in line"}]}',
+          },
+          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.sections.map((s) => s.title)).toEqual(["利率", "Path A", "Path B"]);
+  });
+
+  it("recovers the regime paragraph when the model answered in prose", () => {
+    // One disobedient model must not empty the mail.
+    expect(buildView(report(), SPEC).sections[0]?.title).toBe("今日 regime");
+  });
+
+  it("drops a section whose body is empty — a bare title reads as lost content", () => {
+    const built = buildView(
+      report({
+        steps: [
+          {
+            task: "regime",
+            role: "regime-analyst",
+            mode: "model",
+            text: '{"sections":[{"title":"利率","body":"   "},{"title":"分化","body":"real"}]}',
+          },
+          { task: "review", role: "risk-reviewer", mode: "model", text: REVIEW_TEXT },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.sections.map((s) => s.title)).toEqual(["分化"]);
+  });
+});
+
+it("the renderer never branches on phase", () => {
+  // The load-bearing claim of this design: which blocks a brief contains is
+  // the team manifest's business, decided by which tasks ran. The moment the
+  // renderer learns the word, five phases become five layouts to maintain.
+  // Comments are exempt — the one in index.ts exists to say exactly this.
+  const dir = new URL("../render/", import.meta.url).pathname;
+  const offenders: string[] = [];
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
+    readFileSync(join(dir, name), "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        const code = line.replace(/^\s*(\*|\/\/).*$/, "");
+        if (code.includes("phase")) offenders.push(`${name}:${String(i + 1)}`);
+      });
+  expect(offenders).toEqual([]);
+});
+
+describe("invalidation", () => {
+  const rebuilt = (text: string) =>
+    buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text },
+        ],
+      } as never),
+      SPEC,
+    ).candidates;
+
+  it("mints the id here and carries the levels the thesis dies at", () => {
+    const spy = buildView(report(), SPEC).candidates[0]!;
+    expect(spy.id).toBe("SPY-2026-09-02-1");
+    expect(spy.invalidation).toEqual([{ level: 750, side: "above" }]);
+    expect(buildView(report(), SPEC).candidates[1]!.id).toBe("QQQ-2026-09-02-2");
+  });
+
+  it("says which thesis it dropped instead of an unexplained empty brief", () => {
+    // The failure this guards is 2026-09-02's, one layer down: an empty brief
+    // that looks the same whether the gate worked or the pipeline broke.
+    const prose = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/g,
+      '"invalidation": "SPY breaks below 560"',
+    );
+    const built = buildView(
+      report({
+        steps: [
+          { task: "review", role: "risk-reviewer", mode: "model", text: prose },
+        ],
+      } as never),
+      SPEC,
+    );
+    // GLD is the reviewer's own rejection; the gate's three land beside it, in
+    // one list, so the reader sees every proposal that did not make it and why.
+    expect(built.riskList.map((row) => row.ticker)).toEqual(["GLD", "SPY", "QQQ", "TLT"]);
+    expect(built.riskList[3]!.reason).toContain("失效价");
+  });
+
+  it("drops a thesis whose 失效价 is prose — nobody can ever settle it", () => {
+    // The shape the 2026-09-02 premarket designer actually emitted, verbatim.
+    // It reads well and it is unsettleable: no run can compare a spot to a
+    // sentence, so the thesis would stay open forever.
+    const prose = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/g,
+      '"invalidation": "SPY breaks below 560; broad market reprices off rate fears"',
+    );
+    expect(rebuilt(prose)).toEqual([]);
+  });
+
+  it("drops a thesis with no invalidation at all", () => {
+    expect(rebuilt(REVIEW_TEXT.replace(/\s*"invalidation": \[[^\]]*\],\n/g, ""))).toEqual([]);
+  });
+
+  it("keeps two levels for a two-sided structure", () => {
+    const condor = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"},{"level":720,"side":"below"}]',
+    );
+    expect(rebuilt(condor)[0]!.invalidation).toHaveLength(2);
+  });
+
+  it("refuses a third level — a thesis with three exits has no shape", () => {
+    const three = REVIEW_TEXT.replace(
+      /"invalidation": \[[^\]]*\]/,
+      '"invalidation": [{"level":750,"side":"above"},{"level":720,"side":"below"},{"level":700,"side":"below"}]',
+    );
+    expect(rebuilt(three).map((c) => c.ticker)).not.toContain("SPY");
+  });
+
+  it("prints the id and the levels where a reader can quote them back", () => {
+    const text = renderText(buildView(report(), SPEC));
+    expect(text).toContain("[SPY-2026-09-02-1]");
+    expect(text).toContain("失效 750↑");
   });
 });
