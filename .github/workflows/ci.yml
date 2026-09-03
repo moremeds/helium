@@ -27,6 +27,10 @@ jobs:
       - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
+      # The receiver runs unattended on the mini behind a forced ssh command;
+      # its argument validation, idempotence and pruning are checked here,
+      # where launchd and pnpm are stubbed.
+      - run: pnpm run test:scripts
       # HELIUM_LIVE is never set here: CI holds no secrets and makes no
       # network LLM calls.
       - run: pnpm run test:contracts
