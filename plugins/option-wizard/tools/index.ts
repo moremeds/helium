@@ -1250,7 +1250,6 @@ export function buildTools(cfg: {
       async run(args: Record<string, unknown>): Promise<string> {
         const { phase, days } = ReportsParams.parse(args);
         const dir = join(cfg.stateRoot, "reports");
-        const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
         let names: string[];
         try {
           names = await readdir(dir);
@@ -1259,12 +1258,23 @@ export function buildTools(cfg: {
           // phase is a legitimate empty answer, not a broken tool.
           return JSON.stringify({ dir, reports: [] });
         }
+        // `days` bounds how many distinct report DATES to walk back, counted
+        // from the newest file. Counting dates keeps this tool out of the
+        // timezone question altogether: filenames are stamped in the zone the
+        // tenant declares, and a cutoff subtracted from this process's clock
+        // disagrees with them by a whole day whenever the two are on different
+        // dates — which, for a HK-scheduled run reading ET-dated files, is
+        // most of the day.
         const rows = [];
+        const seen = new Set<string>();
         for (const name of names.sort().reverse()) {
           const match = REPORT_NAME.exec(name);
           if (match === null) continue;
           const [, date, found] = match;
-          if (date < cutoff) continue;
+          if (!seen.has(date)) {
+            if (seen.size >= days) break;
+            seen.add(date);
+          }
           if (phase !== undefined && found !== phase) continue;
           rows.push({ date, phase: found, text: await readFile(join(dir, name), "utf8") });
         }

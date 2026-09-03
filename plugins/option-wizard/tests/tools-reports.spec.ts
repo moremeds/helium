@@ -65,4 +65,20 @@ describe("ow_reports", () => {
   it("refuses a lookback past the cap rather than pulling a fortnight of prose", async () => {
     await expect(reportsTool(stateRoot).run({ days: 30 })).rejects.toThrow();
   });
+  it("counts distinct dates, not wall-clock days, so a zone gap cannot hide a file", async () => {
+    // Three dated reports; days: 2 must return the newest two DATES and stop.
+    // The old cutoff subtracted milliseconds from this process's clock, which
+    // is a different calendar day from the ET-stamped filename for most of the
+    // HK evening — the run that needed yesterday's close was the run that lost
+    // it.
+    const root = mkdtempSync(join(tmpdir(), "ow-reports-span-"));
+    const reports = join(root, "reports");
+    mkdirSync(reports, { recursive: true });
+    for (const day of ["2026-08-31", "2026-09-01", "2026-09-02"])
+      writeFileSync(join(reports, `option-wizard-${day}-close.md`), `# close ${day}\n`);
+    expect((await read(root, { days: 2 })).map((row) => row.date)).toEqual([
+      "2026-09-02",
+      "2026-09-01",
+    ]);
+  });
 });
