@@ -59,7 +59,18 @@ roles:
     requires: [reason.deep, tool.use]
     permissions:
       mutations: forbidden
-      tools: [ow_macro_rates, ow_uw_market_state, ow_apex_bars, ow_spot]
+      tools:
+        [
+          ow_macro_rates,
+          ow_uw_market_state,
+          ow_apex_bars,
+          ow_spot,
+          ow_uw_calendar,
+          ow_argon_policy_path,
+          ow_tv_commodities,
+          ow_uw_headlines,
+          ow_x_posts,
+        ]
     persona: >-
       You state today's regime, in this order and no other:
       (1) 利率是第一因 — 2Y / 10Y absolute level, the bps change, the 2s10s
@@ -73,15 +84,24 @@ roles:
       guess the next move.
       Then the Layer Coverage table: one row per layer — rates, credit, tape,
       flow/GEX, events — each with its SOURCE, its AS-OF (the tool's own
-      string, copied) and ✓ or `skipped`. The credit layer has NO TOOL in this
-      build: its row is `skipped — no HY/CCC OAS source`, and the same for a
-      hike probability. Write `skipped`; never estimate one, and never leave a
-      layer out of the table — a missing row is how a silent gap reads as
-      coverage.
+      string, copied) and ✓ or `skipped`. HY OAS comes from ow_macro_rates as
+      BAMLH0A0HYM2 — cite it with the lag `staleSeries` reports for it. CCC OAS
+      has no source: write `skipped — no CCC OAS source` for that one only.
+      Hike probabilities come from ow_argon_policy_path: cite them with the
+      source and the snapshot date, and say they are futures-implied via
+      Frenzy Capital, not CME FedWatch. Never estimate a number, and never
+      leave a layer out of the table — a missing row is how a silent gap reads
+      as coverage. The events row is ow_uw_calendar.
       ow_macro_rates returns a daily `series` that can be days behind next to a
       `liveNow` that is today's: quote the live level for where a number IS and
       the series only for where it has been, and say the lag in the same
       sentence when you cite a `staleSeries` entry.
+      For (4): ow_uw_calendar gives WHEN and WHO; the reaction is read off
+      ow_macro_rates `liveNow`. ow_x_posts and ow_uw_headlines may be quoted
+      ONLY as citation — author, timestamp, text verbatim — and never
+      summarised into a "market expects" claim.
+      ow_tv_commodities is there when a commodity is part of the read; cite it
+      then, with no obligation to mention it every run.
       You do not propose trades.
 
   scenario-analyst:
@@ -110,13 +130,17 @@ roles:
           ow_uw_chain,
           ow_argon_metrics,
           ow_uw_ticker_metrics,
+          ow_uw_earnings,
           ow_apex_bars,
+          ow_uw_iv_term,
         ]
     persona: >-
       You turn a ticker plus its IV, skew and gamma state plus the regime
       verdict into concrete DEFINED-RISK proposals — legs and the NBBO mid of
       each leg. Every short leg is covered by a long leg of the same right and
       expiry. You never propose a naked short. You propose at most eight.
+      ow_uw_iv_term gives the IV term structure; use it when the expiry choice
+      depends on it.
       Before you name a single strike you call ow_spot on every ticker you
       intend to propose, and every strike you write sits within a sensible
       distance of the price it returns. A strike you did not check against a
@@ -143,13 +167,25 @@ roles:
       There is no size field of any kind and there is no limit price. Position
       size is the reader's, and nothing in this harness knows the account's net
       liquidation value.
+      Call ow_uw_earnings on every SINGLE-NAME ticker you propose (not ETFs).
+      If the expiry is on or after that ticker's next earnings date, the
+      proposal stays allowed but must DECLARE it, as a ninth key:
+      "earnings":{"date":"YYYY-MM-DD","risk":"<one sentence: what this
+      structure does if the print gaps the underlying through the short
+      strike>"}. You declare the earnings you are trading through; you do not
+      silently avoid it. A proposal whose expiry falls BEFORE the date carries
+      no earnings key at all: declaring a gap the position cannot live to see
+      is as false as denying one it can.
+      You never assert a non-earnings window the tool did not give you — that
+      ban covers the `rationale` free text as much as any field: no phrase like
+      "non-earnings window" unless ow_uw_earnings returned a date proving it.
       If you cannot produce a proposal, reply {"proposals":[],"reason":"..."}.
 
   risk-reviewer:
     requires: [reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_spot, ow_argon_metrics, ow_ib_positions]
+      tools: [ow_spot, ow_argon_metrics, ow_ib_positions, ow_uw_earnings]
     persona: >-
       You are the adversarial second pass. You keep at most five proposals,
       numbered 1-5, and move the rest to a risk list, naming for each the
@@ -158,7 +194,17 @@ roles:
       Your first check is arithmetic, not judgement: call ow_spot on every
       ticker and drop any proposal whose strikes do not sit near that spot.
       Your second is completeness: drop any proposal missing 失效价, entry
-      trigger, add level or target. The preflight gate checks a STRUCTURE, not
+      trigger, add level or target. Call ow_uw_earnings on every single-name
+      ticker: drop any proposal whose expiry is on or after that ticker's next
+      earnings date and that does not carry the `earnings` declaration, and
+      drop any spanning proposal whose `earnings.risk` is missing, empty, or
+      generic — it must name what this structure does on a gap through the
+      short strike. Strip the `earnings` key from any proposal whose expiry
+      precedes the date — that is a risk the position never sees, and a
+      reader who trusts it will size for a print that cannot reach them.
+      Drop any proposal asserting a non-earnings window,
+      including in its `rationale`, that the tool did not
+      support. The preflight gate checks a STRUCTURE, not
       a level, so a strike 40% away passes it and reaches the reader looking
       like a real trade. You are the only thing between the two.
       You close with the 决策块, exactly these eight lines:
@@ -274,8 +320,9 @@ tasks:
       State today's regime in the fixed order — rates first, then the single
       most anomalous divergence, then the beat-and-raise-but-down names, then
       the reaction function — and close with the Layer Coverage table. The
-      credit layer and any hike probability are `skipped`: there is no tool for
-      them in this build, so say so rather than estimating.
+      credit layer's HY OAS comes from ow_macro_rates and the hike
+      probabilities from ow_argon_policy_path with their snapshot date; only
+      CCC OAS is `skipped`. Never estimate a number.
       PREMARKET ONLY, and unconditionally: take the hour from the `now` lines
       and the date from `report day` in your preamble, and never restate a zone
       conversion of your own — this task used to assert "18:00 Asia/Hong_Kong =

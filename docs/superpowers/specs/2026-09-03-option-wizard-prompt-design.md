@@ -179,9 +179,21 @@ Total GEX / Total DEX / 1D change / 1D Min / 1D Max
 
 ---
 
-## 8. 不在本期
+## 8. 不在本期 → 子项目 B
 
-- `OW_IB_API_BASE` 修复、`ow_ib_positions` 打通、NLV、`toolsUnconfigured` 误报 → 子项目 B
-- hard rule 4（21DTE 复查）依赖持仓 → B 之后
-- UW 经济日历、`get_central_bank_rates` FOMC 日期、`/api/news/headlines`、IV 期限结构、大宗 → B
-- 信用利差（HY / CCC OAS）与加息概率：无数据源，prompt 里显式 `skipped`，不许由模型估 → 子项目 B
+原清单是按"当时想到什么"写的延期项，没有排序。2026-09-03 的真实 premarket
+run 给了排序键：**这个缺口能不能让一条已发出的候选是错的。** designer 在
+rationale 里断言了 "non-earnings window"，而本 build 没有任何工具能支持它——
+财报日期不在原清单里，却是唯一同时有消费行、又能让候选错的项。
+
+| # | 项 | team.yaml 消费行 | 能让候选错 | 决定（2026-09-03） |
+|---|---|---|---|---|
+| B-1 | 财报日期 `ow_uw_earnings`（UW `/api/stock/{t}/info`；只查个股；到期早于财报日不带声明，渲染层核对） | design / review | 能 | 完成，live run `run-2a417b21` |
+| B-2 | 政策讲话 → 市场解读：`ow_uw_calendar`（何时谁讲）+ `ow_argon_policy_path`（Frenzy 期货隐含概率，mini argon）+ `ow_macro_rates` liveNow（反应）；`ow_uw_headlines` / `ow_x_posts`（白名单 handle）只许引用不许汇总 | regime 反应函数 | 不能，但为重点内容 | 完成；UW 无 FedWatch 端点，`/api/economy/*` 403 |
+| B-3 | 信用 OAS、IV 期限结构 | regime Layer Coverage / design | 不能 | 完成；HY OAS 本来就在 `ow_macro_rates`（prompt 曾错写成 NO TOOL），CCC 无源；`ow_uw_iv_term` 丢 0DTE |
+| — | 大宗 `ow_tv_commodities`（TradingView 前月期货，mini 已验） | regime 按需 | 不能 | 完成 |
+| — | `OW_IB_API_BASE` / `ow_ib_positions` / `toolsUnconfigured` | hard rule 4 | — | 做，但**任何 IB 项都不是 blocker**，不进排序 |
+| — | NLV | 无，且 §4 明令禁止 | — | 废弃，与"无仓位规模"冲突 |
+
+- hard rule 4（21DTE 复查）依赖持仓 → 跟 IB 项走，同样不阻塞
+- 加息概率：无数据源时 prompt 里显式 `skipped`，不许由模型估；B-2 验证 UW 是否有 implied probability

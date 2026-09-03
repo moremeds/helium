@@ -97,6 +97,13 @@ describe("phase remits", () => {
     expect(task("drift")?.phases).toEqual(["intraday"]);
   });
 
+  it("no longer claims the credit and policy layers have no tool", () => {
+    // ow_macro_rates carries HY OAS and ow_argon_policy_path the hike
+    // probabilities; a persona still saying "NO TOOL" would make a role write
+    // `skipped` over data it was handed.
+    expect(manifest.roles["regime-analyst"]?.persona ?? "").not.toContain("NO TOOL");
+  });
+
   it("drift reads this morning's own report", () => {
     const prompt = task("drift")?.prompt ?? "";
     expect(prompt).toContain("phase:premarket");

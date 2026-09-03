@@ -55,6 +55,11 @@ export interface CandidateView {
    *  actually wrote. */
   target: string;
   rationale: string;
+  /** The next earnings date this structure spans, when the designer declared
+   *  one. Display only: a malformed or absent declaration drops the field and
+   *  never rejects the proposal — the gate on it is the reviewer's, and
+   *  duplicating it here would reject twice for one fault. */
+  earnings?: string;
 }
 
 export interface RegimeView {
@@ -295,6 +300,27 @@ export interface Ledger {
   rejected: Array<{ ticker: string; reason: string }>;
 }
 
+/** The date out of an `earnings` declaration, or undefined. Display only, so
+ *  anything that is not a plain YYYY-MM-DD is simply not shown: printing half
+ *  a declaration would read as a fact the designer never asserted.
+ *
+ *  A date after the expiry is not shown either. 2026-09-03 premarket: the
+ *  designer wrote "none require earnings declaration", then declared META's
+ *  2026-11-04 print on a 2026-09-11 spread anyway, with a risk sentence about
+ *  a gap the position cannot live to see. A declaration the structure cannot
+ *  be exposed to is as false as a denied one, and this is the one half of the
+ *  contract the renderer can check without the tool: both dates are in the
+ *  proposal. */
+function earningsDate(value: unknown, expiry: string): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const date = (value as Record<string, unknown>).date;
+  return typeof date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/u.test(date) &&
+    date <= expiry
+    ? date
+    : undefined;
+}
+
 export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
   const parsed = extractJson(reviewText);
   if (parsed === null || !Array.isArray(parsed.proposals))
@@ -342,6 +368,9 @@ export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
       target: typeof proposal.target === "string" ? proposal.target : "",
       rationale:
         typeof proposal.rationale === "string" ? proposal.rationale : "",
+      ...(earningsDate(proposal.earnings, expiry) === undefined
+        ? {}
+        : { earnings: earningsDate(proposal.earnings, expiry) }),
     });
   }
   return { candidates, rejected };
