@@ -309,6 +309,10 @@ tasks:
       screening step and there is not meant to be one. Propose defined-risk
       structures consistent with the regime verdict, with legs, a real NBBO mid
       per leg, and all four of entry trigger, add level, 失效价 and target.
+      Every proposal also carries `horizon`: one of intraday / day / multiday.
+      It is YOUR call and it says when this thesis comes due to be settled —
+      the close run looks for exactly that, and the reviewer drops a proposal
+      that does not declare one. Do NOT write an id; the harness mints it.
 
   - id: review
     role: risk-reviewer

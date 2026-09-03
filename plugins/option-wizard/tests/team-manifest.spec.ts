@@ -136,3 +136,14 @@ it("every narrative task replies as one sections JSON", () => {
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
 });
+
+it("horizon is declared where a proposal is born, not only where it is checked", () => {
+  // 2026-09-02 premarket: the contract lived only in the review prompt, the
+  // designer emitted no horizon, and the reviewer correctly dropped all eight
+  // proposals — "Missing `horizon` field; thesis settlement timeline
+  // undefined", eight times. A field is declared where it originates.
+  for (const id of ["design", "review"])
+    expect(manifest.tasks.find((t) => t.id === id)?.prompt ?? "", id).toContain(
+      "intraday / day / multiday",
+    );
+});
