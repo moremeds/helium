@@ -54,6 +54,13 @@ export interface CandidateView {
    *  加强 / 不变 are judgement and read better as the sentence the designer
    *  actually wrote. */
   target: string;
+  /** The declared entry trigger, when the designer wrote one as a level. Prose
+   *  is dropped rather than parsed: the gate below compares it to a strike. */
+  entry?: Invalidation;
+  /** What the arithmetic gate could NOT check on this candidate, and why. A
+   *  silent pass and a real pass look identical to a reader, and the run that
+   *  shipped a QQQ 420/410 spread with QQQ at 707 looked like a pass. */
+  unchecked?: string;
   rationale: string;
   /** The next earnings date this structure spans, when the designer declared
    *  one. Display only: a malformed or absent declaration drops the field and
@@ -93,6 +100,12 @@ export interface BriefView {
   regime: RegimeView;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
+  /** The reviewer's 决策块, in the order it wrote it: every key it filled and
+   *  no key it did not. This block is the only part of the reply that says
+   *  what to DO, and a line invented here would be the harness's opinion
+   *  wearing the reviewer's name. Carried on the no-candidate day too, where
+   *  it is the only thing the reader gets. */
+  decision?: Array<{ label: string; value: string }>;
   /** ONE line, present only when something actually failed. */
   degradation?: string;
   /** When set, the brief IS this line: no candidates, no sections. */
@@ -181,17 +194,6 @@ function toInvalidation(raw: unknown): Invalidation[] | null {
   // Two is a two-sided structure; a third level means the thesis has no shape,
   // and settling against the wrong one of three is worse than not shipping it.
   return out.length === 0 || out.length > 2 ? null : out;
-}
-
-/** Spot as the reviewer quoted it, e.g. "**SPY (spot 761.78):**". */
-function spotsFrom(text: string): Map<string, number> {
-  const spots = new Map<string, number>();
-  for (const match of text.matchAll(
-    /([A-Z]{1,6})\s*\(spot\s+([0-9]+(?:\.[0-9]+)?)\)/g,
-  )) {
-    spots.set(match[1]!, Number(match[2]));
-  }
-  return spots;
 }
 
 function regimeFrom(text: string): RegimeView {
@@ -433,11 +435,190 @@ function earningsFromTools(report: RunReport): Map<string, string> {
   return dates;
 }
 
-export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
+/** Spot per ticker, from whichever tool priced it. Deliberately never the
+ *  reviewer's prose: a model that miscopied the price would then have its
+ *  strikes checked against its own mistake, which is not a check.
+ *
+ *  Three payload shapes answer with a spot, and reading only the first of them
+ *  cost a real candidate on run-87284561: the reviewer priced SHY through
+ *  ow_strike_check and never through ow_spot, so a ticker with a perfectly good
+ *  tool spot rendered "无工具现货，未校验" and lost its ±% grid. `ow_spot`
+ *  answers `quotes[].last`; `ow_strike_check` and `ow_uw_chain` both answer a
+ *  top-level `ticker` and `spot`. Later payloads win, so the freshest quote in
+ *  the run is the one the gate uses. */
+function spotsFromTools(report: RunReport): Map<string, number> {
+  const spots = new Map<string, number>();
+  for (const payload of toolPayloads(report)) {
+    const { ticker, spot } = payload;
+    if (typeof ticker === "string" && typeof spot === "number" && Number.isFinite(spot))
+      spots.set(ticker, spot);
+    if (!Array.isArray(payload.quotes)) continue;
+    for (const row of payload.quotes) {
+      if (row === null || typeof row !== "object") continue;
+      const { ticker: symbol, last } = row as Record<string, unknown>;
+      if (typeof symbol === "string" && typeof last === "number" && Number.isFinite(last))
+        spots.set(symbol, last);
+    }
+  }
+  return spots;
+}
+
+/** How far a strike may sit from the tool's spot and still be a trade. 25% is
+ *  wide enough for a real hedge and narrow enough to catch the two failures
+ *  that shipped: a QQQ 420/410 spread with QQQ at 707, and SPY 570/580 at 765. */
+const STRIKE_BAND = 0.25;
+
+/**
+ * Which leg order a structure NAME commits to, or null when it commits to none.
+ *
+ * "bull"/"bear" say it outright. So do the four debit/credit phrases, and only
+ * those four: a debit is paid for the leg you are long, so "call debit" is long
+ * the lower strike and "put debit" long the higher, with the credit forms
+ * inverted. Run-87284561 named its structures "Short 30Y duration via put debit
+ * spread" and "Long short-duration bonds via call debit spread" — unambiguous
+ * to a reader and, before this, unrecognised by the gate.
+ *
+ * Separators are normalised first: a real run wrote `put_debit_spread_hedge`
+ * and another wrote "via put debit spread", and a gate that only sees one of
+ * those two spellings has a hole exactly where the models actually write.
+ */
+function declaredShape(
+  name: string,
+): "condor" | "bull-call" | "bear-put" | "bear-call" | "bull-put" | null {
+  if (name.includes("condor")) return "condor";
+  if (name.includes("call debit") || (name.includes("bull") && name.includes("call")))
+    return "bull-call";
+  if (name.includes("put debit") || (name.includes("bear") && name.includes("put")))
+    return "bear-put";
+  if (name.includes("call credit") || (name.includes("bear") && name.includes("call")))
+    return "bear-call";
+  if (name.includes("put credit") || (name.includes("bull") && name.includes("put")))
+    return "bull-put";
+  return null;
+}
+
+/**
+ * Geometry, but only for a structure whose name says what the leg order should
+ * be. Unrecognised means unchecked and said so, never silently passed.
+ */
+function geometryFaults(
+  candidate: CandidateView,
+  spot: number | undefined,
+): { faults: string[]; unchecked: string[] } {
+  const shape = declaredShape(
+    candidate.strategy.toLowerCase().replace(/[_-]/gu, " "),
+  );
+  const faults: string[] = [];
+  const strike = (right: "call" | "put", action: "buy" | "sell") =>
+    candidate.legs.find((leg) => leg.right === right && leg.action === action)?.strike;
+  const ordered = (
+    right: "call" | "put",
+    label: string,
+    longIsHigher: boolean,
+  ): string[] => {
+    const long = strike(right, "buy");
+    const short = strike(right, "sell");
+    if (long === undefined || short === undefined) return [];
+    if (longIsHigher ? long > short : long < short) return [];
+    return [
+      `${label} 的多头 ${String(long)} 不${longIsHigher ? "高" : "低"}于空头 ${String(short)}`,
+    ];
+  };
+  switch (shape) {
+    case "condor": {
+      if (spot === undefined) return { faults, unchecked: [] };
+      for (const leg of candidate.legs) {
+        if (leg.right === "put" && leg.strike >= spot)
+          faults.push(`condor 的 put ${String(leg.strike)} 不在现货 ${String(spot)} 下方`);
+        if (leg.right === "call" && leg.strike <= spot)
+          faults.push(`condor 的 call ${String(leg.strike)} 不在现货 ${String(spot)} 上方`);
+      }
+      return { faults, unchecked: [] };
+    }
+    case "bull-call":
+      return { faults: ordered("call", "bull call spread", false), unchecked: [] };
+    case "bear-put":
+      return { faults: ordered("put", "bear put spread", true), unchecked: [] };
+    case "bear-call":
+      return { faults: ordered("call", "bear call spread", true), unchecked: [] };
+    case "bull-put":
+      return { faults: ordered("put", "bull put spread", false), unchecked: [] };
+    default:
+      return {
+        faults,
+        unchecked: [`结构名 ${candidate.strategy} 未识别，腿序未校验`],
+      };
+  }
+}
+
+/**
+ * The arithmetic gate: comparisons and subtractions over the TOOL's numbers.
+ *
+ * The model declares; the harness verifies. Every fault carries the numbers it
+ * was computed from, because "strikes not near spot" and "空头 put 180 已价内：
+ * 现货 183.60" are the same verdict and different evidence.
+ */
+function arithmeticFaults(
+  candidate: CandidateView,
+  spot: number | undefined,
+): { faults: string[]; unchecked: string[] } {
+  const faults: string[] = [];
+  const unchecked: string[] = [];
+  // A structure that expires on the report day is not a position anyone can
+  // take. An unparseable expiry is left alone: a drop rests on two real dates.
+  if (candidate.dte !== null && candidate.dte < 1)
+    faults.push(`到期日 ${candidate.expiry} 不晚于报告日`);
+  const shorts = candidate.legs.filter((leg) => leg.action === "sell");
+  if (spot === undefined) {
+    unchecked.push("无工具现货，未校验");
+  } else {
+    for (const leg of candidate.legs) {
+      if (Math.abs(leg.strike - spot) / spot > STRIKE_BAND)
+        faults.push(
+          `行权价 ${String(leg.strike)} 距现货 ${String(spot)} 超过 ${String(STRIKE_BAND * 100)}%`,
+        );
+    }
+    for (const leg of shorts) {
+      if (leg.right === "put" && leg.strike >= spot)
+        faults.push(`空头 put ${String(leg.strike)} 已价内：现货 ${String(spot)}`);
+      if (leg.right === "call" && leg.strike <= spot)
+        faults.push(`空头 call ${String(leg.strike)} 已价内：现货 ${String(spot)}`);
+    }
+  }
+  const geometry = geometryFaults(candidate, spot);
+  faults.push(...geometry.faults);
+  unchecked.push(...geometry.unchecked);
+  // An entry trigger that only fires once price is PAST the short strike is a
+  // trade that can never be entered on its own terms.
+  const entry = candidate.entry;
+  if (entry !== undefined) {
+    for (const leg of shorts) {
+      if (leg.right === "call" && entry.side === "above" && entry.level > leg.strike)
+        faults.push(
+          `入场触发 ${String(entry.level)}↑ 越过空头 call ${String(leg.strike)}`,
+        );
+      if (leg.right === "put" && entry.side === "below" && entry.level < leg.strike)
+        faults.push(
+          `入场触发 ${String(entry.level)}↓ 越过空头 put ${String(leg.strike)}`,
+        );
+    }
+  }
+  return { faults, unchecked };
+}
+
+export function candidatesFrom(
+  reviewText: string,
+  dateEtDay: string,
+  /** Spot per ticker as `ow_spot` ANSWERED it. The payoff grid used to be
+   *  anchored on a regex over the reviewer's prose ("**SPY (spot 761.78):**"),
+   *  which is the model's transcription of a tool result and was wrong in 8 of
+   *  11 numbers audited on 09-02/09-03. No tool spot, no grid: the row falls
+   *  back to the strikes and the header says why. */
+  spots: ReadonlyMap<string, number> = new Map(),
+): Ledger {
   const parsed = extractJson(reviewText);
   if (parsed === null || !Array.isArray(parsed.proposals))
     return { candidates: [], rejected: [] };
-  const spots = spotsFrom(reviewText);
 
   const candidates: CandidateView[] = [];
   const rejected: Array<{ ticker: string; reason: string }> = [];
@@ -478,6 +659,11 @@ export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
       pricing: priceStructure(legs, spot),
       width: width(legs),
       target: typeof proposal.target === "string" ? proposal.target : "",
+      // Reuses the invalidation parser: an entry trigger is the same shape —
+      // one level and the side price has to reach it from.
+      ...(toInvalidation(proposal.entry)?.length === 1
+        ? { entry: toInvalidation(proposal.entry)![0]! }
+        : {}),
       rationale:
         typeof proposal.rationale === "string" ? proposal.rationale : "",
       ...(earningsDate(proposal.earnings, expiry) === undefined
@@ -486,6 +672,22 @@ export function candidatesFrom(reviewText: string, dateEtDay: string): Ledger {
     });
   }
   return { candidates, rejected };
+}
+
+/**
+ * The 决策块, flattened to label/value pairs in the order the reviewer wrote
+ * them. Any key whose value is not a non-empty string is dropped rather than
+ * filled in: a blank 最大风险 line printed under the heading reads as "no risk"
+ * to the only person who acts on it.
+ */
+function decisionFrom(raw: unknown): Array<{ label: string; value: string }> {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return [];
+  return Object.entries(raw as Record<string, unknown>).flatMap(
+    ([label, value]) =>
+      typeof value === "string" && value.trim() !== ""
+        ? [{ label, value: value.trim() }]
+        : [],
+  );
 }
 
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
@@ -545,10 +747,16 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
 
   const review = report.steps.find((step) => step.task === "review");
   const parsed = review === undefined ? null : extractJson(review.text);
+  // Resolved before every early return below. The block matters MOST on the day
+  // nothing survived: "今日无候选" alone does not tell the reader whether to
+  // sit still or to cut, and the reviewer already wrote which it is.
+  const rows = decisionFrom(parsed === null ? null : parsed.decision);
+  const decision = rows.length === 0 ? {} : { decision: rows };
   if (parsed === null || !Array.isArray(parsed.proposals)) {
-    if (sections.length > 0) return { ...base, sections, regime };
+    if (sections.length > 0) return { ...base, ...decision, sections, regime };
     return {
       ...base,
+      ...decision,
       empty:
         review === undefined
           ? "本次运行没有产出任何区块"
@@ -556,7 +764,12 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     };
   }
 
-  const { candidates, rejected } = candidatesFrom(review?.text ?? "", dateEtDay);
+  const toolSpots = spotsFromTools(report);
+  const { candidates, rejected } = candidatesFrom(
+    review?.text ?? "",
+    dateEtDay,
+    toolSpots,
+  );
 
   const riskList = Array.isArray(parsed.riskList)
     ? parsed.riskList.flatMap((entry) => {
@@ -587,18 +800,39 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     return false;
   });
 
-  if (survived.length === 0 && riskList.length === 0) {
-    if (sections.length > 0) return { ...base, sections, regime };
+  // The arithmetic gate. It runs on what the TOOLS answered, so it can only
+  // judge a ticker ow_spot actually priced; a candidate it could not judge is
+  // carried with the reason it could not, never as a quiet pass.
+  const checked: CandidateView[] = [];
+  for (const candidate of survived) {
+    const verdict = arithmeticFaults(candidate, toolSpots.get(candidate.ticker));
+    if (verdict.faults.length > 0) {
+      riskList.push({
+        ticker: candidate.ticker,
+        reason: verdict.faults.join("；"),
+      });
+      continue;
+    }
+    checked.push(
+      verdict.unchecked.length === 0
+        ? candidate
+        : { ...candidate, unchecked: verdict.unchecked.join("；") },
+    );
+  }
+
+  if (checked.length === 0 && riskList.length === 0) {
+    if (sections.length > 0) return { ...base, ...decision, sections, regime };
     const reason =
       typeof parsed.reason === "string" ? parsed.reason : "reviewer 未给出候选";
-    return { ...base, empty: `今日无候选：${reason}` };
+    return { ...base, ...decision, empty: `今日无候选：${reason}` };
   }
   // At most five reach the reader; the reviewer's own rule, enforced here too.
   return {
     ...base,
+    ...decision,
     sections,
     regime,
-    candidates: survived.slice(0, 5),
+    candidates: checked.slice(0, 5),
     riskList,
   };
 }

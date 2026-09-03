@@ -93,8 +93,16 @@ export class BudgetExhausted extends Error {
   }
 }
 
-/** Default byte ceiling above which a tool result is summarised (design §5). */
+/** Default byte ceiling above which a tool result is summarised (design §5).
+ *
+ *  Kept at 8 KB now that something finally enforces it: of the outputs measured
+ *  on 2026-09-03 the ones that clear it (10-14 KB) are exactly the ones worth
+ *  spilling, and nothing legitimate sits between 8 and 16 KB. */
 export const SUMMARISE_OVER_BYTES = 8 * 1024;
+
+/** How much of an oversized output still enters the context. Enough to see
+ *  WHAT the output is and decide whether to go read the rest. */
+export const HEAD_CHARS = 2000;
 
 export interface SummariseDecision {
   summarised: boolean;
@@ -130,9 +138,13 @@ export async function applyOutputPolicy(
 
   const spillPath =
     options.spill === undefined ? undefined : await options.spill(output);
+  // The notice has to be unambiguous about what the head IS. A 2000-character
+  // slice of prose is a readable opening; the same slice of a structured
+  // payload ends wherever the 2000th character fell, mid-object, and a reader
+  // that treats it as the whole answer answers from half a record.
   const summary =
     options.summarise === undefined
-      ? `${output.slice(0, 2000)}\n…[${bytes} bytes truncated]`
+      ? `${output.slice(0, HEAD_CHARS)}\n…[HEAD ONLY — first ${HEAD_CHARS} characters of ${bytes} bytes, cut at a fixed offset and possibly mid-record, so it is not necessarily complete or parseable]`
       : await options.summarise(output);
   return {
     summarised: true,

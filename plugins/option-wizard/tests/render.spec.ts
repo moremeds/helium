@@ -1,6 +1,11 @@
 /**
  * `invalidation` is the fixture's own addition — the field did not exist on
- * 2026-09-02. Each level is one of the proposal's OWN strikes, already in this
+ * 2026-09-02. The SPY and TLT `strategy` strings are corrected from the run's
+ * own `put_debit_spread_hedge` to `put_credit_spread_hedge`: both are long the
+ * LOWER put and short the higher one, which is a credit spread, and the
+ * renderer had already been computing SPY's net as a +1.28 credit while the
+ * name said debit. QQQ keeps the debit name because QQQ's legs really are one.
+ * The legs themselves are untouched. Each level is one of the proposal's OWN strikes, already in this
  * file and unchanged from the run; no market value is invented or implied.
  *
  * Fixture built from the real successful run of 2026-09-02 (`run-84a83ad2`):
@@ -26,7 +31,7 @@ const REVIEW_JSON = {
     {
       ticker: "SPY",
       invalidation: [{ level: 750, side: "above" }],
-      strategy: "put_debit_spread_hedge",
+      strategy: "put_credit_spread_hedge",
       legs: [
         {
           right: "put",
@@ -78,7 +83,7 @@ const REVIEW_JSON = {
     {
       ticker: "TLT",
       invalidation: [{ level: 81, side: "above" }],
-      strategy: "put_debit_spread_hedge",
+      strategy: "put_credit_spread_hedge",
       legs: [
         {
           right: "put",
@@ -217,13 +222,34 @@ describe("buildView", () => {
     expect(buildView(report(), SPEC).candidates[0]!.dte).toBe(28);
   });
 
-  it("measures the payoff row in % only where a spot was quoted", () => {
-    // The reviewer quoted a spot for SPY and for nothing else. A "-20%" on QQQ
-    // would have been 20% below its own lowest STRIKE — arithmetic off a price
-    // nobody stated, and in the first live brief every sampled point then fell
-    // outside the spread, printing max-gain three times and max-loss three
-    // times. Without a spot the columns are the strikes themselves.
-    const view = buildView(report(), SPEC);
+  it("measures the payoff row in % only where a TOOL quoted the spot", () => {
+    // ow_spot priced SPY and nothing else. A "-20%" on QQQ would have been 20%
+    // below its own lowest STRIKE — arithmetic off a price nobody stated, and
+    // in the first live brief every sampled point then fell outside the spread,
+    // printing max-gain three times and max-loss three times. Without a spot
+    // the columns are the strikes themselves.
+    //
+    // The anchor is the TOOL's number, never the reviewer's prose: the prose
+    // "(spot 761.78)" is the model's transcription of this same quote, and 8 of
+    // 11 model-written numbers audited on 09-02/09-03 were wrong.
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: REVIEW_TEXT,
+            toolOutputs: [
+              JSON.stringify({
+                quotes: [{ ticker: "SPY", source: "tradingview", last: 761.78 }],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
     const spy = view.candidates[0]!.pricing;
     const qqq = view.candidates[1]!.pricing;
     if (spy.kind !== "priced" || qqq.kind !== "priced") throw new Error("priced");
@@ -448,8 +474,12 @@ describe("renderReport (text part)", () => {
     expect(text).toContain("748.72");
     expect(text).toContain("872");
     expect(text).toContain("未定价");
-    expect(text).toContain("到期损益（spot ±%）");
-    expect(text).toContain("到期损益（按行权价，reviewer 未报 spot）");
+    // No ow_spot output in this report, so no ticker gets a % grid — not even
+    // SPY, whose spot the reviewer typed into its own prose. That prose number
+    // is exactly what the grid must not be anchored on.
+    expect(text).toContain("到期损益（按行权价，无 ow_spot 现货）");
+    expect(text).not.toContain("到期损益（spot ±%）");
+    expect(REVIEW_TEXT).toContain("(spot 761.78)");
     // The reader never sees the model thinking out loud, its quantity guess, or
     // any run metadata.
     expect(text).not.toContain("Actually, let me");
@@ -734,5 +764,297 @@ describe("invalidation", () => {
     const text = renderText(buildView(report(), SPEC));
     expect(text).toContain("[SPY-2026-09-02-1]");
     expect(text).toContain("失效 750↑");
+  });
+});
+
+describe("决策块", () => {
+  /** The eight keys team.yaml asks the reviewer for. Values are drawn from the
+   *  fixture's own numbers (its 750 strike, the regime step's 4.772% and
+   *  16.02) so nothing here is a price this file invented. */
+  const DECISION = {
+    判断: "偏防守，方向不明",
+    行动: "只留对冲，不加方向性多头",
+    进攻程度: "2/5",
+    为什么现在: "10y 4.772%，整条曲线仍在被买",
+    最大风险: "利率回落带来的轧空",
+    失效条件: "SPY 收在 750 上方",
+    下一步触发器: "VIX 自 16.02 站上 20",
+    数据可信度: "IB 层 skipped，其余齐备",
+  };
+
+  const built = (json: unknown) =>
+    buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify(json),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+
+  it("carries all eight lines into both parts of the mail", () => {
+    const view = built({ ...REVIEW_JSON, decision: DECISION });
+    const text = renderText(view);
+    const html = renderReport(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify({ ...REVIEW_JSON, decision: DECISION }),
+          },
+        ],
+      } as never),
+      SPEC,
+    ).html;
+    expect(text).toContain("【决策块】");
+    expect(html).toContain("【决策块】");
+    for (const [label, value] of Object.entries(DECISION)) {
+      expect(text).toContain(`${label}: ${value}`);
+      expect(html).toContain(label);
+      expect(html).toContain(value);
+    }
+  });
+
+  it("survives the day nothing survived — that is when it matters most", () => {
+    // No proposals, no risk list: the brief is one 今日无候选 line, and the
+    // block is the only thing in it that says what to do.
+    const view = built({ proposals: [], riskList: [], reason: "无可交易结构", decision: DECISION });
+    expect(view.empty).toBeDefined();
+    expect(renderText(view)).toContain("最大风险: 利率回落带来的轧空");
+  });
+
+  it("prints no heading when the reviewer wrote no block, and skips a blank line", () => {
+    expect(renderText(built(REVIEW_JSON))).not.toContain("【决策块】");
+    const partial = built({ ...REVIEW_JSON, decision: { 判断: "偏防守", 最大风险: "  " } });
+    expect(partial.decision).toEqual([{ label: "判断", value: "偏防守" }]);
+    expect(renderText(partial)).not.toContain("最大风险");
+  });
+});
+
+describe("arithmetic gate", () => {
+  // 761.78 is SPY's real spot on the 2026-09-02 run this file's fixture comes
+  // from — the same number that run's reviewer quoted in its own prose. Here it
+  // is fed the way the gate is only allowed to read it: as the JSON `ow_spot`
+  // returned. The STRIKES below are moved; a strike is model output, not a
+  // market value, and moving one is how the ITM case is built without inventing
+  // a price.
+  const SPOT_TOOL = JSON.stringify({
+    quotes: [{ ticker: "SPY", source: "tradingview", last: 761.78 }],
+  });
+
+  const withSpot = (proposals: unknown[]) =>
+    buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify({ proposals, riskList: [] }),
+            toolOutputs: [SPOT_TOOL],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+
+  const spy = (over: Record<string, unknown>) => ({
+    ticker: "SPY",
+    invalidation: [{ level: 750, side: "above" }],
+    strategy: "vertical",
+    legs: [],
+    rationale: "…",
+    ...over,
+  });
+
+  it("rejects a short put already in the money, and prints the spot it used", () => {
+    const view = withSpot([
+      spy({
+        legs: [
+          { right: "put", expiry: "2026-09-30", strike: 765, action: "sell", mid: 12.1 },
+          { right: "put", expiry: "2026-09-30", strike: 755, action: "buy", mid: 7.4 },
+        ],
+      }),
+    ]);
+    expect(view.candidates).toEqual([]);
+    expect(view.riskList[0]!.reason).toContain("空头 put 765 已价内");
+    expect(view.riskList[0]!.reason).toContain("761.78");
+  });
+
+  it("passes a bull call spread whose legs are in the right order", () => {
+    const view = withSpot([
+      spy({
+        strategy: "bull_call_spread",
+        legs: [
+          { right: "call", expiry: "2026-09-30", strike: 770, action: "buy", mid: 8.2 },
+          { right: "call", expiry: "2026-09-30", strike: 780, action: "sell", mid: 4.6 },
+        ],
+      }),
+    ]);
+    expect(view.candidates.map((c) => c.ticker)).toEqual(["SPY"]);
+    expect(view.candidates[0]!.unchecked).toBeUndefined();
+    // …and refuses the same structure with its legs the wrong way round.
+    const inverted = withSpot([
+      spy({
+        strategy: "bull_call_spread",
+        legs: [
+          { right: "call", expiry: "2026-09-30", strike: 780, action: "buy", mid: 4.6 },
+          { right: "call", expiry: "2026-09-30", strike: 770, action: "sell", mid: 8.2 },
+        ],
+      }),
+    ]);
+    expect(inverted.candidates).toEqual([]);
+    expect(inverted.riskList[0]!.reason).toContain("bull call spread");
+  });
+
+  it("neither drops nor silently passes a ticker no tool priced", () => {
+    // The base fixture carries no ow_spot output at all. A silent pass and a
+    // real pass read identically, and the run that shipped a QQQ 420/410 spread
+    // with QQQ at 707 looked exactly like a pass.
+    const view = buildView(report(), SPEC);
+    expect(view.candidates.map((c) => c.ticker)).toEqual(["SPY", "QQQ", "TLT"]);
+    expect(view.candidates[0]!.unchecked).toContain("无工具现货，未校验");
+    expect(renderText(view)).toContain("无工具现货，未校验");
+  });
+
+  it("takes the spot from ow_strike_check too, not only from ow_spot", () => {
+    // run-87284561: the reviewer priced SHY through ow_strike_check and never
+    // through ow_spot, so a ticker with a perfectly good tool spot rendered
+    // 未校验 and lost its ±% grid. Same 761.78 SPY quote, delivered in
+    // ow_strike_check's shape — a top-level ticker and spot.
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify({
+              proposals: [
+                spy({
+                  legs: [
+                    { right: "put", expiry: "2026-09-30", strike: 765, action: "sell", mid: 12.1 },
+                    { right: "put", expiry: "2026-09-30", strike: 755, action: "buy", mid: 7.4 },
+                  ],
+                }),
+              ],
+              riskList: [],
+            }),
+            toolOutputs: [
+              JSON.stringify({
+                ticker: "SPY",
+                spot: 761.78,
+                spotSource: "tradingview",
+                rows: [{ strike: 765, right: "put", spot: 761.78, distPct: 0.42, moneyness: "ITM" }],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(view.candidates).toEqual([]);
+    expect(view.riskList[0]!.reason).toContain("空头 put 765 已价内：现货 761.78");
+  });
+
+  it("reads direction out of a debit/credit structure name, not only bull/bear", () => {
+    // The real names on run-87284561 were "Short 30Y duration via put debit
+    // spread" and "Long short-duration bonds via call debit spread". A debit is
+    // paid for the leg you are long, so a put debit spread is long the HIGHER
+    // strike; these TLT legs are the other way round.
+    const put = (strike: number, action: "buy" | "sell") => ({
+      right: "put",
+      expiry: "2026-09-30",
+      strike,
+      action,
+      mid: 2.0,
+    });
+    // No ow_spot output here on purpose: geometry needs no spot, so the leg
+    // order is the only thing that can decide either verdict.
+    const built = (legs: unknown[]) =>
+      buildView(
+        report({
+          steps: [
+            {
+              task: "review",
+              role: "risk-reviewer",
+              mode: "model",
+              text: JSON.stringify({
+                proposals: [
+                  {
+                    ticker: "TLT",
+                    invalidation: [{ level: 82, side: "below" }],
+                    strategy: "Short 30Y duration via put debit spread",
+                    legs,
+                    rationale: "…",
+                  },
+                ],
+                riskList: [],
+              }),
+            },
+          ],
+        } as never),
+        SPEC,
+      );
+    const inverted = built([put(85, "sell"), put(80, "buy")]);
+    expect(inverted.candidates).toEqual([]);
+    expect(inverted.riskList[0]!.reason).toContain(
+      "bear put spread 的多头 80 不高于空头 85",
+    );
+    const correct = built([put(85, "buy"), put(80, "sell")]);
+    expect(correct.candidates.map((c) => c.ticker)).toEqual(["TLT"]);
+    // Recognised, so no 未识别 note either — the whole point of the widening.
+    expect(correct.candidates[0]!.unchecked).not.toContain("未识别");
+  });
+
+  it("normalises the underscored spelling a real run actually wrote", () => {
+    // `put_debit_spread_hedge` was the name on all three of this file's fixture
+    // proposals, and two of the three were credit spreads wearing it. The
+    // separator is not a licence to skip the check: with SPY's own legs — buy
+    // 740 / sell 750, long BELOW short — the debit name is refused.
+    const mislabelled = buildView(
+      report({
+        steps: [
+          {
+            task: "review",
+            role: "risk-reviewer",
+            mode: "model",
+            text: JSON.stringify({
+              proposals: [
+                { ...REVIEW_JSON.proposals[0], strategy: "put_debit_spread_hedge" },
+              ],
+              riskList: [],
+            }),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(mislabelled.candidates).toEqual([]);
+    expect(mislabelled.riskList[0]!.reason).toContain(
+      "bear put spread 的多头 740 不高于空头 750",
+    );
+  });
+
+  it("refuses an entry trigger that only fires past the short strike", () => {
+    const view = withSpot([
+      spy({
+        strategy: "bull_call_spread",
+        entry: { level: 790, side: "above" },
+        legs: [
+          { right: "call", expiry: "2026-09-30", strike: 770, action: "buy", mid: 8.2 },
+          { right: "call", expiry: "2026-09-30", strike: 780, action: "sell", mid: 4.6 },
+        ],
+      }),
+    ]);
+    expect(view.candidates).toEqual([]);
+    expect(view.riskList[0]!.reason).toContain("越过空头 call 780");
   });
 });

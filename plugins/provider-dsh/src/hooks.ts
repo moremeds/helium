@@ -37,8 +37,12 @@ import {
 export interface HookConfig {
   runId: string;
   role: string;
-  audit: AuditStore;
-  budget: TenantBudget;
+  /** Both are needed together, and only by the two budget-aware seams. A
+   *  caller that has neither — the provider does not: `Provider.run` is handed
+   *  a work order, never the run's audit store — installs the other two seams
+   *  and nothing pretends to know what the allowance is. */
+  audit?: AuditStore;
+  budget?: TenantBudget;
   gates?: Gate[];
   /** Byte ceiling over which a tool result is summarised. */
   summariseOverBytes?: number;
@@ -51,55 +55,68 @@ export interface HookConfig {
 }
 
 /**
- * Install all four seams on a context.
+ * Install the seams on a context: all four with a budget, the other two
+ * without one.
  *
  * @returns a disposer, so a run's hooks leave with the run.
  */
-export function installHeliumHooks(ctx: Context, config: HookConfig): () => void {
+export function installHeliumHooks(
+  ctx: Context,
+  config: HookConfig,
+): () => void {
   const disposers: Array<() => void> = [];
+  const audit = config.audit;
+  const budget = config.budget;
 
   // 1. system-prompt/assemble — the remaining-budget line. Doctrine 4: an
   //    agent that knows it is at 10% behaves differently.
-  disposers.push(
-    ctx.on("system-prompt/assemble", async (_assembly, _context, next) => {
-      const assembled = await next();
-      const state = remaining(config.audit, config.runId, config.budget);
-      const line = budgetLine(state, config.budget);
-      const sections = (assembled as { sections?: unknown }).sections;
-      if (Array.isArray(sections)) {
-        sections.push({ id: "helium-budget", text: line });
-      }
-      return assembled;
-    }),
-  );
+  if (audit !== undefined && budget !== undefined) {
+    disposers.push(
+      ctx.on("system-prompt/assemble", async (_assembly, _context, next) => {
+        const assembled = await next();
+        const state = remaining(audit, config.runId, budget);
+        const line = budgetLine(state, budget);
+        const sections = (assembled as { sections?: unknown }).sections;
+        if (Array.isArray(sections)) {
+          sections.push({ id: "helium-budget", text: line });
+        }
+        return assembled;
+      }),
+    );
 
-  // 2. agent/pre-step — budget check and input gates, BEFORE the model call,
-  //    so a refusal costs a gate step rather than a model call.
-  disposers.push(
-    ctx.on("agent/pre-step", async (payload, next) => {
-      const state = remaining(config.audit, config.runId, config.budget);
-      if (state.exhausted) {
-        throw new Error(
-          `budget exhausted for run ${config.runId}: out of ${state.reason}`,
-        );
-      }
-      for (const gate of config.gates ?? []) {
-        if (gate.phase !== "input") continue;
-        if (!gate.appliesTo.includes("*") && !gate.appliesTo.includes(config.role)) {
-          continue;
+    // 2. agent/pre-step — budget check and input gates, BEFORE the model call,
+    //    so a refusal costs a gate step rather than a model call.
+    disposers.push(
+      ctx.on("agent/pre-step", async (payload, next) => {
+        const state = remaining(audit, config.runId, budget);
+        if (state.exhausted) {
+          throw new Error(
+            `budget exhausted for run ${config.runId}: out of ${state.reason}`,
+          );
         }
-        const verdict = await gate.check(payload, {
-          runId: config.runId,
-          role: config.role,
-          remainingUsd: state.usd,
-        });
-        if (!verdict.pass) {
-          throw new Error(`gate ${gate.id} refused this step: ${verdict.reason}`);
+        for (const gate of config.gates ?? []) {
+          if (gate.phase !== "input") continue;
+          if (
+            !gate.appliesTo.includes("*") &&
+            !gate.appliesTo.includes(config.role)
+          ) {
+            continue;
+          }
+          const verdict = await gate.check(payload, {
+            runId: config.runId,
+            role: config.role,
+            remainingUsd: state.usd,
+          });
+          if (!verdict.pass) {
+            throw new Error(
+              `gate ${gate.id} refused this step: ${verdict.reason}`,
+            );
+          }
         }
-      }
-      return await next();
-    }),
-  );
+        return await next();
+      }),
+    );
+  }
 
   // 3. tools/pre-execute — the mutation refusal. The sandbox write-boundary
   //    guard attaches at this same seam and lands with the sandbox kinds (M3).
@@ -131,7 +148,9 @@ export function installHeliumHooks(ctx: Context, config: HookConfig): () => void
         ...(config.summariseOverBytes === undefined
           ? {}
           : { overBytes: config.summariseOverBytes }),
-        ...(config.summarise === undefined ? {} : { summarise: config.summarise }),
+        ...(config.summarise === undefined
+          ? {}
+          : { summarise: config.summarise }),
         ...(config.spill === undefined ? {} : { spill: config.spill }),
       });
       if (!policy.summarised) return decision;

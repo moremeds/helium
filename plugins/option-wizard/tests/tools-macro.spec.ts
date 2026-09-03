@@ -13,7 +13,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildTools } from "../tools/index.js";
+import { buildTools, tvLiveLevels } from "../tools/index.js";
 
 function tool(name: string, env: Record<string, string | undefined>) {
   const found = buildTools({ stateRoot: "/nonexistent", env }).find((t) => t.name === name);
@@ -31,6 +31,43 @@ function fakeBin(payload: string): string {
 }
 
 const UW = { OW_UW_API_KEY: "k" };
+
+describe("tvLiveLevels", () => {
+  it("subtracts 2s10s in bps so nobody quotes the curve from memory", async () => {
+    // 2y 4.371% and 10y 4.772% are the real levels of 2026-09-02, the same two
+    // this repo's render fixture quotes out of that run's regime step.
+    const dir = mkdtempSync(join(tmpdir(), "ow-curve-"));
+    const bin = join(dir, "fake");
+    writeFileSync(
+      bin,
+      [
+        "#!/bin/sh",
+        'case "$4" in',
+        "  US02Y) echo '[{\"close\":4.371}]' ;;",
+        "  US10Y) echo '[{\"close\":4.772}]' ;;",
+        "  *) echo '[]' ;;",
+        "esac",
+        "",
+      ].join("\n"),
+    );
+    chmodSync(bin, 0o755);
+    const live = await tvLiveLevels({ OW_TV_ENABLED: "1", OPENCLI_BIN: bin }, "test");
+    // (4.772 - 4.371) x 100 = 40.1 bps.
+    expect(live).toMatchObject({ spreads: { "2s10s": 40.1 } });
+  });
+
+  it("omits the spread when a leg did not answer, rather than half-computing it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ow-curve-"));
+    const bin = join(dir, "fake");
+    writeFileSync(
+      bin,
+      ["#!/bin/sh", 'case "$4" in', "  US10Y) echo '[{\"close\":4.772}]' ;;", "  *) echo '[]' ;;", "esac", ""].join("\n"),
+    );
+    chmodSync(bin, 0o755);
+    const live = await tvLiveLevels({ OW_TV_ENABLED: "1", OPENCLI_BIN: bin }, "test");
+    expect(live).not.toHaveProperty("spreads");
+  });
+});
 const json = (body: unknown) => async () =>
   new Response(JSON.stringify(body), { status: 200 });
 

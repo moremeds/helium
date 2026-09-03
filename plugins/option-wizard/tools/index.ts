@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
 import { SUMMARISE_OVER_BYTES } from "@helium/core";
 import { candidatesFrom, type CandidateView } from "../render/index.js";
+import { priceStructure, width } from "../render/math.js";
 import {
   ProposalSchema,
   evaluateProposal,
@@ -71,6 +72,10 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_x_posts", { mutating: false }],
   ["ow_tv_commodities", { mutating: false }],
   ["ow_ib_preflight", { mutating: false }],
+  // Pure arithmetic over numbers the caller already has: no env, no network.
+  ["ow_price_structure", { mutating: false }],
+  // Two sources like ow_spot, so no single key whose absence disables it.
+  ["ow_strike_check", { mutating: false }],
 ]);
 
 type Env = Record<string, string | undefined>;
@@ -288,7 +293,10 @@ const TV_LIVE: ReadonlyArray<{
 export async function tvLiveLevels(
   env: Env,
   tool: string,
-): Promise<{ quotes: unknown[]; fetchedAt: string } | { unavailable: string }> {
+): Promise<
+  | { quotes: unknown[]; spreads?: { "2s10s": number }; fetchedAt: string }
+  | { unavailable: string }
+> {
   if (env.OW_TV_ENABLED !== "1") {
     return { unavailable: 'OW_TV_ENABLED is not "1"; no live levels, daily series only' };
   }
@@ -339,7 +347,25 @@ export async function tvLiveLevels(
   if (quotes.length === 0) {
     return { unavailable: "every TradingView symbol answered without a numeric close" };
   }
-  return { quotes, fetchedAt: new Date().toISOString() };
+  // The one curve spread anyone quotes, subtracted here so nobody quotes it
+  // from memory. Yields arrive in percent, so the difference is x100 for bps.
+  // Absent when either leg did not answer: a half-computed spread is worse
+  // than none.
+  const level = (label: string) =>
+    (quotes as Array<{ name?: unknown; last?: unknown }>).find(
+      (quote) => quote.name === label,
+    )?.last;
+  const two = level("2y");
+  const ten = level("10y");
+  const spreads =
+    typeof two === "number" && typeof ten === "number"
+      ? { "2s10s": Number(((ten - two) * 100).toFixed(1)) }
+      : undefined;
+  return {
+    quotes,
+    ...(spreads === undefined ? {} : { spreads }),
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 /** The FRED ids TradingView can quote. What is NOT in here is what
@@ -665,7 +691,38 @@ function numeric(value: unknown): number | undefined {
 const TvParams = z.object({
   flagColors: z.array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"])).optional(),
 });
-const SpotParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(24) });
+// The cap carries its own instruction. A bare Zod `too_big` reaches the model
+// as a path and a number, and on 2026-09-03 gex-reporter answered it by
+// re-calling with the same 63 tickers — one wasted round trip per phase. The
+// message is the cheapest place to say what to do instead.
+const SpotParams = z.object({
+  tickers: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(24, {
+      message:
+        "ow_spot takes at most 24 tickers per call — split the list into batches of 24 or fewer and call again",
+    }),
+});
+const LegParams = z.object({
+  right: z.enum(["call", "put"]),
+  action: z.enum(["buy", "sell"]),
+  strike: z.number().positive(),
+  expiry: z.string().min(1),
+  ratio: z.number().positive().optional(),
+  mid: z.number().optional(),
+});
+const PriceStructureParams = z.object({
+  legs: z.array(LegParams).min(1).max(8),
+  spot: z.number().positive().optional(),
+});
+const StrikeCheckParams = z.object({
+  ticker: z.string().min(1),
+  strikes: z
+    .array(z.object({ strike: z.number().positive(), right: z.enum(["call", "put"]) }))
+    .min(1)
+    .max(20),
+});
 const NoParams = z.object({});
 const UwChainParams = z.object({
   ticker: z.string().min(1),
@@ -983,11 +1040,16 @@ export function buildTools(cfg: {
       // about its own vocabulary.
       name: "ow_spot",
       description:
-        "Last price for each ticker, from TradingView where this machine has it and from Unusual Whales otherwise. Call this before naming any strike: a strike is only meaningful next to the spot it sits against.",
+        "Last price for each ticker, from TradingView where this machine has it and from Unusual Whales otherwise. Call this before naming any strike: a strike is only meaningful next to the spot it sits against. At most 24 tickers per call: split a longer universe into batches of 24 or fewer.",
       paramsSchema: SpotParams,
       mutating: false,
       dshParams: {
-        tickers: { type: "array", required: true, description: "Ticker symbols, at most 24" },
+        tickers: {
+          type: "array",
+          required: true,
+          description:
+            "Ticker symbols, at most 24 per call — split a longer list into batches of 24 or fewer",
+        },
       },
       async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
         const { tickers } = SpotParams.parse(args);
@@ -1174,7 +1236,7 @@ export function buildTools(cfg: {
       // a zero.
       name: "ow_uw_chain",
       description:
-        "Option chain for a ticker within a DTE band, from Unusual Whales: strike, NBBO bid/ask, open interest, IV and greeks, trimmed to the strikes around today's spot. The spot it was trimmed against is returned with it.",
+        "Option chain for a ticker within a DTE band, from Unusual Whales: strike, NBBO bid/ask, open interest, IV and greeks, trimmed to the strikes around today's spot. The spot it was trimmed against is returned with it, and every contract carries `otmPct` — its signed distance from that spot, positive out of the money, negative in it. Copy that number; never compute one.",
       paramsSchema: UwChainParams,
       mutating: false,
       dshParams: {
@@ -1254,6 +1316,16 @@ export function buildTools(cfg: {
                   ...(bid === undefined || ask === undefined
                     ? {}
                     : { mid: Number(((bid + ask) / 2).toFixed(2)) }),
+                  // Signed distance from the spot this chain was trimmed on.
+                  // Positive is out of the money, negative is in it — the sign
+                  // IS the moneyness, and no reader has to subtract anything.
+                  otmPct: Number(
+                    (((parsed.right === "C"
+                      ? parsed.strike - spot.close
+                      : spot.close - parsed.strike) /
+                      spot.close) *
+                      100).toFixed(2),
+                  ),
                   openInterest: oi,
                   volume: typeof entry.volume === "number" ? entry.volume : undefined,
                   // Rounded to four places on the way out. UW answers with
@@ -1474,7 +1546,7 @@ export function buildTools(cfg: {
       // reading as an outage.
       name: "ow_uw_earnings",
       description:
-        "Next scheduled earnings date per single-name ticker (and premarket/postmarket report time when Unusual Whales knows it). A ticker with no scheduled earnings — an ETF, say — comes back as a row with `nextEarningsDate: null` and its `issueType`; `missing` means only that there was no data or the request failed.",
+        "Next scheduled earnings date per single-name ticker, with `daysToEarnings` already subtracted for you (and premarket/postmarket report time when Unusual Whales knows it). A ticker with no scheduled earnings — an ETF, say — comes back as a row with `nextEarningsDate: null` and its `issueType`; `missing` means only that there was no data or the request failed.",
       paramsSchema: EarningsParams,
       mutating: false,
       dshParams: {
@@ -1521,6 +1593,10 @@ export function buildTools(cfg: {
             rows.push({
               ticker,
               nextEarningsDate: date,
+              // Calendar days from today. Subtracted here because a model
+              // subtracting dates gets it off by one, and an off-by-one on an
+              // earnings date is a position held through a print.
+              daysToEarnings: dteOf(date, new Date()),
               ...(typeof time === "string" && time !== "" && time !== "unknown"
                 ? { reportTime: time }
                 : {}),
@@ -1550,15 +1626,16 @@ export function buildTools(cfg: {
       // It returns the LEDGER, not the prose. The first version returned each
       // report's full markdown, and on 2026-09-02 that shipped a fabricated
       // settlement into a delivered email: the premarket report is 50,912
-      // bytes, and NOTHING in the harness trims a tool result before it
-      // reaches a context. `applyOutputPolicy` exists in
-      // packages/core/src/budget.ts, but its only caller is
-      // plugins/provider-dsh/src/hooks.ts, whose `installHeliumHooks` is never
-      // invoked and is not exported — dead code. So the 50 KB arrived whole,
-      // buried the proposals somewhere in the middle of a context, and markout
-      // settled the nearest table it could see. Size discipline is THIS
-      // TOOL'S choice and nobody else's. The proposals it needs are ~2 KB; the
-      // prose that buried them was never what it wanted.
+      // bytes, and at the time NOTHING in the harness trimmed a tool result
+      // before it reached a context: `applyOutputPolicy` had no live caller.
+      // So the 50 KB arrived whole, buried the proposals somewhere in the
+      // middle of a context, and markout settled the nearest table it could
+      // see. The harness now spills over 8 KB (provider.run installs the
+      // post-execute seam), but that is a backstop that hands back a HEAD and
+      // a path — it is not a substitute for a tool returning what was asked
+      // for. Size discipline is THIS TOOL'S choice and nobody else's. The
+      // proposals it needs are ~2 KB; the prose that buried them was never
+      // what it wanted.
       //
       // The ids are minted by `candidatesFrom`, the same function the renderer
       // builds the email with, so an id settled here is an id that was mailed.
@@ -2210,6 +2287,115 @@ export function buildTools(cfg: {
       async run(args: Record<string, unknown>): Promise<string> {
         const proposal = ProposalSchema.parse(args);
         return JSON.stringify(evaluateProposal(proposal, tenantThresholds()));
+      },
+    },
+    {
+      // The renderer's own `priceStructure`, exposed unchanged. The email has
+      // always printed the derived numbers rather than the model's; this lets
+      // the model see the SAME numbers before it commits, instead of writing a
+      // take-profit level off a max gain it computed itself. On 09-02 five of
+      // five proposals disagreed with their own arithmetic, and one printed a
+      // debit spread's max loss as the width instead of the debit.
+      name: "ow_price_structure",
+      description:
+        "Expiry payoff for a defined-risk structure, computed from the legs and their NBBO mids: net (positive is a credit, per share), maxGain and maxLoss per spread in dollars (null means unbounded), breakevens, width, the payoff at ±5/10/20% of spot when a spot is given, and `exit` — takeProfit (half of maxGain) and stop (twice the credit received, or the debit paid), BOTH already in the same per-spread dollars as maxGain and maxLoss. Pure arithmetic — call it and COPY the numbers; never compute a max loss, a breakeven, a take-profit or a stop yourself.",
+      paramsSchema: PriceStructureParams,
+      mutating: false,
+      dshParams: {
+        legs: {
+          type: "array",
+          required: true,
+          description:
+            "right (call|put), action (buy|sell), strike, expiry, optional ratio, and the NBBO mid of each leg",
+        },
+        spot: {
+          type: "number",
+          required: true,
+          description: "The spot ow_spot returned for this ticker",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { legs, spot } = PriceStructureParams.parse(args);
+        const pricing = priceStructure(legs, spot);
+        // The exit levels, multiplied out HERE. The persona used to say "take
+        // profit at 50% of maxGain, stop at 2x the credit", which is a x0.5 and
+        // a x2 done by a model — the same class of arithmetic that was wrong in
+        // 8 of 11 numbers audited on 09-02/09-03. Units are the per-spread
+        // dollars maxGain and maxLoss are already in, so no conversion is left
+        // for the reader either: `net` is per share, so a credit stop is x100.
+        const exit =
+          pricing.kind !== "priced"
+            ? undefined
+            : {
+                takeProfit:
+                  pricing.maxGain === null
+                    ? null
+                    : Number((pricing.maxGain * 0.5).toFixed(2)),
+                stop: Number(
+                  (pricing.net > 0
+                    ? pricing.net * 2 * 100
+                    : Math.abs(pricing.net) * 100
+                  ).toFixed(2),
+                ),
+              };
+        return JSON.stringify({
+          ...pricing,
+          width: width(legs),
+          ...(exit === undefined ? {} : { exit }),
+        });
+      },
+    },
+    {
+      // For a strike proposed without a chain call. Same spot resolution as
+      // ow_spot, so the number here and the number the gate checks against are
+      // one number. A 180 put under a 183.60 spot was called in the money on
+      // 09-03; that is a comparison, and a comparison belongs in code.
+      name: "ow_strike_check",
+      description:
+        "Where each proposed strike sits against the live spot: signed distPct (positive above spot) and moneyness (ITM/OTM/ATM) per strike, given its right. Copy these; never estimate a distance or decide moneyness in your head.",
+      paramsSchema: StrikeCheckParams,
+      mutating: false,
+      dshParams: {
+        ticker: { type: "string", required: true, description: "Underlying symbol" },
+        strikes: {
+          type: "array",
+          required: true,
+          description: "Each entry is { strike, right } with right call or put",
+        },
+      },
+      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+        const { ticker, strikes } = StrikeCheckParams.parse(args);
+        const tool = "ow_strike_check";
+        const spot = await spotOf(env, tool, ticker, ctx);
+        if (spot === undefined) {
+          throw new Error(
+            `${tool}: no spot for ${ticker} from TradingView or Unusual Whales. ` +
+              "Refusing to judge a strike against a price nobody has.",
+          );
+        }
+        const rows = strikes.map((entry) => ({
+          strike: entry.strike,
+          right: entry.right,
+          spot: spot.close,
+          distPct: Number((((entry.strike - spot.close) / spot.close) * 100).toFixed(2)),
+          moneyness:
+            entry.strike === spot.close
+              ? "ATM"
+              : entry.right === "call"
+                ? entry.strike < spot.close
+                  ? "ITM"
+                  : "OTM"
+                : entry.strike > spot.close
+                  ? "ITM"
+                  : "OTM",
+        }));
+        return JSON.stringify({
+          ticker,
+          spot: spot.close,
+          spotSource: spot.source,
+          rows,
+          fetchedAt: new Date().toISOString(),
+        });
       },
     },
   ];

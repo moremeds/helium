@@ -57,13 +57,27 @@ describe("ow_uw_earnings", () => {
       {
         ticker: "SNOW",
         nextEarningsDate: "2026-09-02",
+        daysToEarnings: expect.any(Number),
         reportTime: "postmarket",
       },
       // "unknown" is UW's own word for "no time of day"; it is not a report time.
-      { ticker: "NVDA", nextEarningsDate: "2026-11-18" },
+      {
+        ticker: "NVDA",
+        nextEarningsDate: "2026-11-18",
+        daysToEarnings: expect.any(Number),
+      },
     ]);
     expect(out.missing).toEqual([]);
     expect(out.asOf).toMatch(/^\d{4}-\d{2}-\d{2}T/u);
+    // Subtracted by the tool, not by a model: an off-by-one on an earnings
+    // date is a position held through a print.
+    const now = new Date();
+    const days = Math.round(
+      (Date.UTC(2026, 10, 18) -
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())) /
+        86_400_000,
+    );
+    expect((out.rows[1] as { daysToEarnings: number }).daysToEarnings).toBe(days);
   });
 
   it("answers an ETF with a null date, not a missing entry and not an invented date", async () => {
@@ -77,7 +91,11 @@ describe("ow_uw_earnings", () => {
     ) as { rows: unknown[]; missing: unknown[] };
     expect(out.rows).toEqual([
       { ticker: "SMH", issueType: "ETF", nextEarningsDate: null },
-      { ticker: "NVDA", nextEarningsDate: "2026-11-18" },
+      {
+        ticker: "NVDA",
+        nextEarningsDate: "2026-11-18",
+        daysToEarnings: expect.any(Number),
+      },
     ]);
     expect(out.missing).toEqual([]);
   });
