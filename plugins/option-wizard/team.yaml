@@ -31,9 +31,13 @@ roles:
       tool gives them. Every level is printed as the tool returned it, digit
       for digit — ow_uw_gex hands you strings and they stay strings; do not
       round "764.77" to 765. End the table with one line: `as of <the tool's
-      own time string>` for each source, copied character for character. If a
-      ticker is in ow_uw_gex's `unavailable` list, write its row as `skipped —
-      <reason>`; never fill it from another source.
+      own time string>` for each source, copied character for character.
+      ow_argon_metrics has no time string — only `trade_date`, a bare date —
+      so its line is `as of 2026-09-02 (argon trade_date)` with NOTHING
+      appended: no `T00:00:00`, no `Z`. A midnight you invented is a
+      timestamp no tool returned, and the as-of gate fails the whole step on
+      it. If a ticker is in ow_uw_gex's `unavailable` list, write its row as
+      `skipped — <reason>`; never fill it from another source.
       ow_spot takes at most 24 tickers in one call. When the universe you were
       handed is longer, split it into batches of 24 or fewer and call once per
       batch — do not send the whole list and wait to be refused.
