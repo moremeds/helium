@@ -55,6 +55,18 @@ export interface TenantSpec {
   env?: string[];
   /** Path, relative to the tenant dir, of the run-level prompt. */
   promptFile?: string;
+  /**
+   * The IANA zone whose calendar day labels this tenant's output: the report
+   * file name, the delivery subject and the per-day delivery counter all take
+   * their date from it, and the runner tells the agent the same date.
+   *
+   * It is NOT the trigger timezone. A trigger's zone answers "when does this
+   * run start" for whoever reads the schedule; this one answers "which day is
+   * this run's output about", and a tenant whose subject matter lives in
+   * another zone than its operator needs both. Absent means UTC, which is what
+   * every surface used before this field existed.
+   */
+  reportTimezone?: string;
   /** The tenant-owned opaque block; the host never interprets its contents. */
   extensions: Record<string, unknown>;
 }
@@ -111,6 +123,7 @@ const TenantShape = z.strictObject({
     .max(32)
     .optional(),
   promptFile: z.string().min(1).max(200).optional(),
+  reportTimezone: z.string().min(1).max(64).optional(),
   // ONE opaque block, not a host-maintained allow-list of tenant key names. A
   // tenant adding a fourth block edits only its own file; a typo in a HOST key
   // still fails loudly, because strictObject rejects it.
@@ -173,6 +186,9 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
     sandbox: raw.sandbox,
     ...(raw.env === undefined ? {} : { env: [...raw.env] }),
     ...(raw.promptFile === undefined ? {} : { promptFile: raw.promptFile }),
+    ...(raw.reportTimezone === undefined
+      ? {}
+      : { reportTimezone: raw.reportTimezone }),
     extensions: raw.extensions ?? {},
   };
 }

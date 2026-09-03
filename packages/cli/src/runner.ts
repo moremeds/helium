@@ -398,11 +398,27 @@ export function zonedNow(now: Date, timeZone = "Asia/Hong_Kong"): string {
   );
 }
 
+/**
+ * `2026-09-02` — the calendar date of that instant in `timeZone`. Sliced off
+ * `zonedNow` rather than formatted a second time: two date formatters in one
+ * process is two places for the day to be decided, and the day is the thing
+ * this whole path exists to agree on.
+ */
+export function zonedDay(now: Date, timeZone: string): string {
+  return zonedNow(now, timeZone).slice(0, 10);
+}
+
 export async function runTenant(options: RunOptions): Promise<RunReport> {
   const env = options.env ?? process.env;
   const runId = options.runId ?? `run-${randomUUID()}`;
   const phase = options.phase ?? "premarket";
   const { spec, manifest } = options.tenant;
+  // ONE day for the whole run, read once at the start: the prompt's clock, the
+  // subject, the report file name and the per-day delivery counter are then the
+  // same date even for a run that crosses midnight in some zone. Computing it
+  // per surface is how a report named for one day gets charged to another.
+  const reportZone = spec.reportTimezone ?? "UTC";
+  const reportDay = zonedDay(options.now?.() ?? new Date(), reportZone);
 
   const discovered =
     options.providers === undefined
@@ -456,6 +472,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     tenant: spec.tenant,
     mode,
     phase,
+    day: reportDay,
     providersLive: discovered.live.map((p) => p.id),
     providersSkipped: discovered.skipped,
     steps: [],
@@ -515,13 +532,25 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       `phase: ${phase}`,
       `now: ${zonedNow(at)}`,
       `now (UTC): ${at.toISOString().replace(/\.\d{3}Z$/, "Z")}`,
-      // Spelling out that the two lines are one instant is not padding: a run
-      // near HK midnight shows two different calendar dates, and a model that
-      // reads them as a contradiction spends the step reasoning about the
-      // clock instead of the tape.
-      "The two clock lines are the SAME instant written in two zones, not two",
-      "times. Both are quotable verbatim; every other timestamp you write must",
-      "be copied character-for-character from a tool output.",
+      // The tenant's own zone is the one that answers "what day is it" for the
+      // subject matter, and it is the line that was missing: without it a run
+      // started at 02:40 in the launcher's zone reads the day as already over,
+      // calls the data it is handed stale, and returns nothing.
+      ...(spec.reportTimezone === undefined
+        ? []
+        : [
+            `now (${spec.reportTimezone}): ${zonedNow(at, spec.reportTimezone)}`,
+          ]),
+      `report day: ${reportDay} (${reportZone})`,
+      // Spelling out that the lines are one instant is not padding: a run near
+      // midnight in one of these zones shows two different calendar dates, and
+      // a model that reads them as a contradiction spends the step reasoning
+      // about the clock instead of the tape.
+      "The `now` lines are the SAME instant written in more than one zone, not",
+      "different times, and `report day` is the date this run's output is filed",
+      "under — treat it as today. Every line above is quotable verbatim; every",
+      "other timestamp you write must be copied character-for-character from a",
+      "tool output.",
     ].join("\n");
     toolOutputs.push(clock);
     const work: WorkOrder = WorkOrderSchema.parse({
@@ -932,8 +961,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         {
           tenant: spec.tenant,
           runId,
-          subject: deliverySubject(report),
+          subject: deliverySubject(report, reportDay),
           body: deliveryBody(report),
+          day: reportDay,
           phase: report.phase,
           ...(rendered === undefined ? {} : { rendered }),
         },
@@ -985,8 +1015,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
  * template work and never another model call — a role that only reformats an
  * earlier role's output is the kind of ceremony doctrine 6 deletes.
  */
-function deliverySubject(report: RunReport): string {
-  const day = new Date().toISOString().slice(0, 10);
+function deliverySubject(report: RunReport, day: string): string {
   const tag =
     report.outcome === "failed"
       ? "[FAILED] "

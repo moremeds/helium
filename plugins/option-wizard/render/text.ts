@@ -65,7 +65,7 @@ function candidateLines(candidate: CandidateView): string[] {
 
 export function renderText(view: BriefView): string {
   const lines: string[] = [
-    `${view.dateHkt} / ${view.dateEt} — ${view.tenant} [${view.outcome}]`,
+    `${view.date} — ${view.tenant} [${view.outcome}]`,
     "",
   ];
   if (view.empty !== undefined) {

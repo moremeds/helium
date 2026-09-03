@@ -28,11 +28,16 @@ import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
  *  correction of that report — overwriting is the intent, not a collision.
  *  The run id lives in the file's header line and in the audit table, which is
  *  where a reader chasing a surprising number goes anyway. A run with no phase
- *  falls back to the run id, so a tenant that never sets one is unchanged. */
-function reportPath(dir: string, payload: DeliveryPayload, now: Date): string {
-  const day = now.toISOString().slice(0, 10);
+ *  falls back to the run id, so a tenant that never sets one is unchanged.
+ *
+ *  The DAY comes from the payload, not from a clock in here. The runner reads
+ *  it once per run in the tenant's declared report zone; a channel that asked
+ *  the system clock instead would name the file for a different day than the
+ *  subject and the email counter whenever the two zones disagree, which for a
+ *  tenant whose subject matter is a US afternoon is most of the evening. */
+function reportPath(dir: string, payload: DeliveryPayload): string {
   const tail = payload.phase ?? payload.runId;
-  return join(dir, `${payload.tenant}-${day}-${tail}.md`);
+  return join(dir, `${payload.tenant}-${payload.day}-${tail}.md`);
 }
 
 export class MarkdownChannel implements Channel {
@@ -40,7 +45,7 @@ export class MarkdownChannel implements Channel {
   /** Stays on this machine, so the egress brake does not apply. */
   readonly external = false;
 
-  constructor(private readonly deps: { now?: () => Date; stateRoot?: string } = {}) {}
+  constructor(private readonly deps: { stateRoot?: string } = {}) {}
 
   async deliver(
     payload: DeliveryPayload,
@@ -60,7 +65,7 @@ export class MarkdownChannel implements Channel {
         : isAbsolute(configured)
           ? configured
           : resolve(root, configured);
-    const path = reportPath(dir, payload, (this.deps.now ?? (() => new Date()))());
+    const path = reportPath(dir, payload);
     const lines = [
       `# ${payload.subject}`,
       "",

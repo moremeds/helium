@@ -36,6 +36,18 @@ env:
   - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
 
+# The zone this tenant's DAY is counted in — the report file name, the email
+# subject, the per-day email cap and the `report day:` line the agent is given
+# all take their date from here, and the runner resolves it once per run so the
+# four cannot disagree.
+#
+# US/Eastern and not Asia/Hong_Kong, which is the zone the triggers below are
+# scheduled in: a US trading session has exactly one unambiguous date, and it is
+# this one. A run fired at 01:00 HKT on the 3rd is 13:00 ET on the 2nd, and its
+# report is about the 2nd. Named, never an offset, because this zone DOES
+# observe DST.
+reportTimezone: America/New_York
+
 # DECLARATIVE ONLY. Nothing in this repo runs a cron loop: launchd is the
 # scheduler and `launchd/com.helium.option-wizard-<phase>.plist` is where the
 # time actually lives. These five entries exist so the schedule is readable
@@ -91,11 +103,23 @@ delivery:
   - channel: email
     config:
       subjectPrefix: "[option-wizard]"
-      # Five, because the day now has five runs. The counter is per UTC day
-      # (delivery-email/src/channel.ts:120 uses toISOString().slice(0,10)), so
-      # the boundary is 00:00 UTC = 08:00 HKT and phases 1-4 all fall in the
-      # same UTC day: Monday 4 mails, other weekdays 3, Sunday 1. WHOEVER ADDS
-      # A SIXTH must first check it does not cross 08:00 HKT.
+      # Five, because the day now has five runs. The counter is per
+      # `reportTimezone` day — America/New_York above, not UTC — so the day
+      # boundary is 00:00 ET = 12:00 HKT (13:00 HKT in winter). Each HK trigger
+      # lands on this ET date:
+      #
+      #   premarket  18:00 HKT -> 06:00 ET, SAME date
+      #   frank  Mon 21:00 HKT -> 09:00 ET Monday
+      #   intraday   01:00 HKT -> 13:00 ET, PREVIOUS date
+      #   close      04:15 HKT -> 16:15 ET, PREVIOUS date
+      #   weekly Sun 20:00 HKT -> 08:00 ET Sunday
+      #
+      # So one ET date collects that morning's premarket plus the intraday and
+      # close fired the next HK morning: 3 mails. ET Monday adds frank and ET
+      # Sunday adds weekly, for 4. Peak is 4, under the cap of 5, and DST does
+      # not move any phase across a boundary (the shift is one hour, the
+      # nearest boundary is five away). WHOEVER ADDS A SIXTH must first work
+      # out its ET date.
       maxPerDay: 5
 
 # The tenant-owned opaque block; the host never reads inside it (spec §3).

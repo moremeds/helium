@@ -36,8 +36,10 @@ export interface RegimeView {
 }
 
 export interface BriefView {
-  dateHkt: string;
-  dateEt: string;
+  /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
+   *  printed the HK date beside the ET one made the reader do the conversion
+   *  the harness had already done. */
+  date: string;
   tenant: string;
   outcome: "completed" | "DEGRADED" | "FAILED";
   regime: RegimeView;
@@ -51,16 +53,6 @@ export interface BriefView {
 
 const RIGHTS = new Set(["call", "put"]);
 const ACTIONS = new Set(["buy", "sell"]);
-
-function dayIn(zone: string, now: Date): string {
-  // en-CA gives YYYY-MM-DD, which is the only reason that locale is named here.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: zone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-}
 
 /** The last JSON object in a step's text, fenced or bare. */
 export function extractJson(text: string): Record<string, unknown> | null {
@@ -166,16 +158,19 @@ function degradationFrom(report: RunReport): string | undefined {
   return parts.length === 0 ? undefined : `数据降级：${parts.join("；")}`;
 }
 
-export function buildView(
-  report: RunReport,
-  cfg: TenantSpec,
-  now: Date,
-): BriefView {
-  const dateEtDay = dayIn("America/New_York", now);
+/**
+ * The DAY is `report.day`, never a clock read in here: the runner resolves it
+ * once per run in the tenant's `reportTimezone` (America/New_York), and the
+ * report file name, the mail subject and the daily mail counter all carry that
+ * same date. A renderer that formatted `new Date()` itself would be a fifth
+ * opinion about what day it is, and near either midnight it would be a
+ * different one.
+ */
+export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+  const dateEtDay = report.day;
   const degradation = degradationFrom(report);
   const base: BriefView = {
-    dateHkt: `${dayIn("Asia/Hong_Kong", now)} (HKT)`,
-    dateEt: `${dateEtDay} (ET)`,
+    date: dateEtDay,
     tenant: cfg.tenant,
     outcome:
       report.outcome === "failed"
@@ -266,10 +261,10 @@ export default function renderReport(
   report: RunReport,
   cfg: TenantSpec,
 ): RenderedReport {
-  const view = buildView(report, cfg, new Date());
+  const view = buildView(report, cfg);
   const tag = view.outcome === "completed" ? "" : ` [${view.outcome}]`;
   return {
-    subject: `${view.tenant} ${view.dateHkt.slice(0, 10)}${tag}`,
+    subject: `${view.tenant} ${view.date}${tag}`,
     text: renderText(view),
     html: renderHtml(view),
   };

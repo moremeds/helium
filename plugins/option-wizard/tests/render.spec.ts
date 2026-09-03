@@ -125,6 +125,10 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-84a83ad2-a5cd-49d9-b41d-1fbc55236128",
     tenant: "option-wizard",
+    // The day the RUNNER resolved, in the tenant's reportTimezone
+    // (America/New_York). A run fired 2026-09-03T02:40+08:00 is 14:40 on the
+    // 2nd in ET, and the brief is about the 2nd.
+    day: "2026-09-02",
     mode: "model",
     providersLive: ["dsh"],
     providersSkipped: [],
@@ -147,11 +151,9 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   } as RunReport;
 }
 
-const NOW = new Date("2026-09-02T10:00:00Z");
-
 describe("buildView", () => {
   it("parses the fenced JSON out of the reviewer's prose", () => {
-    const view = buildView(report(), SPEC, NOW);
+    const view = buildView(report(), SPEC);
     expect(view.candidates.map((c) => c.ticker)).toEqual(["SPY", "QQQ", "TLT"]);
     expect(view.riskList).toEqual([
       {
@@ -167,7 +169,7 @@ describe("buildView", () => {
     // max gain 128, max loss (10 - 1.28) x 100 = 872, breakeven 748.72.
     // The role called this a debit spread and wrote limitPrice 3.80; both are
     // wrong, and neither reaches the reader.
-    const spy = buildView(report(), SPEC, NOW).candidates[0]!;
+    const spy = buildView(report(), SPEC).candidates[0]!;
     expect(spy.pricing).toMatchObject({
       kind: "priced",
       net: 1.28,
@@ -178,7 +180,7 @@ describe("buildView", () => {
   });
 
   it("marks a leg with no mid as unpriced instead of estimating it", () => {
-    const tlt = buildView(report(), SPEC, NOW).candidates[2]!;
+    const tlt = buildView(report(), SPEC).candidates[2]!;
     expect(tlt.pricing).toEqual({
       kind: "unpriced",
       reason: "未定价：put 80 缺少 mid",
@@ -186,21 +188,22 @@ describe("buildView", () => {
   });
 
   it("takes the regime verdict paragraph and the three stances", () => {
-    const view = buildView(report(), SPEC, NOW).regime;
+    const view = buildView(report(), SPEC).regime;
     expect(view.paragraph).toContain("Direction bias: cautiously risk-off");
     expect(view.direction).toBe("cautiously risk-off / defensive");
     expect(view.volatility).toBe("neutral-to-firming, cheap but rising");
     expect(view.hedge).toBe("keep hedges on, modest");
   });
 
-  it("dates the brief in both HKT and ET", () => {
-    const view = buildView(report(), SPEC, NOW);
-    expect(view.dateHkt).toBe("2026-09-02 (HKT)");
-    expect(view.dateEt).toBe("2026-09-02 (ET)");
+  it("dates the brief with the run's report day, one date in one zone", () => {
+    // Two dates in two zones was the reader doing a conversion the harness had
+    // already done, and it is the same conversion the model got wrong in prose.
+    const view = buildView(report(), SPEC);
+    expect(view.date).toBe("2026-09-02");
   });
 
   it("computes DTE from the expiry against the ET date", () => {
-    expect(buildView(report(), SPEC, NOW).candidates[0]!.dte).toBe(28);
+    expect(buildView(report(), SPEC).candidates[0]!.dte).toBe(28);
   });
 
   it("measures the payoff row in % only where a spot was quoted", () => {
@@ -209,7 +212,7 @@ describe("buildView", () => {
     // nobody stated, and in the first live brief every sampled point then fell
     // outside the spread, printing max-gain three times and max-loss three
     // times. Without a spot the columns are the strikes themselves.
-    const view = buildView(report(), SPEC, NOW);
+    const view = buildView(report(), SPEC);
     const spy = view.candidates[0]!.pricing;
     const qqq = view.candidates[1]!.pricing;
     if (spy.kind !== "priced" || qqq.kind !== "priced") throw new Error("priced");
@@ -220,7 +223,7 @@ describe("buildView", () => {
   });
 
   it("never shows toolsUnconfigured, which is a known false positive", () => {
-    expect(buildView(report(), SPEC, NOW).degradation).toBeUndefined();
+    expect(buildView(report(), SPEC).degradation).toBeUndefined();
   });
 
   it("says so in one line when a gate or a provider actually failed", () => {
@@ -230,7 +233,6 @@ describe("buildView", () => {
         gatesSkipped: [{ id: "ib-preflight", reason: "module threw" }],
       }),
       SPEC,
-      NOW,
     );
     expect(view.degradation).toBe(
       "数据降级：provider local-llm 不可用（no credential）；gate ib-preflight 未加载（module threw）",
@@ -244,7 +246,6 @@ describe("buildView", () => {
         failure: { class: "budget-exhausted", detail: "no room" },
       }),
       SPEC,
-      NOW,
     );
     expect(view.outcome).toBe("FAILED");
     expect(view.empty).toBe("今日无候选：budget-exhausted — no room");
@@ -254,7 +255,6 @@ describe("buildView", () => {
     const view = buildView(
       report({ mode: "tool-only", providersLive: [] }),
       SPEC,
-      NOW,
     );
     expect(view.outcome).toBe("DEGRADED");
     expect(view.empty).toBe("今日无候选：无可用 provider，本次没有任何模型推理");
@@ -263,7 +263,7 @@ describe("buildView", () => {
   it("returns 今日无候选 when the review step's JSON cannot be parsed", () => {
     const broken = report();
     broken.steps[3]!.text = "I could not produce proposals today.";
-    expect(buildView(broken, SPEC, NOW).empty).toBe(
+    expect(buildView(broken, SPEC).empty).toBe(
       "今日无候选：review 步骤没有可解析的 JSON",
     );
   });

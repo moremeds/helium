@@ -147,6 +147,15 @@ export interface DeliveryPayload {
   runId: string;
   subject: string;
   body: string;
+  /**
+   * `yyyy-mm-dd`: the calendar day this run's output is filed under, in the
+   * tenant's `reportTimezone`. The runner computes it ONCE per run and every
+   * channel copies it — a channel that reads its own clock instead would name
+   * a file for one day while the counter beside it charged another, which is
+   * exactly the drift this field removes. Required, so a new channel cannot
+   * quietly reintroduce a second date.
+   */
+  day: string;
   /** Absolute paths of files the channel may attach or reference. */
   artifacts?: string[];
   /**

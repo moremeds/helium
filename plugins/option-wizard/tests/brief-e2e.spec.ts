@@ -56,6 +56,8 @@ function report(): RunReport {
   return {
     runId: "run-ec962c3e-d57a-4b80-99fe-c5f4e67899f9",
     tenant: "option-wizard",
+    // The runner's day, resolved in the tenant's reportTimezone (ET).
+    day: "2026-09-02",
     mode: "model",
     outcome: "completed",
     providersLive: ["codex-subscription"],

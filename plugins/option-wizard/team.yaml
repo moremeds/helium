@@ -240,8 +240,11 @@ tasks:
       the reaction function — and close with the Layer Coverage table. The
       credit layer and any hike probability are `skipped`: there is no tool for
       them in this build, so say so rather than estimating.
-      PREMARKET ONLY, and unconditionally: this run is 18:00 Asia/Hong_Kong =
-      06:00 US/Eastern. Unusual Whales' market tide is FROZEN outside RTH — the
+      PREMARKET ONLY, and unconditionally: take the hour from the `now` lines
+      and the date from `report day` in your preamble, and never restate a zone
+      conversion of your own — this task used to assert "18:00 Asia/Hong_Kong =
+      06:00 US/Eastern" as a fact, and a run that fired at another hour printed
+      that sentence anyway. Unusual Whales' market tide is FROZEN outside RTH — the
       tide, flow and tape numbers you get are the PREVIOUS session's, and the
       report must say so in its own sentence, naming the session date the tool
       returned. That is pitfall 07 and it is the exact bug that shipped on

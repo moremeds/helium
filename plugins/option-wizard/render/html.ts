@@ -180,7 +180,7 @@ export function renderHtml(view: BriefView): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <meta name="color-scheme" content="light dark" />
-<title>${esc(view.tenant)} ${esc(view.dateHkt)}</title>
+<title>${esc(view.tenant)} ${esc(view.date)}</title>
 <style>
 :root { color-scheme: light dark; supported-color-schemes: light dark; }
 @media (prefers-color-scheme: dark) {
@@ -204,7 +204,7 @@ export function renderHtml(view: BriefView): string {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,'PingFang SC','Microsoft YaHei',sans-serif">
    <tr><td class="pad" style="padding:0 4px 12px">
      <div class="ink" style="color:${INK};font-size:20px;font-weight:700">${esc(view.tenant)}</div>
-     <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(view.dateHkt)} · ${esc(view.dateEt)}
+     <div class="ink-dim" style="color:${DIM};font-size:13px">${esc(view.date)}
        <span class="chip" style="display:inline-block;margin-left:6px;padding:1px 8px;border-radius:10px;background-color:${CHIP};border:1px solid ${RULE};color:${outcomeColour};font-size:12px">${esc(view.outcome)}</span>
      </div>
    </td></tr>
