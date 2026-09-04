@@ -506,8 +506,27 @@ tasks:
       "group"} rows straight from ow_uw_calendar, one per dated release or
       speech in the window you were given. `group` is a short label like
       "Today" or "Tomorrow". Omit a field the tool did not give you.
+      INTRADAY AND CLOSE. Before you write the reaction function, decide
+      whether the tape has a notable move: any index whose `changePct` from
+      ow_spot is beyond ±0.75, a 5bp move at any point on the curve per
+      ow_macro_rates, or a move beyond ±1.5% in gold or the dollar per
+      ow_tv_commodities — compare the tool's own change figure; never derive
+      one. If there is one and ow_uw_calendar lists no dated event before the
+      current hour, you MUST call ow_uw_headlines with `majorOnly: false` and
+      a `searchTerm` — a Fed name (Powell, Waller, Bowman, Williams, Hammack,
+      Goolsbee), "Fed", or the ticker of the moving asset — and cite the row
+      that explains the move: its `created_at` and its `headline` copied
+      character for character. Then write the field
+      `"cause": {"located": true, "headline": "<verbatim>", "at": "<the
+      row's created_at>", "source": "ow_uw_headlines", "searchTerm": "<what
+      you searched>"}`. If nothing in the feed explains it, write
+      `"cause": {"located": false, "searched": ["<term>", "<term>"]}` and say
+      "cause not located" in the reaction function. A cause you cannot cite
+      is not a cause: the 2026-09-03 intraday run explained a curve rally
+      from the curve itself while Governor Waller was on the wire, and named
+      him nowhere. Premarket writes no `cause` field at all.
       Reply as ONE JSON object and nothing else:
-      {"headline","tape":[...],"schedule":[...],"sections":[{"title","body"}]}
+      {"headline","tape":[...],"schedule":[...],"cause":{...},"sections":[{"title","body"}]}
       — one sections entry per section you were asked for, in that order, no
       prose outside the JSON. Your working notes are not a section.
 

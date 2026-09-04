@@ -568,10 +568,8 @@ describe("size budget", () => {
     // link, to the scratchpad for visual inspection — not part of the repo.
     process.env.ARGON_APP_BASE = "https://argon.example.internal";
     const checkHtml =
-      renderReport(
-        { ...report0903(), phase: "premarket" } as RunReport,
-        SPEC,
-      ).html ?? "";
+      renderReport({ ...report0903(), phase: "premarket" } as RunReport, SPEC)
+        .html ?? "";
     delete process.env.ARGON_APP_BASE;
     const scratchpad =
       "/private/tmp/claude-501/-Users-chenxi-projects-helium/10e64f69-0a92-4e54-8bc7-eda824a2d9cf/scratchpad";
@@ -683,6 +681,60 @@ describe("the abridged mail", () => {
     expect(html).toContain("Reject all eight");
     expect(html).not.toContain("Candidates");
     expect(html).not.toContain("Risk register");
+  });
+});
+
+describe("the cause line under the headline", () => {
+  // The real Unusual Whales row for Governor Waller's 2026-09-03 remarks —
+  // the cause the intraday brief that day never named.
+  const WALLER = {
+    created_at: "2026-09-03T13:03:25Z",
+    headline:
+      "FED WALLER: CURRENT FED RATES MAY BE ENOUGH TO BRING INFLATION BACK TO 2%—NO RUSH TO CUT UNTIL MORE PROGRESS EMERGES",
+  };
+  const withCause = (cause: unknown): RunReport => {
+    const base = report0903();
+    return {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.task === "regime"
+          ? { ...step, text: JSON.stringify({ ...REGIME_JSON_0903, cause }) }
+          : step,
+      ),
+    };
+  };
+
+  it("renders a located cause as 'Why it moved' in both parts", () => {
+    const out = renderReport(
+      withCause({
+        located: true,
+        headline: WALLER.headline,
+        at: WALLER.created_at,
+        source: "ow_uw_headlines",
+        searchTerm: "Waller",
+      }),
+      SPEC,
+    );
+    expect(out.html).toContain("Why it moved — FED WALLER: CURRENT FED RATES");
+    expect(out.html).toContain("(2026-09-03T13:03:25Z)");
+    expect(out.text).toContain(
+      `Why it moved — ${WALLER.headline} (2026-09-03T13:03:25Z)`,
+    );
+  });
+
+  it("renders located:false as 'Cause not located.'", () => {
+    const out = renderReport(
+      withCause({ located: false, searched: ["Waller", "Fed"] }),
+      SPEC,
+    );
+    expect(out.html).toContain("Cause not located.");
+    expect(out.text).toContain("Cause not located.");
+  });
+
+  it("prints no cause line when the step wrote none", () => {
+    const out = renderReport(report0903(), SPEC);
+    expect(out.html).not.toContain("Why it moved");
+    expect(out.html).not.toContain("Cause not located");
   });
 });
 

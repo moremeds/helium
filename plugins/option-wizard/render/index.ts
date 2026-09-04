@@ -187,6 +187,18 @@ export interface BriefView {
   /** Drawn from the run's raw tool outputs, never from a model step. Empty
    *  `gex` and absent curve/path all mean the tool did not answer. */
   charts: Charts;
+  /** Why the tape moved, from the regime step's structured `cause` field —
+   *  a headline copied verbatim from the headline feed (the `cause-citation`
+   *  gate checks that), or an honest `located: false`. Absent on a phase the
+   *  rule does not cover. Rendered as the first line under the headline: the
+   *  reader-visible half of the fix, without which the gate protects a field
+   *  nobody sees. */
+  cause?: {
+    located: boolean;
+    headline?: string;
+    at?: string;
+    searchTerm?: string;
+  };
   /** True when an `edit` step's document supplied the prose. Display-only —
    *  the footer says which pipeline wrote the words the reader is reading. */
   edited?: boolean;
@@ -302,6 +314,24 @@ function regimeFrom(text: string): RegimeView {
     ...(direction === undefined ? {} : { direction }),
     ...(volatility === undefined ? {} : { volatility }),
     ...(hedge === undefined ? {} : { hedge }),
+  };
+}
+
+/** The regime step's `cause` field, shape-checked. A located cause with no
+ *  headline string is not a cause; it is dropped rather than printed empty. */
+function causeFrom(raw: unknown): BriefView["cause"] | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.located !== true) return { located: false };
+  if (typeof row.headline !== "string" || row.headline.trim() === "")
+    return undefined;
+  return {
+    located: true,
+    headline: row.headline.trim(),
+    ...(typeof row.at === "string" ? { at: row.at } : {}),
+    ...(typeof row.searchTerm === "string"
+      ? { searchTerm: row.searchTerm }
+      : {}),
   };
 }
 
@@ -1177,6 +1207,9 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
           ? "DEGRADED"
           : "completed",
     headline: headlineFrom(regimeJson) ?? "",
+    ...(causeFrom(regimeJson?.cause) === undefined
+      ? {}
+      : { cause: causeFrom(regimeJson?.cause) }),
     tape: tapeFrom(regimeJson?.tape),
     schedule: scheduleFrom(regimeJson?.schedule),
     overnight: overnightFrom(report),

@@ -16,7 +16,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
-import { candidatesFrom, extractJson, type CandidateView } from "../render/index.js";
+import {
+  candidatesFrom,
+  extractJson,
+  type CandidateView,
+} from "../render/index.js";
 import { priceStructure, width } from "../render/math.js";
 import {
   ProposalSchema,
@@ -123,11 +127,14 @@ async function ibGet(
   const base = need(env, "OW_IB_API_BASE", tool);
   const key = need(env, "OW_IB_API_KEY", tool);
   const url = new URL(path, base);
-  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  for (const [name, value] of Object.entries(query))
+    url.searchParams.set(name, value);
   const doFetch = ctx?.fetchImpl ?? fetch;
   let response: Response;
   try {
-    response = await doFetch(url, { headers: { "X-API-Key": key, Accept: "application/json" } });
+    response = await doFetch(url, {
+      headers: { "X-API-Key": key, Accept: "application/json" },
+    });
   } catch (error: unknown) {
     throw new Error(
       `${tool}: IB query api unreachable at ${url.host} — ${
@@ -136,7 +143,9 @@ async function ibGet(
     );
   }
   if (!response.ok) {
-    throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+    throw new Error(
+      `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+    );
   }
   return response.json();
 }
@@ -159,7 +168,11 @@ export function dteOf(expiry: string, now: Date): number {
     Number(digits.slice(4, 6)) - 1,
     Number(digits.slice(6, 8)),
   );
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
   return Math.round((parsed - today) / 86_400_000);
 }
 
@@ -174,7 +187,9 @@ export function dteOf(expiry: string, now: Date): number {
 export function symbolLiteral(raw: string, tool: string): string {
   const value = raw.trim().toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9._:!-]{0,23}$/.test(value)) {
-    throw new Error(`${tool}: ${JSON.stringify(raw)} is not a symbol this tool will pass on`);
+    throw new Error(
+      `${tool}: ${JSON.stringify(raw)} is not a symbol this tool will pass on`,
+    );
   }
   return value;
 }
@@ -196,13 +211,23 @@ async function pgJson(env: Env, tool: string, sql: string): Promise<unknown[]> {
   try {
     ({ stdout } = await execFileAsync(
       bin,
-      ["-v", "ON_ERROR_STOP=1", "--single-transaction", "-At", "-c", wrapped, url],
+      [
+        "-v",
+        "ON_ERROR_STOP=1",
+        "--single-transaction",
+        "-At",
+        "-c",
+        wrapped,
+        url,
+      ],
       { timeout: 30_000, maxBuffer: 32 * 1024 * 1024 },
     ));
   } catch (error: unknown) {
     throw new Error(
       `${tool}: argon postgres query failed — ${
-        error instanceof Error ? error.message.split("\n").slice(0, 3).join(" ") : String(error)
+        error instanceof Error
+          ? error.message.split("\n").slice(0, 3).join(" ")
+          : String(error)
       }`,
     );
   }
@@ -301,11 +326,16 @@ export async function tvLiveLevels(
   | { unavailable: string }
 > {
   if (env.OW_TV_ENABLED !== "1") {
-    return { unavailable: 'OW_TV_ENABLED is not "1"; no live levels, daily series only' };
+    return {
+      unavailable:
+        'OW_TV_ENABLED is not "1"; no live levels, daily series only',
+    };
   }
   const bin = env.OPENCLI_BIN;
   if (bin === undefined || bin.trim() === "") {
-    return { unavailable: "OPENCLI_BIN is unset; no live levels, daily series only" };
+    return {
+      unavailable: "OPENCLI_BIN is unset; no live levels, daily series only",
+    };
   }
   const quotes: unknown[] = [];
   for (const entry of TV_LIVE) {
@@ -331,8 +361,7 @@ export async function tvLiveLevels(
     }
     const parsed: unknown = JSON.parse(stdout);
     const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
-      | { close?: unknown; change_abs?: unknown }
-      | undefined;
+      { close?: unknown; change_abs?: unknown } | undefined;
     const close = row?.close;
     // An instrument that answers without a number is dropped rather than
     // reported as zero — a 0.00 VIX or a 0.00% yield reads as a real and
@@ -343,12 +372,16 @@ export async function tvLiveLevels(
       symbol: `${entry.exchange}:${entry.ticker}`,
       ...(entry.fredId === undefined ? {} : { fredId: entry.fredId }),
       last: close,
-      ...(typeof row?.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
+      ...(typeof row?.change_abs === "number"
+        ? { changeAbs: row.change_abs }
+        : {}),
       ...(entry.note === undefined ? {} : { note: entry.note }),
     });
   }
   if (quotes.length === 0) {
-    return { unavailable: "every TradingView symbol answered without a numeric close" };
+    return {
+      unavailable: "every TradingView symbol answered without a numeric close",
+    };
   }
   // The one curve spread anyone quotes, subtracted here so nobody quotes it
   // from memory. Yields arrive in percent, so the difference is x100 for bps.
@@ -374,7 +407,9 @@ export async function tvLiveLevels(
 /** The FRED ids TradingView can quote. What is NOT in here is what
  *  `staleSeries` names and what `fredDirect` fetches — one set, so the two
  *  halves cannot drift into disagreeing about which series has a live twin. */
-const TV_TWIN_IDS = new Set(TV_LIVE.flatMap((e) => (e.fredId === undefined ? [] : [e.fredId])));
+const TV_TWIN_IDS = new Set(
+  TV_LIVE.flatMap((e) => (e.fredId === undefined ? [] : [e.fredId])),
+);
 
 /**
  * The series that have NO live twin, with how far behind each one is.
@@ -397,15 +432,24 @@ export function staleSeries(
     const seen = newest.get(id);
     if (seen === undefined || obs > seen) newest.set(id, obs);
   }
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const today = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
   return [...newest]
     .map(([seriesId, latestObs]) => ({
       seriesId,
       latestObs,
-      ageDays: Math.round((today - Date.parse(`${latestObs}T00:00:00Z`)) / 86_400_000),
+      ageDays: Math.round(
+        (today - Date.parse(`${latestObs}T00:00:00Z`)) / 86_400_000,
+      ),
     }))
     .filter((entry) => entry.ageDays >= 1)
-    .sort((a, b) => b.ageDays - a.ageDays || a.seriesId.localeCompare(b.seriesId, "en"));
+    .sort(
+      (a, b) =>
+        b.ageDays - a.ageDays || a.seriesId.localeCompare(b.seriesId, "en"),
+    );
 }
 
 /** No API key and no tier: FRED's own graph endpoint answers CSV. Verified
@@ -414,7 +458,12 @@ export function staleSeries(
 const FRED_CSV = "https://fred.stlouisfed.org/graph/fredgraph.csv";
 const FRED_SOURCE = "FRED direct (fredgraph.csv), ~1-2 day lag";
 
-type FredPoint = { series: string; value: number; asOf: string; source: string };
+type FredPoint = {
+  series: string;
+  value: number;
+  asOf: string;
+  source: string;
+};
 type FredSkip = { series: string; reason: string };
 
 /**
@@ -426,7 +475,9 @@ type FredSkip = { series: string; reason: string };
  * it; scanning backwards for a parseable value is what keeps the date and the
  * value the same observation.
  */
-export function parseFredCsv(csv: string): { value: number; asOf: string } | undefined {
+export function parseFredCsv(
+  csv: string,
+): { value: number; asOf: string } | undefined {
   const lines = csv.split("\n");
   for (let at = lines.length - 1; at >= 1; at -= 1) {
     const [asOf, raw] = (lines[at] ?? "").trim().split(",");
@@ -461,7 +512,9 @@ export async function fredDirect(
       const url = new URL(FRED_CSV);
       url.searchParams.set("id", symbolLiteral(id, "ow_macro_rates"));
       try {
-        const response = await doFetch(url, { signal: AbortSignal.timeout(15_000) });
+        const response = await doFetch(url, {
+          signal: AbortSignal.timeout(15_000),
+        });
         if (!response.ok) {
           return {
             series: id,
@@ -470,11 +523,17 @@ export async function fredDirect(
         }
         const point = parseFredCsv(await response.text());
         if (point === undefined) {
-          return { series: id, reason: "fredgraph.csv carried no numeric observation" };
+          return {
+            series: id,
+            reason: "fredgraph.csv carried no numeric observation",
+          };
         }
         return { series: id, ...point, source: FRED_SOURCE };
       } catch (error: unknown) {
-        return { series: id, reason: error instanceof Error ? error.message : String(error) };
+        return {
+          series: id,
+          reason: error instanceof Error ? error.message : String(error),
+        };
       }
     }),
   );
@@ -501,7 +560,8 @@ async function uwGet(
 ): Promise<unknown> {
   const key = need(env, "OW_UW_API_KEY", tool);
   const url = new URL(path, UW_BASE);
-  for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+  for (const [name, value] of Object.entries(query))
+    url.searchParams.set(name, value);
   const doFetch = ctx?.fetchImpl ?? fetch;
   const response = await doFetch(url, {
     headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
@@ -510,7 +570,9 @@ async function uwGet(
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
-    throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+    throw new Error(
+      `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+    );
   }
   return response.json();
 }
@@ -538,7 +600,9 @@ async function argonGet(
     );
   }
   if (!response.ok) {
-    throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+    throw new Error(
+      `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+    );
   }
   return response.json();
 }
@@ -553,7 +617,9 @@ async function argonLevelsForTicker(
   base: string,
   ticker: string,
   ctx?: ToolRunContext,
-): Promise<Record<string, unknown> & { ticker: string; unavailable?: string[] }> {
+): Promise<
+  Record<string, unknown> & { ticker: string; unavailable?: string[] }
+> {
   const encoded = encodeURIComponent(ticker);
   const calls: Array<[string, string]> = [
     ["dealer", `/api/regime/dealer?ticker=${encoded}`],
@@ -562,7 +628,9 @@ async function argonLevelsForTicker(
     ["technicals", `/api/stock/${encoded}/technicals/live`],
   ];
   const settled = await Promise.allSettled(
-    calls.map(([key, path]) => argonGet(tool, base, path, ctx).then((body) => [key, body] as const)),
+    calls.map(([key, path]) =>
+      argonGet(tool, base, path, ctx).then((body) => [key, body] as const),
+    ),
   );
   const ok = new Map<string, Record<string, unknown>>();
   const unavailable: string[] = [];
@@ -572,12 +640,18 @@ async function argonLevelsForTicker(
       ok.set(key, body as Record<string, unknown>);
     } else {
       unavailable.push(
-        outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason),
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : String(outcome.reason),
       );
     }
   }
   const dealer = ok.get("dealer") as
-    | { spot?: number; closest_levels?: Array<Record<string, unknown>>; odte_share_pct?: number }
+    | {
+        spot?: number;
+        closest_levels?: Array<Record<string, unknown>>;
+        odte_share_pct?: number;
+      }
     | undefined;
   const gex = ok.get("gex") as
     | {
@@ -602,13 +676,19 @@ async function argonLevelsForTicker(
     | undefined;
   const technicals = ok.get("technicals") as { spot?: number } | undefined;
 
-  const out: Record<string, unknown> & { ticker: string; unavailable?: string[] } = { ticker };
+  const out: Record<string, unknown> & {
+    ticker: string;
+    unavailable?: string[];
+  } = { ticker };
 
   // Freshest spot wins: technicals/live is a live tape read, gex/dealer are
   // the same scan's own spot, magnets carries only yesterday's close.
-  if (technicals?.spot !== undefined) out.spot = { value: technicals.spot, source: "technicals/live" };
-  else if (gex?.spot !== undefined) out.spot = { value: gex.spot, source: "gex" };
-  else if (dealer?.spot !== undefined) out.spot = { value: dealer.spot, source: "dealer" };
+  if (technicals?.spot !== undefined)
+    out.spot = { value: technicals.spot, source: "technicals/live" };
+  else if (gex?.spot !== undefined)
+    out.spot = { value: gex.spot, source: "gex" };
+  else if (dealer?.spot !== undefined)
+    out.spot = { value: dealer.spot, source: "dealer" };
 
   const ml = magnets?.levels;
   if (ml !== undefined) {
@@ -628,12 +708,15 @@ async function argonLevelsForTicker(
   if (gl !== undefined) {
     const gamma: Record<string, unknown> = {};
     if (gl.gex_flip?.strike !== undefined) gamma.gex_flip = gl.gex_flip.strike;
-    if (gl.call_wall?.strike !== undefined) gamma.call_wall = gl.call_wall.strike;
+    if (gl.call_wall?.strike !== undefined)
+      gamma.call_wall = gl.call_wall.strike;
     if (gl.put_wall?.strike !== undefined) gamma.put_wall = gl.put_wall.strike;
-    if (gl.max_magnet?.strike !== undefined) gamma.max_magnet = gl.max_magnet.strike;
+    if (gl.max_magnet?.strike !== undefined)
+      gamma.max_magnet = gl.max_magnet.strike;
     // mq (ManaQuant's own hvl snapshot) is nullable per-ticker on argon's own
     // schema — absent here, not zero, when argon has none for this scan.
-    if (gex?.mq?.hvl !== undefined && gex.mq.hvl !== null) gamma.hvl = gex.mq.hvl;
+    if (gex?.mq?.hvl !== undefined && gex.mq.hvl !== null)
+      gamma.hvl = gex.mq.hvl;
     if (Object.keys(gamma).length > 0) {
       out.gamma = gamma;
       out.gammaAsOf = gex?.data_date;
@@ -655,10 +738,17 @@ async function argonLevelsForTicker(
       ...(typeof level.gamma === "number" ? { gamma: level.gamma } : {}),
     }));
   }
-  if (dealer?.odte_share_pct !== undefined) out.odte_share_pct = dealer.odte_share_pct;
+  if (dealer?.odte_share_pct !== undefined)
+    out.odte_share_pct = dealer.odte_share_pct;
 
-  if (gex?.expected_range?.low !== undefined && gex.expected_range.high !== undefined) {
-    out.expected_range = { low: gex.expected_range.low, high: gex.expected_range.high };
+  if (
+    gex?.expected_range?.low !== undefined &&
+    gex.expected_range.high !== undefined
+  ) {
+    out.expected_range = {
+      low: gex.expected_range.low,
+      high: gex.expected_range.high,
+    };
   }
 
   const asOf = gex?.data_date ?? magnets?.as_of;
@@ -680,8 +770,11 @@ export async function tvLast(
   env: Env,
   tool: string,
   raw: string,
-): Promise<{ exchange: string; close: number; changeAbs?: number } | undefined> {
-  if (env.OW_TV_ENABLED !== "1") throw new Error(`OW_TV_ENABLED is not "1"; ${tool} is disabled`);
+): Promise<
+  { exchange: string; close: number; changeAbs?: number } | undefined
+> {
+  if (env.OW_TV_ENABLED !== "1")
+    throw new Error(`OW_TV_ENABLED is not "1"; ${tool} is disabled`);
   const bin = need(env, "OPENCLI_BIN", tool);
   const ticker = symbolLiteral(raw, tool);
   for (const exchange of ["NASDAQ", "AMEX", "NYSE"]) {
@@ -689,7 +782,16 @@ export async function tvLast(
     try {
       ({ stdout } = await execFileAsync(
         bin,
-        ["tradingview", "quote", "--ticker", ticker, "--exchange", exchange, "-f", "json"],
+        [
+          "tradingview",
+          "quote",
+          "--ticker",
+          ticker,
+          "--exchange",
+          exchange,
+          "-f",
+          "json",
+        ],
         { timeout: 30_000 },
       ));
     } catch {
@@ -697,13 +799,14 @@ export async function tvLast(
     }
     const parsed: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
     const row = (Array.isArray(parsed) ? parsed[0] : parsed) as
-      | { close?: unknown; change_abs?: unknown }
-      | undefined;
+      { close?: unknown; change_abs?: unknown } | undefined;
     if (typeof row?.close !== "number") continue;
     return {
       exchange,
       close: row.close,
-      ...(typeof row.change_abs === "number" ? { changeAbs: row.change_abs } : {}),
+      ...(typeof row.change_abs === "number"
+        ? { changeAbs: row.change_abs }
+        : {}),
     };
   }
   return undefined;
@@ -744,7 +847,32 @@ export async function spotOf(
   tool: string,
   raw: string,
   ctx?: ToolRunContext,
-): Promise<{ source: string; close: number; changeAbs?: number; marketTime?: string } | undefined> {
+): Promise<
+  | {
+      source: string;
+      close: number;
+      changeAbs?: number;
+      prevClose?: number;
+      changePct?: number;
+      marketTime?: string;
+    }
+  | undefined
+> {
+  // `changePct` is computed HERE, in code, so the regime step can compare a
+  // move to a threshold without doing the subtraction itself — the one
+  // arithmetic step a model gets wrong. Two decimals; absent when there is no
+  // prior close to measure from.
+  const change = (
+    close: number,
+    prevClose: number | undefined,
+  ): { prevClose?: number; changePct?: number } =>
+    prevClose === undefined || prevClose <= 0
+      ? {}
+      : {
+          prevClose,
+          changePct:
+            Math.round(((close - prevClose) / prevClose) * 10000) / 100,
+        };
   if (env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "") {
     const hit = await tvLast(env, tool, raw);
     if (hit !== undefined) {
@@ -752,6 +880,10 @@ export async function spotOf(
         source: hit.exchange,
         close: hit.close,
         ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }),
+        ...change(
+          hit.close,
+          hit.changeAbs === undefined ? undefined : hit.close - hit.changeAbs,
+        ),
       };
     }
   }
@@ -773,7 +905,12 @@ export async function spotOf(
   return {
     source: "unusualwhales",
     close,
-    ...(typeof row.market_time === "string" ? { marketTime: row.market_time } : {}),
+    ...(typeof row.market_time === "string"
+      ? { marketTime: row.market_time }
+      : {}),
+    // A row whose `close` fell back to `prev_close` is a 0.00% move by
+    // construction, which is what a session that has not printed IS.
+    ...change(close, numeric(row.prev_close)),
   };
 }
 
@@ -789,8 +926,12 @@ export async function spotOf(
  */
 export function parseOcc(
   symbol: string,
-): { root: string; expiry: string; right: "C" | "P"; strike: number } | undefined {
-  const match = /^([A-Z0-9.]+?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/u.exec(symbol);
+):
+  | { root: string; expiry: string; right: "C" | "P"; strike: number }
+  | undefined {
+  const match = /^([A-Z0-9.]+?)(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/u.exec(
+    symbol,
+  );
   if (match === null) return undefined;
   const [, root, yy, mm, dd, right, strike] = match;
   // The root is variable length, so without a calendar check the match can
@@ -864,8 +1005,13 @@ const PRIOR_BRIEF_CEILING_CHARS = 2000;
 const REPORT_ZONE = "America/New_York";
 
 const PriorBriefParams = z.object({
-  phase: z.enum(["premarket", "intraday", "close", "weekly", "frank"]).optional(),
-  today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  phase: z
+    .enum(["premarket", "intraday", "close", "weekly", "frank"])
+    .optional(),
+  today: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
 });
 
 /** The PROSE half of a prior brief's JSON document, never the numbers — a
@@ -883,7 +1029,9 @@ function pickBriefProse(doc: Record<string, unknown>): Record<string, unknown> {
     : [];
   return {
     ...(typeof doc.headline === "string" ? { headline: doc.headline } : {}),
-    ...(doc.decision !== null && typeof doc.decision === "object" ? { decision: doc.decision } : {}),
+    ...(doc.decision !== null && typeof doc.decision === "object"
+      ? { decision: doc.decision }
+      : {}),
     ...(sections.length === 0 ? {} : { sections }),
   };
 }
@@ -893,27 +1041,27 @@ function round4(value: number | undefined): number | undefined {
 }
 
 function numeric(value: unknown): number | undefined {
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  if (typeof value === "number")
+    return Number.isFinite(value) ? value : undefined;
   if (typeof value !== "string") return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 const TvParams = z.object({
-  flagColors: z.array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"])).optional(),
+  flagColors: z
+    .array(z.enum(["red", "orange", "yellow", "green", "blue", "purple"]))
+    .optional(),
 });
 // The cap carries its own instruction. A bare Zod `too_big` reaches the model
 // as a path and a number, and on 2026-09-03 gex-reporter answered it by
 // re-calling with the same 63 tickers — one wasted round trip per phase. The
 // message is the cheapest place to say what to do instead.
 const SpotParams = z.object({
-  tickers: z
-    .array(z.string().min(1))
-    .min(1)
-    .max(24, {
-      message:
-        "ow_spot takes at most 24 tickers per call — split the list into batches of 24 or fewer and call again",
-    }),
+  tickers: z.array(z.string().min(1)).min(1).max(24, {
+    message:
+      "ow_spot takes at most 24 tickers per call — split the list into batches of 24 or fewer and call again",
+  }),
 });
 const LegParams = z.object({
   right: z.enum(["call", "put"]),
@@ -930,7 +1078,12 @@ const PriceStructureParams = z.object({
 const StrikeCheckParams = z.object({
   ticker: z.string().min(1),
   strikes: z
-    .array(z.object({ strike: z.number().positive(), right: z.enum(["call", "put"]) }))
+    .array(
+      z.object({
+        strike: z.number().positive(),
+        right: z.enum(["call", "put"]),
+      }),
+    )
     .min(1)
     .max(20),
 });
@@ -942,11 +1095,16 @@ const UwChainParams = z.object({
   strikeWindowPct: z.number().positive().max(50).optional(),
   minOpenInterest: z.number().int().nonnegative().optional(),
 });
-const TickerMetricsParams = z.object({ tickers: z.array(z.string().min(1)).min(1).max(25) });
+const TickerMetricsParams = z.object({
+  tickers: z.array(z.string().min(1)).min(1).max(25),
+});
 // sector and etf are REQUIRED: the tide endpoints are per-sector and per-ETF,
 // and picking a default here would be picking a market view on the caller's
 // behalf.
-const MarketStateParams = z.object({ sector: z.string().min(1), etf: z.string().min(1) });
+const MarketStateParams = z.object({
+  sector: z.string().min(1),
+  etf: z.string().min(1),
+});
 const FRANK_PUBLICATION = "https://franktrading.substack.com";
 
 const ReportsParams = z.object({
@@ -993,12 +1151,16 @@ const MacroParams = z.object({
 });
 const BarsParams = z.object({
   symbol: z.string().min(1),
-  assetClass: z.enum(["equity", "index", "rates", "crypto", "futures"]).optional(),
+  assetClass: z
+    .enum(["equity", "index", "rates", "crypto", "futures"])
+    .optional(),
   timeframe: z.string().min(1).optional(),
   lookbackDays: z.number().int().positive().max(3650).optional(),
 });
 
-const IvTermParams = z.object({ tickers: z.array(z.string().min(1).max(8)).min(1).max(3) });
+const IvTermParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).min(1).max(3),
+});
 const HeadlinesParams = z.object({
   searchTerm: z.string().min(1).max(64).optional(),
   ticker: z.string().min(1).max(8).optional(),
@@ -1030,7 +1192,11 @@ const XPostsParams = z.object({
  * contract is used for oil and copper instead. A symbol that stops answering
  * is dropped from the payload rather than reported as zero.
  */
-const TV_COMMODITIES: ReadonlyArray<{ label: string; ticker: string; exchange: string }> = [
+const TV_COMMODITIES: ReadonlyArray<{
+  label: string;
+  ticker: string;
+  exchange: string;
+}> = [
   { label: "gold", ticker: "GOLD", exchange: "TVC" },
   { label: "silver", ticker: "SILVER", exchange: "TVC" },
   { label: "WTI crude", ticker: "CL1!", exchange: "NYMEX" },
@@ -1112,7 +1278,8 @@ export function buildTools(cfg: {
       dshParams: {
         flagColors: {
           type: "array",
-          description: "Colored flag lists: red, orange, yellow, green, blue, purple",
+          description:
+            "Colored flag lists: red, orange, yellow, green, blue, purple",
         },
       },
       async run(args: Record<string, unknown>): Promise<string> {
@@ -1139,13 +1306,18 @@ export function buildTools(cfg: {
               `TradingView was not usable on this run (${why}). These are the tickers the ` +
               "operator listed, not today's flagged watchlists — the list is as current as " +
               "whoever set it.",
-            tickers: [...new Set(listed)].sort((a, b) => a.localeCompare(b, "en")),
+            tickers: [...new Set(listed)].sort((a, b) =>
+              a.localeCompare(b, "en"),
+            ),
             fetchedAt: new Date().toISOString(),
           });
         };
-        const tvHere = env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "";
+        const tvHere =
+          env.OW_TV_ENABLED === "1" && (env.OPENCLI_BIN ?? "") !== "";
         if (!tvHere) {
-          return operatorUniverse("TradingView is not enabled here (needs OW_TV_ENABLED=1 and OPENCLI_BIN)");
+          return operatorUniverse(
+            "TradingView is not enabled here (needs OW_TV_ENABLED=1 and OPENCLI_BIN)",
+          );
         }
         const bin = need(env, "OPENCLI_BIN", "ow_tv_watchlist");
         const symbols = new Set<string>();
@@ -1204,7 +1376,8 @@ export function buildTools(cfg: {
               const trimmed = symbol.trim();
               const colon = trimmed.indexOf(":");
               if (colon === -1) continue;
-              if (!US_EQUITY_VENUES.has(trimmed.slice(0, colon).toUpperCase())) continue;
+              if (!US_EQUITY_VENUES.has(trimmed.slice(0, colon).toUpperCase()))
+                continue;
               const ticker = trimmed.slice(colon + 1).trim();
               if (ticker !== "") symbols.add(ticker);
             }
@@ -1265,7 +1438,10 @@ export function buildTools(cfg: {
             "Ticker symbols, at most 24 per call — split a longer list into batches of 24 or fewer",
         },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { tickers } = SpotParams.parse(args);
         const tool = "ow_spot";
         const quotes: unknown[] = [];
@@ -1279,7 +1455,11 @@ export function buildTools(cfg: {
         // the whole fix — batches, not a queue, because the wall time that
         // matters is the slowest ticker's, not the scheduler's elegance.
         const SPOT_CONCURRENCY = 6;
-        const settled: Array<{ ticker: string; hit: Awaited<ReturnType<typeof spotOf>>; why: string }> = [];
+        const settled: Array<{
+          ticker: string;
+          hit: Awaited<ReturnType<typeof spotOf>>;
+          why: string;
+        }> = [];
         for (let at = 0; at < tickers.length; at += SPOT_CONCURRENCY) {
           // Order in = order out: each chunk is resolved in place, so the
           // caller's ticker list and the returned quote list still line up.
@@ -1288,7 +1468,11 @@ export function buildTools(cfg: {
               tickers.slice(at, at + SPOT_CONCURRENCY).map(async (raw) => {
                 const ticker = symbolLiteral(raw, tool);
                 try {
-                  return { ticker, hit: await spotOf(env, tool, ticker, ctx), why: "" };
+                  return {
+                    ticker,
+                    hit: await spotOf(env, tool, ticker, ctx),
+                    why: "",
+                  };
                 } catch (error: unknown) {
                   // One unreachable ticker must not take the other twenty-three
                   // with it: it goes on the noPrice list like any other name.
@@ -1306,8 +1490,31 @@ export function buildTools(cfg: {
           // A ticker with no price is NAMED, never dropped and never guessed at.
           // Silence here is what produced the 420 strike on a 707 underlying.
           if (hit === undefined)
-            missing.push({ ticker, reason: why === "" ? "no quote from TradingView or Unusual Whales" : why });
-          else quotes.push({ ticker, source: hit.source, last: hit.close, ...(hit.marketTime === undefined ? {} : { marketTime: hit.marketTime }), ...(hit.changeAbs === undefined ? {} : { changeAbs: hit.changeAbs }) });
+            missing.push({
+              ticker,
+              reason:
+                why === ""
+                  ? "no quote from TradingView or Unusual Whales"
+                  : why,
+            });
+          else
+            quotes.push({
+              ticker,
+              source: hit.source,
+              last: hit.close,
+              ...(hit.marketTime === undefined
+                ? {}
+                : { marketTime: hit.marketTime }),
+              ...(hit.changeAbs === undefined
+                ? {}
+                : { changeAbs: hit.changeAbs }),
+              ...(hit.prevClose === undefined
+                ? {}
+                : { prevClose: hit.prevClose }),
+              ...(hit.changePct === undefined
+                ? {}
+                : { changePct: hit.changePct }),
+            });
         }
         if (quotes.length === 0) {
           throw new Error(
@@ -1353,11 +1560,17 @@ export function buildTools(cfg: {
       paramsSchema: TickerMetricsParams,
       mutating: false,
       dshParams: {
-        tickers: { type: "array", required: true, description: "Up to 25 symbols" },
+        tickers: {
+          type: "array",
+          required: true,
+          description: "Up to 25 symbols",
+        },
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const { tickers } = TickerMetricsParams.parse(args);
-        const list = tickers.map((ticker) => `'${symbolLiteral(ticker, "ow_argon_metrics")}'`).join(",");
+        const list = tickers
+          .map((ticker) => `'${symbolLiteral(ticker, "ow_argon_metrics")}'`)
+          .join(",");
         const rows = await pgJson(
           env,
           "ow_argon_metrics",
@@ -1381,12 +1594,22 @@ export function buildTools(cfg: {
     },
     {
       name: "ow_ib_positions",
-      description: "Open positions, net liquidation and buying power from IB Gateway (read-only).",
+      description:
+        "Open positions, net liquidation and buying power from IB Gateway (read-only).",
       paramsSchema: NoParams,
       mutating: false,
       dshParams: {},
-      async run(_args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const body = (await ibGet(env, "ow_ib_positions", "/portfolio", {}, ctx)) as {
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const body = (await ibGet(
+          env,
+          "ow_ib_positions",
+          "/portfolio",
+          {},
+          ctx,
+        )) as {
           last_sync?: unknown;
         };
         // `/portfolio` is a PERSISTED SNAPSHOT, not a live read. xenon refreshes
@@ -1398,14 +1621,19 @@ export function buildTools(cfg: {
         // number with the wrong date on it is not a weaker number, it is a
         // wrong one; refusing is the only honest option, and the message names
         // the exact command that fixes it.
-        const syncedAt = typeof body.last_sync === "string" ? Date.parse(body.last_sync) : NaN;
+        const syncedAt =
+          typeof body.last_sync === "string" ? Date.parse(body.last_sync) : NaN;
         if (Number.isNaN(syncedAt)) {
-          throw new Error("ow_ib_positions: /portfolio carried no readable last_sync; refusing an undateable account snapshot");
+          throw new Error(
+            "ow_ib_positions: /portfolio carried no readable last_sync; refusing an undateable account snapshot",
+          );
         }
         const ageHours = (Date.now() - syncedAt) / 3_600_000;
         const maxAgeHours = Number(env.OW_IB_MAX_SNAPSHOT_AGE_HOURS ?? "24");
         if (!Number.isFinite(maxAgeHours) || maxAgeHours <= 0) {
-          throw new Error("OW_IB_MAX_SNAPSHOT_AGE_HOURS is not a positive number; ow_ib_positions has no freshness bound to check against");
+          throw new Error(
+            "OW_IB_MAX_SNAPSHOT_AGE_HOURS is not a positive number; ow_ib_positions has no freshness bound to check against",
+          );
         }
         if (ageHours > maxAgeHours) {
           // The raw `last_sync` is NOT quoted here on purpose. xenon writes it
@@ -1425,7 +1653,10 @@ export function buildTools(cfg: {
         }
         // Age travels WITH the data, so a consumer that ignores the bound still
         // cannot mistake the vintage.
-        return JSON.stringify({ ...body, snapshotAgeHours: Number(ageHours.toFixed(2)) });
+        return JSON.stringify({
+          ...body,
+          snapshotAgeHours: Number(ageHours.toFixed(2)),
+        });
       },
     },
     {
@@ -1454,16 +1685,31 @@ export function buildTools(cfg: {
       paramsSchema: UwChainParams,
       mutating: false,
       dshParams: {
-        ticker: { type: "string", required: true, description: "Underlying symbol" },
-        minDte: { type: "number", required: true, description: "Minimum days to expiry" },
-        maxDte: { type: "number", required: true, description: "Maximum days to expiry" },
+        ticker: {
+          type: "string",
+          required: true,
+          description: "Underlying symbol",
+        },
+        minDte: {
+          type: "number",
+          required: true,
+          description: "Minimum days to expiry",
+        },
+        maxDte: {
+          type: "number",
+          required: true,
+          description: "Maximum days to expiry",
+        },
         // strikeWindowPct and minOpenInterest stay OUT of the model-facing
         // spec: dsh rejects a parameter declared `required: false`
         // ("unsupported JSON schema: parameters.X.required must be true when
         // present"), and a trimming knob is not a decision a role should be
         // making anyway. The zod schema still accepts both for direct callers.
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { ticker, minDte, maxDte, strikeWindowPct, minOpenInterest } =
           UwChainParams.parse(args);
         const tool = "ow_uw_chain";
@@ -1493,8 +1739,18 @@ export function buildTools(cfg: {
         const listed = Array.isArray(breakdown.data) ? breakdown.data : [];
         const now = new Date();
         const inBand = listed
-          .map((row) => row as { expires?: unknown; open_interest?: unknown; volume?: unknown })
-          .filter((row): row is { expires: string } & typeof row => typeof row.expires === "string")
+          .map(
+            (row) =>
+              row as {
+                expires?: unknown;
+                open_interest?: unknown;
+                volume?: unknown;
+              },
+          )
+          .filter(
+            (row): row is { expires: string } & typeof row =>
+              typeof row.expires === "string",
+          )
           .map((row) => ({ ...row, dte: dteOf(row.expires, now) }))
           .filter((row) => row.dte >= minDte && row.dte <= maxDte)
           .sort((a, b) => a.dte - b.dte)
@@ -1514,11 +1770,17 @@ export function buildTools(cfg: {
             .map((entry) => entry as Record<string, unknown>)
             .flatMap((entry) => {
               const parsed =
-                typeof entry.option_symbol === "string" ? parseOcc(entry.option_symbol) : undefined;
+                typeof entry.option_symbol === "string"
+                  ? parseOcc(entry.option_symbol)
+                  : undefined;
               if (parsed === undefined) return [];
-              const oi = typeof entry.open_interest === "number" ? entry.open_interest : 0;
+              const oi =
+                typeof entry.open_interest === "number"
+                  ? entry.open_interest
+                  : 0;
               if (oi < oiFloor) return [];
-              if (Math.abs(parsed.strike - spot.close) / spot.close > window) return [];
+              if (Math.abs(parsed.strike - spot.close) / spot.close > window)
+                return [];
               const bid = numeric(entry.nbbo_bid);
               const ask = numeric(entry.nbbo_ask);
               return [
@@ -1534,14 +1796,17 @@ export function buildTools(cfg: {
                   // Positive is out of the money, negative is in it — the sign
                   // IS the moneyness, and no reader has to subtract anything.
                   otmPct: Number(
-                    (((parsed.right === "C"
-                      ? parsed.strike - spot.close
-                      : spot.close - parsed.strike) /
-                      spot.close) *
-                      100).toFixed(2),
+                    (
+                      ((parsed.right === "C"
+                        ? parsed.strike - spot.close
+                        : spot.close - parsed.strike) /
+                        spot.close) *
+                      100
+                    ).toFixed(2),
                   ),
                   openInterest: oi,
-                  volume: typeof entry.volume === "number" ? entry.volume : undefined,
+                  volume:
+                    typeof entry.volume === "number" ? entry.volume : undefined,
                   // Rounded to four places on the way out. UW answers with
                   // seventeen significant digits of float noise per greek, and
                   // five greeks across three expiries of chain is most of the
@@ -1554,10 +1819,19 @@ export function buildTools(cfg: {
                 },
               ];
             })
-            .sort((a, b) => a.strike - b.strike || a.right.localeCompare(b.right, "en"));
+            .sort(
+              (a, b) =>
+                a.strike - b.strike || a.right.localeCompare(b.right, "en"),
+            );
           const trimmed = [
-            ...thinAcross(contracts.filter((c) => c.right === "P"), 40),
-            ...thinAcross(contracts.filter((c) => c.right === "C"), 40),
+            ...thinAcross(
+              contracts.filter((c) => c.right === "P"),
+              40,
+            ),
+            ...thinAcross(
+              contracts.filter((c) => c.right === "C"),
+              40,
+            ),
           ];
           expiries.push({
             expiry: row.expires,
@@ -1604,9 +1878,16 @@ export function buildTools(cfg: {
       paramsSchema: TickerMetricsParams,
       mutating: false,
       dshParams: {
-        tickers: { type: "array", required: true, description: "Up to 25 symbols" },
+        tickers: {
+          type: "array",
+          required: true,
+          description: "Up to 25 symbols",
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { tickers } = TickerMetricsParams.parse(args);
         const rows = [];
         for (const ticker of tickers) {
@@ -1637,14 +1918,26 @@ export function buildTools(cfg: {
       // GET /api/market/market-tide, /api/market/{sector}/sector-tide,
       // /api/market/{ticker}/etf-tide.
       name: "ow_uw_market_state",
-      description: "Market tide plus one sector tide and one ETF tide from Unusual Whales.",
+      description:
+        "Market tide plus one sector tide and one ETF tide from Unusual Whales.",
       paramsSchema: MarketStateParams,
       mutating: false,
       dshParams: {
-        sector: { type: "string", required: true, description: "Sector for the sector tide" },
-        etf: { type: "string", required: true, description: "ETF symbol for the ETF tide" },
+        sector: {
+          type: "string",
+          required: true,
+          description: "Sector for the sector tide",
+        },
+        etf: {
+          type: "string",
+          required: true,
+          description: "ETF symbol for the ETF tide",
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { sector, etf } = MarketStateParams.parse(args);
         const tool = "ow_uw_market_state";
         return JSON.stringify({
@@ -1711,12 +2004,17 @@ export function buildTools(cfg: {
       dshParams: {
         tickers: {
           type: "array",
-          description: "Tickers, e.g. [\"SPY\",\"QQQ\"]. Defaults to SPY and QQQ.",
+          description: 'Tickers, e.g. ["SPY","QQQ"]. Defaults to SPY and QQQ.',
         },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { tickers } = GexParams.parse(args);
-        const wanted = (tickers ?? ["SPY", "QQQ"]).map((t) => symbolLiteral(t, "ow_uw_gex"));
+        const wanted = (tickers ?? ["SPY", "QQQ"]).map((t) =>
+          symbolLiteral(t, "ow_uw_gex"),
+        );
         const levels: unknown[] = [];
         const unavailable: Array<{ ticker: string; reason: string }> = [];
         for (const ticker of wanted) {
@@ -1759,7 +2057,9 @@ export function buildTools(cfg: {
               {},
               ctx,
             )) as Record<string, unknown>;
-            const rows = (rawSpot.data ?? rawSpot) as Array<Record<string, unknown>>;
+            const rows = (rawSpot.data ?? rawSpot) as Array<
+              Record<string, unknown>
+            >;
             if (!Array.isArray(rows) || rows.length === 0) {
               throw new Error(`${ticker}: spot-exposures returned no rows`);
             }
@@ -1767,7 +2067,11 @@ export function buildTools(cfg: {
             // whole session and pick the row with the max `time` ourselves.
             let latest = rows[0];
             for (const row of rows) {
-              if (typeof row.time === "string" && typeof latest.time === "string" && row.time > latest.time) {
+              if (
+                typeof row.time === "string" &&
+                typeof latest.time === "string" &&
+                row.time > latest.time
+              ) {
                 latest = row;
               }
             }
@@ -1889,7 +2193,11 @@ export function buildTools(cfg: {
               .join("; ")}`,
           );
         }
-        return JSON.stringify({ asOf: new Date().toISOString(), rows, missing });
+        return JSON.stringify({
+          asOf: new Date().toISOString(),
+          rows,
+          missing,
+        });
       },
     },
     {
@@ -1919,12 +2227,19 @@ export function buildTools(cfg: {
       paramsSchema: ReportsParams,
       mutating: false,
       dshParams: {
-        phase: { type: "string", description: "premarket | intraday | close | weekly | frank" },
-        days: { type: "number", required: true, description: "How many days back, 1-10." },
+        phase: {
+          type: "string",
+          description: "premarket | intraday | close | weekly | frank",
+        },
+        days: {
+          type: "number",
+          required: true,
+          description: "How many days back, 1-10.",
+        },
         steps: {
           type: "array",
           description:
-            "Task ids whose prose to include, e.g. [\"drift\"] or [\"markout\",\"recap\"]. Omit for the proposals alone.",
+            'Task ids whose prose to include, e.g. ["drift"] or ["markout","recap"]. Omit for the proposals alone.',
         },
       },
       async run(args: Record<string, unknown>): Promise<string> {
@@ -2039,10 +2354,15 @@ export function buildTools(cfg: {
       paramsSchema: PriorBriefParams,
       mutating: false,
       dshParams: {
-        phase: { type: "string", description: "premarket (default) | intraday | close | weekly | frank" },
+        phase: {
+          type: "string",
+          description:
+            "premarket (default) | intraday | close | weekly | frank",
+        },
         today: {
           type: "string",
-          description: "YYYY-MM-DD report day to look back FROM, exclusive. Omit for today in the tenant's report zone.",
+          description:
+            "YYYY-MM-DD report day to look back FROM, exclusive. Omit for today in the tenant's report zone.",
         },
       },
       async run(args: Record<string, unknown>): Promise<string> {
@@ -2052,17 +2372,30 @@ export function buildTools(cfg: {
         // reasoning as ow_reports' date counting: a cutoff taken from this
         // process's clock disagrees with the filenames by a whole day for a
         // HK-scheduled run reading ET-dated files.
-        const cutoff = today ?? new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(new Date());
+        const cutoff =
+          today ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
         const dir = join(cfg.stateRoot, "reports");
         let names: string[];
         try {
           names = await readdir(dir);
         } catch {
-          return JSON.stringify({ dir, prior: null, reason: "no reports directory yet" });
+          return JSON.stringify({
+            dir,
+            prior: null,
+            reason: "no reports directory yet",
+          });
         }
         const found = names
           .map((name) => ({ name, match: REPORT_NAME.exec(name) }))
-          .filter((row) => row.match !== null && row.match[2] === wanted && row.match[1]! < cutoff)
+          .filter(
+            (row) =>
+              row.match !== null &&
+              row.match[2] === wanted &&
+              row.match[1]! < cutoff,
+          )
           .sort((a, b) => b.match![1]!.localeCompare(a.match![1]!))[0];
         if (found === undefined) {
           return JSON.stringify({
@@ -2078,10 +2411,9 @@ export function buildTools(cfg: {
         // Either way this is prose the reader has already seen.
         const source = byStep.get("edit") ?? byStep.get("regime") ?? "";
         const parsed = extractJson(source);
-        const text = (parsed === null ? source : JSON.stringify(pickBriefProse(parsed))).slice(
-          0,
-          PRIOR_BRIEF_CEILING_CHARS,
-        );
+        const text = (
+          parsed === null ? source : JSON.stringify(pickBriefProse(parsed))
+        ).slice(0, PRIOR_BRIEF_CEILING_CHARS);
         return JSON.stringify({
           dir,
           prior: { day, phase: wanted, file: found.name, text },
@@ -2109,7 +2441,10 @@ export function buildTools(cfg: {
       mutating: false,
       dshParams: {},
       async run(): Promise<string> {
-        const bin = (env.OW_OPENCLI_BIN ?? "").trim() === "" ? "opencli" : env.OW_OPENCLI_BIN!;
+        const bin =
+          (env.OW_OPENCLI_BIN ?? "").trim() === ""
+            ? "opencli"
+            : env.OW_OPENCLI_BIN!;
         const cwd = join(cfg.stateRoot, "scratch", "frank");
         await mkdir(cwd, { recursive: true });
         // Every `web read` gets its own directory, named for the url it was
@@ -2119,7 +2454,11 @@ export function buildTools(cfg: {
         // stapled to it. A per-url directory makes the binding structural: the
         // only .md in there is the one this call wrote.
         const readPage = async (url: string): Promise<string | undefined> => {
-          const into = join(cwd, "reads", url.replace(/[^A-Za-z0-9]+/gu, "-").slice(-80));
+          const into = join(
+            cwd,
+            "reads",
+            url.replace(/[^A-Za-z0-9]+/gu, "-").slice(-80),
+          );
           await mkdir(into, { recursive: true });
           const readArgv = ["web", "read", "--url", url];
           try {
@@ -2138,24 +2477,43 @@ export function buildTools(cfg: {
         // 2025-12-29 note — so the run compared this week against nine months
         // ago. Ask for a page of rows and take the first DATED slug; the index
         // page is read only when no row is dated.
-        const listArgv = ["substack", "publication", FRANK_PUBLICATION, "--limit", "10", "-f", "json"];
+        const listArgv = [
+          "substack",
+          "publication",
+          FRANK_PUBLICATION,
+          "--limit",
+          "10",
+          "-f",
+          "json",
+        ];
         let listed: string;
         try {
-          ({ stdout: listed } = await execFileAsync(bin, listArgv, { cwd, timeout: 120_000 }));
+          ({ stdout: listed } = await execFileAsync(bin, listArgv, {
+            cwd,
+            timeout: 120_000,
+          }));
         } catch (error: unknown) {
           throw new Error(
             `ow_frank: ${bin} ${listArgv.join(" ")} failed — ` +
               `${error instanceof Error ? error.message : String(error)}`,
           );
         }
-        const parsed: unknown = JSON.parse(listed.trim() === "" ? "[]" : listed);
+        const parsed: unknown = JSON.parse(
+          listed.trim() === "" ? "[]" : listed,
+        );
         const rows = Array.isArray(parsed) ? parsed : [parsed];
         const datedRow = rows.find(
-          (row) => typeof (row as { url?: unknown })?.url === "string" && isDatedPostUrl((row as { url: string }).url),
+          (row) =>
+            typeof (row as { url?: unknown })?.url === "string" &&
+            isDatedPostUrl((row as { url: string }).url),
         );
-        const post = (datedRow ?? rows[0]) as { url?: unknown; publish_time?: unknown; title?: unknown } | undefined;
+        const post = (datedRow ?? rows[0]) as
+          | { url?: unknown; publish_time?: unknown; title?: unknown }
+          | undefined;
         if (typeof post?.url !== "string") {
-          throw new Error(`ow_frank: no post url in ${bin} substack publication output`);
+          throw new Error(
+            `ow_frank: no post url in ${bin} substack publication output`,
+          );
         }
         // An undated slug is an index page, not a note. Read it once for the
         // links it carries and follow the newest dated one; never hand it back
@@ -2163,7 +2521,8 @@ export function buildTools(cfg: {
         let url = post.url;
         if (!isDatedPostUrl(url)) {
           const index = await readPage(url);
-          const dated = index === undefined ? undefined : firstDatedPostUrl(index);
+          const dated =
+            index === undefined ? undefined : firstDatedPostUrl(index);
           if (dated === undefined) {
             throw new Error(
               `ow_frank: ${url} is not a dated article slug and its page carries no ` +
@@ -2177,7 +2536,9 @@ export function buildTools(cfg: {
         // one .md it just wrote rather than reconstructing its name.
         const markdown = await readPage(url);
         if (markdown === undefined) {
-          throw new Error(`ow_frank: ${bin} web read wrote no markdown for ${url}`);
+          throw new Error(
+            `ow_frank: ${bin} web read wrote no markdown for ${url}`,
+          );
         }
         // A real note runs tens of KB. A short body or a page of "Read full
         // story" teasers is a paywall cut or an index that slipped the slug
@@ -2192,7 +2553,10 @@ export function buildTools(cfg: {
         }
         return JSON.stringify({
           url,
-          publishedAt: typeof post.publish_time === "string" ? post.publish_time : undefined,
+          publishedAt:
+            typeof post.publish_time === "string"
+              ? post.publish_time
+              : undefined,
           title: typeof post.title === "string" ? post.title : undefined,
           markdown,
         });
@@ -2216,14 +2580,23 @@ export function buildTools(cfg: {
       dshParams: {
         series: {
           type: "array",
-          description: "FRED series ids; omit for the default rates/vol/credit set",
+          description:
+            "FRED series ids; omit for the default rates/vol/credit set",
         },
-        lookbackDays: { type: "number", description: "How far back to return observations (default 30)" },
+        lookbackDays: {
+          type: "number",
+          description: "How far back to return observations (default 30)",
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { series, lookbackDays } = MacroParams.parse(args);
         const wanted = series ?? [...DEFAULT_MACRO_SERIES];
-        const list = wanted.map((id) => `'${symbolLiteral(id, "ow_macro_rates")}'`).join(",");
+        const list = wanted
+          .map((id) => `'${symbolLiteral(id, "ow_macro_rates")}'`)
+          .join(",");
         const days = lookbackDays ?? 30;
         const rows = await pgJson(
           env,
@@ -2258,12 +2631,17 @@ export function buildTools(cfg: {
         // remove.
         return JSON.stringify({
           series: { source: "argon.uw_scan.macro_series_daily", rows },
-          liveNow: { source: "tradingview", ...(await tvLiveLevels(env, "ow_macro_rates")) },
+          liveNow: {
+            source: "tradingview",
+            ...(await tvLiveLevels(env, "ow_macro_rates")),
+          },
           fredDirect: await fredDirect(
             wanted.filter((id) => !TV_TWIN_IDS.has(id)),
             ctx,
           ),
-          staleSeries: staleSeries(rows as Array<{ series_id?: unknown; obs_date?: unknown }>),
+          staleSeries: staleSeries(
+            rows as Array<{ series_id?: unknown; obs_date?: unknown }>,
+          ),
         });
       },
     },
@@ -2281,20 +2659,37 @@ export function buildTools(cfg: {
       paramsSchema: BarsParams,
       mutating: false,
       dshParams: {
-        symbol: { type: "string", required: true, description: "Ticker, e.g. SPY" },
-        assetClass: { type: "string", description: "equity (default), index, rates, crypto, futures" },
+        symbol: {
+          type: "string",
+          required: true,
+          description: "Ticker, e.g. SPY",
+        },
+        assetClass: {
+          type: "string",
+          description: "equity (default), index, rates, crypto, futures",
+        },
         timeframe: { type: "string", description: "e.g. 1d (default), 1h, 5m" },
-        lookbackDays: { type: "number", description: "Calendar days back from today (default 180)" },
+        lookbackDays: {
+          type: "number",
+          description: "Calendar days back from today (default 180)",
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const { symbol, assetClass, timeframe, lookbackDays } = BarsParams.parse(args);
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const { symbol, assetClass, timeframe, lookbackDays } =
+          BarsParams.parse(args);
         const tool = "ow_apex_bars";
         const base = need(env, "OW_APEX_API_BASE", tool);
         const ticker = symbolLiteral(symbol, tool);
         const klass = assetClass ?? "equity";
         const back = lookbackDays ?? 180;
         const start = new Date(Date.now() - back * 86_400_000).toISOString();
-        const url = new URL(`/v1/${encodeURIComponent(klass)}/${encodeURIComponent(ticker)}/bars`, base);
+        const url = new URL(
+          `/v1/${encodeURIComponent(klass)}/${encodeURIComponent(ticker)}/bars`,
+          base,
+        );
         url.searchParams.set("timeframe", timeframe ?? "1d");
         url.searchParams.set("start", start);
         if (klass === "equity") url.searchParams.set("price_mode", "adjusted");
@@ -2310,7 +2705,9 @@ export function buildTools(cfg: {
           );
         }
         if (!response.ok) {
-          throw new Error(`${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`);
+          throw new Error(
+            `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+          );
         }
         const body = (await response.json()) as { bars?: unknown[] };
         if (!Array.isArray(body.bars) || body.bars.length === 0) {
@@ -2335,8 +2732,17 @@ export function buildTools(cfg: {
       paramsSchema: NoParams,
       mutating: false,
       dshParams: {},
-      async run(_args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const raw = (await uwGet(env, "ow_uw_calendar", "/api/market/economic-calendar", {}, ctx)) as {
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const raw = (await uwGet(
+          env,
+          "ow_uw_calendar",
+          "/api/market/economic-calendar",
+          {},
+          ctx,
+        )) as {
           data?: unknown;
         };
         const all = Array.isArray(raw.data) ? raw.data : [];
@@ -2451,17 +2857,31 @@ export function buildTools(cfg: {
         tickers: {
           type: "array",
           required: true,
-          description: 'Tickers to fetch levels for, e.g. ["SPY","QQQ"]. Up to 12 per call.',
+          description:
+            'Tickers to fetch levels for, e.g. ["SPY","QQQ"]. Up to 12 per call.',
         },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { tickers } = ArgonLevelsParams.parse(args);
         const tool = "ow_argon_levels";
         const base = need(env, "OW_ARGON_API_BASE", tool);
         const results = await Promise.all(
-          tickers.map((raw) => argonLevelsForTicker(tool, base, symbolLiteral(raw, tool), ctx)),
+          tickers.map((raw) =>
+            argonLevelsForTicker(tool, base, symbolLiteral(raw, tool), ctx),
+          ),
         );
-        if (results.every((row) => row.spot === undefined && row.technical === undefined && row.gamma === undefined && row.closest_levels === undefined)) {
+        if (
+          results.every(
+            (row) =>
+              row.spot === undefined &&
+              row.technical === undefined &&
+              row.gamma === undefined &&
+              row.closest_levels === undefined,
+          )
+        ) {
           throw new Error(
             `${tool}: argon returned nothing usable for any of ${tickers.join(", ")} — ` +
               `${results.map((row) => `${row.ticker}: ${(row.unavailable ?? []).join("; ")}`).join(" | ")}`,
@@ -2487,9 +2907,15 @@ export function buildTools(cfg: {
       paramsSchema: IvTermParams,
       mutating: false,
       dshParams: {
-        tickers: { type: "array", description: 'At most 3 tickers, e.g. ["NVDA"].' },
+        tickers: {
+          type: "array",
+          description: 'At most 3 tickers, e.g. ["NVDA"].',
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const parsed = IvTermParams.safeParse(args);
         if (!parsed.success) {
           throw new Error(
@@ -2507,9 +2933,9 @@ export function buildTools(cfg: {
             {},
             ctx,
           )) as { data?: unknown };
-          for (const row of (Array.isArray(body.data) ? body.data : []) as Array<
-            Record<string, unknown>
-          >) {
+          for (const row of (Array.isArray(body.data)
+            ? body.data
+            : []) as Array<Record<string, unknown>>) {
             const dte = Number(row.dte);
             if (!Number.isFinite(dte) || dte <= 0) continue;
             rows.push({
@@ -2542,13 +2968,29 @@ export function buildTools(cfg: {
       paramsSchema: HeadlinesParams,
       mutating: false,
       dshParams: {
-        searchTerm: { type: "string", description: "Free-text filter, e.g. \"Powell\"" },
-        ticker: { type: "string", description: "Restrict to headlines tagged with this ticker" },
-        limit: { type: "number", description: "Rows to return, default 15, max 25" },
-        majorOnly: { type: "boolean", description: "Major headlines only (default true)" },
+        searchTerm: {
+          type: "string",
+          description: 'Free-text filter, e.g. "Powell"',
+        },
+        ticker: {
+          type: "string",
+          description: "Restrict to headlines tagged with this ticker",
+        },
+        limit: {
+          type: "number",
+          description: "Rows to return, default 15, max 25",
+        },
+        majorOnly: {
+          type: "boolean",
+          description: "Major headlines only (default true)",
+        },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
-        const { searchTerm, ticker, limit, majorOnly } = HeadlinesParams.parse(args);
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const { searchTerm, ticker, limit, majorOnly } =
+          HeadlinesParams.parse(args);
         const body = (await uwGet(
           env,
           "ow_uw_headlines",
@@ -2563,9 +3005,11 @@ export function buildTools(cfg: {
           },
           ctx,
         )) as { data?: unknown };
-        const rows = ((Array.isArray(body.data) ? body.data : []) as Array<
-          Record<string, unknown>
-        >).map((row) => ({
+        const rows = (
+          (Array.isArray(body.data) ? body.data : []) as Array<
+            Record<string, unknown>
+          >
+        ).map((row) => ({
           created_at: row.created_at,
           headline: row.headline,
           tickers: row.tickers ?? [],
@@ -2597,7 +3041,10 @@ export function buildTools(cfg: {
           required: true,
           description: `One of: ${X_HANDLES.join(", ")}`,
         },
-        limit: { type: "number", description: "Posts to return, default 10, max 20" },
+        limit: {
+          type: "number",
+          description: "Posts to return, default 10, max 20",
+        },
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const parsed = XPostsParams.safeParse(args);
@@ -2609,21 +3056,35 @@ export function buildTools(cfg: {
           );
         }
         if (env.OW_TV_ENABLED !== "1") {
-          throw new Error('ow_x_posts: OW_TV_ENABLED is not "1"; this machine has no browser bridge');
+          throw new Error(
+            'ow_x_posts: OW_TV_ENABLED is not "1"; this machine has no browser bridge',
+          );
         }
         const bin = env.OPENCLI_BIN;
         if (bin === undefined || bin.trim() === "") {
-          throw new Error("ow_x_posts: OPENCLI_BIN is unset; there is no route to X");
+          throw new Error(
+            "ow_x_posts: OPENCLI_BIN is unset; there is no route to X",
+          );
         }
         const { handle, limit } = parsed.data;
-        const argv = ["twitter", "tweets", handle, "--limit", String(limit ?? 10), "-f", "json"];
+        const argv = [
+          "twitter",
+          "tweets",
+          handle,
+          "--limit",
+          String(limit ?? 10),
+          "-f",
+          "json",
+        ];
         let stdout: string;
         try {
           ({ stdout } = await execFileAsync(bin, argv, { timeout: 60_000 }));
         } catch (error: unknown) {
           throw new Error(
             `ow_x_posts: ${bin} twitter tweets ${handle} failed — ` +
-              (error instanceof Error ? error.message.split("\n")[0] : String(error)),
+              (error instanceof Error
+                ? error.message.split("\n")[0]
+                : String(error)),
           );
         }
         const parsedOut: unknown = JSON.parse(stdout);
@@ -2658,7 +3119,9 @@ export function buildTools(cfg: {
         }
         const bin = env.OPENCLI_BIN;
         if (bin === undefined || bin.trim() === "") {
-          throw new Error("ow_tv_commodities: OPENCLI_BIN is unset; there is no route to quotes");
+          throw new Error(
+            "ow_tv_commodities: OPENCLI_BIN is unset; there is no route to quotes",
+          );
         }
         const rows: unknown[] = [];
         for (const entry of TV_COMMODITIES) {
@@ -2666,7 +3129,16 @@ export function buildTools(cfg: {
           try {
             ({ stdout } = await execFileAsync(
               bin,
-              ["tradingview", "quote", "--ticker", entry.ticker, "--exchange", entry.exchange, "-f", "json"],
+              [
+                "tradingview",
+                "quote",
+                "--ticker",
+                entry.ticker,
+                "--exchange",
+                entry.exchange,
+                "-f",
+                "json",
+              ],
               { timeout: 30_000 },
             ));
           } catch {
@@ -2674,14 +3146,15 @@ export function buildTools(cfg: {
           }
           const out: unknown = JSON.parse(stdout);
           const row = (Array.isArray(out) ? out[0] : out) as
-            | { close?: unknown; change?: unknown }
-            | undefined;
+            { close?: unknown; change?: unknown } | undefined;
           if (typeof row?.close !== "number") continue;
           rows.push({
             label: entry.label,
             symbol: `${entry.exchange}:${entry.ticker}`,
             close: row.close,
-            ...(typeof row.change === "number" ? { change_pct: row.change } : {}),
+            ...(typeof row.change === "number"
+              ? { change_pct: row.change }
+              : {}),
           });
         }
         if (rows.length === 0) {
@@ -2702,14 +3175,27 @@ export function buildTools(cfg: {
       paramsSchema: ProposalSchema,
       mutating: false,
       dshParams: {
-        ticker: { type: "string", required: true, description: "Underlying symbol" },
-        strategy: { type: "string", required: true, description: "e.g. put-credit-spread" },
+        ticker: {
+          type: "string",
+          required: true,
+          description: "Underlying symbol",
+        },
+        strategy: {
+          type: "string",
+          required: true,
+          description: "e.g. put-credit-spread",
+        },
         legs: {
           type: "array",
           required: true,
-          description: "right/expiry/strike/action/ratio, plus the NBBO mid of each leg",
+          description:
+            "right/expiry/strike/action/ratio, plus the NBBO mid of each leg",
         },
-        rationale: { type: "string", required: true, description: "Why this structure" },
+        rationale: {
+          type: "string",
+          required: true,
+          description: "Why this structure",
+        },
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const proposal = ProposalSchema.parse(args);
@@ -2783,14 +3269,21 @@ export function buildTools(cfg: {
       paramsSchema: StrikeCheckParams,
       mutating: false,
       dshParams: {
-        ticker: { type: "string", required: true, description: "Underlying symbol" },
+        ticker: {
+          type: "string",
+          required: true,
+          description: "Underlying symbol",
+        },
         strikes: {
           type: "array",
           required: true,
           description: "Each entry is { strike, right } with right call or put",
         },
       },
-      async run(args: Record<string, unknown>, ctx?: ToolRunContext): Promise<string> {
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
         const { ticker, strikes } = StrikeCheckParams.parse(args);
         const tool = "ow_strike_check";
         const spot = await spotOf(env, tool, ticker, ctx);
@@ -2804,7 +3297,9 @@ export function buildTools(cfg: {
           strike: entry.strike,
           right: entry.right,
           spot: spot.close,
-          distPct: Number((((entry.strike - spot.close) / spot.close) * 100).toFixed(2)),
+          distPct: Number(
+            (((entry.strike - spot.close) / spot.close) * 100).toFixed(2),
+          ),
           moneyness:
             entry.strike === spot.close
               ? "ATM"
