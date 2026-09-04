@@ -1236,17 +1236,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
     /layer coverage/iu.test(entry.title),
   );
   const found = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
-  // The Fed path's as-of belongs in the coverage table with every other
-  // source's date — asserted here from the tool payload, so a model that
-  // forgets to write it cannot leave it out.
-  const policyAsOf = policySnapshotDate(report);
-  const coverage =
-    found === undefined || policyAsOf === undefined
-      ? found
-      : {
-          ...found,
-          body: `${found.body} | Fed path (argon) — as of ${policyAsOf}`,
-        };
+  const coverage = found;
   const staleness = stalenessFrom(report);
   const sections =
     coverageIdx === -1
@@ -1446,9 +1436,28 @@ function enforceBudget(view: BriefView): BriefView {
   };
 }
 
+/** The Fed path's as-of belongs in the coverage table with every other
+ *  source's date — asserted from the tool payload AFTER the editor has had
+ *  its say, because the editor's `coverage` replaces the assembled one
+ *  wholesale (seen 2026-09-04: the row vanished from every edited run). */
+function withPolicyAsOf(view: BriefView, report: RunReport): BriefView {
+  const policyAsOf = policySnapshotDate(report);
+  if (view.coverage === undefined || policyAsOf === undefined) return view;
+  return {
+    ...view,
+    coverage: {
+      ...view.coverage,
+      body: `${view.coverage.body} | Fed path (argon) — as of ${policyAsOf}`,
+    },
+  };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
-  const view = enforceBudget(
-    applyEditor(assembleView(report, cfg), editorDocFrom(report)),
+  const view = withPolicyAsOf(
+    enforceBudget(
+      applyEditor(assembleView(report, cfg), editorDocFrom(report)),
+    ),
+    report,
   );
   // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
   // read here, once, rather than inside the renderer: the html and text parts

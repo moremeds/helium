@@ -781,7 +781,9 @@ describe("a policy-path snapshot older than its cadence says so", () => {
   it("prints the as-of into coverage and no stale line for the normal D-1", () => {
     const view = buildView(withPolicy("2026-09-02", "2026-09-03"), SPEC);
     expect(view.staleness).toBeUndefined();
-    expect(view.coverage?.body).toContain("Fed path (argon) — as of 2026-09-02");
+    expect(view.coverage?.body).toContain(
+      "Fed path (argon) — as of 2026-09-02",
+    );
   });
 
   it("is quiet on a Monday reading Friday's snapshot (3 days)", () => {
@@ -800,6 +802,32 @@ describe("a policy-path snapshot older than its cadence says so", () => {
     expect(out.text).toContain("Fed path: snapshot 2026-09-02, 5 days behind");
     // Not a failure: the degradation line must keep meaning "something broke".
     expect(view.degradation ?? "").not.toContain("Fed path");
+  });
+
+  it("keeps the as-of when the editor rewrites coverage (seen live 2026-09-04)", () => {
+    const base = withPolicy("2026-09-02", "2026-09-03");
+    const report: RunReport = {
+      ...base,
+      steps: [
+        ...base.steps,
+        {
+          task: "edit",
+          role: "editor",
+          mode: "model",
+          text: JSON.stringify({
+            coverage: {
+              title: "Layer Coverage",
+              body: "Rates — series only | Tape — SPY 771.39",
+            },
+          }),
+        } as RunReport["steps"][number],
+      ],
+    };
+    const view = buildView(report, SPEC);
+    expect(view.edited).toBe(true);
+    expect(view.coverage?.body).toBe(
+      "Rates — series only | Tape — SPY 771.39 | Fed path (argon) — as of 2026-09-02",
+    );
   });
 
   it("says nothing when no such payload exists", () => {
