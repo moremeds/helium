@@ -173,11 +173,14 @@ function tapeStrip(items: TapeItem[]): string {
     const slice = items.slice(i, i + size);
     i += size;
     const widthPct = Math.round((100 / size) * 100) / 100;
-    rows.push(`<tr>${slice.map((item) => cell(item, widthPct)).join("")}</tr>`);
+    // One table per row: a fixed-layout table takes its column widths from
+    // the first row, so a two-tile row inside a three-column table would sit
+    // at two thirds width instead of stretching.
+    rows.push(
+      `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed"><tr>${slice.map((item) => cell(item, widthPct)).join("")}</tr></table>`,
+    );
   }
-  return section(
-    `${eyebrow("Market snapshot")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">${rows.join("")}</table>`,
-  );
+  return section(`${eyebrow("Market snapshot")}${rows.join("")}`);
 }
 
 /** The run's one-sentence call. It used to be the masthead headline set in
