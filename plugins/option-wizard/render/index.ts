@@ -12,6 +12,7 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
+import { FLASH_BUDGET, trim } from "./budget.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
@@ -1007,9 +1008,27 @@ function sectionList(raw: unknown): Section[] {
   return out;
 }
 
+/** Gate refusals that must NOT discard the editor's document. `flash-budget`
+ *  is a MEASUREMENT: `enforceBudget` below already cuts what it complained
+ *  about, so throwing the document away would cost the reader a written brief
+ *  in exchange for a seven-fragment one that is also over budget. Every other
+ *  refusal still discards — a step the harness could not trust is not prose it
+ *  can print. */
+const ADVISORY_GATES = new Set(["flash-budget"]);
+
+function advisoryOnly(step: RunReport["steps"][number]): boolean {
+  const refusals = step.gateRefusals ?? [];
+  return (
+    step.failure === "gate-refused" &&
+    refusals.length > 0 &&
+    refusals.every((refusal) => ADVISORY_GATES.has(refusal.id))
+  );
+}
+
 function editorDocFrom(report: RunReport): EditorDoc | undefined {
   const step = report.steps.find((entry) => entry.task === "edit");
-  if (step === undefined || step.failure !== undefined) return undefined;
+  if (step === undefined) return undefined;
+  if (step.failure !== undefined && !advisoryOnly(step)) return undefined;
   const parsed = extractJson(step.text);
   if (parsed === null) return undefined;
 
@@ -1304,8 +1323,42 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  * candidate's ticker would move which profile is shown and could not touch a
  * single number inside it.
  */
+/** Deterministic trim to `FLASH_BUDGET`. Sections beyond the fifth are
+ *  DROPPED, not merged — merging would invent a paragraph no author wrote.
+ *  Bodies, the headline, decision values and rationales are cut by `trim`
+ *  (last sentence end inside the budget; word cut with "…" only when the
+ *  first sentence alone is over). `coverage` is exempt: it is the as-of table
+ *  the `as-of-verbatim` gate protects, and a trim there would delete
+ *  evidence to save words. Runs after `applyEditor` so the editor's prose is
+ *  what gets measured, and before charts, which it cannot touch. */
+function enforceBudget(view: BriefView): BriefView {
+  const cut = (text: string, max: number): string => trim(text, max).text;
+  return {
+    ...view,
+    headline: cut(view.headline, FLASH_BUDGET.headlineWords),
+    sections: view.sections.slice(0, FLASH_BUDGET.sectionCount).map((s) => ({
+      ...s,
+      body: cut(s.body, FLASH_BUDGET.sectionBodyWords),
+    })),
+    ...(view.decision === undefined
+      ? {}
+      : {
+          decision: view.decision.map((row) => ({
+            ...row,
+            value: cut(row.value, FLASH_BUDGET.decisionValueWords),
+          })),
+        }),
+    candidates: view.candidates.map((c) => ({
+      ...c,
+      rationale: cut(c.rationale, FLASH_BUDGET.rationaleWords),
+    })),
+  };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
-  const view = applyEditor(assembleView(report, cfg), editorDocFrom(report));
+  const view = enforceBudget(
+    applyEditor(assembleView(report, cfg), editorDocFrom(report)),
+  );
   // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
   // read here, once, rather than inside the renderer: the html and text parts
   // must link to the same page, and a second read is a second chance to
