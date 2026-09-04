@@ -238,16 +238,29 @@ describe("the editor is one author over seven fragments", () => {
     // `dependsOn` is what FEEDS it: runner.ts forwards each named step's whole
     // output into the prompt, so this list is the editor's desk. An editor
     // missing a dependency is an author who never saw a chapter.
-    expect(task?.phases).toEqual(["premarket"]);
+    // All three daily phases: intraday shipped eight raw sections and close
+    // seven on 2026-09-03 because neither had an author. Weekly and frank
+    // already have a single author each and are out of scope.
+    expect(task?.phases).toEqual(["premarket", "intraday", "close"]);
+    expect(task?.phases).not.toContain("weekly");
+    expect(task?.phases).not.toContain("frank");
+    // Phase-scoped dependencies are safe: a task whose phase does not match
+    // produces no text, and handoff drops dependencies with no text.
     expect(task?.dependsOn ?? []).toEqual([
       "universe",
       "gex",
+      "markout",
       "overnight",
       "regime",
       "scenarios",
       "design",
       "review",
+      "drift",
+      "recap",
     ]);
+    const ids = new Set(manifest.tasks.map((entry) => entry.id));
+    for (const dependency of task?.dependsOn ?? [])
+      expect(ids.has(dependency), dependency).toBe(true);
     const order = topologicalOrder(manifest);
     for (const dependency of task?.dependsOn ?? [])
       expect(order.indexOf(dependency), dependency).toBeLessThan(
@@ -279,11 +292,12 @@ describe("the editor is one author over seven fragments", () => {
     expect(prompt).toContain("what CHANGED");
     expect(prompt).toContain("No filler sentence");
     // The word budget replaced the flat 120-words-per-section cap on
-    // 2026-09-04: the brief that shipped the day before ran to 1,747 rendered
-    // words because nothing capped the headline, the decision block or a
-    // rationale.
-    expect(prompt).toContain("at most 60 words");
-    expect(prompt).toContain("at most 800 words");
+    // 2026-09-04; since the flash-format change it is a statement of what the
+    // renderer does (render/budget.ts), not a request — the prompt must say
+    // so, or the model writes past a cut it does not know is coming.
+    expect(prompt).toContain("enforced by the renderer");
+    expect(prompt).toContain("60 words");
+    expect(prompt).toContain("at most FIVE");
     expect(prompt).toContain("never an HTTP status code in prose");
   });
 
