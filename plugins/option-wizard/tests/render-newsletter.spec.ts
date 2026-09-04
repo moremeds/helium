@@ -228,12 +228,15 @@ describe("2026-09-03 premarket fixture (zero candidates)", () => {
     );
   });
 
-  it("says so in one line when overnight was empty, on a real zero-earnings run", () => {
+  it("records an empty overnight on the view, and no longer mails it", () => {
+    // The one-liner used to be printed in both parts. Since the mail was
+    // abridged (2026-09-05) the overnight list is Flash's, and the view — the
+    // document argon renders from — is where it has to survive.
     expect(view.overnight).toEqual([]);
     const text = renderReport(report0903(), SPEC).text ?? "";
-    expect(text).toContain("Nothing flagged overnight.");
+    expect(text).not.toContain("Nothing flagged overnight.");
     const html = renderReport(report0903(), SPEC).html ?? "";
-    expect(html).toContain("Nothing flagged overnight.");
+    expect(html).not.toContain("Nothing flagged overnight.");
   });
 
   it("carries the 8 real rejections in the risk register and zero candidates", () => {
@@ -253,9 +256,11 @@ describe("2026-09-03 premarket fixture (zero candidates)", () => {
 
   // Design 04 (2026-09-04) gives the header a fixed title and moves the run's
   // own sentence out of it, into a "Today in one sentence" section under the
-  // market snapshot — the spec's fixed daily structure. So the headline now
-  // follows the tape instead of preceding it; everything after it is unchanged.
-  it("renders the snapshot, one-sentence call, bottom line, schedule and risk register in that order in the html", () => {
+  // market snapshot — the spec's fixed daily structure. So the headline
+  // follows the tape instead of preceding it. Abridging the mail (2026-09-05)
+  // then cut everything after the decision block: what remains is this order,
+  // and the schedule and risk register are gone from the mail entirely.
+  it("renders the snapshot, one-sentence call and bottom line in that order, and nothing after them", () => {
     const html = renderReport(report0903(), SPEC).html ?? "";
     const at = (needle: string) => {
       const i = html.indexOf(needle);
@@ -265,13 +270,11 @@ describe("2026-09-03 premarket fixture (zero candidates)", () => {
     const tape = at("765.16");
     const oneSentence = at("Rates are still the first cause");
     const bottomLine = at("Bottom line");
-    const schedule = at("Initial Jobless Claims");
-    const riskRegister = at("Risk register");
     expect(at("Market snapshot")).toBeLessThan(tape);
     expect(tape).toBeLessThan(oneSentence);
     expect(oneSentence).toBeLessThan(bottomLine);
-    expect(bottomLine).toBeLessThan(schedule);
-    expect(schedule).toBeLessThan(riskRegister);
+    expect(html).not.toContain("Initial Jobless Claims");
+    expect(html).not.toContain("Risk register");
   });
 });
 
@@ -436,9 +439,9 @@ describe("2026-09-02 close fixture (real candidates)", () => {
     });
   });
 
-  it("has no overnight step in the close phase, and still prints the one-liner", () => {
+  it("has no overnight step in the close phase, and mails no overnight block", () => {
     expect(view.overnight).toEqual([]);
-    expect(renderReport(report0902(), SPEC).text).toContain(
+    expect(renderReport(report0902(), SPEC).text).not.toContain(
       "Nothing flagged overnight.",
     );
   });
@@ -560,20 +563,124 @@ describe("size budget", () => {
     console.log(`size-budget html bytes: ${String(bytes)}`);
     expect(bytes).toBeLessThan(90 * 1024);
 
-    // Also write the 2026-09-03 premarket brief to the scratchpad for visual
-    // inspection — not part of the repo, per the task's non-goals.
-    const checkHtml = renderReport(report0903(), SPEC).html ?? "";
+    // Also write the 2026-09-03 premarket brief, abridged and with its Flash
+    // link, to the scratchpad for visual inspection — not part of the repo.
+    process.env.ARGON_APP_BASE = "https://argon.example.internal";
+    const checkHtml =
+      renderReport(
+        { ...report0903(), phase: "premarket" } as RunReport,
+        SPEC,
+      ).html ?? "";
+    delete process.env.ARGON_APP_BASE;
     const scratchpad =
       "/private/tmp/claude-501/-Users-chenxi-projects-helium/10e64f69-0a92-4e54-8bc7-eda824a2d9cf/scratchpad";
     try {
-      writeFileSync(`${scratchpad}/render-check.html`, checkHtml);
+      writeFileSync(`${scratchpad}/abridged-premarket.html`, checkHtml);
       // eslint-disable-next-line no-console
       console.log(
-        `render-check.html bytes: ${String(Buffer.byteLength(checkHtml, "utf8"))}`,
+        `abridged-premarket.html bytes: ${String(Buffer.byteLength(checkHtml, "utf8"))}`,
       );
     } catch {
       // The scratchpad may not exist outside this session; that is fine,
       // the byte-size assertions above already cover the requirement.
     }
+  });
+});
+
+/**
+ * The abridged mail (2026-09-05). The full brief now lives on argon's Flash
+ * page; the email keeps the four things a reader acts on without opening a
+ * browser — the tape, the day's sentence, the decision block and a one-row-
+ * per-candidate table — and links to the rest.
+ *
+ * Both fixtures below are the SAME recorded runs used above: 2026-09-02 close
+ * (three real candidates, real legs and mids, the run's own decision block)
+ * and 2026-09-03 premarket (zero candidates, eight real rejections).
+ */
+describe("the abridged mail", () => {
+  const APP_BASE = "https://argon.example.internal";
+  const closeReport = (): RunReport =>
+    ({ ...report0902(), phase: "close" }) as RunReport;
+
+  const withBase = (): string => {
+    process.env.ARGON_APP_BASE = APP_BASE;
+    try {
+      return renderReport(closeReport(), SPEC).html ?? "";
+    } finally {
+      delete process.env.ARGON_APP_BASE;
+    }
+  };
+
+  it("keeps the headline, the decision block and one row per candidate", () => {
+    const html = withBase();
+    expect(html).toContain("Bottom line");
+    // The decision block's own words, verbatim from the recorded run.
+    expect(html).toContain("Release all three to reader. No drops.");
+    for (const ticker of ["NOW", "IWM", "QQQ"]) expect(html).toContain(ticker);
+    // Per candidate: structure, expiry, entry debit, max loss, invalidation.
+    expect(html).toContain("Call debit spread — bullish tilt");
+    expect(html).toContain("2026-09-25");
+    expect(html).toContain("Max loss");
+    expect(html).toContain("Invalidation");
+  });
+
+  it("links to the Flash page for this ISO week, day and run label", () => {
+    expect(withBase()).toContain(
+      `${APP_BASE}/flash/2026-W36/2026-09-02?phase=close`,
+    );
+  });
+
+  it("drops the payoff figure, the rationales, the narrative and the risk register", () => {
+    const html = withBase();
+    expect(html).not.toContain("Payoff at expiry");
+    expect(html).not.toContain("Risk register");
+    expect(html).not.toContain("Data coverage");
+    expect(html).not.toContain("Overnight");
+    // A candidate's rationale paragraph, verbatim from the recorded run.
+    expect(html).not.toContain("Repricing is macro-mechanical");
+    // The run's own narrative section, title and body.
+    expect(html).not.toContain("grinding duration multiples lower");
+  });
+
+  it("is abridged with no link at all when ARGON_APP_BASE is unset", () => {
+    delete process.env.ARGON_APP_BASE;
+    const html = renderReport(closeReport(), SPEC).html ?? "";
+    expect(html).not.toContain("/flash/");
+    expect(html).not.toContain("Full brief");
+    expect(html).not.toContain("Payoff at expiry");
+    expect(html).not.toContain("Repricing is macro-mechanical");
+    // Still the four things it keeps.
+    expect(html).toContain("Bottom line");
+    expect(html).toContain("NOW");
+  });
+
+  it("abridges the text part the same way, link and all", () => {
+    process.env.ARGON_APP_BASE = APP_BASE;
+    try {
+      const text = renderReport(closeReport(), SPEC).text ?? "";
+      expect(text).toContain("【Bottom line】");
+      expect(text).toContain("NOW");
+      expect(text).toContain(
+        `Full brief: ${APP_BASE}/flash/2026-W36/2026-09-02?phase=close`,
+      );
+      expect(text).not.toContain("Payoff at expiry");
+      expect(text).not.toContain("Repricing is macro-mechanical");
+      expect(text).not.toContain("【Overnight】");
+    } finally {
+      delete process.env.ARGON_APP_BASE;
+    }
+  });
+
+  it("keeps the tape and prints no candidate table on a zero-candidate day", () => {
+    // 2026-09-03 premarket: eight proposals, all eight rejected by the
+    // arithmetic gate. The tape and the decision block are the whole mail, and
+    // a Candidates heading with nothing under it is not printed.
+    const html = renderReport(report0903(), SPEC).html ?? "";
+    expect(html).toContain("Market snapshot");
+    expect(html).toContain("765.16");
+    expect(html).toContain("Rates are still the first cause");
+    expect(html).toContain("Reject all eight");
+    expect(html).not.toContain("Candidates");
+    expect(html).not.toContain("Risk register");
   });
 });

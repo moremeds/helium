@@ -25,28 +25,21 @@
  * cards. One accent (#1769E0) that is an accent, not the identity of every
  * component; green and red only ever colour a number or a bar, never a box.
  *
- * Section order (the spec's fixed daily structure, mapped onto the sections
- * this tenant actually has data for): header -> market snapshot (tape) ->
- * today in one sentence (the run's headline) -> bottom line (decision block)
- * -> overnight -> today's schedule -> the run's own narrative sections ->
- * rates & policy path -> candidates -> gamma profile -> risk register -> data
- * coverage -> footer. The spec's Movers and Watchlist modules have no data
- * behind them in this tenant and are not invented.
+ * ABRIDGED (2026-09-05). The mail is no longer the whole brief: argon's Flash
+ * page is, and this is the part a reader acts on without opening a browser.
+ * Section order: header -> market snapshot (tape) -> today in one sentence
+ * (the run's headline) -> bottom line (decision block) -> candidates, one row
+ * each -> the Flash link. The narrative sections, per-candidate rationales,
+ * payoff figures, schedule, overnight list, rates/gamma charts, risk register
+ * and data-coverage table were REMOVED from the mail, not from the document:
+ * `renderReport` still hands the full `BriefView` to the argon channel, which
+ * is where they are read now.
+ *
  * @module dsh-plugin-tenant-option-wizard/render/html
  */
-import type {
-  BriefView,
-  CandidateView,
-  ScheduleRow,
-  TapeItem,
-} from "./index.js";
-import type { Priced } from "./math.js";
-import {
-  formatScheduleMagnitude,
-  invalidationLabel,
-  payoffAt,
-  scheduleTimeLabel,
-} from "./math.js";
+import type { BriefView, CandidateView, TapeItem } from "./index.js";
+import { invalidationLabel } from "./math.js";
+import { flashUrl } from "./week.js";
 
 /**
  * Design 04's tokens, verbatim from the spec. Blue is an accent; the two
@@ -57,13 +50,11 @@ const DIM = "#626A75";
 const MUTED = "#9198A2";
 const PAPER = "#FFFFFF";
 const BORDER = "#E8EBEF";
-const BORDER_STRONG = "#D7DCE2";
 const ACCENT = "#1769E0";
 const ACCENT_SOFT = "#EFF6FF";
 const POS = "#168A54";
 const NEG = "#D54141";
-/** The unfilled half of a bar. The spec's chart grid colour. */
-const GRID = "#EEF0F3";
+
 /** Caution. The negative token, never an amber: an amber note in a financial
  *  mail is a Bloomberg quotation, and the brief forbids it. */
 const WARN = NEG;
@@ -213,537 +204,70 @@ function bottomLine(view: BriefView): string {
   );
 }
 
-/** The spec's Key Points marker: a small outlined blue circle, not a bullet
- *  glyph and not an icon. */
-const DOT = `<td width="16" valign="top" style="width:16px;padding:6px 10px 0 0"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="6" style="width:6px;height:6px;line-height:6px;font-size:1px;border:1px solid ${ACCENT};border-radius:4px">&nbsp;</td></tr></table></td>`;
 
-function overnightSection(items: string[]): string {
-  const body =
-    items.length === 0
-      ? `<div class="ink-dim" style="color:${DIM};font-size:13px">Nothing flagged overnight.</div>`
-      : `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">${items
-          .map(
-            (item) =>
-              `<tr>${DOT}<td class="ink" style="color:${INK};font-size:13px;line-height:1.6;padding-bottom:8px">${esc(item)}</td></tr>`,
-          )
-          .join("")}</table>`;
-  return section(`${eyebrow("Overnight")}${body}`);
-}
-
-function scheduleSection(rows: ScheduleRow[]): string {
-  if (rows.length === 0) return "";
+/**
+ * The candidate table: ONE row per candidate, and only the five fields a
+ * reader acts on — which ticker, what the structure is, what it costs, what it
+ * can lose, and the level that kills it.
+ *
+ * The card this replaced carried a payoff figure, a leg-by-leg grid, a
+ * breakeven line and the reviewer's rationale paragraph. All of that still
+ * exists, in the document argon's Flash page renders; the mail links to it
+ * rather than duplicating it at 8KB a candidate.
+ */
+function candidateRows(candidates: CandidateView[]): string {
   const head = `<tr>
-    <td class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Time</td>
-    <td class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Event</td>
-    <td align="right" class="ink-dim" style="padding:0 0 7px 0;${LBL}">Cons / prior</td>
+    <td class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Ticker</td>
+    <td class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Structure</td>
+    <td align="right" class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Net · share</td>
+    <td align="right" class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Max loss</td>
+    <td align="right" class="ink-dim" style="padding:0 0 7px 0;${LBL}">Invalidation</td>
   </tr>`;
-  let lastGroup: string | undefined;
-  const body = rows
-    .map((row) => {
-      const groupRow =
-        row.group === undefined || row.group === lastGroup
-          ? ""
-          : `<tr><td colspan="3" class="ink-dim rule" style="padding:12px 0 4px;border-top:1px solid ${BORDER};${LBL}">${esc(row.group)}</td></tr>`;
-      lastGroup = row.group;
-      const when = scheduleTimeLabel(row);
-      const cp = [row.consensus, row.prior]
-        .filter((v): v is string => v !== undefined)
-        .map(formatScheduleMagnitude)
+  const body = candidates
+    .map((candidate) => {
+      const pricing = candidate.pricing;
+      const priced = pricing.kind === "priced";
+      const net = priced
+        ? `${pricing.net >= 0 ? "" : "−"}$${Math.abs(pricing.net).toFixed(2)}${pricing.net >= 0 ? " cr" : ""}`
+        : "—";
+      const maxLoss = priced ? money(pricing.maxLoss) : "—";
+      const legs = candidate.legs
+        .map(
+          (leg) =>
+            `${leg.action} ${leg.right} ${String(leg.strike)}${leg.mid === undefined ? "" : ` @ ${leg.mid.toFixed(2)}`}`,
+        )
         .join(" / ");
-      return `${groupRow}<tr>
-        <td valign="top" class="ink-dim rule" style="padding:8px 10px 8px 0;border-top:1px solid ${BORDER};color:${DIM};font-size:12px;white-space:nowrap">${esc(when)}</td>
-        <td valign="top" class="ink rule" style="padding:8px 10px 8px 0;border-top:1px solid ${BORDER};color:${INK};font-size:13px;line-height:1.45">${esc(row.event)}</td>
-        <td valign="top" align="right" class="ink-dim rule" style="padding:8px 0;border-top:1px solid ${BORDER};color:${DIM};font-size:12px;white-space:nowrap">${esc(cp)}</td>
+      const cell = `padding:9px 10px 9px 0;border-top:1px solid ${BORDER}`;
+      return `<tr>
+        <td valign="top" class="ink rule" style="${cell};color:${INK};font-size:14px;font-weight:650;white-space:nowrap">${esc(candidate.ticker)}</td>
+        <td valign="top" class="ink rule" style="${cell};color:${INK};font-size:13px;line-height:1.45">${esc(candidate.strategy)}
+          <div class="ink-dim" style="color:${DIM};font-size:11px;line-height:1.45;padding-top:3px">${esc(legs)} · exp ${esc(candidate.expiry)}</div>
+          ${priced ? "" : `<div class="neg" style="color:${WARN};font-size:11px;line-height:1.45;padding-top:3px">${esc(pricing.reason)}</div>`}
+        </td>
+        <td valign="top" align="right" class="ink rule" style="${cell};color:${INK};font-size:13px;white-space:nowrap">${esc(net)}</td>
+        <td valign="top" align="right" class="ink rule" style="${cell};color:${INK};font-size:13px;white-space:nowrap">${esc(maxLoss)}</td>
+        <td valign="top" align="right" class="neg rule" style="padding:9px 0 9px 0;border-top:1px solid ${BORDER};color:${NEG};font-size:13px;white-space:nowrap">${esc(invalidationLabel(candidate.invalidation))}</td>
       </tr>`;
     })
     .join("");
   return section(
-    `${eyebrow("Today's schedule")}
+    `${eyebrow("Candidates")}<div class="ink-dim" style="color:${MUTED};font-size:11px;margin:-6px 0 12px">Per contract, no size. Net is per share; max loss is per contract.</div>
      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">${head}${body}</table>`,
   );
 }
 
-/** The regime stances as three plain label/value pairs. Colour carries no
- *  meaning here, so it is not spent. */
-function stanceRow(view: BriefView): string {
-  const rows = [
-    ["Direction", view.regime.direction],
-    ["Volatility", view.regime.volatility],
-    ["Hedge", view.regime.hedge],
-  ].filter((entry): entry is [string, string] => entry[1] !== undefined);
-  if (rows.length === 0) return "";
-  const cells = rows
-    .map(
-      ([label, value]) =>
-        `<td valign="top" width="33%" style="width:33.33%;padding:0 10px 0 0">
-           <div class="ink-dim" style="${LBL}">${esc(label)}</div>
-           <div class="ink" style="color:${INK};font-size:14px;font-weight:650;padding-top:3px">${esc(value)}</div>
-         </td>`,
-    )
-    .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed;margin-top:16px"><tr>${cells}</tr></table>`;
-}
-
-/** The payoff profile's geometry. Twelve columns divide 100% evenly enough for
- *  a fixed-layout table, and adjacent columns of equal height are merged with
- *  `colspan` — a vertical spread's profile is two flats and a ramp, so twelve
- *  columns cost about five cells, which is what keeps the figure inside the
- *  90KB Gmail-clip budget at five candidates. */
-const PAYOFF_COLS = 12;
-const PAYOFF_H = 42;
-/** The gutter that carries the max-gain / max-loss axis labels. */
-const PAYOFF_GUTTER = 64;
-const GUT = `<td width="${String(PAYOFF_GUTTER)}" style="width:${String(PAYOFF_GUTTER)}px;font-size:1px;line-height:1px">&nbsp;</td>`;
-const FIXED =
-  'role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed"';
-
 /**
- * The payoff at expiry, as an actual payoff diagram.
+ * The one line that says where the rest of the brief is.
  *
- * What this replaced (2026-09-04): one horizontal bar per `pnlAt` point, bar
- * length proportional to |P&L|. Six bars of two colours pointing the same way
- * is not a payoff — nothing in it said which end was the underlying going up,
- * and a max-loss bar and a max-gain bar of similar size looked identical.
- *
- * This draws the real thing: P&L on the vertical, spot at expiry on the
- * horizontal, a zero line, gains above it in green and losses below in red,
- * with the spot and every breakeven marked on the axis. Every column's value
- * comes from `payoffAt` — the same function that produced `maxGain`, `maxLoss`
- * and the `pnlAt` table below — evaluated at that column's centre price, so
- * the picture cannot disagree with the numbers beside it. Nothing is sampled,
- * smoothed or invented.
- *
- * The axis spans the strikes, the breakevens and the spot, padded 18% each
- * side so the flat max-gain and max-loss ends are visible. That range is a
- * display choice and is printed under the chart; it is not data.
+ * Absent when `ARGON_APP_BASE` is unset: the mail is abridged either way — the
+ * link is what makes the abridgement recoverable, not what causes it.
  */
-function payoffFigure(candidate: CandidateView, pricing: Priced): string {
-  const anchors = [
-    ...candidate.legs.map((leg) => leg.strike),
-    ...pricing.breakevens,
-  ];
-  if (candidate.spot !== undefined) anchors.push(candidate.spot);
-  const low = Math.min(...anchors);
-  const high = Math.max(...anchors);
-  const spread = high - low;
-  const pad = spread > 0 ? spread * 0.18 : Math.max(1, high * 0.05);
-  const lo = low - pad;
-  const hi = high + pad;
-  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return "";
-  const step = (hi - lo) / PAYOFF_COLS;
-  const values = Array.from({ length: PAYOFF_COLS }, (_, i) =>
-    payoffAt(candidate.legs, pricing.net, lo + step * (i + 0.5)),
-  );
-  const posMax = Math.max(0, ...values, pricing.maxGain ?? 0);
-  const negMax = Math.max(0, ...values.map((v) => -v), pricing.maxLoss ?? 0);
-  const scale = Math.max(posMax, negMax, 1);
-  const height = (magnitude: number): number =>
-    Math.round((PAYOFF_H * magnitude) / scale);
-  const gainH = posMax > 0 ? Math.max(4, height(posMax)) : 0;
-  const lossH = negMax > 0 ? Math.max(4, height(negMax)) : 0;
-
-  /** One half of the profile, run-length encoded: consecutive columns of the
-   *  same bar height become one `colspan` cell. */
-  const half = (up: boolean, areaH: number): string => {
-    if (areaH === 0) return "";
-    const bars = values.map((value) => {
-      const magnitude = up ? value : -value;
-      return magnitude > 0
-        ? Math.max(1, Math.min(areaH, height(magnitude)))
-        : 0;
-    });
-    const cells: string[] = [];
-    for (let i = 0; i < bars.length;) {
-      let span = 1;
-      while (i + span < bars.length && bars[i + span] === bars[i]) span += 1;
-      const width = ((span * 100) / PAYOFF_COLS).toFixed(2);
-      const box = `width:${width}%;height:${String(areaH)}px;font-size:1px;line-height:1px`;
-      const barH = bars[i]!;
-      cells.push(
-        barH === 0
-          ? `<td colspan="${String(span)}" style="${box}">&nbsp;</td>`
-          : `<td colspan="${String(span)}" valign="${up ? "bottom" : "top"}" style="${box}"><div style="height:${String(barH)}px;line-height:${String(barH)}px;background-color:${up ? POS : NEG}">&nbsp;</div></td>`,
-      );
-      i += span;
-    }
-    return `<table ${FIXED}><tr>${cells.join("")}</tr></table>`;
-  };
-
-  /** A price marker under the axis, positioned by percentage. Each marker gets
-   *  its own row, which is what makes overlap impossible without any
-   *  collision arithmetic. */
-  const marker = (
-    at: number,
-    label: string,
-    colour: string,
-    cls: string,
-  ): string => {
-    const pct = Math.max(0, Math.min(100, ((at - lo) / (hi - lo)) * 100));
-    const left = pct <= 50;
-    const gap = `<td width="${(left ? pct : 100 - pct).toFixed(1)}%" style="font-size:1px;line-height:1px">&nbsp;</td>`;
-    const text = `<td align="${left ? "left" : "right"}" class="${cls}" style="color:${colour};font-size:10px;white-space:nowrap;padding-top:3px">${left ? "&#9650; " : ""}${esc(label)}${left ? "" : " &#9650;"}</td>`;
-    return `<tr>${GUT}<td><table ${FIXED}><tr>${left ? gap + text : text + gap}</tr></table></td></tr>`;
-  };
-
-  const gutter = (inner: string, align: "top" | "bottom"): string =>
-    `<td width="${String(PAYOFF_GUTTER)}" valign="${align}" align="right" style="width:${String(PAYOFF_GUTTER)}px;padding-right:8px">${inner}</td>`;
-
-  const gainRow =
-    gainH === 0
-      ? ""
-      : `<tr>${gutter(
-          `<div class="ink-dim" style="${LBL}">max gain</div><div class="pos" style="color:${POS};font-size:11px;font-weight:650">${esc(money(pricing.maxGain))}</div>`,
-          "top",
-        )}<td valign="bottom">${half(true, gainH)}</td></tr>`;
-  const lossRow =
-    lossH === 0
-      ? ""
-      : `<tr>${gutter(
-          `<div class="neg" style="color:${NEG};font-size:11px;font-weight:650">${esc(money(pricing.maxLoss))}</div><div class="ink-dim" style="${LBL}">max loss</div>`,
-          "bottom",
-        )}<td valign="top">${half(false, lossH)}</td></tr>`;
-
-  const markers = [
-    candidate.spot === undefined
-      ? ""
-      : marker(
-          candidate.spot,
-          `spot ${candidate.spot.toFixed(2)}`,
-          ACCENT,
-          "accent",
-        ),
-    ...pricing.breakevens.map((value) =>
-      marker(value, `breakeven ${value.toFixed(2)}`, DIM, "ink-dim"),
-    ),
-  ].join("");
-
-  return `<table ${FIXED.replace("table-layout:fixed", "table-layout:fixed;margin-top:6px")}>
-    ${gainRow}
-    <tr>${GUT}<td class="rule" style="border-top:1px solid ${BORDER_STRONG};font-size:1px;line-height:1px">&nbsp;</td></tr>
-    ${lossRow}
-    <tr>${GUT}<td><table ${FIXED}><tr>
-      <td align="left" class="ink-dim" style="color:${MUTED};font-size:10px;padding-top:4px">${lo.toFixed(2)}</td>
-      <td align="right" class="ink-dim" style="color:${MUTED};font-size:10px;padding-top:4px">${hi.toFixed(2)}</td>
-    </tr></table></td></tr>
-    ${markers}
-  </table>`;
-}
-
-/** The exact P&L at the six points `math.ts` measured: percentage moves off a
- *  quoted spot, or the strikes themselves when no tool quoted one. Two rows,
- *  under the same gutter as the figure above. */
-function payoffPoints(pricing: Priced): string {
-  const quoted = pricing.pnlAt[0]?.pct !== null;
-  const head = pricing.pnlAt
-    .map((point) => {
-      const move =
-        point.pct === null
-          ? ""
-          : `<br><span class="ink-dim" style="color:${MUTED};font-size:9px">${point.pct > 0 ? "+" : ""}${String(point.pct)}%</span>`;
-      return `<td align="right" class="ink" style="padding:0 0 0 6px;color:${INK};font-size:11px;line-height:1.3">${point.spot.toFixed(2)}${move}</td>`;
-    })
-    .join("");
-  const body = pricing.pnlAt
-    .map(
-      (point) =>
-        `<td align="right" class="${point.pnl >= 0 ? "pos" : "neg"} rule" style="padding:5px 0 0 6px;border-top:1px solid ${BORDER};color:${point.pnl >= 0 ? POS : NEG};font-size:12px;font-weight:650">${point.pnl >= 0 ? "+" : "−"}${Math.abs(point.pnl).toFixed(0)}</td>`,
-    )
-    .join("");
-  return `<table ${FIXED.replace("table-layout:fixed", "table-layout:fixed;margin-top:14px")}>
-    <tr><td width="11%" valign="bottom" class="ink-dim" style="width:11%;${LBL}">${quoted ? "Spot" : "Strike"}</td>${head}</tr>
-    <tr><td class="ink-dim rule" style="padding-top:5px;border-top:1px solid ${BORDER};${LBL}">P&amp;L</td>${body}</tr>
-  </table>`;
-}
-
-function legRows(candidate: CandidateView): string {
-  return candidate.legs
-    .map(
-      (leg) => `<tr>
-        <td class="${leg.action === "buy" ? "pos" : "neg"} rule" style="padding:6px 6px 6px 0;border-top:1px solid ${BORDER};color:${leg.action === "buy" ? POS : NEG};font-size:12px;font-weight:600">${esc(leg.action)}</td>
-        <td class="ink rule" style="padding:6px;border-top:1px solid ${BORDER};color:${INK};font-size:12px">${esc(leg.right)}</td>
-        <td align="right" class="ink rule" style="padding:6px;border-top:1px solid ${BORDER};color:${INK};font-size:12px">${leg.strike.toFixed(2)}</td>
-        <td class="ink-dim rule" style="padding:6px;border-top:1px solid ${BORDER};color:${DIM};font-size:12px">${esc(leg.expiry)}</td>
-        <td align="right" class="ink rule" style="padding:6px 0 6px 6px;border-top:1px solid ${BORDER};color:${INK};font-size:12px">${leg.mid === undefined ? "—" : leg.mid.toFixed(2)}</td>
-      </tr>`,
-    )
-    .join("");
-}
-
-function pricingBlock(candidate: CandidateView): string {
-  const pricing = candidate.pricing;
-  if (pricing.kind !== "priced") {
-    return `<div class="${pricing.kind === "invalid" ? "neg" : "ink-dim"}" style="margin-top:12px;color:${pricing.kind === "invalid" ? NEG : WARN};font-size:13px">${esc(pricing.reason)}</div>`;
-  }
-  const credit = pricing.net >= 0;
-  return `<div class="ink" style="margin-top:12px;font-size:13px;line-height:1.5;color:${INK}">
-      ${credit ? "Net credit" : "Net debit"} <strong>$${Math.abs(pricing.net).toFixed(2)}</strong> per share · spread width ${candidate.width.toFixed(2)}
-    </div>
-    <div class="ink-dim" style="margin-top:16px;${LBL}">Payoff at expiry · $ per contract</div>
-    ${payoffFigure(candidate, pricing)}
-    ${payoffPoints(pricing)}
-    <div class="ink-dim" style="color:${MUTED};font-size:10px;margin-top:6px">per contract, no size</div>`;
-}
-
-/** Entry / Target / Invalidation, side by side: the level that starts the
- *  thesis, what it is aiming at, and the level that kills it. Three outlined
- *  boxes, per the spec's watchlist module — outline only, no fill. */
-function trigger(candidate: CandidateView): string {
-  const entry =
-    candidate.entry === undefined ? "—" : invalidationLabel([candidate.entry]);
-  const target = candidate.target === "" ? "—" : esc(candidate.target);
-  const stop = esc(invalidationLabel(candidate.invalidation));
-  const tile = (
-    label: string,
-    value: string,
-    colour: string,
-    cls: string,
-  ): string =>
-    `<td width="33%" valign="top" style="width:33.33%;padding:0 8px 0 0">
-       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="border-collapse:separate;background-color:${PAPER};border:1px solid ${BORDER};border-radius:6px"><tr><td valign="top" style="padding:8px 10px">
-         <div class="ink-dim" style="${LBL}">${label}</div>
-         <div class="${cls}" style="color:${colour};font-size:13px;font-weight:600;padding-top:3px;line-height:1.4">${value}</div>
-       </td></tr></table>
-     </td>`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed;margin-top:12px">
-    <tr>${tile("Entry", esc(entry), INK, "ink")}${tile("Target", target, INK, "ink")}${tile("Invalidation", stop, NEG, "neg")}</tr>
-  </table>`;
-}
-
-function candidateCard(candidate: CandidateView): string {
-  const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
-  const earnings =
-    candidate.earnings === undefined ? "" : ` · earnings ${candidate.earnings}`;
-  const spot =
-    candidate.spot === undefined ? "" : `Spot ${candidate.spot.toFixed(2)}`;
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-          <td valign="bottom" class="ink" style="color:${INK};font-size:18px;font-weight:650;letter-spacing:-0.2px">${esc(candidate.ticker)}</td>
-          <td valign="bottom" align="right" class="ink-dim" style="color:${MUTED};font-size:11px">Exp ${esc(candidate.expiry)}${esc(dte)}${esc(earnings)}</td>
-        </tr></table>
-        <div class="ink-dim" style="color:${DIM};font-size:13px;padding-top:3px">${esc(candidate.strategy)}${spot === "" ? "" : ` · ${spot}`}</div>
-        ${trigger(candidate)}
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="ink" style="margin-top:14px;border-collapse:collapse;color:${INK}">
-          <tr>
-            <th align="left" class="ink-dim" style="padding:0 6px 6px 0;${LBL};font-weight:400">action</th>
-            <th align="left" class="ink-dim" style="padding:0 6px 6px;${LBL};font-weight:400">right</th>
-            <th align="right" class="ink-dim" style="padding:0 6px 6px;${LBL};font-weight:400">strike</th>
-            <th align="left" class="ink-dim" style="padding:0 6px 6px;${LBL};font-weight:400">expiry</th>
-            <th align="right" class="ink-dim" style="padding:0 0 6px 6px;${LBL};font-weight:400">mid</th>
-          </tr>
-          ${legRows(candidate)}
-        </table>
-        ${pricingBlock(candidate)}
-        ${
-          candidate.unchecked === undefined
-            ? ""
-            : `<div class="neg" style="color:${WARN};font-size:12px;margin-top:12px">⚠ ${esc(candidate.unchecked)}</div>`
-        }
-        <div class="ink" style="color:${INK};font-size:13px;line-height:1.6;margin-top:12px">${esc(candidate.rationale)}</div>
-        <div class="ink-dim" style="color:${MUTED};font-size:10px;font-family:ui-monospace,Menlo,monospace;margin-top:10px">${esc(candidate.id)}</div>`;
-}
-
-/**
- * The two data charts. Same primitive as the payoff figure and for the same
- * reason: a table cell with a background colour is the only chart every mail
- * client draws. Gmail rewrites a data-URI `src` to `nosrc` and deletes an
- * inline `<svg>` WITH its fallback, so there is no image and no svg anywhere
- * in this file.
- *
- * Every number below comes from `view.charts`, which `chartsFrom` built out of
- * the run's raw tool outputs. No model step is read here, and a chart whose
- * tool did not answer returns "" — omitted, never faked.
- */
-function bar(pct: number, colour: string): string {
-  const filled = Math.max(1, Math.min(100, Math.round(pct)));
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr>
-    <td width="${String(filled)}%" style="background-color:${colour};font-size:1px;line-height:8px;height:8px">&nbsp;</td>
-    <td class="grid" width="${String(100 - filled)}%" style="background-color:${GRID};font-size:1px;line-height:8px;height:8px">&nbsp;</td>
-  </tr></table>`;
-}
-
-/** A sub-heading inside a section. */
-function subhead(text: string, top = 18): string {
-  return `<div class="ink-dim" style="margin-top:${String(top)}px;${LBL};font-weight:600">${esc(text)}</div>`;
-}
-
-function yieldCurveChart(chart: BriefView["charts"]["yieldCurve"]): string {
-  if (chart === undefined) return "";
-  const top = Math.max(...chart.points.map((point) => point.value));
-  // The axis does NOT start at zero, and the caption says so. 4.375 and 4.788
-  // differ by 9% of their own size and by everything anyone trades on; a
-  // zero-based axis draws them as the same bar and hides the curve's shape,
-  // which is the only thing this chart exists to show.
-  const span = Math.max(0.05, top - chart.baseline);
-  const rows = chart.points
-    .map((point) => {
-      // A yield RISING is not a gain: the colour follows the level, and the
-      // reader reads the sign, so both directions get the semantic pair.
-      const change =
-        point.change === undefined
-          ? ""
-          : ` <span class="${point.change >= 0 ? "neg" : "pos"}" style="color:${point.change >= 0 ? NEG : POS};font-size:11px">${point.change >= 0 ? "+" : ""}${point.change.toFixed(3)}</span>`;
-      return `<tr>
-        <td width="34" class="ink-dim" style="width:34px;padding:3px 8px 3px 0;color:${DIM};font-size:11px;white-space:nowrap">${esc(point.label)}</td>
-        <td style="padding:3px 0">${bar(((point.value - chart.baseline) / span) * 100, ACCENT)}</td>
-        <td width="86" align="right" class="ink" style="width:86px;padding:3px 0 3px 8px;color:${INK};font-size:12px;font-weight:600;white-space:nowrap">${point.value.toFixed(3)}%${change}</td>
-      </tr>`;
-    })
-    .join("");
-  const spread =
-    chart.spread2s10s === undefined
-      ? ""
-      : ` · 2s10s ${chart.spread2s10s >= 0 ? "+" : ""}${chart.spread2s10s.toFixed(1)}bp`;
-  return `${subhead("Treasury curve", 0)}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:8px">${rows}</table>
-    <div class="ink-dim" style="color:${MUTED};font-size:10px;margin-top:5px">Axis starts at ${chart.baseline.toFixed(2)}%, not zero${esc(spread)}</div>`;
-}
-
-function policyPathChart(chart: BriefView["charts"]["policyPath"]): string {
-  if (chart === undefined) return "";
-  const rows = chart.meetings
-    .map((meeting) => {
-      const detail = [meeting.impliedRate, meeting.targetRange]
-        .filter((value): value is string => value !== undefined)
-        .join(" · ");
-      // Hold is the neutral outcome and gets the accent; a move in either
-      // direction is the thing worth seeing at a glance.
-      const hold =
-        meeting.stance === undefined || /hold/iu.test(meeting.stance);
-      const cut = !hold && /cut/iu.test(meeting.stance ?? "");
-      const colour = hold ? DIM : cut ? POS : NEG;
-      const cls = hold ? "ink-dim" : cut ? "pos" : "neg";
-      return `<tr>
-        <td width="46" valign="top" class="ink" style="width:46px;padding:3px 8px 3px 0;color:${INK};font-size:12px;font-weight:600;white-space:nowrap">${esc(meeting.label)}</td>
-        <td valign="top" style="padding:3px 0">${bar(meeting.probability, hold ? ACCENT : colour)}
-          <div class="ink-dim" style="color:${MUTED};font-size:10px;padding-top:2px">${esc(detail)}</div></td>
-        <td width="72" valign="top" align="right" class="${cls}" style="width:72px;padding:3px 0 3px 8px;color:${colour};font-size:12px;font-weight:600;white-space:nowrap">${esc(meeting.stance ?? "")} ${meeting.probability.toFixed(0)}%</td>
-      </tr>`;
-    })
-    .join("");
-  return `${subhead("Priced policy path")}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:8px">${rows}</table>
-    <div class="ink-dim" style="color:${MUTED};font-size:10px;margin-top:5px">Fed-funds futures via argon${chart.snapshotDate === undefined ? "" : `, snapshot ${esc(chart.snapshotDate)}`}; not CME FedWatch</div>`;
-}
-
-function ratesCard(charts: BriefView["charts"]): string {
-  const inner = `${yieldCurveChart(charts.yieldCurve)}${policyPathChart(charts.policyPath)}`;
-  return inner === ""
-    ? ""
-    : section(`${eyebrow("Rates & policy path")}${inner}`);
-}
-
-/** One ticker's gamma ladder: the levels argon returned around spot, bar
- *  length proportional to |gamma| against the largest on that ticker, spot
- *  shown as its own row so the reader can see which side of each wall it is
- *  on. Positive gamma is a damping wall, negative an amplifying one. */
-function gexLadder(chart: BriefView["charts"]["gex"][number]): string {
-  const maxAbs = Math.max(
-    1,
-    ...chart.levels.map((level) => Math.abs(level.gamma)),
-  );
-  const rows = chart.levels
-    .map((level) => {
-      const positive = level.gamma >= 0;
-      const width = (Math.abs(level.gamma) / maxAbs) * 100;
-      const here =
-        chart.spot !== undefined && Math.abs(level.strike - chart.spot) < 0.005;
-      return `<tr>
-        <td width="52" valign="top" class="ink" style="width:52px;padding:5px 8px 5px 0;color:${INK};font-size:12px;font-weight:600;white-space:nowrap">${level.strike.toFixed(2)}${here ? " ◂" : ""}</td>
-        <td valign="top" style="padding:5px 0">${bar(width, positive ? ACCENT : NEG)}
-          <div class="ink-dim" style="color:${MUTED};font-size:10px;padding-top:2px">${esc(level.label)}${level.role === undefined ? "" : ` · ${esc(level.role)}`}</div></td>
-        <td width="76" valign="top" align="right" class="${positive ? "ink" : "neg"}" style="width:76px;padding:5px 0 5px 8px;color:${positive ? INK : NEG};font-size:11px;white-space:nowrap">${level.gamma >= 0 ? "+" : "−"}${Math.abs(level.gamma).toFixed(0)}</td>
-      </tr>`;
-    })
-    .join("");
-  const spot =
-    chart.spot === undefined
-      ? ""
-      : `<div class="ink-dim" style="color:${MUTED};font-size:10px">Spot ${chart.spot.toFixed(2)}${chart.asOf === undefined ? "" : ` · as of ${esc(chart.asOf)}`}</div>`;
-  return `${subhead(chart.ticker)}
-    ${spot}
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:6px">${rows}</table>`;
-}
-
-function gexCard(charts: BriefView["charts"]): string {
-  if (charts.gex.length === 0) return "";
+function flashLink(view: BriefView): string {
+  const href = flashUrl(view.appBase ?? "", view.date, view.runLabel ?? "");
+  if (href === "") return "";
   return section(
-    `${eyebrow("Gamma profile")}${charts.gex.map(gexLadder).join("")}
-     <div class="ink-dim" style="color:${MUTED};font-size:10px;margin-top:12px;line-height:1.5">Dealer gamma per strike from argon. A bar is its size, the colour its sign — red is negative gamma, where hedging amplifies rather than damps.</div>`,
+    `<div style="font-size:13px;line-height:1.55"><span class="ink-dim" style="color:${DIM}">Full brief: </span><a class="accent" href="${esc(href)}" style="color:${ACCENT};text-decoration:underline">${esc(href)}</a></div>`,
   );
-}
-
-/** Risk register: a compact ticker/reason table, not one card per row. */
-function riskRegister(riskList: BriefView["riskList"]): string {
-  if (riskList.length === 0) return "";
-  const head = `<tr>
-    <td class="ink-dim" style="padding:0 12px 7px 0;${LBL}">Ticker</td>
-    <td class="ink-dim" style="padding:0 0 7px 0;${LBL}">Reason</td>
-  </tr>`;
-  const rows = riskList
-    .map(
-      (entry) => `<tr>
-        <td valign="top" class="ink rule" style="padding:8px 12px 8px 0;border-top:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:600;white-space:nowrap">${esc(entry.ticker)}</td>
-        <td valign="top" class="ink-dim rule" style="padding:8px 0;border-top:1px solid ${BORDER};color:${DIM};font-size:12px;line-height:1.5">${esc(entry.reason)}</td>
-      </tr>`,
-    )
-    .join("");
-  return section(
-    `${eyebrow("Risk register")}
-     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">${head}${rows}</table>`,
-  );
-}
-
-/** The Layer Coverage block's body is the regime step's own prose, one layer
- *  per " | "-separated segment (the format `team.yaml` asks the regime step
- *  for). Splitting on that literal separator is safe regardless of wording;
- *  the ✓/skipped colour hint is a substring check on the same real text, not
- *  a parse of it. A segment that doesn't split cleanly still renders, just
- *  without the colour hint. */
-function coverageRows(body: string): string {
-  const segments = body
-    .split("|")
-    .map((segment) => segment.trim())
-    .filter((segment) => segment !== "");
-  if (segments.length === 0) return "";
-  const rows = segments
-    .map((segment) => {
-      const skipped = /skipped/iu.test(segment);
-      const dash = segment.indexOf("—");
-      const label = dash === -1 ? segment : segment.slice(0, dash).trim();
-      const rest = dash === -1 ? "" : segment.slice(dash + 1).trim();
-      // Skipped rows already start with the word "skipped" in `rest` (the
-      // regime step's own prose); a mark there would repeat it, so the line
-      // is left dim instead of prefixing a redundant symbol.
-      const restHtml = skipped
-        ? esc(rest)
-        : `<span class="pos" style="color:${POS}">✓</span> ${esc(rest)}`;
-      return `<tr>
-        <td valign="top" class="ink rule" style="padding:7px 12px 7px 0;border-top:1px solid ${BORDER};color:${INK};font-size:12px;font-weight:600;white-space:nowrap">${esc(label)}</td>
-        <td valign="top" class="ink-dim rule" style="padding:7px 0;border-top:1px solid ${BORDER};color:${MUTED};font-size:11px;line-height:1.5">${restHtml}</td>
-      </tr>`;
-    })
-    .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">${rows}</table>`;
-}
-
-function coverageSection(coverage: BriefView["coverage"]): string {
-  if (coverage === undefined) return "";
-  return section(`${eyebrow("Data coverage")}${coverageRows(coverage.body)}`);
-}
-
-/** The run's own narrative blocks, each its own section: title as the 13px
- *  section head, body as 13px prose. No serif, no underline, no accent — the
- *  spec's hierarchy is weight and whitespace. */
-function narrative(view: BriefView): string {
-  const stance = stanceRow(view);
-  if (view.sections.length === 0 && stance === "") return "";
-  const blocks = view.sections
-    .map((block) =>
-      section(
-        `${eyebrow(block.title)}<div class="ink" style="color:${INK};font-size:13px;line-height:1.7">${esc(block.body).replace(/\n/g, "<br>")}</div>`,
-      ),
-    )
-    .join("");
-  return `${blocks}${stance === "" ? "" : section(stance)}`;
 }
 
 export function renderHtml(view: BriefView): string {
@@ -765,42 +289,29 @@ export function renderHtml(view: BriefView): string {
    </td></tr>
    <tr><td class="pad" style="padding:22px 32px 26px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="rule" style="border-top:1px solid ${BORDER};font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>`;
 
+  // The abridged mail (2026-09-05): the tape, the day's sentence, the decision
+  // block, one row per candidate, and the link. Nothing else. The narrative
+  // sections, the payoff figures, the rationales, the schedule, the overnight
+  // list, the charts and the risk register are all still in `view` — argon's
+  // Flash page renders them from the same document — and none of them is
+  // printed here.
   const body =
     view.empty !== undefined
       ? `${tapeStrip(view.tape)}
          ${oneSentence(view.headline)}
+         ${bottomLine(view)}
          ${section(
            `${eyebrow("Candidates")}
            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="chip" style="border-collapse:separate;background-color:${ACCENT_SOFT};border:1px solid ${BORDER};border-radius:7px"><tr><td style="padding:12px 16px">
              <div class="ink" style="color:${INK};font-size:14px;line-height:1.55">${esc(view.empty)}</div>
            </td></tr></table>`,
          )}
-         ${bottomLine(view)}
-         ${overnightSection(view.overnight)}
-         ${scheduleSection(view.schedule)}
-         ${ratesCard(view.charts)}`
+         ${flashLink(view)}`
       : `${tapeStrip(view.tape)}
          ${oneSentence(view.headline)}
          ${bottomLine(view)}
-         ${overnightSection(view.overnight)}
-         ${scheduleSection(view.schedule)}
-         ${narrative(view)}
-         ${ratesCard(view.charts)}
-         ${
-           view.candidates.length === 0
-             ? ""
-             : section(
-                 `${eyebrow("Candidates")}<div class="ink-dim" style="color:${MUTED};font-size:11px;margin:-6px 0 16px">Per contract, no size.</div>${view.candidates
-                   .map(
-                     (candidate, index) =>
-                       `<div class="${index === 0 ? "" : "rule"}" style="${index === 0 ? "" : `margin-top:22px;padding-top:22px;border-top:1px solid ${BORDER}`}">${candidateCard(candidate)}</div>`,
-                   )
-                   .join("")}`,
-               )
-         }
-         ${gexCard(view.charts)}
-         ${riskRegister(view.riskList)}
-         ${coverageSection(view.coverage)}`;
+         ${view.candidates.length === 0 ? "" : candidateRows(view.candidates)}
+         ${flashLink(view)}`;
 
   const degradationRow =
     view.degradation === undefined

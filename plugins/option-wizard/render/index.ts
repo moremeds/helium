@@ -189,6 +189,14 @@ export interface BriefView {
   /** True when an `edit` step's document supplied the prose. Display-only —
    *  the footer says which pipeline wrote the words the reader is reading. */
   edited?: boolean;
+  /** The run's own label, carried verbatim from `report.phase` and printed
+   *  into the Flash link and nowhere else. Opaque on purpose: the renderer
+   *  must not learn what the labels ARE (`render.spec.ts` enforces it), and a
+   *  string that is only ever concatenated into a URL cannot teach it. */
+  runLabel?: string;
+  /** argon's public origin, from `ARGON_APP_BASE`. Unset on a machine that has
+   *  no Flash page to link to, and then no link is printed at all. */
+  appBase?: string;
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -1298,8 +1306,17 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  */
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const view = applyEditor(assembleView(report, cfg), editorDocFrom(report));
+  // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
+  // read here, once, rather than inside the renderer: the html and text parts
+  // must link to the same page, and a second read is a second chance to
+  // disagree. An unset variable is not an error — it is a machine with no
+  // Flash page, and the mail simply carries no link.
+  const appBase = (process.env.ARGON_APP_BASE ?? "").trim();
+  const runLabel = report.phase;
   return {
     ...view,
+    ...(runLabel === undefined ? {} : { runLabel }),
+    ...(appBase === "" ? {} : { appBase }),
     charts: chartsFrom(
       toolPayloads(report),
       view.candidates.map((candidate) => candidate.ticker),

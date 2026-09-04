@@ -43,6 +43,11 @@ env:
   # Reusing one key for both is how a laptop ends up publishing to the mini.
   - ARGON_BASE_URL
   - ARGON_INGEST_TOKEN
+  # argon's PUBLIC origin, for the one link the abridged mail carries. A THIRD
+  # argon key on purpose: this one is pasted into an email a human clicks, so
+  # it is the machine's outside address, not the ingest endpoint and not a
+  # tool's read endpoint. Unset means the mail carries no link.
+  - ARGON_APP_BASE
 
 # The zone this tenant's DAY is counted in — the report file name, the email
 # subject, the per-day email cap and the `report day:` line the agent is given

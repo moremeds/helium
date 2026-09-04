@@ -5,79 +5,42 @@
  * message scoring like mail rather than like a flyer, and it is what a text
  * client shows. The markdown channel keeps writing the generic transcript, so
  * this file is never the durable record.
+ *
+ * ABRIDGED (2026-09-05), the same four blocks the html keeps: the tape, the
+ * headline, the decision block and one line per candidate, then the Flash
+ * link. Everything else the run produced is in the document argon renders.
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
-import {
-  formatScheduleMagnitude,
-  invalidationLabel,
-  scheduleTimeLabel,
-} from "./math.js";
-
-/**
- * The header of the payoff row, which says what its columns ARE. With a quoted
- * spot they are moves away from it; without one they are the strikes, and
- * saying so is what stops a reader reading a strike as a percentage.
- */
-export function payoffLabel(quoted: boolean): string {
-  return quoted
-    ? "Payoff at expiry (spot ±%)"
-    : "Payoff at expiry (by strike, no ow_spot quote)";
-}
-
-/** One column of the payoff row: "+10%: 320" or "750: -290". */
-export function payoffCell(point: {
-  pct: number | null;
-  spot: number;
-  pnl: number;
-}): string {
-  const head =
-    point.pct === null
-      ? point.spot.toFixed(2)
-      : `${point.pct > 0 ? "+" : ""}${String(point.pct)}%`;
-  return `${head}: ${point.pnl.toFixed(0)}`;
-}
+import { invalidationLabel } from "./math.js";
+import { flashUrl } from "./week.js";
 
 const money = (value: number | null): string =>
   value === null ? "unlimited" : `$${value.toFixed(2)}`;
 
-function pricingLines(candidate: CandidateView): string[] {
-  const pricing = candidate.pricing;
-  if (pricing.kind !== "priced") return [`  ${pricing.reason}`];
-  const flow = pricing.net >= 0 ? "Net credit" : "Net debit";
-  const breakevens =
-    pricing.breakevens.length === 0
-      ? "none"
-      : pricing.breakevens.map((value) => value.toFixed(2)).join(" / ");
-  return [
-    `  ${flow} $${Math.abs(pricing.net).toFixed(2)}/share`,
-    `  max gain ${money(pricing.maxGain)} · max loss ${money(pricing.maxLoss)} · spread width ${candidate.width.toFixed(2)}`,
-    `  breakeven ${breakevens}`,
-    `  ${payoffLabel(pricing.pnlAt[0]?.pct !== null)}: ${pricing.pnlAt
-      .map((point) => payoffCell(point))
-      .join("  ")}`,
-  ];
-}
-
+/** One candidate, one block: what it is, what it costs, what it can lose, and
+ *  the level that kills it. The rationale, the breakevens and the payoff row
+ *  moved to the Flash page with the rest of the brief. */
 function candidateLines(candidate: CandidateView): string[] {
-  const dte = candidate.dte === null ? "" : ` · ${String(candidate.dte)} DTE`;
-  const earnings =
-    candidate.earnings === undefined ? "" : ` · earnings ${candidate.earnings}`;
-  const spot =
-    candidate.spot === undefined ? "" : ` · spot ${candidate.spot.toFixed(2)}`;
+  const pricing = candidate.pricing;
+  const priced = pricing.kind === "priced";
+  const flow = priced
+    ? `${pricing.net >= 0 ? "net credit" : "net debit"} $${Math.abs(pricing.net).toFixed(2)}/share · max loss ${money(pricing.maxLoss)}/contract`
+    : pricing.reason;
   return [
-    `${candidate.ticker} — ${candidate.strategy}${dte}${spot}${earnings}`,
-    `  entry ${candidate.entry === undefined ? "—" : invalidationLabel([candidate.entry])} · target ${candidate.target || "—"} · stop ${invalidationLabel(candidate.invalidation)}`,
-    ...candidate.legs.map(
-      (leg) =>
-        `  ${leg.action} ${leg.right} ${String(leg.strike)} ${leg.expiry}` +
-        (leg.mid === undefined ? " mid —" : ` mid ${leg.mid.toFixed(2)}`),
-    ),
-    ...pricingLines(candidate),
+    `${candidate.ticker} — ${candidate.strategy} · exp ${candidate.expiry}`,
+    `  ${candidate.legs
+      .map(
+        (leg) =>
+          `${leg.action} ${leg.right} ${String(leg.strike)}` +
+          (leg.mid === undefined ? "" : ` @ ${leg.mid.toFixed(2)}`),
+      )
+      .join(" / ")}`,
+    `  ${flow}`,
+    `  invalidation ${invalidationLabel(candidate.invalidation)}`,
     ...(candidate.unchecked === undefined
       ? []
       : [`  ⚠ ${candidate.unchecked}`]),
-    `  ${candidate.rationale}`,
     `  [${candidate.id}]`,
     "",
   ];
@@ -112,32 +75,11 @@ function tapeLine(view: BriefView): string[] {
   ];
 }
 
-function overnightLines(view: BriefView): string[] {
-  const lines = ["【Overnight】"];
-  if (view.overnight.length === 0) {
-    lines.push("Nothing flagged overnight.");
-  } else {
-    for (const item of view.overnight) lines.push(`- ${item}`);
-  }
-  lines.push("");
-  return lines;
-}
-
-function scheduleLines(view: BriefView): string[] {
-  if (view.schedule.length === 0) return [];
-  const lines = ["【Today's schedule】"];
-  for (const row of view.schedule) {
-    const when = scheduleTimeLabel(row);
-    const cp = [row.consensus, row.prior]
-      .filter((entry): entry is string => entry !== undefined)
-      .map(formatScheduleMagnitude)
-      .join(" / ");
-    lines.push(
-      `- ${when === "" ? "" : `${when} `}${row.event}${cp === "" ? "" : ` (${cp})`}`,
-    );
-  }
-  lines.push("");
-  return lines;
+/** The one line that says where the rest of the brief is. Absent when
+ *  `ARGON_APP_BASE` is unset — see `flashLink` in html.ts. */
+function flashLine(view: BriefView): string[] {
+  const href = flashUrl(view.appBase ?? "", view.date, view.runLabel ?? "");
+  return href === "" ? [] : [`Full brief: ${href}`, ""];
 }
 
 export function renderText(view: BriefView): string {
@@ -148,25 +90,12 @@ export function renderText(view: BriefView): string {
   ];
   lines.push(...tapeLine(view));
   lines.push(...decisionLines(view));
-  lines.push(...overnightLines(view));
-  lines.push(...scheduleLines(view));
   if (view.empty !== undefined) {
     lines.push(view.empty, "");
+    lines.push(...flashLine(view));
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
-  for (const section of view.sections)
-    lines.push(`【${section.title}】`, section.body, "");
-  const stances = [
-    view.regime.direction === undefined
-      ? null
-      : `direction: ${view.regime.direction}`,
-    view.regime.volatility === undefined
-      ? null
-      : `volatility: ${view.regime.volatility}`,
-    view.regime.hedge === undefined ? null : `hedge: ${view.regime.hedge}`,
-  ].filter((entry): entry is string => entry !== null);
-  if (stances.length > 0) lines.push(stances.join(" | "), "");
   // No header without rows under it. An intraday brief has no candidates by
   // design, and a failed run's are withheld; a bare heading reads as content
   // that got lost on the way.
@@ -175,14 +104,7 @@ export function renderText(view: BriefView): string {
     for (const candidate of view.candidates)
       lines.push(...candidateLines(candidate));
   }
-  if (view.riskList.length > 0) {
-    lines.push("【Risk register】");
-    for (const entry of view.riskList)
-      lines.push(`- ${entry.ticker}: ${entry.reason}`);
-    lines.push("");
-  }
-  if (view.coverage !== undefined)
-    lines.push(`【${view.coverage.title}】`, view.coverage.body, "");
+  lines.push(...flashLine(view));
   if (view.degradation !== undefined) lines.push(view.degradation, "");
   return lines.join("\n");
 }

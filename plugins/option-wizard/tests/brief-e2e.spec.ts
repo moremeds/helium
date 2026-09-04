@@ -89,8 +89,10 @@ describe("one brief, gated then rendered", () => {
     expect(body).not.toContain("malformed proposal");
     expect(body).not.toContain("Invalid input");
     // SPY 750/720 put debit: 2.90 paid, so 290 risked, 2710 max gain
-    // (30 width less the debit), breakeven 750 - 2.90.
-    expect(body).toContain("747.10");
+    // (30 width less the debit), breakeven 750 - 2.90. The abridged mail
+    // (2026-09-05) carries the max loss and drops the breakeven — that number
+    // is on argon's Flash page, from the same document.
     expect(body).toContain("290.00");
+    expect(body).not.toContain("747.10");
   });
 });
