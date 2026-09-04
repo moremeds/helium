@@ -1968,7 +1968,12 @@ export function buildTools(cfg: {
             // A report with no `review` step (intraday, weekly, frank) has no
             // proposals of its own, and an empty list is the honest answer —
             // its content is prose and `steps` is how to ask for it.
-            candidates: candidatesFrom(byStep.get("review") ?? "", date).candidates,
+            // `found` is the phase this stored file was written for, straight
+            // off its own name — the same segment the run that wrote it minted
+            // into its ids, so a settling role gets them back under exactly the
+            // names they were promised under.
+            candidates: candidatesFrom(byStep.get("review") ?? "", date, found)
+              .candidates,
             ...(steps === undefined
               ? {}
               : {

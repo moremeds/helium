@@ -854,6 +854,18 @@ function arithmeticFaults(
 export function candidatesFrom(
   reviewText: string,
   dateEtDay: string,
+  /** The phase this proposal list belongs to. REQUIRED — leaving it out is
+   *  exactly the 2026-09-03 defect: `design` and `review` declare
+   *  `phases: [premarket, close]`, so the close run mints a FRESH list for the
+   *  same ET day, and without a phase segment `QQQ-2026-09-03-1` can name one
+   *  structure in the morning and a different one in the afternoon. The ledger
+   *  gate checks id membership and nothing else, so such a collision passes
+   *  validation and the settlement section settles the wrong structure.
+   *  The index alone cannot fix this: it runs over the SURVIVING proposals, so
+   *  two different lists that drop different members both start at `-1`.
+   *  A default would let a future call site silently reintroduce the collision,
+   *  which is why there is none. */
+  phase: string,
   /** Spot per ticker as `ow_spot` ANSWERED it. The payoff grid used to be
    *  anchored on a regex over the reviewer's prose ("**SPY (spot 761.78):**"),
    *  which is the model's transcription of a tool result and was wrong in 8 of
@@ -892,7 +904,7 @@ export function candidatesFrom(
         86_400_000,
     );
     candidates.push({
-      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
+      id: `${proposal.ticker}-${dateEtDay}-${phase}-${String(candidates.length + 1)}`,
       invalidation,
       ticker: proposal.ticker,
       strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
@@ -1199,6 +1211,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   const { candidates, rejected } = candidatesFrom(
     review?.text ?? "",
     dateEtDay,
+    report.phase,
     toolSpots,
   );
 

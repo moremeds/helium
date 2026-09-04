@@ -168,7 +168,7 @@ const EDITOR_JSON = {
   overnight: ["AVGO — guided Q4 revenue to $34.8B against a $35.1B estimate."],
   candidates: [
     {
-      id: "SPY-2026-09-03-1",
+      id: "SPY-2026-09-03-premarket-1",
       rationale:
         "Edited: the 40bp curve pays the seller of a 755/760 put spread.",
       // Every one of these is a lie the editor is not allowed to tell. The
@@ -188,6 +188,7 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-editor-fixture",
     tenant: "option-wizard",
+    phase: "premarket",
     day: "2026-09-03",
     mode: "model",
     providersLive: ["dsh"],
@@ -282,7 +283,7 @@ describe("the editor's document", () => {
     expect(candidate.legs.every((leg) => leg.right === "put")).toBe(true);
     expect(candidate.expiry).toBe("2026-09-30");
     expect(candidate.invalidation).toEqual([{ level: 760, side: "below" }]);
-    expect(candidate.id).toBe("SPY-2026-09-03-1");
+    expect(candidate.id).toBe("SPY-2026-09-03-premarket-1");
   });
 
   it("takes a rationale keyed by the bare ticker when the card is unambiguous", () => {

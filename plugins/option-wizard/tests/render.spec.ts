@@ -143,6 +143,10 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-84a83ad2-a5cd-49d9-b41d-1fbc55236128",
     tenant: "option-wizard",
+    // The run label the runner started this run with. It reaches the renderer
+    // for exactly one purpose: the id segment that keeps the close run's
+    // proposals from being confused with the morning's.
+    phase: "premarket",
     // The day the RUNNER resolved, in the tenant's reportTimezone
     // (America/New_York). A run fired 2026-09-03T02:40+08:00 is 14:40 on the
     // 2nd in ET, and the brief is about the 2nd.
@@ -504,6 +508,69 @@ describe("deterministic gates over what the tools answered", () => {
     expect(cut).toContain("NFLX-2026-09-02-1");
     expect(cut).toContain("NFLX");
   });
+
+  it("drops a settlement that names its OWN phase's id, not the ledger's", () => {
+    // The 2026-09-03 defect, in one assertion. `design` and `review` run in
+    // both premarket and close, so the close run mints a fresh list for the
+    // same ET day. Before the phase went into the id both of these strings
+    // were `SLV-2026-09-03-1` and this test could not be written: the ledger
+    // gate checks id membership and nothing else, so a close proposal settling
+    // against a premarket ledger passed validation and settled the wrong
+    // structure — a 2026-09-30 spread reported as the 2026-09-18 one.
+    const view = buildView(
+      report({
+        day: "2026-09-03",
+        steps: [
+          {
+            task: "markout",
+            role: "markout-clerk",
+            mode: "model",
+            text: JSON.stringify({
+              settlements: [
+                {
+                  id: "SLV-2026-09-03-premarket-3",
+                  ticker: "SLV",
+                  state: "加强",
+                  note: "close 60.55, above the 60 invalidation",
+                },
+                {
+                  id: "SLV-2026-09-03-close-1",
+                  ticker: "SLV",
+                  state: "不变",
+                  note: "this run's own proposal, not a promise it can settle",
+                },
+              ],
+              sections: [],
+            }),
+            toolOutputs: [
+              JSON.stringify({
+                dir: "/tmp/reports",
+                reports: [
+                  {
+                    date: "2026-09-03",
+                    phase: "premarket",
+                    candidates: [
+                      { id: "SLV-2026-09-03-premarket-3", ticker: "SLV" },
+                    ],
+                  },
+                ],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    const kept = view.sections.find(
+      (section) => section.title === "Settlements",
+    )!.body;
+    expect(kept).toContain("SLV-2026-09-03-premarket-3");
+    expect(kept).not.toContain("SLV-2026-09-03-close-1");
+    const cut = view.sections.find(
+      (section) => section.title === "Settlements not in the ledger, dropped",
+    )!.body;
+    expect(cut).toContain("SLV-2026-09-03-close-1");
+  });
 });
 
 describe("renderReport (text part)", () => {
@@ -741,16 +808,28 @@ describe("sections", () => {
 it("the renderer never branches on phase", () => {
   // The load-bearing claim of this design: which blocks a brief contains is
   // the team manifest's business, decided by which tasks ran. The moment the
-  // renderer learns the word, five phases become five layouts to maintain.
+  // renderer learns a phase NAME, five phases become five layouts to maintain.
   // Comments are exempt — the one in index.ts exists to say exactly this.
+  //
+  // This used to ban the word outright. It was relaxed on 2026-09-05, when the
+  // renderer began minting the run label into a candidate id: carrying an
+  // opaque label into a string is not branching, and the ban was a proxy for
+  // the property rather than the property. What is checked now is the property
+  // itself — no phase name may appear in the code, and nothing may be COMPARED
+  // against the label — which is strictly harder to satisfy by accident than a
+  // ban on six letters was.
+  const NAMES = /["'`](premarket|intraday|close|weekly|frank)["'`]/;
+  const COMPARED = /(===|!==|[^=!<>]==|!=[^=]|\bswitch\b|\bcase\b|\?|\.includes\(|\.startsWith\(|\.test\()/;
   const dir = new URL("../render/", import.meta.url).pathname;
   const offenders: string[] = [];
   for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
     readFileSync(join(dir, name), "utf8")
       .split("\n")
       .forEach((line, i) => {
-        const code = line.replace(/^\s*(\*|\/\/).*$/, "");
-        if (code.includes("phase")) offenders.push(`${name}:${String(i + 1)}`);
+        const code = line.replace(/^\s*(\*|\/\/|\/\*).*$/, "");
+        const branches = code.includes("phase") && COMPARED.test(code);
+        if (NAMES.test(code) || branches)
+          offenders.push(`${name}:${String(i + 1)}`);
       });
   expect(offenders).toEqual([]);
 });
@@ -766,10 +845,10 @@ describe("invalidation", () => {
 
   it("mints the id here and carries the levels the thesis dies at", () => {
     const spy = buildView(report(), SPEC).candidates[0]!;
-    expect(spy.id).toBe("SPY-2026-09-02-1");
+    expect(spy.id).toBe("SPY-2026-09-02-premarket-1");
     expect(spy.invalidation).toEqual([{ level: 750, side: "above" }]);
     expect(buildView(report(), SPEC).candidates[1]!.id).toBe(
-      "QQQ-2026-09-02-2",
+      "QQQ-2026-09-02-premarket-2",
     );
   });
 
@@ -882,7 +961,7 @@ describe("invalidation", () => {
 
   it("prints the id and the levels where a reader can quote them back", () => {
     const text = renderText(buildView(report(), SPEC));
-    expect(text).toContain("[SPY-2026-09-02-1]");
+    expect(text).toContain("[SPY-2026-09-02-premarket-1]");
     expect(text).toContain("stop 750↑");
   });
 });

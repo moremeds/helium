@@ -424,6 +424,10 @@ tasks:
       in the week. Every id the tool returns gets exactly one line, and you
       settle ONLY ids the tool returned — if a ticker is not in that list it
       had no proposal, whatever else you have seen it in today.
+      An id names one proposal from one phase: <TICKER>-<day>-<phase>-<n>.
+      Settle only ids that ow_reports returned to you. If a structure you are
+      looking at is not under one of those ids, say so — never re-use an id for
+      a different structure.
       Nothing comes due by the calendar; a thesis is open until a level breaks.
       For each id compare today's price to its `invalidation`. Exactly four
       states, and they are not interchangeable:
@@ -695,6 +699,10 @@ tasks:
     requires: [tool.use, reason.deep, long.context]
     prompt: >-
       Call ow_reports with days:1 phase:premarket for this morning's report.
+      An id names one proposal from one phase: <TICKER>-<day>-<phase>-<n>.
+      Settle only ids that ow_reports returned to you. If a structure you are
+      looking at is not under one of those ids, say so — never re-use an id for
+      a different structure.
       For every proposal id it returns — and no ticker it does not — say
       whether the thesis is 加强 / 不变 / 反转 against the levels you were
       just handed, in one line each, quoting the price that decided it. 反转
