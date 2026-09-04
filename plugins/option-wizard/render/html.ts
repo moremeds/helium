@@ -133,9 +133,18 @@ function splitTapeValue(value: string): { value: string; note?: string } {
 /** Market snapshot: small outlined cells, three to a row, label small / value
  *  large / change coloured. The spec's five-cell strip, widened to however
  *  many levels the regime step actually reported. */
+/** Row sizes for `n` tiles, at most three across and as even as possible. */
+export function tapeRowSizes(n: number): number[] {
+  if (n <= 0) return [];
+  const rowCount = Math.ceil(n / 3);
+  const base = Math.floor(n / rowCount);
+  const extra = n % rowCount;
+  return Array.from({ length: rowCount }, (_, r) => base + (r < extra ? 1 : 0));
+}
+
 function tapeStrip(items: TapeItem[]): string {
   if (items.length === 0) return "";
-  const cell = (item: TapeItem): string => {
+  const cell = (item: TapeItem, widthPct: number): string => {
     const split = splitTapeValue(item.value);
     const note =
       split.note === undefined
@@ -147,7 +156,7 @@ function tapeStrip(items: TapeItem[]): string {
         : `<span class="${item.positive === undefined ? "ink-dim" : item.positive ? "pos" : "neg"}" style="color:${
             item.positive === undefined ? MUTED : item.positive ? POS : NEG
           };font-weight:600;font-size:11px"> ${esc(item.change)}</span>`;
-    return `<td width="33%" valign="top" style="width:33.33%;padding:0 8px 8px 0">
+    return `<td width="${widthPct}%" valign="top" style="width:${widthPct}%;padding:0 8px 8px 0">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" height="100%" class="card" style="height:100%;border-collapse:separate;background-color:${PAPER};border:1px solid ${BORDER};border-radius:7px"><tr><td valign="top" style="padding:9px 11px">
         <div class="ink-dim" style="${LBL};white-space:nowrap">${esc(item.label)}</div>
         <div class="ink" style="color:${INK};font-size:18px;font-weight:650;padding-top:3px">${esc(split.value)}${change}</div>
@@ -155,13 +164,16 @@ function tapeStrip(items: TapeItem[]): string {
       </td></tr></table>
     </td>`;
   };
+  // Balanced rows, at most three across: 10 tiles are 3/3/2/2, never 3/3/3/1.
+  // A lone tile on the last row reads as a missing one — the same rule the
+  // Flash page uses for its tape.
   const rows: string[] = [];
-  for (let i = 0; i < items.length; i += 3) {
-    const slice = items.slice(i, i + 3);
-    const fill = '<td width="33%" style="width:33.33%">&nbsp;</td>'.repeat(
-      3 - slice.length,
-    );
-    rows.push(`<tr>${slice.map(cell).join("")}${fill}</tr>`);
+  let i = 0;
+  for (const size of tapeRowSizes(items.length)) {
+    const slice = items.slice(i, i + size);
+    i += size;
+    const widthPct = Math.round((100 / size) * 100) / 100;
+    rows.push(`<tr>${slice.map((item) => cell(item, widthPct)).join("")}</tr>`);
   }
   return section(
     `${eyebrow("Market snapshot")}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;table-layout:fixed">${rows.join("")}</table>`,

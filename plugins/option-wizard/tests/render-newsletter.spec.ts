@@ -21,6 +21,7 @@ import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { RunReport, TenantSpec } from "@helium/core";
 import renderReport, { buildView } from "../render/index.js";
+import { tapeRowSizes } from "../render/html.js";
 
 const SPEC = { tenant: "option-wizard" } as unknown as TenantSpec;
 
@@ -682,5 +683,16 @@ describe("the abridged mail", () => {
     expect(html).toContain("Reject all eight");
     expect(html).not.toContain("Candidates");
     expect(html).not.toContain("Risk register");
+  });
+});
+
+describe("tape rows are balanced", () => {
+  it("lays ten tiles out as 3/3/2/2, never leaving one tile alone", () => {
+    expect(tapeRowSizes(10)).toEqual([3, 3, 2, 2]);
+    expect(tapeRowSizes(9)).toEqual([3, 3, 3]);
+    expect(tapeRowSizes(7)).toEqual([3, 2, 2]);
+    expect(tapeRowSizes(4)).toEqual([2, 2]);
+    expect(tapeRowSizes(1)).toEqual([1]);
+    expect(tapeRowSizes(0)).toEqual([]);
   });
 });
