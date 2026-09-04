@@ -120,7 +120,21 @@ export interface ScheduleRow {
   group?: string;
 }
 
+/**
+ * Bumped ONLY on a breaking change to `BriefView` — a removed field, a renamed
+ * field, or a changed meaning. Adding an optional field is not breaking.
+ *
+ * A consumer that stores the view and renders it days later, from a build that
+ * may be older than the one that wrote it, otherwise sees a renamed field as a
+ * silently missing section: a shorter page, with nothing to tell the reader
+ * something was dropped. With a version it says "I was written for version N,
+ * this is N+1" and the fix is a deploy rather than an investigation.
+ */
+export const BRIEF_VIEW_SCHEMA_VERSION = 1;
+
 export interface BriefView {
+  /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
+  schemaVersion: number;
   /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
    *  printed the HK date beside the ET one made the reader do the conversion
    *  the harness had already done. */
@@ -1114,6 +1128,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
       : rawSections.filter((_entry, index) => index !== coverageIdx);
 
   const base: BriefView = {
+    schemaVersion: BRIEF_VIEW_SCHEMA_VERSION,
     date: dateEtDay,
     tenant: cfg.tenant,
     outcome:
@@ -1292,5 +1307,8 @@ export default function renderReport(
   return {
     text: renderText(view),
     html: renderHtml(view),
+    // The same document the prose was rendered FROM, for a channel that stores
+    // the data instead of mailing the rendering. Core never reads inside it.
+    data: view as unknown as Record<string, unknown>,
   };
 }

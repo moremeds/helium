@@ -85,6 +85,17 @@ export interface RenderedReport {
   subject?: string;
   text: string;
   html?: string;
+  /**
+   * The structured document the tenant's renderer built, for a channel that
+   * wants the DATA rather than the prose. Opaque: core never reads inside it,
+   * never validates it, never learns a key name from it — the same rule that
+   * keeps `toolOutputs` a string.
+   *
+   * A channel that writes to a database needs the shape, not the rendering;
+   * the alternative is a channel parsing the HTML the email channel sends,
+   * which makes every renderer change a silent data corruption somewhere else.
+   */
+  data?: Record<string, unknown>;
 }
 
 /**
