@@ -1157,6 +1157,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           body: deliveryBody(report),
           day: reportDay,
           phase: report.phase,
+          codeVersion: codeVersion(),
           ...(rendered === undefined ? {} : { rendered }),
         },
         entry.config,

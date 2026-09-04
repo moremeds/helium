@@ -120,7 +120,21 @@ export interface ScheduleRow {
   group?: string;
 }
 
+/**
+ * Bumped ONLY on a breaking change to `BriefView` — a removed field, a renamed
+ * field, or a changed meaning. Adding an optional field is not breaking.
+ *
+ * A consumer that stores the view and renders it days later, from a build that
+ * may be older than the one that wrote it, otherwise sees a renamed field as a
+ * silently missing section: a shorter page, with nothing to tell the reader
+ * something was dropped. With a version it says "I was written for version N,
+ * this is N+1" and the fix is a deploy rather than an investigation.
+ */
+export const BRIEF_VIEW_SCHEMA_VERSION = 1;
+
 export interface BriefView {
+  /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
+  schemaVersion: number;
   /** `yyyy-mm-dd` — the run's report day, ET. ONE date, one zone: a brief that
    *  printed the HK date beside the ET one made the reader do the conversion
    *  the harness had already done. */
@@ -175,6 +189,14 @@ export interface BriefView {
   /** True when an `edit` step's document supplied the prose. Display-only —
    *  the footer says which pipeline wrote the words the reader is reading. */
   edited?: boolean;
+  /** The run's own label, carried verbatim from `report.phase` and printed
+   *  into the Flash link and nowhere else. Opaque on purpose: the renderer
+   *  must not learn what the labels ARE (`render.spec.ts` enforces it), and a
+   *  string that is only ever concatenated into a URL cannot teach it. */
+  runLabel?: string;
+  /** argon's public origin, from `ARGON_APP_BASE`. Unset on a machine that has
+   *  no Flash page to link to, and then no link is printed at all. */
+  appBase?: string;
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -840,6 +862,18 @@ function arithmeticFaults(
 export function candidatesFrom(
   reviewText: string,
   dateEtDay: string,
+  /** The phase this proposal list belongs to. REQUIRED — leaving it out is
+   *  exactly the 2026-09-03 defect: `design` and `review` declare
+   *  `phases: [premarket, close]`, so the close run mints a FRESH list for the
+   *  same ET day, and without a phase segment `QQQ-2026-09-03-1` can name one
+   *  structure in the morning and a different one in the afternoon. The ledger
+   *  gate checks id membership and nothing else, so such a collision passes
+   *  validation and the settlement section settles the wrong structure.
+   *  The index alone cannot fix this: it runs over the SURVIVING proposals, so
+   *  two different lists that drop different members both start at `-1`.
+   *  A default would let a future call site silently reintroduce the collision,
+   *  which is why there is none. */
+  phase: string,
   /** Spot per ticker as `ow_spot` ANSWERED it. The payoff grid used to be
    *  anchored on a regex over the reviewer's prose ("**SPY (spot 761.78):**"),
    *  which is the model's transcription of a tool result and was wrong in 8 of
@@ -878,7 +912,7 @@ export function candidatesFrom(
         86_400_000,
     );
     candidates.push({
-      id: `${proposal.ticker}-${dateEtDay}-${String(candidates.length + 1)}`,
+      id: `${proposal.ticker}-${dateEtDay}-${phase}-${String(candidates.length + 1)}`,
       invalidation,
       ticker: proposal.ticker,
       strategy: typeof proposal.strategy === "string" ? proposal.strategy : "",
@@ -1114,6 +1148,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
       : rawSections.filter((_entry, index) => index !== coverageIdx);
 
   const base: BriefView = {
+    schemaVersion: BRIEF_VIEW_SCHEMA_VERSION,
     date: dateEtDay,
     tenant: cfg.tenant,
     outcome:
@@ -1184,6 +1219,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   const { candidates, rejected } = candidatesFrom(
     review?.text ?? "",
     dateEtDay,
+    report.phase,
     toolSpots,
   );
 
@@ -1270,8 +1306,17 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  */
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const view = applyEditor(assembleView(report, cfg), editorDocFrom(report));
+  // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
+  // read here, once, rather than inside the renderer: the html and text parts
+  // must link to the same page, and a second read is a second chance to
+  // disagree. An unset variable is not an error — it is a machine with no
+  // Flash page, and the mail simply carries no link.
+  const appBase = (process.env.ARGON_APP_BASE ?? "").trim();
+  const runLabel = report.phase;
   return {
     ...view,
+    ...(runLabel === undefined ? {} : { runLabel }),
+    ...(appBase === "" ? {} : { appBase }),
     charts: chartsFrom(
       toolPayloads(report),
       view.candidates.map((candidate) => candidate.ticker),
@@ -1292,5 +1337,8 @@ export default function renderReport(
   return {
     text: renderText(view),
     html: renderHtml(view),
+    // The same document the prose was rendered FROM, for a channel that stores
+    // the data instead of mailing the rendering. Core never reads inside it.
+    data: view as unknown as Record<string, unknown>,
   };
 }

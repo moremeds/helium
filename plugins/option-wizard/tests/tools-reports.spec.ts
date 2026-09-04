@@ -79,7 +79,9 @@ describe("ow_reports", () => {
       [today, "premarket"],
       [yesterday, "close"],
     ]);
-    expect(rows[0]!.candidates.map((c) => c.id)).toEqual([`NVDA-${today}-1`]);
+    expect(rows[0]!.candidates.map((c) => c.id)).toEqual([
+      `NVDA-${today}-premarket-1`,
+    ]);
   });
 
   it("returns the ledger, not the prose — the proposals, with their ids", async () => {
@@ -111,7 +113,11 @@ describe("ow_reports", () => {
     // the filter, one dropped proposal would shift every later id and a
     // settlement would cite an id nobody ever received.
     const rows = await read(stateRoot, { days: 1, phase: "premarket" });
-    const mailed = candidatesFrom("```json\n" + NVDA_REVIEW + "\n```", today);
+    const mailed = candidatesFrom(
+      "```json\n" + NVDA_REVIEW + "\n```",
+      today,
+      "premarket",
+    );
     expect(rows[0]!.candidates).toEqual(mailed.candidates);
   });
 

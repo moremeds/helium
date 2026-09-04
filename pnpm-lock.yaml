@@ -152,6 +152,19 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  plugins/delivery-argon:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   plugins/delivery-email:
     dependencies:
       '@helium/core':

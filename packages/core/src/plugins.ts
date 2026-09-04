@@ -185,6 +185,14 @@ export interface DeliveryPayload {
   /** The run label. A channel may name its artifact after it; core does not
    *  interpret it. */
   phase?: string;
+  /**
+   * Which build produced this run. The runner already resolves it once — it is
+   * what `helium audit` prints as `code: <sha>` and what every audit row
+   * carries as `code_version` — so a channel that re-derived it could disagree
+   * with the audit table about the same run, which is the one thing a
+   * provenance field must never do. Same reasoning as `day`.
+   */
+  codeVersion?: string;
 }
 
 export interface DeliveryOutcome {

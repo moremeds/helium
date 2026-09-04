@@ -143,6 +143,10 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-84a83ad2-a5cd-49d9-b41d-1fbc55236128",
     tenant: "option-wizard",
+    // The run label the runner started this run with. It reaches the renderer
+    // for exactly one purpose: the id segment that keeps the close run's
+    // proposals from being confused with the morning's.
+    phase: "premarket",
     // The day the RUNNER resolved, in the tenant's reportTimezone
     // (America/New_York). A run fired 2026-09-03T02:40+08:00 is 14:40 on the
     // 2nd in ET, and the brief is about the 2nd.
@@ -379,7 +383,9 @@ describe("buildView", () => {
     const view = buildView(drift, SPEC);
     expect(view.empty).toBeUndefined();
     expect(view.sections.map((s) => s.title)).toEqual(["读数结论：无变化"]);
-    expect(renderText(view)).toContain("【读数结论：无变化】");
+    // The block is on the view, which is what argon renders. The abridged mail
+    // (2026-09-05) no longer prints the run's narrative sections at all.
+    expect(renderText(view)).not.toContain("【读数结论：无变化】");
   });
 
   it("names the real reason when a run with no review step produced nothing", () => {
@@ -504,6 +510,69 @@ describe("deterministic gates over what the tools answered", () => {
     expect(cut).toContain("NFLX-2026-09-02-1");
     expect(cut).toContain("NFLX");
   });
+
+  it("drops a settlement that names its OWN phase's id, not the ledger's", () => {
+    // The 2026-09-03 defect, in one assertion. `design` and `review` run in
+    // both premarket and close, so the close run mints a fresh list for the
+    // same ET day. Before the phase went into the id both of these strings
+    // were `SLV-2026-09-03-1` and this test could not be written: the ledger
+    // gate checks id membership and nothing else, so a close proposal settling
+    // against a premarket ledger passed validation and settled the wrong
+    // structure — a 2026-09-30 spread reported as the 2026-09-18 one.
+    const view = buildView(
+      report({
+        day: "2026-09-03",
+        steps: [
+          {
+            task: "markout",
+            role: "markout-clerk",
+            mode: "model",
+            text: JSON.stringify({
+              settlements: [
+                {
+                  id: "SLV-2026-09-03-premarket-3",
+                  ticker: "SLV",
+                  state: "加强",
+                  note: "close 60.55, above the 60 invalidation",
+                },
+                {
+                  id: "SLV-2026-09-03-close-1",
+                  ticker: "SLV",
+                  state: "不变",
+                  note: "this run's own proposal, not a promise it can settle",
+                },
+              ],
+              sections: [],
+            }),
+            toolOutputs: [
+              JSON.stringify({
+                dir: "/tmp/reports",
+                reports: [
+                  {
+                    date: "2026-09-03",
+                    phase: "premarket",
+                    candidates: [
+                      { id: "SLV-2026-09-03-premarket-3", ticker: "SLV" },
+                    ],
+                  },
+                ],
+              }),
+            ],
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    const kept = view.sections.find(
+      (section) => section.title === "Settlements",
+    )!.body;
+    expect(kept).toContain("SLV-2026-09-03-premarket-3");
+    expect(kept).not.toContain("SLV-2026-09-03-close-1");
+    const cut = view.sections.find(
+      (section) => section.title === "Settlements not in the ledger, dropped",
+    )!.body;
+    expect(cut).toContain("SLV-2026-09-03-close-1");
+  });
 });
 
 describe("renderReport (text part)", () => {
@@ -514,15 +583,12 @@ describe("renderReport (text part)", () => {
     // line that all five of the day's mails share.
     expect(subject).toBeUndefined();
     expect(text).toContain("SPY");
-    expect(text).toContain("748.72");
     expect(text).toContain("872");
     expect(text).toContain("Unpriced");
-    // No ow_spot output in this report, so no ticker gets a % grid — not even
-    // SPY, whose spot the reviewer typed into its own prose. That prose number
-    // is exactly what the grid must not be anchored on.
-    expect(text).toContain("Payoff at expiry (by strike, no ow_spot quote)");
-    expect(text).not.toContain("Payoff at expiry (spot ±%)");
-    expect(REVIEW_TEXT).toContain("(spot 761.78)");
+    // The breakeven and the payoff row left the mail with the abridgement
+    // (2026-09-05); max loss and the unpriced reason stayed.
+    expect(text).not.toContain("748.72");
+    expect(text).not.toContain("Payoff at expiry");
     // The reader never sees the model thinking out loud, its quantity guess, or
     // any run metadata.
     expect(text).not.toContain("Actually, let me");
@@ -539,7 +605,9 @@ describe("renderReport (text part)", () => {
       }),
       SPEC,
     );
-    expect(text).toContain("This run did not finish");
+    // The reason moved to Flash with the rest of the narrative; the outcome
+    // itself still travels, on the mail's own second line.
+    expect(text).toContain("[FAILED]");
     expect(text).not.toContain("Actually, let me");
   });
 });
@@ -548,9 +616,9 @@ describe("renderReport (html part)", () => {
   it("carries the computed numbers and none of the transcript", () => {
     const html = renderReport(report(), SPEC).html ?? "";
     expect(html).toContain("SPY");
-    expect(html).toContain("748.72");
     expect(html).toContain("872");
     expect(html).toContain("Unpriced");
+    expect(html).not.toContain("748.72");
     expect(html).not.toContain("Actually, let me");
     expect(html).not.toContain("quantity");
     expect(html).not.toContain("run-84a83ad2");
@@ -573,11 +641,14 @@ describe("renderReport (html part)", () => {
     expect(html).toContain("max-width: 359px");
   });
 
-  it("escapes a rationale that contains markup", () => {
+  it("escapes a model field that contains markup", () => {
+    // The rationale this used to inject into is no longer mailed; the strategy
+    // name is, so that is where the markup goes now. Same property: every
+    // model string reaching the html goes through `esc`.
     const withMarkup = report();
     withMarkup.steps[3]!.text = REVIEW_TEXT.replace(
-      "Bond duration hedge: minimal cost insurance.",
-      "Bond <script>alert(1)</script> hedge",
+      "put_credit_spread_hedge",
+      "put <script>alert(1)</script> spread",
     );
     const html = renderReport(withMarkup, SPEC).html ?? "";
     expect(html).not.toContain("<script>");
@@ -593,10 +664,12 @@ describe("renderReport (html part)", () => {
         }),
         SPEC,
       ).html ?? "";
-    expect(html).toContain("This run did not finish");
-    // The narrative is information; a structure is a recommendation, and a run
-    // whose gate refused a step has not earned one.
-    expect(html).not.toContain("【候选结构】");
+    // The failure reason is Flash's now; the mail still says FAILED in its
+    // own header, and still withholds every structure — the narrative is
+    // information, a structure is a recommendation, and a run whose gate
+    // refused a step has not earned one.
+    expect(html).toContain("FAILED");
+    expect(html).not.toContain("Candidates");
   });
 });
 
@@ -667,9 +740,10 @@ describe("sections", () => {
         { title: "Path B — In-line CPI", body: "base case。" },
       ]),
     );
-    expect(text).toContain("【利率是第一因】");
-    expect(text).toContain("【Path B — In-line CPI】");
-    expect(text.indexOf("利率是第一因")).toBeLessThan(text.indexOf("Path B"));
+    // Since the abridgement (2026-09-05) the mail prints none of them: the
+    // sections are carried on the view, and argon's Flash page draws them.
+    expect(text).not.toContain("【利率是第一因】");
+    expect(text).not.toContain("【Path B — In-line CPI】");
   });
 
   it("renders a run with no narrative sections at all", () => {
@@ -741,16 +815,28 @@ describe("sections", () => {
 it("the renderer never branches on phase", () => {
   // The load-bearing claim of this design: which blocks a brief contains is
   // the team manifest's business, decided by which tasks ran. The moment the
-  // renderer learns the word, five phases become five layouts to maintain.
+  // renderer learns a phase NAME, five phases become five layouts to maintain.
   // Comments are exempt — the one in index.ts exists to say exactly this.
+  //
+  // This used to ban the word outright. It was relaxed on 2026-09-05, when the
+  // renderer began minting the run label into a candidate id: carrying an
+  // opaque label into a string is not branching, and the ban was a proxy for
+  // the property rather than the property. What is checked now is the property
+  // itself — no phase name may appear in the code, and nothing may be COMPARED
+  // against the label — which is strictly harder to satisfy by accident than a
+  // ban on six letters was.
+  const NAMES = /["'`](premarket|intraday|close|weekly|frank)["'`]/;
+  const COMPARED = /(===|!==|[^=!<>]==|!=[^=]|\bswitch\b|\bcase\b|\?|\.includes\(|\.startsWith\(|\.test\()/;
   const dir = new URL("../render/", import.meta.url).pathname;
   const offenders: string[] = [];
   for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
     readFileSync(join(dir, name), "utf8")
       .split("\n")
       .forEach((line, i) => {
-        const code = line.replace(/^\s*(\*|\/\/).*$/, "");
-        if (code.includes("phase")) offenders.push(`${name}:${String(i + 1)}`);
+        const code = line.replace(/^\s*(\*|\/\/|\/\*).*$/, "");
+        const branches = code.includes("phase") && COMPARED.test(code);
+        if (NAMES.test(code) || branches)
+          offenders.push(`${name}:${String(i + 1)}`);
       });
   expect(offenders).toEqual([]);
 });
@@ -766,10 +852,10 @@ describe("invalidation", () => {
 
   it("mints the id here and carries the levels the thesis dies at", () => {
     const spy = buildView(report(), SPEC).candidates[0]!;
-    expect(spy.id).toBe("SPY-2026-09-02-1");
+    expect(spy.id).toBe("SPY-2026-09-02-premarket-1");
     expect(spy.invalidation).toEqual([{ level: 750, side: "above" }]);
     expect(buildView(report(), SPEC).candidates[1]!.id).toBe(
-      "QQQ-2026-09-02-2",
+      "QQQ-2026-09-02-premarket-2",
     );
   });
 
@@ -855,7 +941,8 @@ describe("invalidation", () => {
       SPEC,
     );
     expect(withEarnings.candidates[0]!.earnings).toBe("2026-09-24");
-    expect(renderText(withEarnings)).toContain("earnings 2026-09-24");
+    // Carried on the candidate, not in the abridged mail's table.
+    expect(renderText(withEarnings)).not.toContain("earnings 2026-09-24");
     // The unmodified fixture declares no earnings at all.
     expect(buildView(report(), SPEC).candidates[0]!.earnings).toBeUndefined();
     expect(renderText(buildView(report(), SPEC))).not.toContain("earnings ");
@@ -882,8 +969,8 @@ describe("invalidation", () => {
 
   it("prints the id and the levels where a reader can quote them back", () => {
     const text = renderText(buildView(report(), SPEC));
-    expect(text).toContain("[SPY-2026-09-02-1]");
-    expect(text).toContain("stop 750↑");
+    expect(text).toContain("[SPY-2026-09-02-premarket-1]");
+    expect(text).toContain("invalidation 750↑");
   });
 });
 

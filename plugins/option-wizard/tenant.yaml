@@ -38,6 +38,16 @@ env:
   - OW_IB_API_KEY
   - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
+  # argon's ingest for structured runs. Separate from OW_ARGON_API_BASE, which
+  # is a TOOL's read endpoint: this one is a WRITE and it is authenticated.
+  # Reusing one key for both is how a laptop ends up publishing to the mini.
+  - ARGON_BASE_URL
+  - ARGON_INGEST_TOKEN
+  # argon's PUBLIC origin, for the one link the abridged mail carries. A THIRD
+  # argon key on purpose: this one is pasted into an email a human clicks, so
+  # it is the machine's outside address, not the ingest endpoint and not a
+  # tool's read endpoint. Unset means the mail carries no link.
+  - ARGON_APP_BASE
 
 # The zone this tenant's DAY is counted in — the report file name, the email
 # subject, the per-day email cap and the `report day:` line the agent is given
@@ -124,6 +134,25 @@ delivery:
       # nearest boundary is five away). WHOEVER ADDS A SIXTH must first work
       # out its ET date.
       maxPerDay: 5
+  # The Flash page. External like mail — the row does not leave the building but
+  # a person reads it as a briefing — so this entry alone sends nothing: it also
+  # needs HELIUM_TENANT_DELIVERY=1 and a reachable ARGON_BASE_URL. Three
+  # independent conditions: intent here, authority in the brake, capability in
+  # the environment. No baseUrl in this file: the environment is the only place
+  # it is set, so the manifest cannot commit a machine's URL to the repo.
+  #
+  # `kinds` is not a filter anyone wants today. It exists so that adding a SIXTH
+  # phase is a deliberate line here rather than a page that silently gains a tab.
+  - channel: argon
+    config:
+      kinds: [premarket, intraday, close, weekly, frank]
+      # Which ISO week each kind's row is FILED under. Frank posts on Monday
+      # about the week that just ended, so his review belongs to that earlier
+      # week and not to the day it was published. Every other kind is about the
+      # day it ran. The channel knows the rule names and never the kind names,
+      # so this mapping is the tenant's word, not the channel's.
+      weekKeyRules:
+        frank: previous-iso-week
 
 # The tenant-owned opaque block; the host never reads inside it (spec §3).
 #

@@ -1968,7 +1968,12 @@ export function buildTools(cfg: {
             // A report with no `review` step (intraday, weekly, frank) has no
             // proposals of its own, and an empty list is the honest answer —
             // its content is prose and `steps` is how to ask for it.
-            candidates: candidatesFrom(byStep.get("review") ?? "", date).candidates,
+            // `found` is the phase this stored file was written for, straight
+            // off its own name — the same segment the run that wrote it minted
+            // into its ids, so a settling role gets them back under exactly the
+            // names they were promised under.
+            candidates: candidatesFrom(byStep.get("review") ?? "", date, found)
+              .candidates,
             ...(steps === undefined
               ? {}
               : {
@@ -2127,7 +2132,13 @@ export function buildTools(cfg: {
           }
           return newestMarkdown(join(into, "web-articles"));
         };
-        const listArgv = ["substack", "publication", FRANK_PUBLICATION, "--limit", "1", "-f", "json"];
+        // `--limit 1` returned the evergreen `/p/weekly-recap-and-outlook`
+        // index (verified 2026-09-04: it and `/p/education` sit above every
+        // dated post in the listing), and that page's first dated link was the
+        // 2025-12-29 note — so the run compared this week against nine months
+        // ago. Ask for a page of rows and take the first DATED slug; the index
+        // page is read only when no row is dated.
+        const listArgv = ["substack", "publication", FRANK_PUBLICATION, "--limit", "10", "-f", "json"];
         let listed: string;
         try {
           ({ stdout: listed } = await execFileAsync(bin, listArgv, { cwd, timeout: 120_000 }));
@@ -2139,7 +2150,10 @@ export function buildTools(cfg: {
         }
         const parsed: unknown = JSON.parse(listed.trim() === "" ? "[]" : listed);
         const rows = Array.isArray(parsed) ? parsed : [parsed];
-        const post = rows[0] as { url?: unknown; publish_time?: unknown; title?: unknown } | undefined;
+        const datedRow = rows.find(
+          (row) => typeof (row as { url?: unknown })?.url === "string" && isDatedPostUrl((row as { url: string }).url),
+        );
+        const post = (datedRow ?? rows[0]) as { url?: unknown; publish_time?: unknown; title?: unknown } | undefined;
         if (typeof post?.url !== "string") {
           throw new Error(`ow_frank: no post url in ${bin} substack publication output`);
         }

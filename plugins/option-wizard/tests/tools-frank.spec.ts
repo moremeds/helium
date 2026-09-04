@@ -92,7 +92,7 @@ describe("ow_frank", () => {
         "publication",
         "https://franktrading.substack.com",
         "--limit",
-        "1",
+        "10",
         "-f",
         "json",
       ],
@@ -169,6 +169,32 @@ describe("ow_frank", () => {
       "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook",
     );
     expect(out.markdown).toContain("复盘与展望");
+  });
+
+  it("skips undated index rows in the listing and reads the first dated post directly", async () => {
+    // Recorded 2026-09-04: the listing puts the evergreen index and the
+    // Education page above every dated post. The tool must never read the
+    // index when a dated row is right there.
+    const reads: string[] = [];
+    state.handler = (call) => {
+      if (call.argv[0] === "substack")
+        return JSON.stringify([
+          { title: "Weekly Recap and Outlook", url: "https://franktrading.substack.com/p/weekly-recap-and-outlook" },
+          { title: "Education", url: "https://franktrading.substack.com/p/education" },
+          { title: "08/31/2026 Trading Recap and Outlook", url: "https://franktrading.substack.com/p/08312026-trading-recap-and-outlook" },
+          { title: "08/24/2026 Trading Recap and Outlook", url: "https://franktrading.substack.com/p/08242026-trading-recap-and-outlook" },
+        ]);
+      const url = call.argv[3];
+      reads.push(url);
+      const slug = url.split("/p/")[1];
+      const dir = join(call.cwd!, "web-articles", slug);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${slug}.md`), ARTICLE);
+      return JSON.stringify({ status: "success" });
+    };
+    const out = JSON.parse(await frankTool().run({})) as { url: string };
+    expect(out.url).toBe("https://franktrading.substack.com/p/08312026-trading-recap-and-outlook");
+    expect(reads).toEqual(["https://franktrading.substack.com/p/08312026-trading-recap-and-outlook"]);
   });
 
   it("refuses an index page with no dated article link on it", async () => {

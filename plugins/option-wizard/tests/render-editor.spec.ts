@@ -168,7 +168,7 @@ const EDITOR_JSON = {
   overnight: ["AVGO — guided Q4 revenue to $34.8B against a $35.1B estimate."],
   candidates: [
     {
-      id: "SPY-2026-09-03-1",
+      id: "SPY-2026-09-03-premarket-1",
       rationale:
         "Edited: the 40bp curve pays the seller of a 755/760 put spread.",
       // Every one of these is a lie the editor is not allowed to tell. The
@@ -188,6 +188,7 @@ function report(overrides: Partial<RunReport> = {}): RunReport {
   return {
     runId: "run-editor-fixture",
     tenant: "option-wizard",
+    phase: "premarket",
     day: "2026-09-03",
     mode: "model",
     providersLive: ["dsh"],
@@ -282,7 +283,7 @@ describe("the editor's document", () => {
     expect(candidate.legs.every((leg) => leg.right === "put")).toBe(true);
     expect(candidate.expiry).toBe("2026-09-30");
     expect(candidate.invalidation).toEqual([{ level: 760, side: "below" }]);
-    expect(candidate.id).toBe("SPY-2026-09-03-1");
+    expect(candidate.id).toBe("SPY-2026-09-03-premarket-1");
   });
 
   it("takes a rationale keyed by the bare ticker when the card is unambiguous", () => {
@@ -357,11 +358,15 @@ describe("charts drawn from the tool outputs", () => {
     expect(chart.spread2s10s).toBe(40);
   });
 
-  it("prints the axis floor on the chart, so the reader is never misled by it", () => {
+  // The three charts left the MAIL when it was abridged (2026-09-05); they did
+  // not leave the document. `view.charts` is what argon's Flash page draws,
+  // and the assertions that matter — the non-zero axis floor above, the stance
+  // and probability below — are on the data, where they always belonged. What
+  // is checked here is only that the mail stopped carrying the drawing.
+  it("no longer draws the curve in the mail", () => {
     const html = renderReport(report(), SPEC).html;
-    expect(html).toContain("Axis starts at 4.00%, not zero");
-    expect(html).toContain("2s10s +40.0bp");
-    expect(html).toContain("4.790%");
+    expect(html).not.toContain("Axis starts at 4.00%, not zero");
+    expect(html).not.toContain("2s10s +40.0bp");
   });
 
   it("reads the policy path off argon's snapshot, stance and probability intact", () => {
@@ -379,11 +384,8 @@ describe("charts drawn from the tool outputs", () => {
       { label: "12/9", stance: "HIKE", probability: 64 },
     ]);
     const html = renderReport(report(), SPEC).html;
-    expect(html).toContain("HIKE 60%");
-    expect(html).toContain("HOLD 70%");
-    // The citation travels with the chart: futures-implied, not CME FedWatch.
-    expect(html).toContain("not CME FedWatch");
-    expect(html).toContain("snapshot 2026-09-02");
+    expect(html).not.toContain("HIKE 60%");
+    expect(html).not.toContain("not CME FedWatch");
   });
 
   it("profiles gamma per strike, for the candidate tickers only", () => {
@@ -404,9 +406,8 @@ describe("charts drawn from the tool outputs", () => {
       { label: "Gamma Flip", role: "flip", strike: 766, gamma: 0 },
     ]);
     const html = renderReport(report(), SPEC).html;
-    expect(html).toContain("Gamma profile");
-    expect(html).toContain("Call Wall");
-    expect(html).toContain("770.00");
+    expect(html).not.toContain("Gamma profile");
+    expect(html).not.toContain("Call Wall");
   });
 
   it("omits every chart, rather than faking one, when no tool answered", () => {
