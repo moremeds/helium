@@ -613,6 +613,11 @@ describe("tape", () => {
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
+    // No tool payloads behind this fixture, so no chart is drawable. An empty
+    // `gex` and an absent curve is exactly what a run with no argon answer
+    // produces, and the assertion below (no <span> anywhere) is what proves
+    // the charts stay omitted rather than rendering an empty axis.
+    charts: { gex: [] },
   });
 
   it("omits the trailing <span> entirely when change is an empty string", () => {

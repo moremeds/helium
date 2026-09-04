@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
-import { candidatesFrom, type CandidateView } from "../render/index.js";
+import { candidatesFrom, extractJson, type CandidateView } from "../render/index.js";
 import { priceStructure, width } from "../render/math.js";
 import {
   ProposalSchema,
@@ -57,6 +57,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
   ["ow_reports", { mutating: false }],
+  // Same reasoning as ow_reports: it reads the same report directory, and "no
+  // brief yesterday" is an answer the editor prints in one line, not an outage.
+  ["ow_prior_brief", { mutating: false }],
   // No `requiresEnv` either: OW_OPENCLI_BIN has a working default, and a
   // `requiresEnv` on a key with a default reports a working machine as broken
   // (the note above ow_tv_watchlist is the precedent).
@@ -638,11 +641,18 @@ async function argonLevelsForTicker(
   }
 
   if (Array.isArray(dealer?.closest_levels)) {
+    // `gamma` is KEPT, not dropped. It is the only per-strike exposure
+    // MAGNITUDE any tool in this tenant returns — the gex endpoint's own
+    // `levels` map is flattened to strikes above, and ow_uw_gex answers a
+    // single aggregate spot-gamma number. Without it the renderer can print
+    // where the walls are but not how big they are, which is the difference
+    // between a ladder and a profile.
     out.closest_levels = dealer.closest_levels.map((level) => ({
       label: level.label,
       role: level.role,
       strike: level.strike,
       distance_pct: level.distance_pct,
+      ...(typeof level.gamma === "number" ? { gamma: level.gamma } : {}),
     }));
   }
   if (dealer?.odte_share_pct !== undefined) out.odte_share_pct = dealer.odte_share_pct;
@@ -841,6 +851,42 @@ function thinTide(tide: unknown): unknown {
  *  this number is about a model filling a gap from a wall of narrative, not
  *  about context cost, so it keeps its own 8 KB. */
 const REPORTS_PROSE_CEILING_BYTES = 8 * 1024;
+
+/** Yesterday's brief is background, not evidence: it exists so the editor can
+ *  write "what changed", and a real premarket report is 17 KB on disk. Two
+ *  thousand characters is the headline, the decision block and the opening of
+ *  each section — enough to diff against, too little to copy from. */
+const PRIOR_BRIEF_CEILING_CHARS = 2000;
+
+/** The zone the report filenames are stamped in — the tenant's own
+ *  `reportTimezone`. Named here rather than read off this process's clock so
+ *  "yesterday" means the same calendar day the filenames do. */
+const REPORT_ZONE = "America/New_York";
+
+const PriorBriefParams = z.object({
+  phase: z.enum(["premarket", "intraday", "close", "weekly", "frank"]).optional(),
+  today: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+});
+
+/** The PROSE half of a prior brief's JSON document, never the numbers — a
+ *  fresh tool answers those better and this text is a day old. Section bodies
+ *  are cut to their opening because a delta needs the CLAIM, not the whole
+ *  argument, and one long section would otherwise spend the whole ceiling. */
+function pickBriefProse(doc: Record<string, unknown>): Record<string, unknown> {
+  const sections = Array.isArray(doc.sections)
+    ? doc.sections.flatMap((entry) => {
+        if (entry === null || typeof entry !== "object") return [];
+        const { title, body } = entry as Record<string, unknown>;
+        if (typeof title !== "string" || typeof body !== "string") return [];
+        return [{ title, body: body.slice(0, 240) }];
+      })
+    : [];
+  return {
+    ...(typeof doc.headline === "string" ? { headline: doc.headline } : {}),
+    ...(doc.decision !== null && typeof doc.decision === "object" ? { decision: doc.decision } : {}),
+    ...(sections.length === 0 ? {} : { sections }),
+  };
+}
 
 function round4(value: number | undefined): number | undefined {
   return value === undefined ? undefined : Number(value.toFixed(4));
@@ -1965,6 +2011,77 @@ export function buildTools(cfg: {
           dropped.push(`${row.date}-${row.phase}`);
         }
         return payload();
+      },
+    },
+    {
+      // The editor writes DELTAS, so it needs the document it is writing one
+      // against. `ow_reports` cannot serve that: it deliberately returns the
+      // settlement LEDGER and drops the prose (see its comment above), and the
+      // prose is the whole question here.
+      //
+      // Reads the same `<stateRoot>/reports/<tenant>-<day>-<phase>.md` files
+      // delivery-markdown writes. STRICTLY BEFORE `today` — a run that has
+      // already written its own report for today would otherwise read itself
+      // and conclude nothing changed, every single morning.
+      //
+      // Capped at ~2 KB, the same discipline as ow_reports and for the same
+      // reason: yesterday's premarket report is 17 KB on a real run, and an
+      // uncapped one would bury today's own data under a document the reader
+      // has already read once.
+      name: "ow_prior_brief",
+      description:
+        "The previous day's delivered brief for a phase: its masthead headline, its decision block and the opening of each narrative section, capped at ~2 KB. Read it to say what CHANGED since; it is never evidence about today's tape.",
+      paramsSchema: PriorBriefParams,
+      mutating: false,
+      dshParams: {
+        phase: { type: "string", description: "premarket (default) | intraday | close | weekly | frank" },
+        today: {
+          type: "string",
+          description: "YYYY-MM-DD report day to look back FROM, exclusive. Omit for today in the tenant's report zone.",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { phase, today } = PriorBriefParams.parse(args);
+        const wanted = phase ?? "premarket";
+        // The report day in the zone the filenames are stamped in. Same
+        // reasoning as ow_reports' date counting: a cutoff taken from this
+        // process's clock disagrees with the filenames by a whole day for a
+        // HK-scheduled run reading ET-dated files.
+        const cutoff = today ?? new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(new Date());
+        const dir = join(cfg.stateRoot, "reports");
+        let names: string[];
+        try {
+          names = await readdir(dir);
+        } catch {
+          return JSON.stringify({ dir, prior: null, reason: "no reports directory yet" });
+        }
+        const found = names
+          .map((name) => ({ name, match: REPORT_NAME.exec(name) }))
+          .filter((row) => row.match !== null && row.match[2] === wanted && row.match[1]! < cutoff)
+          .sort((a, b) => b.match![1]!.localeCompare(a.match![1]!))[0];
+        if (found === undefined) {
+          return JSON.stringify({
+            dir,
+            prior: null,
+            reason: `no ${wanted} report on disk dated before ${cutoff}`,
+          });
+        }
+        const day = found.match![1]!;
+        const byStep = stepsOf(await readFile(join(dir, found.name), "utf8"));
+        // The prior run's own editor document when it had one; the regime step
+        // is the fallback for a report written before the editor existed.
+        // Either way this is prose the reader has already seen.
+        const source = byStep.get("edit") ?? byStep.get("regime") ?? "";
+        const parsed = extractJson(source);
+        const text = (parsed === null ? source : JSON.stringify(pickBriefProse(parsed))).slice(
+          0,
+          PRIOR_BRIEF_CEILING_CHARS,
+        );
+        return JSON.stringify({
+          dir,
+          prior: { day, phase: wanted, file: found.name, text },
+          note: "Yesterday's own words. Quote it only to say what changed; every number about TODAY comes from a live tool.",
+        });
       },
     },
     {

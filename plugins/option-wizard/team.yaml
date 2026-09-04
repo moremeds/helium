@@ -357,6 +357,45 @@ roles:
       claims that are incompatible, and the observable that will separate them.
       You do not adopt his view and you do not defend ours. Quote him with his
       own numbers; quote us with ours.
+
+  editor:
+    requires: [long.context, reason.deep]
+    permissions:
+      mutations: forbidden
+      tools: [ow_prior_brief]
+    persona: >-
+      You are the only author of this brief. Every step before you wrote a
+      fragment in isolation, each blind to the others, and the reader receives
+      one document — the seams are yours to remove.
+      You write PROSE and you write nothing else. You do not compute. You do
+      not adjust, round, convert, average, difference or re-express any number:
+      every figure you write is copied character-for-character out of a step
+      you were handed, and a number you cannot find there does not go in the
+      brief. Eight of eleven model-computed numbers audited on 2026-09-03 were
+      wrong, which is why the arithmetic belongs to the tools and the renderer.
+      The strikes, prices, widths, breakevens, payoffs, ids and invalidation
+      levels on every candidate are NOT yours. You may write a candidate's
+      rationale and nothing else about it; the renderer discards anything else
+      you say about one.
+      Your one tool is ow_prior_brief. Call it once. The first paragraph of the
+      macro read answers "what changed since yesterday's brief" — and if the
+      tool has no prior brief, that is one line saying so and then straight on
+      to today.
+      Say what CHANGED, not what IS. Every paragraph carries a number that
+      appeared in a step you were handed. No sentence survives that would read
+      the same tomorrow. No filler: no "as noted", "it is worth remembering",
+      "in summary", "going forward", no hedge that is true under every outcome.
+      WORD BUDGET, and it is a budget, not a target — the 2026-09-03 brief
+      shipped at 1,747 rendered words and read as a wall:
+      - `headline` (today in one sentence): at most 30 words.
+      - each `sections` body: at most 60 words.
+      - each `decision` value: at most 25 words.
+      - each candidate `rationale`: at most 40 words.
+      - the whole brief: at most 800 words.
+      Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
+      and never an HTTP status code in prose. The reader does not run the
+      harness; say what was not checked, not which call did not return.
+
 tasks:
   - id: universe
     role: universe-builder
@@ -518,6 +557,136 @@ tasks:
       rather than a level — the close run settles a thesis by comparing a spot
       to this number, so a sentence there is a thesis nobody can ever settle.
       Do NOT write an id; the harness mints it.
+
+  # The last step of a premarket run, and the only one that sees all of it.
+  # `dependsOn` is what feeds it: runner.ts forwards each named step's whole
+  # output into the prompt, so this list IS the editor's desk. A step that did
+  # not run this phase forwards nothing and costs nothing.
+  - id: edit
+    role: editor
+    phases: [premarket]
+    dependsOn: [universe, gex, overnight, regime, scenarios, design, review]
+    requires: [long.context, reason.deep]
+    prompt: |-
+      Write the whole brief as one document. You have every step of this run
+      above; the reader gets one note, not seven.
+
+      FIRST, call ow_prior_brief (phase premarket). Its answer is yesterday's
+      own words. The first paragraph of your macro read says what CHANGED
+      since it — the level that moved, by how much, and what that costs. If it
+      returns prior:null, say so in one line and go on to today.
+
+      Reply as ONE JSON object and nothing else:
+      {"headline":"...",
+       "decision":{"Call","Action","Aggression","WhyNow","MaxRisk",
+                   "Invalidation","NextTrigger","Confidence"},
+       "sections":[{"title","body"}],
+       "coverage":{"title","body"},
+       "overnight":["one line per item, at most five"],
+       "candidates":[{"id","rationale"}],
+       "riskList":[{"ticker","reason"}]}
+
+      Rules the renderer enforces, so breaking one costs you the field:
+      - `candidates` entries carry ONLY `id` and `rationale`. Every strike,
+        price, width, breakeven, payoff, expiry and invalidation level is
+        recomputed from the tools and cannot be changed here. An id is
+        `<TICKER>-<report day>-<n>` — e.g. SPY-2026-09-03-1 — with n counting
+        the reviewer's KEPT proposals from 1 in the order it wrote them. Write
+        the full id, not the bare ticker.
+      - `decision` values are the reviewer's decision block, rewritten for a
+        reader — same verdict, same numbers, better sentences. Do not invent a
+        verdict the reviewer did not reach.
+      - `headline` is ONE sentence: the cause and what it costs. It must read
+        differently on a quiet day than on a violent one.
+      - `coverage` is the Layer Coverage line, layers separated by " | ",
+        each "<layer> — <state>". Copy the regime step's states; do not
+        upgrade a `skipped` layer to a checked one.
+      - Omit a key entirely rather than emit an empty or invented one. What
+        you omit falls back to the step that already wrote it.
+
+      Every paragraph carries a number that appears in a step above. Say what
+      changed, not what is. No filler sentence.
+
+      WORD BUDGET, and it is a budget, not a target — the 2026-09-03 brief
+      shipped at 1,747 rendered words and read as a wall:
+      - `headline` (today in one sentence): at most 30 words.
+      - each `sections` body: at most 60 words.
+      - each `decision` value: at most 25 words.
+      - each candidate `rationale`: at most 40 words.
+      - the whole brief: at most 800 words.
+      Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
+      and never an HTTP status code in prose. The reader does not run the
+      harness; say what was not checked, not which call did not return.
+
+      STYLE EXEMPLAR — the approved 3 September 2026 premarket mockup, quoted
+      for its SHAPE only. Its numbers belong to that day. Copying one of them
+      into today's brief is the exact failure this exemplar exists to prevent.
+
+      Masthead, one sentence:
+        "Rates are still the first cause. No candidate ships today."
+
+      Bottom line — number, then what it means, then what it costs:
+        "The 10Y at 4.788% sits about 16bp above its 5 August level; 2s10s is
+        +41.3bp. This is a bear-steepener. The market is repricing term
+        premium and a firmer policy path, not a cut, and the longest-duration
+        equity pays for it first."
+        "Credit is not corroborating the bearish story. HY OAS at 2.65% has
+        tightened 10bp from 2.75% on 5 August, and the prior session closed
+        net call premium +124M against net put -33M. Nobody is hedged
+        defensively into tomorrow's number."
+        Call: "All eight structures produced today failed the
+        strike-versus-spot arithmetic gate. Their strikes were priced against
+        levels 15% to 84% away from where the underlyings actually trade. Not
+        one sits near the market."
+        Action: "Reject all eight and send the book back to be repriced
+        against today's spot. Nothing ships."
+
+      Macro read — a claim as the heading, evidence under it:
+        "Rates are the first cause. The 10Y is 4.788% and the 30Y 5.261%,
+        while the 2Y at 4.375% has barely moved. That is a bear-steepener:
+        what is being repriced is term premium and a firmer policy path, not a
+        cut. Ranked by cash-flow duration, the damage runs in this order.
+        First, the longest-duration, profitless story equity, where value is
+        almost entirely terminal. Second, big-cap secular growth, where the
+        multiple is the position. Third, rate-sensitive REITs and utilities.
+        Short-duration cash-flow compounders are hurt least."
+        "The most anomalous divergence is gold. Gold is $4,427.62, up 0.90%,
+        in the same tape as a 10Y real yield of 2.44% that has itself climbed
+        from 2.32% on 25 August. Gold rising while real yields rise is the
+        anomaly; the bar it faced was 'real carry is getting more expensive,
+        fade me,' and it cleared that bar anyway. That is a different buyer
+        from the one pricing the 10Y."
+        "The beat-and-raise-that-closed-down tag is left unassigned today. The
+        label requires three things verified together - the beat, the raise,
+        and the red close. This run received no per-name earnings prints or
+        closing changes for the watchlist. Rather than name a candidate on
+        pattern alone, the tag is recorded as unassigned."
+
+      Scenarios — a trigger band, a curve, an equity consequence, and the
+      observable that separates each path from its neighbour:
+        "A - Base case. NFP +20k to +90k, unemployment 4.0-4.1%. 2Y grinds up
+        a few bp, 10Y and 30Y lead higher; 2s10s steepens toward the mid-40s.
+        Longest-duration cohort de-rates, short-duration compounders bleed
+        least; gold holds its bid on a soft dollar."
+        "B - Hot. NFP above +90k, or unemployment ticks to 4.0%. 2Y gaps
+        toward and through 4.45%, 10Y clears 4.85%, 30Y presses past 5.30%; if
+        the front outruns the long end it flattens, and that is the tell that
+        separates B from A."
+        "Confirms A. NFP +20k to +90k and unemployment 4.0-4.1% and 2s10s
+        holds or steepens toward the mid-40s and HY OAS stays at or below
+        2.70%. All four together, or it does not count."
+        "Reverse risk. The base case is a bear-steepener that grinds duration
+        equity lower, so the risk that deserves its own space is a dovish
+        resolution that squeezes exactly the cohort path A is short.
+        Prior-session positioning closed net call positive, which means the
+        pain trade is up, not down. The 10Y real yield we are leaning on was
+        last observed on 1 September, two days stale, so the anchor may
+        already have moved."
+
+      What the exemplar never does: a sentence with no number from a tool this
+      run; "as we noted" / "it is worth remembering" / "in summary"; a
+      restatement of a level already in the tape strip or the schedule; a
+      hedge that survives every outcome; any number the author computed.
 
   - id: drift
     role: drift-watcher

@@ -133,9 +133,9 @@ const REVIEW_JSON_0903 = {
   // the same 8 real rejections above, reformatted into the new English
   // decision-block keys.
   decision: {
-    Call:
-      "All eight structures produced today failed the strike-versus-spot arithmetic gate. Their strikes were priced against levels 15% to 84% away from where the underlyings actually trade. Not one sits near the market.",
-    Action: "Reject all eight and send the book back to be repriced against today's spot. Nothing ships.",
+    Call: "All eight structures produced today failed the strike-versus-spot arithmetic gate. Their strikes were priced against levels 15% to 84% away from where the underlyings actually trade. Not one sits near the market.",
+    Action:
+      "Reject all eight and send the book back to be repriced against today's spot. Nothing ships.",
     Aggression: "Zero. There is no structure that can be entered.",
     NextTrigger:
       "Re-anchor all eight to current spot and re-run design. On the macro side, the Employment Report at 12:30Z tomorrow.",
@@ -155,7 +155,12 @@ function report0903(): RunReport {
     delivery: [],
     toolsUnconfigured: ["ow_ib_positions (OW_IB_API_BASE unset)"],
     steps: [
-      { task: "universe", role: "universe-builder", mode: "deterministic", text: "SPY QQQ" },
+      {
+        task: "universe",
+        role: "universe-builder",
+        mode: "deterministic",
+        text: "SPY QQQ",
+      },
       {
         task: "gex",
         role: "gex-reporter",
@@ -166,10 +171,30 @@ function report0903(): RunReport {
       // (briefing.md:30, "this run was not given per-name earnings prints
       // ... I will not manufacture names"). That absence is exactly what
       // exercises the empty-overnight one-liner, on real data.
-      { task: "regime", role: "regime-analyst", mode: "model", text: JSON.stringify(REGIME_JSON_0903) },
-      { task: "scenarios", role: "scenario-analyst", mode: "model", text: '{"sections":[]}' },
-      { task: "design", role: "structure-designer", mode: "model", text: '{"proposals":[]}' },
-      { task: "review", role: "risk-reviewer", mode: "model", text: JSON.stringify(REVIEW_JSON_0903) },
+      {
+        task: "regime",
+        role: "regime-analyst",
+        mode: "model",
+        text: JSON.stringify(REGIME_JSON_0903),
+      },
+      {
+        task: "scenarios",
+        role: "scenario-analyst",
+        mode: "model",
+        text: '{"sections":[]}',
+      },
+      {
+        task: "design",
+        role: "structure-designer",
+        mode: "model",
+        text: '{"proposals":[]}',
+      },
+      {
+        task: "review",
+        role: "risk-reviewer",
+        mode: "model",
+        text: JSON.stringify(REVIEW_JSON_0903),
+      },
     ],
   } as RunReport;
 }
@@ -196,7 +221,10 @@ describe("2026-09-03 premarket fixture (zero candidates)", () => {
       }),
     );
     expect(view.schedule).toContainEqual(
-      expect.objectContaining({ event: "Employment Report", group: "Tomorrow · 4 September" }),
+      expect.objectContaining({
+        event: "Employment Report",
+        group: "Tomorrow · 4 September",
+      }),
     );
   });
 
@@ -212,24 +240,36 @@ describe("2026-09-03 premarket fixture (zero candidates)", () => {
     expect(view.candidates).toEqual([]);
     expect(view.riskList).toHaveLength(8);
     expect(view.riskList.map((row) => row.ticker)).toEqual([
-      "NVDA", "ASTS", "TOL", "QQQ", "SMH", "XLRE", "MSFT", "ARM",
+      "NVDA",
+      "ASTS",
+      "TOL",
+      "QQQ",
+      "SMH",
+      "XLRE",
+      "MSFT",
+      "ARM",
     ]);
   });
 
-  it("renders the masthead, tape, bottom line, schedule and risk register in that order in the html", () => {
+  // Design 04 (2026-09-04) gives the header a fixed title and moves the run's
+  // own sentence out of it, into a "Today in one sentence" section under the
+  // market snapshot — the spec's fixed daily structure. So the headline now
+  // follows the tape instead of preceding it; everything after it is unchanged.
+  it("renders the snapshot, one-sentence call, bottom line, schedule and risk register in that order in the html", () => {
     const html = renderReport(report0903(), SPEC).html ?? "";
     const at = (needle: string) => {
       const i = html.indexOf(needle);
       expect(i, needle).toBeGreaterThan(-1);
       return i;
     };
-    const masthead = at("Rates are still the first cause");
     const tape = at("765.16");
+    const oneSentence = at("Rates are still the first cause");
     const bottomLine = at("Bottom line");
     const schedule = at("Initial Jobless Claims");
     const riskRegister = at("Risk register");
-    expect(masthead).toBeLessThan(tape);
-    expect(tape).toBeLessThan(bottomLine);
+    expect(at("Market snapshot")).toBeLessThan(tape);
+    expect(tape).toBeLessThan(oneSentence);
+    expect(oneSentence).toBeLessThan(bottomLine);
     expect(bottomLine).toBeLessThan(schedule);
     expect(schedule).toBeLessThan(riskRegister);
   });
@@ -252,8 +292,22 @@ const REVIEW_JSON_0902 = {
       ticker: "NOW",
       strategy: "Call debit spread — bullish tilt",
       legs: [
-        { right: "call", expiry: "2026-09-25", strike: 141, action: "buy", ratio: 1, mid: 5.25 },
-        { right: "call", expiry: "2026-09-25", strike: 145, action: "sell", ratio: 1, mid: 3.92 },
+        {
+          right: "call",
+          expiry: "2026-09-25",
+          strike: 141,
+          action: "buy",
+          ratio: 1,
+          mid: 5.25,
+        },
+        {
+          right: "call",
+          expiry: "2026-09-25",
+          strike: 145,
+          action: "sell",
+          ratio: 1,
+          mid: 3.92,
+        },
       ],
       // briefing.md:387 ("NOW: 136.00 (break of intraday low)")
       invalidation: [{ level: 136.0, side: "below" }],
@@ -265,8 +319,22 @@ const REVIEW_JSON_0902 = {
       ticker: "IWM",
       strategy: "Put debit spread — bearish tilt",
       legs: [
-        { right: "put", expiry: "2026-09-25", strike: 289, action: "buy", ratio: 1, mid: 3.37 },
-        { right: "put", expiry: "2026-09-25", strike: 278, action: "sell", ratio: 1, mid: 1.31 },
+        {
+          right: "put",
+          expiry: "2026-09-25",
+          strike: 289,
+          action: "buy",
+          ratio: 1,
+          mid: 3.37,
+        },
+        {
+          right: "put",
+          expiry: "2026-09-25",
+          strike: 278,
+          action: "sell",
+          ratio: 1,
+          mid: 1.31,
+        },
       ],
       // briefing.md:387 ("IWM: 301.00 (break of squeeze target, structural case fails)")
       invalidation: [{ level: 301.0, side: "above" }],
@@ -278,8 +346,22 @@ const REVIEW_JSON_0902 = {
       ticker: "QQQ",
       strategy: "Put debit spread — bearish tilt",
       legs: [
-        { right: "put", expiry: "2026-09-25", strike: 685, action: "buy", ratio: 1, mid: 5.31 },
-        { right: "put", expiry: "2026-09-25", strike: 660, action: "sell", ratio: 1, mid: 2.38 },
+        {
+          right: "put",
+          expiry: "2026-09-25",
+          strike: 685,
+          action: "buy",
+          ratio: 1,
+          mid: 5.31,
+        },
+        {
+          right: "put",
+          expiry: "2026-09-25",
+          strike: 660,
+          action: "sell",
+          ratio: 1,
+          mid: 2.38,
+        },
       ],
       // briefing.md:387 ("QQQ: 719.00 (break of recent high, duration repricing reverses)")
       invalidation: [{ level: 719.0, side: "above" }],
@@ -292,10 +374,10 @@ const REVIEW_JSON_0902 = {
   decision: {
     // briefing.md:429-436, translated key names to the redesigned English
     // contract, values verbatim.
-    Call:
-      "Three multi-day defined-risk spreads, all validated by argon (med confidence). NOW is repricing-exhaustion long; IWM/QQQ are structural shorts into rate rigidity.",
+    Call: "Three multi-day defined-risk spreads, all validated by argon (med confidence). NOW is repricing-exhaustion long; IWM/QQQ are structural shorts into rate rigidity.",
     Action: "Release all three to reader. No drops.",
-    Aggression: "Measured: all defined-risk (max loss capped); debit-spread formats; theta positive into 22-day horizon.",
+    Aggression:
+      "Measured: all defined-risk (max loss capped); debit-spread formats; theta positive into 22-day horizon.",
     MaxRisk:
       "Tail risk: all three theses invalidated simultaneously by Fed cut shock or VIX compression.",
   },
@@ -314,7 +396,12 @@ function report0902(): RunReport {
     delivery: [],
     toolsUnconfigured: [],
     steps: [
-      { task: "universe", role: "universe-builder", mode: "deterministic", text: "NOW IWM QQQ" },
+      {
+        task: "universe",
+        role: "universe-builder",
+        mode: "deterministic",
+        text: "NOW IWM QQQ",
+      },
       {
         task: "regime",
         role: "regime-analyst",
@@ -322,7 +409,12 @@ function report0902(): RunReport {
         text: '{"sections":[{"title":"Rates","body":"10Y 4.772% grinding duration multiples lower."}]}',
       },
       { task: "design", role: "structure-designer", mode: "model", text: "{}" },
-      { task: "review", role: "risk-reviewer", mode: "model", text: JSON.stringify(REVIEW_JSON_0902) },
+      {
+        task: "review",
+        role: "risk-reviewer",
+        mode: "model",
+        text: JSON.stringify(REVIEW_JSON_0902),
+      },
     ],
   } as RunReport;
 }
@@ -338,12 +430,17 @@ describe("2026-09-02 close fixture (real candidates)", () => {
     // the three the real data actually has rather than dropping one to fit
     // the stated number.
     expect(view.candidates.map((c) => c.ticker)).toEqual(["NOW", "IWM", "QQQ"]);
-    expect(view.candidates[0]!.legs[0]).toMatchObject({ strike: 141, mid: 5.25 });
+    expect(view.candidates[0]!.legs[0]).toMatchObject({
+      strike: 141,
+      mid: 5.25,
+    });
   });
 
   it("has no overnight step in the close phase, and still prints the one-liner", () => {
     expect(view.overnight).toEqual([]);
-    expect(renderReport(report0902(), SPEC).text).toContain("Nothing flagged overnight.");
+    expect(renderReport(report0902(), SPEC).text).toContain(
+      "Nothing flagged overnight.",
+    );
   });
 });
 
@@ -364,8 +461,22 @@ describe("size budget", () => {
         ticker: "SPY",
         strategy: "put_credit_spread_hedge",
         legs: [
-          { right: "put", expiry: "2026-09-30", strike: 740, action: "buy", ratio: 1, mid: 5.14 },
-          { right: "put", expiry: "2026-09-30", strike: 750, action: "sell", ratio: 1, mid: 6.42 },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 740,
+            action: "buy",
+            ratio: 1,
+            mid: 5.14,
+          },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 750,
+            action: "sell",
+            ratio: 1,
+            mid: 6.42,
+          },
         ],
         invalidation: [{ level: 750, side: "above" }],
         target: "Max gain 128 at 750, exit at 50% (~64)",
@@ -375,8 +486,22 @@ describe("size budget", () => {
         ticker: "TLT",
         strategy: "put_credit_spread_hedge",
         legs: [
-          { right: "put", expiry: "2026-09-30", strike: 80, action: "buy", ratio: 1, mid: 0.3 },
-          { right: "put", expiry: "2026-09-30", strike: 81, action: "sell", ratio: 1, mid: 0.56 },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 80,
+            action: "buy",
+            ratio: 1,
+            mid: 0.3,
+          },
+          {
+            right: "put",
+            expiry: "2026-09-30",
+            strike: 81,
+            action: "sell",
+            ratio: 1,
+            mid: 0.56,
+          },
         ],
         invalidation: [{ level: 81, side: "above" }],
         target: "Max gain 26 at 81, exit at 50% (~13)",
@@ -400,10 +525,30 @@ describe("size budget", () => {
       delivery: [],
       toolsUnconfigured: [],
       steps: [
-        { task: "universe", role: "universe-builder", mode: "deterministic", text: "NOW IWM QQQ SPY TLT" },
-        { task: "regime", role: "regime-analyst", mode: "model", text: JSON.stringify(REGIME_JSON_0903) },
-        { task: "design", role: "structure-designer", mode: "model", text: "{}" },
-        { task: "review", role: "risk-reviewer", mode: "model", text: JSON.stringify(review) },
+        {
+          task: "universe",
+          role: "universe-builder",
+          mode: "deterministic",
+          text: "NOW IWM QQQ SPY TLT",
+        },
+        {
+          task: "regime",
+          role: "regime-analyst",
+          mode: "model",
+          text: JSON.stringify(REGIME_JSON_0903),
+        },
+        {
+          task: "design",
+          role: "structure-designer",
+          mode: "model",
+          text: "{}",
+        },
+        {
+          task: "review",
+          role: "risk-reviewer",
+          mode: "model",
+          text: JSON.stringify(review),
+        },
       ],
     } as RunReport;
     const view = buildView(report, SPEC);

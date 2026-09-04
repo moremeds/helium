@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseTeamYaml } from "@helium/core";
+import { parseTeamYaml, topologicalOrder } from "@helium/core";
 import { VOCABULARY } from "../tools/index.js";
 
 const TEAM = join(__dirname, "..", "team.yaml");
@@ -218,4 +218,82 @@ it("the settlement level is demanded where a proposal is born, not only where it
     expect(manifest.tasks.find((t) => t.id === id)?.prompt ?? "", id).toContain(
       '"side": "above"|"below"',
     );
+});
+
+describe("the editor is one author over seven fragments", () => {
+  const task = manifest.tasks.find((entry) => entry.id === "edit");
+
+  it("routes on reason.deep, declared on the TASK — which is what the router prices", () => {
+    // Same reason `design` and `review` name it: runner.ts builds the
+    // WorkOrder from `task.requires`, so a judgement step that declares only
+    // the cheap capability is routed to the cheap model. Writing the whole
+    // brief in one pass is the deepest reasoning step in the run.
+    expect(task?.requires ?? []).toContain("reason.deep");
+    expect(task?.requires ?? []).toContain("long.context");
+    expect(manifest.roles.editor?.requires ?? []).toContain("reason.deep");
+    expect(manifest.roles.editor?.requires ?? []).toContain("long.context");
+  });
+
+  it("runs last, after every step whose output it edits", () => {
+    // `dependsOn` is what FEEDS it: runner.ts forwards each named step's whole
+    // output into the prompt, so this list is the editor's desk. An editor
+    // missing a dependency is an author who never saw a chapter.
+    expect(task?.phases).toEqual(["premarket"]);
+    expect(task?.dependsOn ?? []).toEqual([
+      "universe",
+      "gex",
+      "overnight",
+      "regime",
+      "scenarios",
+      "design",
+      "review",
+    ]);
+    const order = topologicalOrder(manifest);
+    for (const dependency of task?.dependsOn ?? [])
+      expect(order.indexOf(dependency), dependency).toBeLessThan(
+        order.indexOf("edit"),
+      );
+  });
+
+  it("carries the style exemplar in the TASK prompt, where the 4000-char cap is not", () => {
+    // TeamRoleSchema caps `persona` at 4000 characters and TeamTaskSchema caps
+    // `prompt` at 20000. The exemplar is the approved mockup's own prose and
+    // does not fit in a persona, so it lives in the prompt — and the persona
+    // has to stay under its cap for parseTeamYaml to accept the file at all.
+    expect((manifest.roles.editor?.persona ?? "").length).toBeLessThanOrEqual(
+      4000,
+    );
+    const prompt = task?.prompt ?? "";
+    expect(prompt.length).toBeLessThanOrEqual(20_000);
+    expect(prompt).toContain("STYLE EXEMPLAR");
+    expect(prompt).toContain("Rates are still the first cause");
+  });
+
+  it("forbids the editor every number on a candidate except the words around it", () => {
+    const prompt = task?.prompt ?? "";
+    expect(prompt).toContain(
+      "`candidates` entries carry ONLY `id` and `rationale`",
+    );
+    expect(prompt).toContain("cannot be changed here");
+    // The three rules the brief is judged on.
+    expect(prompt).toContain("what CHANGED");
+    expect(prompt).toContain("No filler sentence");
+    // The word budget replaced the flat 120-words-per-section cap on
+    // 2026-09-04: the brief that shipped the day before ran to 1,747 rendered
+    // words because nothing capped the headline, the decision block or a
+    // rationale.
+    expect(prompt).toContain("at most 60 words");
+    expect(prompt).toContain("at most 800 words");
+    expect(prompt).toContain("never an HTTP status code in prose");
+  });
+
+  it("reads yesterday's brief, and only through the tool that caps it", () => {
+    expect(manifest.roles.editor?.permissions.tools).toEqual([
+      "ow_prior_brief",
+    ]);
+    const prompt = task?.prompt ?? "";
+    expect(prompt).toContain("ow_prior_brief");
+    // A day with no prior report is one line, not a silent gap.
+    expect(prompt).toContain("prior:null");
+  });
 });
