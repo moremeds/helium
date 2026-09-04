@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 // Asia/Hong_Kong, so these are HKT numbers; there is no zone key in the plist
 // format to write, which is why the named zone lives in tenant.yaml instead.
 const PHASES = {
-  premarket: { Hour: 18, Minute: 0 },
+  premarket: { Hour: 20, Minute: 45 },
   frank: { Hour: 21, Minute: 0, Weekday: 1 },
   intraday: { Hour: 1, Minute: 0 },
   close: { Hour: 4, Minute: 15 },

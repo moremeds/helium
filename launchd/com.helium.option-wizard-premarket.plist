@@ -12,8 +12,8 @@
   </array>
   <key>StartCalendarInterval</key>
   <dict>
-    <key>Hour</key><integer>18</integer>
-    <key>Minute</key><integer>0</integer>
+    <key>Hour</key><integer>20</integer>
+    <key>Minute</key><integer>45</integer>
   </dict>
   <key>StandardOutPath</key>
   <string>/Users/moremeds/.helium/logs/option-wizard-premarket.log</string>
