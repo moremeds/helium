@@ -12,8 +12,19 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
+import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
+
+export type {
+  Charts,
+  CurvePoint,
+  GexLevel,
+  GexProfileChart,
+  PolicyMeeting,
+  PolicyPathChart,
+  YieldCurveChart,
+} from "./charts.js";
 
 /**
  * One price that ends a thesis, and which way it has to go to do it.
@@ -158,6 +169,12 @@ export interface BriefView {
   degradation?: string;
   /** When set, the brief IS this line: no candidates, no sections. */
   empty?: string;
+  /** Drawn from the run's raw tool outputs, never from a model step. Empty
+   *  `gex` and absent curve/path all mean the tool did not answer. */
+  charts: Charts;
+  /** True when an `edit` step's document supplied the prose. Display-only —
+   *  the footer says which pipeline wrote the words the reader is reading. */
+  edited?: boolean;
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -905,7 +922,168 @@ function decisionFrom(raw: unknown): Array<{ label: string; value: string }> {
   );
 }
 
-export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+/**
+ * The `edit` step's document, applied over the per-step assembly.
+ *
+ * WHY there is an editor at all: the brief was seven small JSON fragments
+ * stitched by a template, each written by an agent that could not see the
+ * others. The approved mockup was written by one author holding all the data,
+ * and the gap between the two is not a template problem — it is an authorship
+ * problem. The editor is that one author; this function is the seam where its
+ * document wins.
+ *
+ * FIELD BY FIELD, and only where the editor actually wrote something usable.
+ * A missing or malformed field falls back to the per-step assembly rather than
+ * blanking the section: a run whose editor step was refused, timed out or
+ * answered in prose still delivers the brief the pipeline already knew how to
+ * build.
+ *
+ * `candidates` is the exception that defines the rule. The editor may rewrite
+ * a `rationale` and NOTHING else on a candidate — every strike, price, width,
+ * payoff point, invalidation level and id stays exactly as `candidatesFrom`
+ * and `priceStructure` computed it. Eight of eleven model-written numbers
+ * audited across the 2026-09-02 and 09-03 runs were wrong; an editing pass is
+ * a place for prose to improve, never for arithmetic to be re-entered by hand.
+ * Numeric keys on an editor candidate are dropped silently here because the
+ * prompt already forbids them and a refusal would cost the reader the brief.
+ */
+interface EditorDoc {
+  headline?: string;
+  tape?: TapeItem[];
+  schedule?: ScheduleRow[];
+  overnight?: string[];
+  sections?: Section[];
+  coverage?: Section;
+  decision?: Array<{ label: string; value: string }>;
+  riskList?: Array<{ ticker: string; reason: string }>;
+  /** id -> rationale. Prose only; every other key on the entry is ignored. */
+  rationales?: Map<string, string>;
+}
+
+function sectionList(raw: unknown): Section[] {
+  if (!Array.isArray(raw)) return [];
+  const out: Section[] = [];
+  for (const entry of raw) {
+    if (entry === null || typeof entry !== "object") continue;
+    const { title, body } = entry as Record<string, unknown>;
+    if (typeof title !== "string" || typeof body !== "string") continue;
+    if (title.trim() === "" || body.trim() === "") continue;
+    out.push({ title: title.trim(), body: body.trim() });
+  }
+  return out;
+}
+
+function editorDocFrom(report: RunReport): EditorDoc | undefined {
+  const step = report.steps.find((entry) => entry.task === "edit");
+  if (step === undefined || step.failure !== undefined) return undefined;
+  const parsed = extractJson(step.text);
+  if (parsed === null) return undefined;
+
+  const headline =
+    typeof parsed.headline === "string" && parsed.headline.trim() !== ""
+      ? parsed.headline.trim()
+      : undefined;
+  const tape = tapeFrom(parsed.tape);
+  const schedule = scheduleFrom(parsed.schedule);
+  const overnight = Array.isArray(parsed.overnight)
+    ? parsed.overnight
+        .filter(
+          (line): line is string =>
+            typeof line === "string" && line.trim() !== "",
+        )
+        .map((line) => line.trim())
+        .slice(0, 5)
+    : [];
+  const sections = sectionList(parsed.sections);
+  const coverage = sectionList([parsed.coverage])[0];
+  const decision = decisionFrom(parsed.decision);
+  const riskList = Array.isArray(parsed.riskList)
+    ? parsed.riskList.flatMap((entry) => {
+        if (entry === null || typeof entry !== "object") return [];
+        const row = entry as Record<string, unknown>;
+        return typeof row.ticker === "string" && typeof row.reason === "string"
+          ? [{ ticker: row.ticker, reason: row.reason }]
+          : [];
+      })
+    : [];
+  const rationales = new Map<string, string>();
+  if (Array.isArray(parsed.candidates)) {
+    for (const entry of parsed.candidates) {
+      if (entry === null || typeof entry !== "object") continue;
+      const { id, rationale } = entry as Record<string, unknown>;
+      if (typeof id !== "string" || typeof rationale !== "string") continue;
+      if (rationale.trim() === "") continue;
+      rationales.set(id, rationale.trim());
+      // The minted id is `<TICKER>-<day>-<n>` and the editor never sees one —
+      // it reads the reviewer's proposals, which carry no id by design. The
+      // 2026-09-03 run keyed its three rationales "SPY", "QQQ" and "IWM", and
+      // all three were dropped on an exact-id miss. The prompt now spells the
+      // format out; this keeps a bare ticker working too, and `applyEditor`
+      // consults it only when the id missed AND the ticker is unique among
+      // the cards.
+      const ticker = id.split("-")[0];
+      if (ticker !== undefined && ticker !== "")
+        rationales.set(`ticker:${ticker}`, rationale.trim());
+    }
+  }
+
+  return {
+    ...(headline === undefined ? {} : { headline }),
+    ...(tape.length === 0 ? {} : { tape }),
+    ...(schedule.length === 0 ? {} : { schedule }),
+    ...(overnight.length === 0 ? {} : { overnight }),
+    ...(sections.length === 0 ? {} : { sections }),
+    ...(coverage === undefined ? {} : { coverage }),
+    ...(decision.length === 0 ? {} : { decision }),
+    ...(riskList.length === 0 ? {} : { riskList }),
+    ...(rationales.size === 0 ? {} : { rationales }),
+  };
+}
+
+/** The editor's document laid over the assembled view. Nothing numeric moves. */
+function applyEditor(view: BriefView, doc: EditorDoc | undefined): BriefView {
+  if (doc === undefined) return view;
+  return {
+    ...view,
+    edited: true,
+    ...(doc.headline === undefined ? {} : { headline: doc.headline }),
+    ...(doc.tape === undefined ? {} : { tape: doc.tape }),
+    ...(doc.schedule === undefined ? {} : { schedule: doc.schedule }),
+    ...(doc.overnight === undefined ? {} : { overnight: doc.overnight }),
+    ...(doc.sections === undefined ? {} : { sections: doc.sections }),
+    ...(doc.coverage === undefined ? {} : { coverage: doc.coverage }),
+    ...(doc.decision === undefined ? {} : { decision: doc.decision }),
+    ...(doc.riskList === undefined ? {} : { riskList: doc.riskList }),
+    candidates:
+      doc.rationales === undefined
+        ? view.candidates
+        : view.candidates.map((candidate) => {
+            // Ambiguity loses: two cards on one ticker mean a bare-ticker key
+            // cannot say which rationale belongs to which, and the reviewer's
+            // own words beat the wrong editor sentence.
+            const unique =
+              view.candidates.filter((row) => row.ticker === candidate.ticker)
+                .length === 1;
+            const rationale =
+              doc.rationales!.get(candidate.id) ??
+              (unique
+                ? doc.rationales!.get(`ticker:${candidate.ticker}`)
+                : undefined);
+            return rationale === undefined
+              ? candidate
+              : { ...candidate, rationale };
+          }),
+  };
+}
+
+/**
+ * The per-step assembly: seven agents' fragments stitched into one view.
+ *
+ * Still the fallback path, and still the only path on a run with no `edit`
+ * step — an intraday run, a close run, a premarket run whose editor was gated
+ * or timed out. `buildView` below is what the renderer calls.
+ */
+function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   const dateEtDay = report.day;
   const degradation = degradationFrom(report);
 
@@ -953,6 +1131,8 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
+    // Filled by `buildView`, which knows which tickers reached a card.
+    charts: { gex: [] },
     ...(degradation === undefined ? {} : { degradation }),
   };
 
@@ -1075,6 +1255,27 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     regime,
     candidates: checked.slice(0, 5),
     riskList,
+  };
+}
+
+/**
+ * The view the renderer draws: the per-step assembly, the editor's document
+ * laid over it, and the charts drawn from the raw tool outputs underneath
+ * both.
+ *
+ * Order matters. Charts are computed LAST and from `toolPayloads` alone, so no
+ * arrangement of editor fields can reach them: an editor that renamed a
+ * candidate's ticker would move which profile is shown and could not touch a
+ * single number inside it.
+ */
+export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+  const view = applyEditor(assembleView(report, cfg), editorDocFrom(report));
+  return {
+    ...view,
+    charts: chartsFrom(
+      toolPayloads(report),
+      view.candidates.map((candidate) => candidate.ticker),
+    ),
   };
 }
 

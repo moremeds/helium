@@ -379,7 +379,39 @@ function handoff(
  * `tool/result` events the fold measures into `toolOutputBytes`. The tool is
  * never re-run to obtain them, and nothing is summarised: a gate comparing the
  * model's text against a paraphrase would pass what it exists to catch.
+ *
+ * `message.content` comes in three real shapes and this reads all of them.
+ * Some runtimes put the tool's own string there. A dsh session.jsonl puts an
+ * ARRAY of blocks, and the block's payload sits one level deeper than it
+ * looks: verified against a real log on 2026-09-04, it is
+ * `[{ type: "tool-result", toolCallId, content: [{ type: "text", text: "…" }] }]`
+ * — a tool-result block whose own `content` holds the text blocks. The flatter
+ * `[{ type: "tool-result", text: "…" }]` that `fold.spec.ts` froze on
+ * 2026-09-02 is the second shape, still accepted here.
+ *
+ * Reading only the outermost object and stringifying it produced a JSON ARRAY
+ * whose first character is `[`, so every reader downstream that parses a tool
+ * payload as an OBJECT skipped it in silence: the tenant renderer's spot map,
+ * earnings map and settlement ledger, and every gate that checks a model's
+ * claim against what it was handed. The tell was a run whose audit table
+ * listed seventeen tool calls and whose brief still said "no tool spot; not
+ * verified" — blindness that looks exactly like a tool that was never called.
+ *
+ * A block with no readable text falls back to the block itself rather than
+ * being dropped. Losing a payload silently is how this survived a provider.
  */
+function blockTexts(block: unknown): string[] {
+  if (typeof block === "string") return [block];
+  if (block === null || typeof block !== "object") {
+    return [JSON.stringify(block ?? null)];
+  }
+  const row = block as Record<string, unknown>;
+  if (typeof row.text === "string") return [row.text];
+  if (Array.isArray(row.content)) return row.content.flatMap(blockTexts);
+  if (typeof row.content === "string") return [row.content];
+  return [JSON.stringify(block)];
+}
+
 function toolResultTexts(
   events: readonly { type: string; data: unknown }[],
 ): string[] {
@@ -389,9 +421,15 @@ function toolResultTexts(
     const data = event.data as Record<string, unknown>;
     const message = data.message as Record<string, unknown> | undefined;
     const content = message?.content;
-    texts.push(
-      typeof content === "string" ? content : JSON.stringify(content ?? null),
-    );
+    if (typeof content === "string") {
+      texts.push(content);
+      continue;
+    }
+    if (Array.isArray(content)) {
+      texts.push(...content.flatMap(blockTexts));
+      continue;
+    }
+    texts.push(JSON.stringify(content ?? null));
   }
   return texts;
 }

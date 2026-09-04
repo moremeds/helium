@@ -463,9 +463,13 @@ describe("ow_argon_levels", () => {
     });
     expect(row.gamma.hvl).toBeUndefined();
     expect(row.gammaAsOf).toBe("2026-09-03");
+    // `gamma` survives the mapping: it is the per-strike exposure magnitude
+    // the renderer's gamma-profile bars are drawn from, and it is the only one
+    // any tool here returns. Gamma Flip's own is 0 in argon's live answer and
+    // is kept as 0 rather than dropped — a level with no exposure is a fact.
     expect(row.closest_levels).toEqual([
-      { label: "Call Wall", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848 },
-      { label: "Gamma Flip", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926 },
+      { label: "Call Wall", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848, gamma: 75477.6864 },
+      { label: "Gamma Flip", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926, gamma: 0 },
     ]);
     expect(row.expected_range).toEqual({ low: 762.99, high: 774.81 });
     expect(row.as_of).toBe("2026-09-03");

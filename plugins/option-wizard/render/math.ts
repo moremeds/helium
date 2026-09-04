@@ -83,8 +83,15 @@ function intrinsic(legs: Leg[], spot: number): number {
   }, 0);
 }
 
-/** P&L per contract at an expiry spot, including the premium paid or received. */
-function pnlAtSpot(legs: Leg[], net: number, spot: number): number {
+/**
+ * P&L per contract at an expiry spot, including the premium paid or received.
+ *
+ * Exported because the html payoff figure draws the profile from this same
+ * arithmetic. A renderer that re-derived the curve by interpolating between
+ * `pnlAt` points would draw a shape that disagrees with `maxGain`/`maxLoss`
+ * computed here; there must be one payoff function, not two.
+ */
+export function payoffAt(legs: Leg[], net: number, spot: number): number {
   return round2((intrinsic(legs, spot) + net) * MULTIPLIER);
 }
 
@@ -137,7 +144,7 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
     (a, b) => a - b,
   );
   const bounded = [0, ...strikes];
-  const boundedPnl = bounded.map((point) => pnlAtSpot(legs, net, point));
+  const boundedPnl = bounded.map((point) => payoffAt(legs, net, point));
 
   // Above the highest strike every call is exercised or expired, so the slope
   // is constant: the signed call quantity. Puts contribute nothing there. Below
@@ -155,7 +162,7 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
   // found too. With slopeUp === 0 the ray is flat and no crossing can hide
   // there, so the extra point costs nothing.
   const scan = [...bounded, strikes[strikes.length - 1]! * 2 + 100];
-  const scanPnl = scan.map((point) => pnlAtSpot(legs, net, point));
+  const scanPnl = scan.map((point) => payoffAt(legs, net, point));
   const breakevens: number[] = [];
   for (let i = 0; i < scan.length - 1; i += 1) {
     const a = scanPnl[i]!;
@@ -188,11 +195,11 @@ export function priceStructure(legs: Leg[], spot?: number): Pricing {
         ? strikes.map((at) => ({
             pct: null,
             spot: at,
-            pnl: pnlAtSpot(legs, net, at),
+            pnl: payoffAt(legs, net, at),
           }))
         : PCTS.map((pct) => {
             const at = round2(spot * (1 + pct / 100));
-            return { pct, spot: at, pnl: pnlAtSpot(legs, net, at) };
+            return { pct, spot: at, pnl: payoffAt(legs, net, at) };
           }),
   };
 }
