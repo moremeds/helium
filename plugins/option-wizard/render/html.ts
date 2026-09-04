@@ -342,6 +342,11 @@ export function renderHtml(view: BriefView): string {
          ${view.candidates.length === 0 ? "" : candidateRows(view.candidates)}
          ${flashLink(view)}`;
 
+  // Muted, not WARN: nothing failed, a source is just older than its cadence.
+  const stalenessRow =
+    view.staleness === undefined || view.staleness.length === 0
+      ? ""
+      : `<tr><td class="pad" style="padding:0 32px 12px;color:${MUTED};font-size:12px">${esc(view.staleness.join("; "))}</td></tr>`;
   const degradationRow =
     view.degradation === undefined
       ? ""
@@ -395,7 +400,7 @@ export function renderHtml(view: BriefView): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background-color:${PAPER}">
  <tr><td align="center">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="max-width:640px;background-color:${PAPER};font-family:${SANS};${NUM}">
-   ${header}${body}${degradationRow}${footer}
+   ${header}${body}${stalenessRow}${degradationRow}${footer}
   </table>
  </td></tr>
 </table>

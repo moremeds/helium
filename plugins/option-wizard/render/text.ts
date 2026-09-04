@@ -95,6 +95,8 @@ export function renderText(view: BriefView): string {
   if (view.empty !== undefined) {
     lines.push(view.empty, "");
     lines.push(...flashLine(view));
+    if (view.staleness !== undefined && view.staleness.length > 0)
+      lines.push(view.staleness.join("; "), "");
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
@@ -107,6 +109,8 @@ export function renderText(view: BriefView): string {
       lines.push(...candidateLines(candidate));
   }
   lines.push(...flashLine(view));
+  if (view.staleness !== undefined && view.staleness.length > 0)
+    lines.push(view.staleness.join("; "), "");
   if (view.degradation !== undefined) lines.push(view.degradation, "");
   return lines.join("\n");
 }

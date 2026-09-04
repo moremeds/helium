@@ -748,3 +748,63 @@ describe("tape rows are balanced", () => {
     expect(tapeRowSizes(0)).toEqual([]);
   });
 });
+
+describe("a policy-path snapshot older than its cadence says so", () => {
+  // Shape recorded from ow_argon_policy_path on 2026-09-03 (render-editor.spec
+  // POLICY_TOOL): `snapshotDate` beside a `meetings` array. argon writes the
+  // snapshot for day D after the ET close, so D-1 is what every phase sees.
+  const policy = (snapshotDate: string): string =>
+    JSON.stringify({
+      source: "frenzy_capital fed-funds futures via argon",
+      snapshotDate,
+      meetings: [
+        {
+          snapshot_date: snapshotDate,
+          meeting_date: "2026-09-16",
+          payload: { label: "9/16", stance: "HIKE", probability: 60 },
+        },
+      ],
+    });
+  const withPolicy = (snapshotDate: string, day: string): RunReport => {
+    const base = report0903();
+    return {
+      ...base,
+      day,
+      steps: base.steps.map((step) =>
+        step.task === "regime"
+          ? { ...step, toolOutputs: [policy(snapshotDate)] }
+          : step,
+      ),
+    };
+  };
+
+  it("prints the as-of into coverage and no stale line for the normal D-1", () => {
+    const view = buildView(withPolicy("2026-09-02", "2026-09-03"), SPEC);
+    expect(view.staleness).toBeUndefined();
+    expect(view.coverage?.body).toContain("Fed path (argon) — as of 2026-09-02");
+  });
+
+  it("is quiet on a Monday reading Friday's snapshot (3 days)", () => {
+    const view = buildView(withPolicy("2026-09-04", "2026-09-07"), SPEC);
+    expect(view.staleness).toBeUndefined();
+  });
+
+  it("names a gap past the weekend, in both parts", () => {
+    const report = withPolicy("2026-09-02", "2026-09-07");
+    const view = buildView(report, SPEC);
+    expect(view.staleness).toEqual([
+      "Fed path: snapshot 2026-09-02, 5 days behind",
+    ]);
+    const out = renderReport(report, SPEC);
+    expect(out.html).toContain("Fed path: snapshot 2026-09-02, 5 days behind");
+    expect(out.text).toContain("Fed path: snapshot 2026-09-02, 5 days behind");
+    // Not a failure: the degradation line must keep meaning "something broke".
+    expect(view.degradation ?? "").not.toContain("Fed path");
+  });
+
+  it("says nothing when no such payload exists", () => {
+    const view = buildView(report0903(), SPEC);
+    expect(view.staleness).toBeUndefined();
+    expect(view.coverage?.body ?? "").not.toContain("Fed path (argon)");
+  });
+});

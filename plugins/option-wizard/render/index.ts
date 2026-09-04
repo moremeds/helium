@@ -182,6 +182,12 @@ export interface BriefView {
   decision?: Array<{ label: string; value: string }>;
   /** ONE line, present only when something actually failed. */
   degradation?: string;
+  /** Freshness notes the renderer asserts on its own from the run's raw tool
+   *  outputs — never from a model step. Present only when a source is older
+   *  than its own cadence allows (a Fed-path snapshot more than three
+   *  calendar days behind the report day). NOT folded into `degradation`:
+   *  nothing failed, and that line must keep meaning "something broke". */
+  staleness?: string[];
   /** When set, the brief IS this line: no candidates, no sections. */
   empty?: string;
   /** Drawn from the run's raw tool outputs, never from a model step. Empty
@@ -632,6 +638,45 @@ function toolPayloads(report: RunReport): Record<string, unknown>[] {
  * promise, and the only thing that makes it checkable is the list of promises
  * the run was handed.
  */
+/** The Fed-path snapshot date, identified by SHAPE (`snapshotDate` beside a
+ *  `meetings` array) — the producing tool is not recorded, same rule as
+ *  `ledgerIds` and `earningsFromTools`. */
+function policySnapshotDate(report: RunReport): string | undefined {
+  for (const payload of toolPayloads(report)) {
+    if (
+      typeof payload.snapshotDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payload.snapshotDate) &&
+      Array.isArray(payload.meetings)
+    )
+      return payload.snapshotDate;
+  }
+  return undefined;
+}
+
+/** Calendar days from `from` to `to`, both `yyyy-mm-dd`; NaN-safe as 0. */
+function daysBetween(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86_400_000) : 0;
+}
+
+/** argon writes the policy-path snapshot for day D after the ET close
+ *  (verified 2026-09-04: `first_seen_at` = D+1 06:45 HKT), so every phase
+ *  sees D-1 and that is the design, not a fault. Only a gap past a weekend —
+ *  more than three calendar days — is argon's nightly job having missed. The
+ *  2026-09-03 intraday brief printed a day-old "60% HIKE" beside live levels
+ *  and only the model's prose happened to say so; the as-of now goes into
+ *  `coverage` unconditionally, and this line fires only for a real gap. */
+const POLICY_STALE_AFTER_DAYS = 3;
+
+function stalenessFrom(report: RunReport): string[] {
+  const snapshot = policySnapshotDate(report);
+  if (snapshot === undefined) return [];
+  const behind = daysBetween(snapshot, report.day);
+  return behind > POLICY_STALE_AFTER_DAYS
+    ? [`Fed path: snapshot ${snapshot}, ${String(behind)} days behind`]
+    : [];
+}
+
 function ledgerIds(report: RunReport): Set<string> {
   const ids = new Set<string>();
   for (const payload of toolPayloads(report)) {
@@ -1190,7 +1235,19 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   const coverageIdx = rawSections.findIndex((entry) =>
     /layer coverage/iu.test(entry.title),
   );
-  const coverage = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
+  const found = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
+  // The Fed path's as-of belongs in the coverage table with every other
+  // source's date — asserted here from the tool payload, so a model that
+  // forgets to write it cannot leave it out.
+  const policyAsOf = policySnapshotDate(report);
+  const coverage =
+    found === undefined || policyAsOf === undefined
+      ? found
+      : {
+          ...found,
+          body: `${found.body} | Fed path (argon) — as of ${policyAsOf}`,
+        };
+  const staleness = stalenessFrom(report);
   const sections =
     coverageIdx === -1
       ? rawSections
@@ -1215,6 +1272,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
     overnight: overnightFrom(report),
     sections: [],
     ...(coverage === undefined ? {} : { coverage }),
+    ...(staleness.length === 0 ? {} : { staleness }),
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
