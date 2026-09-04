@@ -69,9 +69,11 @@ reportTimezone: America/New_York
 # missing. Timezone is named, never a UTC offset: HK does not observe DST, but
 # writing +08:00 would make that a property of this file instead of the zone.
 triggers:
-  # 06:00 ET — the US tape is FROZEN at this hour; see the regime prompt.
+  # 08:45 ET — after the 08:30 ET major-data slot (NFP/CPI/etc land in the
+  # window), still well before the 09:30 open. The US tape is FROZEN at this
+  # hour regardless; see the regime prompt.
   - kind: cron
-    schedule: "0 18 * * *"
+    schedule: "45 20 * * *"
     timezone: Asia/Hong_Kong
     phase: premarket
   # Monday only, 09:00 ET. Frank posts 12:37 UTC = 20:37 HKT, two and a half
@@ -121,7 +123,7 @@ delivery:
       # boundary is 00:00 ET = 12:00 HKT (13:00 HKT in winter). Each HK trigger
       # lands on this ET date:
       #
-      #   premarket  18:00 HKT -> 06:00 ET, SAME date
+      #   premarket  20:45 HKT -> 08:45 ET, SAME date
       #   frank  Mon 21:00 HKT -> 09:00 ET Monday
       #   intraday   01:00 HKT -> 13:00 ET, PREVIOUS date
       #   close      04:15 HKT -> 16:15 ET, PREVIOUS date
