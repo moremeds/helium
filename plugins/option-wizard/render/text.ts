@@ -12,6 +12,7 @@
  * @module dsh-plugin-tenant-option-wizard/render/text
  */
 import type { BriefView, CandidateView } from "./index.js";
+import { causeText } from "./html.js";
 import { invalidationLabel } from "./math.js";
 import { flashUrl } from "./week.js";
 
@@ -85,6 +86,7 @@ function flashLine(view: BriefView): string[] {
 export function renderText(view: BriefView): string {
   const lines: string[] = [
     view.headline === "" ? view.tenant : view.headline,
+    ...(causeText(view.cause) === "" ? [] : [causeText(view.cause)]),
     `${view.date} — ${view.tenant} [${view.outcome}]`,
     "",
   ];
@@ -93,6 +95,8 @@ export function renderText(view: BriefView): string {
   if (view.empty !== undefined) {
     lines.push(view.empty, "");
     lines.push(...flashLine(view));
+    if (view.staleness !== undefined && view.staleness.length > 0)
+      lines.push(view.staleness.join("; "), "");
     if (view.degradation !== undefined) lines.push(view.degradation, "");
     return lines.join("\n");
   }
@@ -105,6 +109,8 @@ export function renderText(view: BriefView): string {
       lines.push(...candidateLines(candidate));
   }
   lines.push(...flashLine(view));
+  if (view.staleness !== undefined && view.staleness.length > 0)
+    lines.push(view.staleness.join("; "), "");
   if (view.degradation !== undefined) lines.push(view.degradation, "");
   return lines.join("\n");
 }

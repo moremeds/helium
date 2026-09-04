@@ -568,10 +568,8 @@ describe("size budget", () => {
     // link, to the scratchpad for visual inspection — not part of the repo.
     process.env.ARGON_APP_BASE = "https://argon.example.internal";
     const checkHtml =
-      renderReport(
-        { ...report0903(), phase: "premarket" } as RunReport,
-        SPEC,
-      ).html ?? "";
+      renderReport({ ...report0903(), phase: "premarket" } as RunReport, SPEC)
+        .html ?? "";
     delete process.env.ARGON_APP_BASE;
     const scratchpad =
       "/private/tmp/claude-501/-Users-chenxi-projects-helium/10e64f69-0a92-4e54-8bc7-eda824a2d9cf/scratchpad";
@@ -686,6 +684,60 @@ describe("the abridged mail", () => {
   });
 });
 
+describe("the cause line under the headline", () => {
+  // The real Unusual Whales row for Governor Waller's 2026-09-03 remarks —
+  // the cause the intraday brief that day never named.
+  const WALLER = {
+    created_at: "2026-09-03T13:03:25Z",
+    headline:
+      "FED WALLER: CURRENT FED RATES MAY BE ENOUGH TO BRING INFLATION BACK TO 2%—NO RUSH TO CUT UNTIL MORE PROGRESS EMERGES",
+  };
+  const withCause = (cause: unknown): RunReport => {
+    const base = report0903();
+    return {
+      ...base,
+      steps: base.steps.map((step) =>
+        step.task === "regime"
+          ? { ...step, text: JSON.stringify({ ...REGIME_JSON_0903, cause }) }
+          : step,
+      ),
+    };
+  };
+
+  it("renders a located cause as 'Why it moved' in both parts", () => {
+    const out = renderReport(
+      withCause({
+        located: true,
+        headline: WALLER.headline,
+        at: WALLER.created_at,
+        source: "ow_uw_headlines",
+        searchTerm: "Waller",
+      }),
+      SPEC,
+    );
+    expect(out.html).toContain("Why it moved — FED WALLER: CURRENT FED RATES");
+    expect(out.html).toContain("(2026-09-03T13:03:25Z)");
+    expect(out.text).toContain(
+      `Why it moved — ${WALLER.headline} (2026-09-03T13:03:25Z)`,
+    );
+  });
+
+  it("renders located:false as 'Cause not located.'", () => {
+    const out = renderReport(
+      withCause({ located: false, searched: ["Waller", "Fed"] }),
+      SPEC,
+    );
+    expect(out.html).toContain("Cause not located.");
+    expect(out.text).toContain("Cause not located.");
+  });
+
+  it("prints no cause line when the step wrote none", () => {
+    const out = renderReport(report0903(), SPEC);
+    expect(out.html).not.toContain("Why it moved");
+    expect(out.html).not.toContain("Cause not located");
+  });
+});
+
 describe("tape rows are balanced", () => {
   it("lays ten tiles out as 3/3/2/2, never leaving one tile alone", () => {
     expect(tapeRowSizes(10)).toEqual([3, 3, 2, 2]);
@@ -694,5 +746,93 @@ describe("tape rows are balanced", () => {
     expect(tapeRowSizes(4)).toEqual([2, 2]);
     expect(tapeRowSizes(1)).toEqual([1]);
     expect(tapeRowSizes(0)).toEqual([]);
+  });
+});
+
+describe("a policy-path snapshot older than its cadence says so", () => {
+  // Shape recorded from ow_argon_policy_path on 2026-09-03 (render-editor.spec
+  // POLICY_TOOL): `snapshotDate` beside a `meetings` array. argon writes the
+  // snapshot for day D after the ET close, so D-1 is what every phase sees.
+  const policy = (snapshotDate: string): string =>
+    JSON.stringify({
+      source: "frenzy_capital fed-funds futures via argon",
+      snapshotDate,
+      meetings: [
+        {
+          snapshot_date: snapshotDate,
+          meeting_date: "2026-09-16",
+          payload: { label: "9/16", stance: "HIKE", probability: 60 },
+        },
+      ],
+    });
+  const withPolicy = (snapshotDate: string, day: string): RunReport => {
+    const base = report0903();
+    return {
+      ...base,
+      day,
+      steps: base.steps.map((step) =>
+        step.task === "regime"
+          ? { ...step, toolOutputs: [policy(snapshotDate)] }
+          : step,
+      ),
+    };
+  };
+
+  it("prints the as-of into coverage and no stale line for the normal D-1", () => {
+    const view = buildView(withPolicy("2026-09-02", "2026-09-03"), SPEC);
+    expect(view.staleness).toBeUndefined();
+    expect(view.coverage?.body).toContain(
+      "Fed path (argon) — as of 2026-09-02",
+    );
+  });
+
+  it("is quiet on a Monday reading Friday's snapshot (3 days)", () => {
+    const view = buildView(withPolicy("2026-09-04", "2026-09-07"), SPEC);
+    expect(view.staleness).toBeUndefined();
+  });
+
+  it("names a gap past the weekend, in both parts", () => {
+    const report = withPolicy("2026-09-02", "2026-09-07");
+    const view = buildView(report, SPEC);
+    expect(view.staleness).toEqual([
+      "Fed path: snapshot 2026-09-02, 5 days behind",
+    ]);
+    const out = renderReport(report, SPEC);
+    expect(out.html).toContain("Fed path: snapshot 2026-09-02, 5 days behind");
+    expect(out.text).toContain("Fed path: snapshot 2026-09-02, 5 days behind");
+    // Not a failure: the degradation line must keep meaning "something broke".
+    expect(view.degradation ?? "").not.toContain("Fed path");
+  });
+
+  it("keeps the as-of when the editor rewrites coverage (seen live 2026-09-04)", () => {
+    const base = withPolicy("2026-09-02", "2026-09-03");
+    const report: RunReport = {
+      ...base,
+      steps: [
+        ...base.steps,
+        {
+          task: "edit",
+          role: "editor",
+          mode: "model",
+          text: JSON.stringify({
+            coverage: {
+              title: "Layer Coverage",
+              body: "Rates — series only | Tape — SPY 771.39",
+            },
+          }),
+        } as RunReport["steps"][number],
+      ],
+    };
+    const view = buildView(report, SPEC);
+    expect(view.edited).toBe(true);
+    expect(view.coverage?.body).toBe(
+      "Rates — series only | Tape — SPY 771.39 | Fed path (argon) — as of 2026-09-02",
+    );
+  });
+
+  it("says nothing when no such payload exists", () => {
+    const view = buildView(report0903(), SPEC);
+    expect(view.staleness).toBeUndefined();
+    expect(view.coverage?.body ?? "").not.toContain("Fed path (argon)");
   });
 });

@@ -385,13 +385,17 @@ roles:
       appeared in a step you were handed. No sentence survives that would read
       the same tomorrow. No filler: no "as noted", "it is worth remembering",
       "in summary", "going forward", no hedge that is true under every outcome.
-      WORD BUDGET, and it is a budget, not a target — the 2026-09-03 brief
-      shipped at 1,747 rendered words and read as a wall:
-      - `headline` (today in one sentence): at most 30 words.
-      - each `sections` body: at most 60 words.
-      - each `decision` value: at most 25 words.
-      - each candidate `rationale`: at most 40 words.
-      - the whole brief: at most 800 words.
+      WORD BUDGET — enforced by the renderer, not by you. The 2026-09-03 brief
+      shipped at 1,747 rendered words and read as a wall; now:
+      - `headline`: 30 words. Over that, it is cut at its last sentence end.
+      - `sections`: at most FIVE. A sixth is dropped entirely.
+      - each `sections` body: 60 words. A body over that is cut back to its
+        last complete sentence inside the budget, so a sentence you start
+        past the budget is a sentence the reader never sees.
+      - each `decision` value: 25 words. Same cut.
+      - each candidate `rationale`: 40 words. Same cut.
+      Choose the five that matter and write them to length — the trim cannot
+      choose for you, it can only cut.
       Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
       and never an HTTP status code in prose. The reader does not run the
       harness; say what was not checked, not which call did not return.
@@ -502,8 +506,27 @@ tasks:
       "group"} rows straight from ow_uw_calendar, one per dated release or
       speech in the window you were given. `group` is a short label like
       "Today" or "Tomorrow". Omit a field the tool did not give you.
+      INTRADAY AND CLOSE. Before you write the reaction function, decide
+      whether the tape has a notable move: any index whose `changePct` from
+      ow_spot is beyond ±0.75, a 5bp move at any point on the curve per
+      ow_macro_rates, or a move beyond ±1.5% in gold or the dollar per
+      ow_tv_commodities — compare the tool's own change figure; never derive
+      one. If there is one and ow_uw_calendar lists no dated event before the
+      current hour, you MUST call ow_uw_headlines with `majorOnly: false` and
+      a `searchTerm` — a Fed name (Powell, Waller, Bowman, Williams, Hammack,
+      Goolsbee), "Fed", or the ticker of the moving asset — and cite the row
+      that explains the move: its `created_at` and its `headline` copied
+      character for character. Then write the field
+      `"cause": {"located": true, "headline": "<verbatim>", "at": "<the
+      row's created_at>", "source": "ow_uw_headlines", "searchTerm": "<what
+      you searched>"}`. If nothing in the feed explains it, write
+      `"cause": {"located": false, "searched": ["<term>", "<term>"]}` and say
+      "cause not located" in the reaction function. A cause you cannot cite
+      is not a cause: the 2026-09-03 intraday run explained a curve rally
+      from the curve itself while Governor Waller was on the wire, and named
+      him nowhere. Premarket writes no `cause` field at all.
       Reply as ONE JSON object and nothing else:
-      {"headline","tape":[...],"schedule":[...],"sections":[{"title","body"}]}
+      {"headline","tape":[...],"schedule":[...],"cause":{...},"sections":[{"title","body"}]}
       — one sections entry per section you were asked for, in that order, no
       prose outside the JSON. Your working notes are not a section.
 
@@ -568,14 +591,30 @@ tasks:
   # not run this phase forwards nothing and costs nothing.
   - id: edit
     role: editor
-    phases: [premarket]
-    dependsOn: [universe, gex, overnight, regime, scenarios, design, review]
+    # All three daily phases. Intraday shipped eight raw sections and close
+    # seven on 2026-09-03 because neither had an author; the renderer can cut
+    # but cannot choose. Phase-scoped dependencies (markout, scenarios, drift,
+    # recap) are harmless where they do not run: no text, dropped by handoff.
+    phases: [premarket, intraday, close]
+    dependsOn:
+      [
+        universe,
+        gex,
+        markout,
+        overnight,
+        regime,
+        scenarios,
+        design,
+        review,
+        drift,
+        recap,
+      ]
     requires: [long.context, reason.deep]
     prompt: |-
       Write the whole brief as one document. You have every step of this run
       above; the reader gets one note, not seven.
 
-      FIRST, call ow_prior_brief (phase premarket). Its answer is yesterday's
+      FIRST, call ow_prior_brief for THIS run's phase. Its answer is yesterday's
       own words. The first paragraph of your macro read says what CHANGED
       since it — the level that moved, by how much, and what that costs. If it
       returns prior:null, say so in one line and go on to today.
@@ -611,13 +650,17 @@ tasks:
       Every paragraph carries a number that appears in a step above. Say what
       changed, not what is. No filler sentence.
 
-      WORD BUDGET, and it is a budget, not a target — the 2026-09-03 brief
-      shipped at 1,747 rendered words and read as a wall:
-      - `headline` (today in one sentence): at most 30 words.
-      - each `sections` body: at most 60 words.
-      - each `decision` value: at most 25 words.
-      - each candidate `rationale`: at most 40 words.
-      - the whole brief: at most 800 words.
+      WORD BUDGET — enforced by the renderer, not by you. The 2026-09-03 brief
+      shipped at 1,747 rendered words and read as a wall; now:
+      - `headline`: 30 words. Over that, it is cut at its last sentence end.
+      - `sections`: at most FIVE. A sixth is dropped entirely.
+      - each `sections` body: 60 words. A body over that is cut back to its
+        last complete sentence inside the budget, so a sentence you start
+        past the budget is a sentence the reader never sees.
+      - each `decision` value: 25 words. Same cut.
+      - each candidate `rationale`: 40 words. Same cut.
+      Choose the five that matter and write them to length — the trim cannot
+      choose for you, it can only cut.
       Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
       and never an HTTP status code in prose. The reader does not run the
       harness; say what was not checked, not which call did not return.

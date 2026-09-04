@@ -28,7 +28,9 @@ const EMPTY_ENV: Record<string, string | undefined> = {};
 const tmp = mkdtempSync(join(tmpdir(), "ow-tv-"));
 
 function tool(name: string, env = EMPTY_ENV) {
-  const found = buildTools({ stateRoot: "/nonexistent", env }).find((t) => t.name === name);
+  const found = buildTools({ stateRoot: "/nonexistent", env }).find(
+    (t) => t.name === name,
+  );
   if (found === undefined) throw new Error(`no tool ${name}`);
   return found;
 }
@@ -39,7 +41,9 @@ describe("vocabulary", () => {
   });
 
   it("matches the built catalog exactly", () => {
-    const built = buildTools({ stateRoot: "/nonexistent", env: EMPTY_ENV }).map((t) => t.name);
+    const built = buildTools({ stateRoot: "/nonexistent", env: EMPTY_ENV }).map(
+      (t) => t.name,
+    );
     expect(built.sort()).toEqual([...VOCABULARY.keys()].sort());
   });
 
@@ -73,10 +77,16 @@ describe("absent environment", () => {
     ["ow_apex_bars", { symbol: "SPY" }, "OW_APEX_API_BASE is unset"],
     ["ow_argon_levels", { tickers: ["SPY"] }, "OW_ARGON_API_BASE is unset"],
     ["ow_uw_ticker_metrics", { tickers: ["AAPL"] }, "OW_UW_API_KEY is unset"],
-    ["ow_uw_market_state", { sector: "Technology", etf: "XLK" }, "OW_UW_API_KEY is unset"],
+    [
+      "ow_uw_market_state",
+      { sector: "Technology", etf: "XLK" },
+      "OW_UW_API_KEY is unset",
+    ],
     ["ow_macro_rates", { series: ["DGS10"] }, "OW_ARGON_PG_URL is unset"],
   ])("%s throws naming the missing key", async (name, args, message) => {
-    await expect(tool(name).run(args as Record<string, unknown>)).rejects.toThrow(message);
+    await expect(
+      tool(name).run(args as Record<string, unknown>),
+    ).rejects.toThrow(message);
   });
 
   it("ow_spot refuses with a price it cannot get, and says which source failed", async () => {
@@ -90,7 +100,10 @@ describe("absent environment", () => {
     // TradingView enabled but opencli absent — the mini's exact shape — falls
     // through to Unusual Whales rather than failing on the desktop app.
     await expect(
-      tool("ow_spot", { OW_TV_ENABLED: "1", OPENCLI_BIN: "/nonexistent/opencli" }).run({
+      tool("ow_spot", {
+        OW_TV_ENABLED: "1",
+        OPENCLI_BIN: "/nonexistent/opencli",
+      }).run({
         tickers: ["SPY"],
       }),
     ).rejects.toThrow("OW_UW_API_KEY is unset");
@@ -113,10 +126,23 @@ describe("absent environment", () => {
     };
     const json = await tool("ow_spot", { OW_UW_API_KEY: "k" }).run(
       { tickers: ["SPY"] },
-      { fetchImpl: (async () => new Response(JSON.stringify(body))) as unknown as typeof fetch },
+      {
+        fetchImpl: (async () =>
+          new Response(JSON.stringify(body))) as unknown as typeof fetch,
+      },
     );
+    // changePct is computed in code: (761.21 - 761.78) / 761.78 = -0.0748%,
+    // two decimals -> -0.07. The regime step compares this to its threshold
+    // and never does the subtraction itself.
     expect(JSON.parse(json).quotes).toEqual([
-      { ticker: "SPY", source: "unusualwhales", last: 761.21, marketTime: "premarket" },
+      {
+        ticker: "SPY",
+        source: "unusualwhales",
+        last: 761.21,
+        marketTime: "premarket",
+        prevClose: 761.78,
+        changePct: -0.07,
+      },
     ]);
   });
 
@@ -131,14 +157,20 @@ describe("absent environment", () => {
       {
         fetchImpl: (async (url: URL) => {
           const symbol = url.pathname.split("/").filter(Boolean)[2] ?? "";
-          return new Response(JSON.stringify({ data: { close: String(100 + tickers.indexOf(symbol)) } }));
+          return new Response(
+            JSON.stringify({
+              data: { close: String(100 + tickers.indexOf(symbol)) },
+            }),
+          );
         }) as unknown as typeof fetch,
       },
     );
-    expect(JSON.parse(priced).quotes.map((q: { ticker: string }) => q.ticker)).toEqual(tickers);
-    expect(JSON.parse(priced).quotes.map((q: { last: number }) => q.last)).toEqual(
-      tickers.map((_, at) => 100 + at),
-    );
+    expect(
+      JSON.parse(priced).quotes.map((q: { ticker: string }) => q.ticker),
+    ).toEqual(tickers);
+    expect(
+      JSON.parse(priced).quotes.map((q: { last: number }) => q.last),
+    ).toEqual(tickers.map((_, at) => 100 + at));
   });
 
   it("tells an over-long ow_spot call to batch, instead of a bare Zod path", async () => {
@@ -146,9 +178,31 @@ describe("absent environment", () => {
     // `too_big` off `tickers`, and re-sent the same 63 — one wasted model turn
     // per phase. The refusal has to say what to do next, in the refusal.
     const tickers = [
-      "SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "SLV", "XLF", "XLE", "XLK",
-      "XLV", "XLI", "XLP", "XLU", "XLY", "XLB", "XLC", "XLRE", "AAPL", "MSFT",
-      "NVDA", "AMZN", "GOOGL", "META", "TSLA",
+      "SPY",
+      "QQQ",
+      "IWM",
+      "DIA",
+      "TLT",
+      "GLD",
+      "SLV",
+      "XLF",
+      "XLE",
+      "XLK",
+      "XLV",
+      "XLI",
+      "XLP",
+      "XLU",
+      "XLY",
+      "XLB",
+      "XLC",
+      "XLRE",
+      "AAPL",
+      "MSFT",
+      "NVDA",
+      "AMZN",
+      "GOOGL",
+      "META",
+      "TSLA",
     ];
     expect(tickers).toHaveLength(25);
     await expect(tool("ow_spot").run({ tickers })).rejects.toThrow(/24/u);
@@ -171,7 +225,9 @@ describe("absent environment", () => {
         { ticker: "SPY", minDte: 21, maxDte: 60 },
         {
           fetchImpl: (async () =>
-            new Response(JSON.stringify({ data: {} }))) as unknown as typeof fetch,
+            new Response(
+              JSON.stringify({ data: {} }),
+            )) as unknown as typeof fetch,
         },
       ),
     ).rejects.toThrow("no spot for SPY");
@@ -197,7 +253,9 @@ describe("absent environment", () => {
             return new Response(JSON.stringify({ data: { close: 761.78 } }));
           if (url.pathname.endsWith("/expiry-breakdown"))
             return new Response(
-              JSON.stringify({ data: [{ expires: iso, open_interest: 100000, volume: 5000 }] }),
+              JSON.stringify({
+                data: [{ expires: iso, open_interest: 100000, volume: 5000 }],
+              }),
             );
           return new Response(
             JSON.stringify({
@@ -230,8 +288,20 @@ describe("absent environment", () => {
     const json = await tool("ow_price_structure").run({
       spot: 560,
       legs: [
-        { right: "call", action: "buy", strike: 555, expiry: "2026-09-30", mid: 4.0 },
-        { right: "call", action: "sell", strike: 565, expiry: "2026-09-30", mid: 1.5 },
+        {
+          right: "call",
+          action: "buy",
+          strike: 555,
+          expiry: "2026-09-30",
+          mid: 4.0,
+        },
+        {
+          right: "call",
+          action: "sell",
+          strike: 565,
+          expiry: "2026-09-30",
+          mid: 1.5,
+        },
       ],
     });
     expect(JSON.parse(json)).toMatchObject({
@@ -252,19 +322,32 @@ describe("absent environment", () => {
     // A 180 put under a 183.60 spot was called in the money on 09-03. It is a
     // comparison; comparisons belong in code.
     const json = await tool("ow_strike_check", { OW_UW_API_KEY: "k" }).run(
-      { ticker: "SPY", strikes: [{ strike: 740, right: "put" }, { strike: 780, right: "put" }] },
+      {
+        ticker: "SPY",
+        strikes: [
+          { strike: 740, right: "put" },
+          { strike: 780, right: "put" },
+        ],
+      },
       {
         fetchImpl: (async () =>
-          new Response(JSON.stringify({ data: { close: 761.78 } }))) as unknown as typeof fetch,
+          new Response(
+            JSON.stringify({ data: { close: 761.78 } }),
+          )) as unknown as typeof fetch,
       },
     );
-    const rows = JSON.parse(json).rows as Array<{ moneyness: string; distPct: number }>;
+    const rows = JSON.parse(json).rows as Array<{
+      moneyness: string;
+      distPct: number;
+    }>;
     expect(rows[0]).toMatchObject({ moneyness: "OTM", distPct: -2.86 });
     expect(rows[1]).toMatchObject({ moneyness: "ITM", distPct: 2.39 });
   });
 
   it("ow_tv_watchlist refuses rather than returning an empty universe", async () => {
-    await expect(tool("ow_tv_watchlist").run({})).rejects.toThrow("OW_UNIVERSE names no fallback");
+    await expect(tool("ow_tv_watchlist").run({})).rejects.toThrow(
+      "OW_UNIVERSE names no fallback",
+    );
     await expect(
       tool("ow_tv_watchlist", { OW_TV_ENABLED: "1" }).run({}),
     ).rejects.toThrow("OW_UNIVERSE names no fallback");
@@ -274,7 +357,9 @@ describe("absent environment", () => {
     // Without this the universe step hands the designer an empty set and the
     // run proposes nothing while reporting "completed". The list is the
     // OPERATOR's; this tool never invents one.
-    const json = await tool("ow_tv_watchlist", { OW_UNIVERSE: " spy ,qqq, spy,IWM " }).run({});
+    const json = await tool("ow_tv_watchlist", {
+      OW_UNIVERSE: " spy ,qqq, spy,IWM ",
+    }).run({});
     const parsed = JSON.parse(json);
     expect(parsed.tickers).toEqual(["IWM", "QQQ", "SPY"]);
     expect(parsed.source).toContain("operator list");
@@ -338,7 +423,10 @@ describe("absent environment", () => {
   it("ow_ib_positions names the host it could not reach", async () => {
     // Port 1 on loopback: nothing listens there, so this is a connection
     // refusal rather than a timeout.
-    const configured = { OW_IB_API_BASE: "http://127.0.0.1:1", OW_IB_API_KEY: "x" };
+    const configured = {
+      OW_IB_API_BASE: "http://127.0.0.1:1",
+      OW_IB_API_KEY: "x",
+    };
     await expect(tool("ow_ib_positions", configured).run({})).rejects.toThrow(
       "IB query api unreachable at 127.0.0.1:1",
     );
@@ -350,18 +438,21 @@ describe("absent environment", () => {
     // write path. Sent under the wrong header it would simply be unauthenticated,
     // which is a failure — but a silent one to write down.
     let seen: Headers | undefined;
-    const configured = { OW_IB_API_BASE: "http://ib.invalid", OW_IB_API_KEY: "secret-key" };
-    await tool("ow_ib_positions", configured).run(
-      {},
-      {
-        fetchImpl: async (_url: unknown, init?: { headers?: HeadersInit }) => {
-          seen = new Headers(init?.headers);
-          return new Response(JSON.stringify({ last_sync: new Date().toISOString() }), {
+    const configured = {
+      OW_IB_API_BASE: "http://ib.invalid",
+      OW_IB_API_KEY: "secret-key",
+    };
+    await tool("ow_ib_positions", configured).run({}, {
+      fetchImpl: async (_url: unknown, init?: { headers?: HeadersInit }) => {
+        seen = new Headers(init?.headers);
+        return new Response(
+          JSON.stringify({ last_sync: new Date().toISOString() }),
+          {
             status: 200,
-          });
-        },
-      } as never,
-    );
+          },
+        );
+      },
+    } as never);
     expect(seen?.get("x-api-key")).toBe("secret-key");
     expect(seen?.get("authorization")).toBeNull();
   });
@@ -377,8 +468,22 @@ describe("ow_argon_levels", () => {
     spot: 768.86,
     net_gex: 280354.25139999995,
     closest_levels: [
-      { label: "Call Wall", direction: "up", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848, gamma: 75477.6864 },
-      { label: "Gamma Flip", direction: "down", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926, gamma: 0 },
+      {
+        label: "Call Wall",
+        direction: "up",
+        role: "resistance",
+        strike: 770.0,
+        distance_pct: 0.0014827146684701848,
+        gamma: 75477.6864,
+      },
+      {
+        label: "Gamma Flip",
+        direction: "down",
+        role: "flip",
+        strike: 766.0,
+        distance_pct: -0.0037197929401971926,
+        gamma: 0,
+      },
     ],
     odte_share_pct: 1.0,
   };
@@ -421,14 +526,21 @@ describe("ow_argon_levels", () => {
   function routedFetch(byPath: Record<string, unknown | "404">) {
     return (async (url: URL) => {
       const hit = byPath[url.pathname];
-      if (hit === undefined) throw new Error(`unexpected path in test: ${url.pathname}`);
-      if (hit === "404") return new Response("not found", { status: 404, statusText: "Not Found" });
+      if (hit === undefined)
+        throw new Error(`unexpected path in test: ${url.pathname}`);
+      if (hit === "404")
+        return new Response("not found", {
+          status: 404,
+          statusText: "Not Found",
+        });
       return new Response(JSON.stringify(hit), { status: 200 });
     }) as unknown as typeof fetch;
   }
 
   it("parses the frozen real argon response into compact per-ticker levels", async () => {
-    const json = await tool("ow_argon_levels", { OW_ARGON_API_BASE: "http://argon.test" }).run(
+    const json = await tool("ow_argon_levels", {
+      OW_ARGON_API_BASE: "http://argon.test",
+    }).run(
       { tickers: ["SPY"] },
       {
         fetchImpl: routedFetch({
@@ -468,8 +580,20 @@ describe("ow_argon_levels", () => {
     // any tool here returns. Gamma Flip's own is 0 in argon's live answer and
     // is kept as 0 rather than dropped — a level with no exposure is a fact.
     expect(row.closest_levels).toEqual([
-      { label: "Call Wall", role: "resistance", strike: 770.0, distance_pct: 0.0014827146684701848, gamma: 75477.6864 },
-      { label: "Gamma Flip", role: "flip", strike: 766.0, distance_pct: -0.0037197929401971926, gamma: 0 },
+      {
+        label: "Call Wall",
+        role: "resistance",
+        strike: 770.0,
+        distance_pct: 0.0014827146684701848,
+        gamma: 75477.6864,
+      },
+      {
+        label: "Gamma Flip",
+        role: "flip",
+        strike: 766.0,
+        distance_pct: -0.0037197929401971926,
+        gamma: 0,
+      },
     ]);
     expect(row.expected_range).toEqual({ low: 762.99, high: 774.81 });
     expect(row.as_of).toBe("2026-09-03");
@@ -477,7 +601,9 @@ describe("ow_argon_levels", () => {
   });
 
   it("returns a partial row, never throws, when one sub-endpoint 404s", async () => {
-    const json = await tool("ow_argon_levels", { OW_ARGON_API_BASE: "http://argon.test" }).run(
+    const json = await tool("ow_argon_levels", {
+      OW_ARGON_API_BASE: "http://argon.test",
+    }).run(
       { tickers: ["SPY"] },
       {
         fetchImpl: routedFetch({
@@ -511,7 +637,9 @@ describe("ow_argon_levels", () => {
           }),
         },
       ),
-    ).rejects.toThrow("ow_argon_levels: argon returned nothing usable for any of SPY");
+    ).rejects.toThrow(
+      "ow_argon_levels: argon returned nothing usable for any of SPY",
+    );
   });
 });
 
@@ -522,8 +650,20 @@ describe("ow_ib_preflight", () => {
         ticker: "AAPL",
         strategy: "put-credit-spread",
         legs: [
-          { right: "P", expiry: "2026-10-16", strike: 320, action: "SELL", ratio: 1 },
-          { right: "P", expiry: "2026-10-16", strike: 315, action: "BUY", ratio: 1 },
+          {
+            right: "P",
+            expiry: "2026-10-16",
+            strike: 320,
+            action: "SELL",
+            ratio: 1,
+          },
+          {
+            right: "P",
+            expiry: "2026-10-16",
+            strike: 315,
+            action: "BUY",
+            ratio: 1,
+          },
         ],
         rationale: "spot 325.13, last close as of 2026-09-02",
       }),
@@ -546,7 +686,8 @@ describe("stale data", () => {
   const live = { OW_IB_API_BASE: "http://ib.invalid", OW_IB_API_KEY: "k" };
   const respond = (body: unknown) =>
     ({
-      fetchImpl: async () => new Response(JSON.stringify(body), { status: 200 }),
+      fetchImpl: async () =>
+        new Response(JSON.stringify(body), { status: 200 }),
     }) as never;
 
   it("refuses an account snapshot older than the bound, naming its age", async () => {
@@ -556,7 +697,10 @@ describe("stale data", () => {
     // role reasoned about today's buying power from it.
     const old = new Date(Date.now() - 35 * 86_400_000).toISOString();
     await expect(
-      tool("ow_ib_positions", live).run({}, respond({ last_sync: old, bankroll: 1 })),
+      tool("ow_ib_positions", live).run(
+        {},
+        respond({ last_sync: old, bankroll: 1 }),
+      ),
     ).rejects.toThrow(/840\.\d+h old, past the 24h bound/);
   });
 
@@ -601,8 +745,15 @@ describe("symbolLiteral", () => {
   it("refuses anything that could close a quote or a path", () => {
     // These reach a psql -c string and a URL path segment, and they arrive
     // from a model's tool call — the one input here that is nobody's contract.
-    for (const bad of ["SPY'; DROP TABLE x --", "../../etc", "SPY OR 1=1", ""]) {
-      expect(() => symbolLiteral(bad, "t")).toThrow("is not a symbol this tool will pass on");
+    for (const bad of [
+      "SPY'; DROP TABLE x --",
+      "../../etc",
+      "SPY OR 1=1",
+      "",
+    ]) {
+      expect(() => symbolLiteral(bad, "t")).toThrow(
+        "is not a symbol this tool will pass on",
+      );
     }
   });
 });
@@ -655,11 +806,19 @@ describe("parseOcc", () => {
   });
 
   it("handles a fractional strike and a longer root", () => {
-    expect(parseOcc("NVDA261016C00217500")).toMatchObject({ root: "NVDA", strike: 217.5 });
+    expect(parseOcc("NVDA261016C00217500")).toMatchObject({
+      root: "NVDA",
+      strike: 217.5,
+    });
   });
 
   it("returns undefined rather than a guess on anything else", () => {
-    for (const bad of ["", "SPY", "SPY261016X00725000", "SPY2610161P00725000"]) {
+    for (const bad of [
+      "",
+      "SPY",
+      "SPY261016X00725000",
+      "SPY2610161P00725000",
+    ]) {
       expect(parseOcc(bad)).toBeUndefined();
     }
   });
@@ -705,7 +864,9 @@ describe("staleSeries", () => {
   });
 
   it("says nothing when argon has caught up", () => {
-    expect(staleSeries([{ series_id: "T10YIE", obs_date: "2026-09-02" }], now)).toEqual([]);
+    expect(
+      staleSeries([{ series_id: "T10YIE", obs_date: "2026-09-02" }], now),
+    ).toEqual([]);
   });
 });
 
@@ -727,7 +888,9 @@ describe("parseFredCsv", () => {
   });
 
   it("returns undefined rather than a NaN when nothing is observed", () => {
-    expect(parseFredCsv("observation_date,ANFCI\n2026-09-02,.\n")).toBeUndefined();
+    expect(
+      parseFredCsv("observation_date,ANFCI\n2026-09-02,.\n"),
+    ).toBeUndefined();
     expect(parseFredCsv("observation_date,ANFCI\n")).toBeUndefined();
   });
 });
@@ -744,14 +907,20 @@ describe("fredDirect", () => {
       }) as unknown as typeof fetch,
     });
     expect(result.points).toEqual([]);
-    expect(result.skipped.map((row) => row.series)).toEqual(["BAMLH0A0HYM2", "ANFCI"]);
-    for (const row of result.skipped) expect(row.reason).toContain("certificate");
+    expect(result.skipped.map((row) => row.series)).toEqual([
+      "BAMLH0A0HYM2",
+      "ANFCI",
+    ]);
+    for (const row of result.skipped)
+      expect(row.reason).toContain("certificate");
   });
 
   it("labels the point with FRED direct and its lag when the fetch lands", async () => {
     const result = await fredDirect(["BAMLH0A0HYM2"], {
       fetchImpl: (async () =>
-        new Response("observation_date,BAMLH0A0HYM2\n2026-09-01,2.65\n")) as unknown as typeof fetch,
+        new Response(
+          "observation_date,BAMLH0A0HYM2\n2026-09-01,2.65\n",
+        )) as unknown as typeof fetch,
     });
     expect(result.skipped).toEqual([]);
     expect(result.points).toEqual([

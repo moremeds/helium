@@ -153,6 +153,15 @@ export interface Gate {
   /** Role names this gate applies to; `["*"]` for all. */
   appliesTo: string[];
   phase: "input" | "output";
+  /**
+   * An advisory output gate's refusal is recorded — audit span, step
+   * `gateRefusals`, degradation line — but does not fail the step or the
+   * run. For a gate whose consumer already enforces the same rule
+   * deterministically (a renderer that trims to the budget the gate
+   * measures), failing the run would throw away work the reader can still
+   * be given. Ignored on input gates: a refusal there blocks the model call.
+   */
+  advisory?: boolean;
   check(
     input: unknown,
     ctx: GateCtx,

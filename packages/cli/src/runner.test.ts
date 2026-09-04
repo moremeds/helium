@@ -668,6 +668,60 @@ describe("gates", () => {
     expect(report.steps[0]?.text).not.toBe("");
     audit.close();
   });
+
+  it("an advisory output refusal is recorded but fails neither step nor run", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      gates: [
+        gate({
+          id: "budget",
+          phase: "output",
+          advisory: true,
+          check: async () => ({ pass: false, reason: "headline 31 of 30" }),
+        }),
+      ],
+    });
+    expect(report.outcome).toBe("completed");
+    expect(report.steps[0]?.failure).toBeUndefined();
+    expect(report.steps[0]?.gateRefusals).toEqual([
+      { id: "budget", reason: "headline 31 of 30" },
+    ]);
+    expect(
+      audit.spans(report.runId).some((s) => s.toolName === "gate:budget"),
+    ).toBe(true);
+    audit.close();
+  });
+
+  it("advisory means nothing on an input gate: the model call is still blocked", async () => {
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      gates: [
+        gate({
+          id: "closed",
+          advisory: true,
+          check: async () => ({ pass: false, reason: "market is closed" }),
+        }),
+      ],
+    });
+    expect(report.steps[0]?.failure).toBe("gate-refused");
+    audit.close();
+  });
 });
 
 describe("delivery", () => {

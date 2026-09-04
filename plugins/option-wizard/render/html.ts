@@ -187,11 +187,26 @@ function tapeStrip(items: TapeItem[]): string {
  *  23px serif, which made a 40-word sentence the loudest object on the page;
  *  the spec gives the header a fixed title and puts the day's sentence here,
  *  right under the numbers it is about. */
-function oneSentence(headline: string): string {
-  if (headline === "") return "";
+function oneSentence(headline: string, cause?: BriefView["cause"]): string {
+  if (headline === "" && cause === undefined) return "";
   return section(
-    `${eyebrow("Today in one sentence")}<div class="ink" style="color:${INK};font-size:15px;line-height:1.55">${esc(headline)}</div>`,
+    `${eyebrow("Today in one sentence")}<div class="ink" style="color:${INK};font-size:15px;line-height:1.55">${esc(headline)}</div>${causeLine(cause)}`,
   );
+}
+
+/** "Why it moved — <headline> (<at>)", or "Cause not located." The headline
+ *  is the feed's own string, verbatim — the cause-citation gate saw to that. */
+export function causeText(cause: BriefView["cause"]): string {
+  if (cause === undefined) return "";
+  if (!cause.located) return "Cause not located.";
+  return `Why it moved — ${cause.headline ?? ""}${cause.at === undefined ? "" : ` (${cause.at})`}`;
+}
+
+function causeLine(cause: BriefView["cause"]): string {
+  const text = causeText(cause);
+  return text === ""
+    ? ""
+    : `<div class="ink" style="color:${INK};font-size:13px;line-height:1.5;margin-top:6px">${esc(text)}</div>`;
 }
 
 /** "NextTrigger" -> "Next Trigger": a display-only space insert before an
@@ -218,7 +233,6 @@ function bottomLine(view: BriefView): string {
      </td></tr></table>`,
   );
 }
-
 
 /**
  * The candidate table: ONE row per candidate, and only the five fields a
@@ -313,7 +327,7 @@ export function renderHtml(view: BriefView): string {
   const body =
     view.empty !== undefined
       ? `${tapeStrip(view.tape)}
-         ${oneSentence(view.headline)}
+         ${oneSentence(view.headline, view.cause)}
          ${bottomLine(view)}
          ${section(
            `${eyebrow("Candidates")}
@@ -323,11 +337,16 @@ export function renderHtml(view: BriefView): string {
          )}
          ${flashLink(view)}`
       : `${tapeStrip(view.tape)}
-         ${oneSentence(view.headline)}
+         ${oneSentence(view.headline, view.cause)}
          ${bottomLine(view)}
          ${view.candidates.length === 0 ? "" : candidateRows(view.candidates)}
          ${flashLink(view)}`;
 
+  // Muted, not WARN: nothing failed, a source is just older than its cadence.
+  const stalenessRow =
+    view.staleness === undefined || view.staleness.length === 0
+      ? ""
+      : `<tr><td class="pad" style="padding:0 32px 12px;color:${MUTED};font-size:12px">${esc(view.staleness.join("; "))}</td></tr>`;
   const degradationRow =
     view.degradation === undefined
       ? ""
@@ -381,7 +400,7 @@ export function renderHtml(view: BriefView): string {
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="bg" style="background-color:${PAPER}">
  <tr><td align="center">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" class="card" style="max-width:640px;background-color:${PAPER};font-family:${SANS};${NUM}">
-   ${header}${body}${degradationRow}${footer}
+   ${header}${body}${stalenessRow}${degradationRow}${footer}
   </table>
  </td></tr>
 </table>

@@ -1,0 +1,35 @@
+{
+ "_recordedFrom": "GET /api/news/headlines?limit=3&major_only=false&search_term=Waller%20inflation, Unusual Whales, run from the mini 2026-09-04 (Task 0 step 2 of the flash-format plan)",
+ "data": [
+  {
+   "meta": {},
+   "source": "Tradex",
+   "created_at": "2026-09-03T15:31:58Z",
+   "tags": [],
+   "tickers": [],
+   "headline": "Fed Governor Christopher Waller now leans toward a conditional September hold, according to WSJ’s Nick Timiraos. If August inflation keeps moving toward 2%, he favors no change; a hot print could put a rate hike back in play.",
+   "is_major": true,
+   "sentiment": "neutral"
+  },
+  {
+   "meta": {},
+   "source": "Tradex",
+   "created_at": "2026-09-03T13:29:24Z",
+   "tags": [],
+   "tickers": [],
+   "headline": "Fed Governor Christopher Waller says the September rate decision will depend heavily on next week’s August CPI report. He called the recent improvement in three-month core inflation encouraging, while keeping a rate hike on the table.",
+   "is_major": true,
+   "sentiment": "neutral"
+  },
+  {
+   "meta": {},
+   "source": "Tradex",
+   "created_at": "2026-09-03T13:03:25Z",
+   "tags": [],
+   "tickers": [],
+   "headline": "FED WALLER: CURRENT FED RATES MAY BE ENOUGH TO BRING INFLATION BACK TO 2%—NO RUSH TO CUT UNTIL MORE PROGRESS EMERGES",
+   "is_major": true,
+   "sentiment": "neutral"
+  }
+ ]
+}

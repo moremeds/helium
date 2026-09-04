@@ -12,6 +12,7 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
+import { FLASH_BUDGET, trim } from "./budget.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { renderText } from "./text.js";
@@ -181,11 +182,29 @@ export interface BriefView {
   decision?: Array<{ label: string; value: string }>;
   /** ONE line, present only when something actually failed. */
   degradation?: string;
+  /** Freshness notes the renderer asserts on its own from the run's raw tool
+   *  outputs — never from a model step. Present only when a source is older
+   *  than its own cadence allows (a Fed-path snapshot more than three
+   *  calendar days behind the report day). NOT folded into `degradation`:
+   *  nothing failed, and that line must keep meaning "something broke". */
+  staleness?: string[];
   /** When set, the brief IS this line: no candidates, no sections. */
   empty?: string;
   /** Drawn from the run's raw tool outputs, never from a model step. Empty
    *  `gex` and absent curve/path all mean the tool did not answer. */
   charts: Charts;
+  /** Why the tape moved, from the regime step's structured `cause` field —
+   *  a headline copied verbatim from the headline feed (the `cause-citation`
+   *  gate checks that), or an honest `located: false`. Absent on a phase the
+   *  rule does not cover. Rendered as the first line under the headline: the
+   *  reader-visible half of the fix, without which the gate protects a field
+   *  nobody sees. */
+  cause?: {
+    located: boolean;
+    headline?: string;
+    at?: string;
+    searchTerm?: string;
+  };
   /** True when an `edit` step's document supplied the prose. Display-only —
    *  the footer says which pipeline wrote the words the reader is reading. */
   edited?: boolean;
@@ -301,6 +320,24 @@ function regimeFrom(text: string): RegimeView {
     ...(direction === undefined ? {} : { direction }),
     ...(volatility === undefined ? {} : { volatility }),
     ...(hedge === undefined ? {} : { hedge }),
+  };
+}
+
+/** The regime step's `cause` field, shape-checked. A located cause with no
+ *  headline string is not a cause; it is dropped rather than printed empty. */
+function causeFrom(raw: unknown): BriefView["cause"] | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  if (row.located !== true) return { located: false };
+  if (typeof row.headline !== "string" || row.headline.trim() === "")
+    return undefined;
+  return {
+    located: true,
+    headline: row.headline.trim(),
+    ...(typeof row.at === "string" ? { at: row.at } : {}),
+    ...(typeof row.searchTerm === "string"
+      ? { searchTerm: row.searchTerm }
+      : {}),
   };
 }
 
@@ -601,6 +638,45 @@ function toolPayloads(report: RunReport): Record<string, unknown>[] {
  * promise, and the only thing that makes it checkable is the list of promises
  * the run was handed.
  */
+/** The Fed-path snapshot date, identified by SHAPE (`snapshotDate` beside a
+ *  `meetings` array) — the producing tool is not recorded, same rule as
+ *  `ledgerIds` and `earningsFromTools`. */
+function policySnapshotDate(report: RunReport): string | undefined {
+  for (const payload of toolPayloads(report)) {
+    if (
+      typeof payload.snapshotDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(payload.snapshotDate) &&
+      Array.isArray(payload.meetings)
+    )
+      return payload.snapshotDate;
+  }
+  return undefined;
+}
+
+/** Calendar days from `from` to `to`, both `yyyy-mm-dd`; NaN-safe as 0. */
+function daysBetween(from: string, to: string): number {
+  const ms = Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`);
+  return Number.isFinite(ms) ? Math.round(ms / 86_400_000) : 0;
+}
+
+/** argon writes the policy-path snapshot for day D after the ET close
+ *  (verified 2026-09-04: `first_seen_at` = D+1 06:45 HKT), so every phase
+ *  sees D-1 and that is the design, not a fault. Only a gap past a weekend —
+ *  more than three calendar days — is argon's nightly job having missed. The
+ *  2026-09-03 intraday brief printed a day-old "60% HIKE" beside live levels
+ *  and only the model's prose happened to say so; the as-of now goes into
+ *  `coverage` unconditionally, and this line fires only for a real gap. */
+const POLICY_STALE_AFTER_DAYS = 3;
+
+function stalenessFrom(report: RunReport): string[] {
+  const snapshot = policySnapshotDate(report);
+  if (snapshot === undefined) return [];
+  const behind = daysBetween(snapshot, report.day);
+  return behind > POLICY_STALE_AFTER_DAYS
+    ? [`Fed path: snapshot ${snapshot}, ${String(behind)} days behind`]
+    : [];
+}
+
 function ledgerIds(report: RunReport): Set<string> {
   const ids = new Set<string>();
   for (const payload of toolPayloads(report)) {
@@ -1009,7 +1085,11 @@ function sectionList(raw: unknown): Section[] {
 
 function editorDocFrom(report: RunReport): EditorDoc | undefined {
   const step = report.steps.find((entry) => entry.task === "edit");
-  if (step === undefined || step.failure !== undefined) return undefined;
+  if (step === undefined) return undefined;
+  // A failed step is not prose the harness can print. `flash-budget` is
+  // advisory (its refusal never sets `failure`), so an over-budget document
+  // arrives here intact and `enforceBudget` cuts what the gate measured.
+  if (step.failure !== undefined) return undefined;
   const parsed = extractJson(step.text);
   if (parsed === null) return undefined;
 
@@ -1141,7 +1221,9 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   const coverageIdx = rawSections.findIndex((entry) =>
     /layer coverage/iu.test(entry.title),
   );
-  const coverage = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
+  const found = coverageIdx === -1 ? undefined : rawSections[coverageIdx];
+  const coverage = found;
+  const staleness = stalenessFrom(report);
   const sections =
     coverageIdx === -1
       ? rawSections
@@ -1158,11 +1240,15 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
           ? "DEGRADED"
           : "completed",
     headline: headlineFrom(regimeJson) ?? "",
+    ...(causeFrom(regimeJson?.cause) === undefined
+      ? {}
+      : { cause: causeFrom(regimeJson?.cause) }),
     tape: tapeFrom(regimeJson?.tape),
     schedule: scheduleFrom(regimeJson?.schedule),
     overnight: overnightFrom(report),
     sections: [],
     ...(coverage === undefined ? {} : { coverage }),
+    ...(staleness.length === 0 ? {} : { staleness }),
     regime: { paragraph: "" },
     candidates: [],
     riskList: [],
@@ -1304,8 +1390,61 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  * candidate's ticker would move which profile is shown and could not touch a
  * single number inside it.
  */
+/** Deterministic trim to `FLASH_BUDGET`. Sections beyond the fifth are
+ *  DROPPED, not merged — merging would invent a paragraph no author wrote.
+ *  Bodies, the headline, decision values and rationales are cut by `trim`
+ *  (last sentence end inside the budget; word cut with "…" only when the
+ *  first sentence alone is over). `coverage` is exempt: it is the as-of table
+ *  the `as-of-verbatim` gate protects, and a trim there would delete
+ *  evidence to save words. Runs after `applyEditor` so the editor's prose is
+ *  what gets measured, and before charts, which it cannot touch. */
+function enforceBudget(view: BriefView): BriefView {
+  const cut = (text: string, max: number): string => trim(text, max).text;
+  return {
+    ...view,
+    headline: cut(view.headline, FLASH_BUDGET.headlineWords),
+    sections: view.sections.slice(0, FLASH_BUDGET.sectionCount).map((s) => ({
+      ...s,
+      body: cut(s.body, FLASH_BUDGET.sectionBodyWords),
+    })),
+    ...(view.decision === undefined
+      ? {}
+      : {
+          decision: view.decision.map((row) => ({
+            ...row,
+            value: cut(row.value, FLASH_BUDGET.decisionValueWords),
+          })),
+        }),
+    candidates: view.candidates.map((c) => ({
+      ...c,
+      rationale: cut(c.rationale, FLASH_BUDGET.rationaleWords),
+    })),
+  };
+}
+
+/** The Fed path's as-of belongs in the coverage table with every other
+ *  source's date — asserted from the tool payload AFTER the editor has had
+ *  its say, because the editor's `coverage` replaces the assembled one
+ *  wholesale (seen 2026-09-04: the row vanished from every edited run). */
+function withPolicyAsOf(view: BriefView, report: RunReport): BriefView {
+  const policyAsOf = policySnapshotDate(report);
+  if (view.coverage === undefined || policyAsOf === undefined) return view;
+  return {
+    ...view,
+    coverage: {
+      ...view.coverage,
+      body: `${view.coverage.body} | Fed path (argon) — as of ${policyAsOf}`,
+    },
+  };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
-  const view = applyEditor(assembleView(report, cfg), editorDocFrom(report));
+  const view = withPolicyAsOf(
+    enforceBudget(
+      applyEditor(assembleView(report, cfg), editorDocFrom(report)),
+    ),
+    report,
+  );
   // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
   // read here, once, rather than inside the renderer: the html and text parts
   // must link to the same page, and a second read is a second chance to
