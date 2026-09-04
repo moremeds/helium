@@ -9,7 +9,8 @@
  *
  * The runner does not discard a refused output (`runner.ts`: "a refusal here
  * does NOT discard the text"), and `editorDocFrom` is told by name that this
- * gate is advisory — see `ADVISORY_GATES` in `render/index.ts`.
+ * gate is advisory (`advisory: true`): the renderer trims to the same budget,
+ * so a refusal is recorded but does not fail the step.
  * @module dsh-plugin-tenant-option-wizard/gates/flash-budget
  */
 import type { Gate, GateCtx } from "@helium/core";
@@ -28,6 +29,7 @@ function textOf(input: unknown): string {
 const gate: Gate = {
   id: "flash-budget",
   phase: "output",
+  advisory: true,
   // Every role that can put a `sections` array into a brief.
   appliesTo: ["editor", "regime-analyst", "drift-watcher", "recap-writer"],
   async check(

@@ -1083,27 +1083,13 @@ function sectionList(raw: unknown): Section[] {
   return out;
 }
 
-/** Gate refusals that must NOT discard the editor's document. `flash-budget`
- *  is a MEASUREMENT: `enforceBudget` below already cuts what it complained
- *  about, so throwing the document away would cost the reader a written brief
- *  in exchange for a seven-fragment one that is also over budget. Every other
- *  refusal still discards — a step the harness could not trust is not prose it
- *  can print. */
-const ADVISORY_GATES = new Set(["flash-budget"]);
-
-function advisoryOnly(step: RunReport["steps"][number]): boolean {
-  const refusals = step.gateRefusals ?? [];
-  return (
-    step.failure === "gate-refused" &&
-    refusals.length > 0 &&
-    refusals.every((refusal) => ADVISORY_GATES.has(refusal.id))
-  );
-}
-
 function editorDocFrom(report: RunReport): EditorDoc | undefined {
   const step = report.steps.find((entry) => entry.task === "edit");
   if (step === undefined) return undefined;
-  if (step.failure !== undefined && !advisoryOnly(step)) return undefined;
+  // A failed step is not prose the harness can print. `flash-budget` is
+  // advisory (its refusal never sets `failure`), so an over-budget document
+  // arrives here intact and `enforceBudget` cuts what the gate measured.
+  if (step.failure !== undefined) return undefined;
   const parsed = extractJson(step.text);
   if (parsed === null) return undefined;
 

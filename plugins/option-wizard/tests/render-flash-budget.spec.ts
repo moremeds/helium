@@ -149,7 +149,6 @@ describe("enforceBudget in buildView", () => {
   it("keeps the editor's document through a flash-budget-only refusal", () => {
     const refused = buildView(
       report(editorDoc, {
-        failure: "gate-refused",
         gateRefusals: [{ id: "flash-budget", reason: "4 of 11 over" }],
       }),
       cfg,

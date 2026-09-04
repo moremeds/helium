@@ -450,8 +450,8 @@ async function runGates(
     toolCalls?: string[];
     stepToolOutputs?: string[];
   },
-): Promise<{ ran: number; refusals: Array<{ id: string; reason: string }> }> {
-  const refusals: Array<{ id: string; reason: string }> = [];
+): Promise<{ ran: number; refusals: Refusal[] }> {
+  const refusals: Refusal[] = [];
   const applicable = gates.filter(
     (gate) =>
       gate.phase === phase &&
@@ -501,9 +501,29 @@ async function runGates(
       summarised: false,
       ts: new Date().toISOString(),
     });
-    if (!verdict.pass) refusals.push({ id: gate.id, reason: verdict.reason });
+    if (!verdict.pass)
+      refusals.push({
+        id: gate.id,
+        reason: verdict.reason,
+        ...(gate.advisory === true && phase === "output" ? { advisory: true } : {}),
+      });
   }
   return { ran: applicable.length, refusals };
+}
+
+type Refusal = { id: string; reason: string; advisory?: boolean };
+
+/** The step fields an output gate pass leaves behind. Every refusal is kept
+ *  on the step — the audit and the degradation line read them — but only a
+ *  non-advisory one marks the step failed (see `Gate.advisory`). */
+function refusalFields(
+  refusals: Refusal[],
+): Pick<RunReport["steps"][number], "failure" | "gateRefusals"> {
+  if (refusals.length === 0) return {};
+  const gateRefusals = refusals.map(({ id, reason }) => ({ id, reason }));
+  return refusals.every((refusal) => refusal.advisory === true)
+    ? { gateRefusals }
+    : { failure: "gate-refused", gateRefusals };
 }
 
 /**
@@ -856,9 +876,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         role: task.role,
         mode: deterministic ? "deterministic" : "tool-only",
         text,
-        ...(out.refusals.length === 0
-          ? {}
-          : { failure: "gate-refused", gateRefusals: out.refusals }),
+        ...refusalFields(out.refusals),
       });
       continue;
     }
@@ -1047,9 +1065,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
                 "the session log reported no usage and no text: this step did not reach a model",
             }
           : {}),
-        ...(out.refusals.length === 0
-          ? {}
-          : { failure: "gate-refused", gateRefusals: out.refusals }),
+        ...refusalFields(out.refusals),
       });
       break;
     }
