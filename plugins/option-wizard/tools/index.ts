@@ -1362,13 +1362,32 @@ function priorDay(day: string): string {
   return at.toISOString().slice(0, 10);
 }
 
-/** The last weekday before `day`. Weekends only — a market holiday still
- *  answers with an empty session, and an empty session labelled `prior` is
- *  honest, while guessing a holiday calendar here would not be. */
-function priorWeekday(day: string): string {
+/**
+ * The last OPEN day before `day`, per the calendar the tenant declares. Both
+ * `yyyy-mm-dd`.
+ *
+ * The closures are not guessed here: they are the `calendar:` block in
+ * `tenant.yaml`, hand-maintained from nyse.com, and this walks back over them
+ * the same way it walks back over a weekend. With no calendar passed it falls
+ * back to weekends only, which is what this did before the block existed — a
+ * closed day then answers with an empty session labelled `prior`, honest but
+ * useless, and that is exactly the outcome the declaration removes.
+ *
+ * Exported so the walk can be tested without building a tool.
+ */
+export function priorOpenDay(
+  day: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): string {
+  const closed = new Set(calendar?.closed ?? []);
+  const weekends = calendar === undefined || calendar.weekdaysOnly;
+  const shut = (d: string): boolean =>
+    closed.has(d) ||
+    (weekends && new Date(`${d}T00:00:00Z`).getUTCDay() % 6 === 0);
   let out = priorDay(day);
-  while (new Date(`${out}T00:00:00Z`).getUTCDay() % 6 === 0)
-    out = priorDay(out);
+  // Bounded: a run of closed days longer than a fortnight is a broken
+  // declaration, not a holiday, and looping forever on it would hang the run.
+  for (let step = 0; step < 14 && shut(out); step += 1) out = priorDay(out);
   return out;
 }
 
@@ -1383,6 +1402,9 @@ export function buildTools(cfg: {
   asOf?: Date;
   variant?: string;
   pit?: { markUnavailable: (tool: string, reason: string) => void };
+  /** The tenant's `calendar:` block, passed through by the runner. Absent in a
+   *  test or an older host: the prior-day walk then skips weekends only. */
+  calendar?: { weekdaysOnly: boolean; closed: string[] };
 }) {
   const { env } = cfg;
   const asOf = cfg.asOf;
@@ -2105,7 +2127,7 @@ export function buildTools(cfg: {
         // was supposed to be written before. The prints are individually
         // timestamped, so the fix is to cut them at the instant; when nothing
         // survives (a premarket instant, which is the normal case) the tide
-        // for the PRIOR weekday is fetched instead and labelled as such, so
+        // for the PRIOR OPEN DAY is fetched instead and labelled as such, so
         // the model reads it as yesterday's tide and not as this morning's.
         const tideFor = async (path: string): Promise<unknown> => {
           if (asOf === undefined || asOfDay === undefined) {
@@ -2123,7 +2145,7 @@ export function buildTools(cfg: {
               ...(thinTide(today.body) as Record<string, unknown>),
             };
           }
-          const prior = priorWeekday(asOfDay);
+          const prior = priorOpenDay(asOfDay, cfg.calendar);
           return {
             session: "prior",
             date: prior,

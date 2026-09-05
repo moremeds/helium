@@ -36,6 +36,28 @@ export interface TenantBudget {
   tokens: number;
 }
 
+/**
+ * Which calendar days this tenant has anything to say about, expressed as the
+ * days it does NOT. Core knows nothing about why a day is closed -- a schedule
+ * that fires every day is a property of the scheduler, and which of those days
+ * are worth a run is the tenant's own word.
+ */
+export interface TenantCalendar {
+  /** Saturday and Sunday in `reportTimezone` are closed. */
+  weekdaysOnly: boolean;
+  /** Individually closed days, `yyyy-mm-dd` in `reportTimezone`. */
+  closed: string[];
+  /**
+   * The run labels this calendar governs. Absent means every label.
+   *
+   * Not every trigger is about the closed thing: a tenant can have a run that
+   * exists precisely BECAUSE the subject is shut (a weekend review), and a
+   * calendar applied to all labels alike deletes it. Naming the governed labels
+   * is the only way for one tenant to say both at once.
+   */
+  appliesTo?: string[];
+}
+
 export interface TenantDelivery {
   /** Channel plugin id (`email`, `github-pr`, `file`) and its opaque config. */
   channel: string;
@@ -67,6 +89,11 @@ export interface TenantSpec {
    * every surface used before this field existed.
    */
   reportTimezone?: string;
+  /**
+   * The days this tenant has no run for, in `reportTimezone`. Absent means
+   * every day is open, which is what every tenant got before this existed.
+   */
+  calendar?: TenantCalendar;
   /** The tenant-owned opaque block; the host never interprets its contents. */
   extensions: Record<string, unknown>;
 }
@@ -124,6 +151,19 @@ const TenantShape = z.strictObject({
     .optional(),
   promptFile: z.string().min(1).max(200).optional(),
   reportTimezone: z.string().min(1).max(64).optional(),
+  // A closed day is a DATE, never a parsed instant: `2026-09-07` in the
+  // tenant's own zone. The regex is the whole validation on purpose -- a
+  // Date-parsed entry would accept `2026-09-31` and silently mean October 1.
+  calendar: z
+    .strictObject({
+      weekdaysOnly: z.boolean().default(false),
+      closed: z
+        .array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))
+        .max(400)
+        .default([]),
+      appliesTo: z.array(z.string().min(1).max(64)).max(32).optional(),
+    })
+    .optional(),
   // ONE opaque block, not a host-maintained allow-list of tenant key names. A
   // tenant adding a fourth block edits only its own file; a typo in a HOST key
   // still fails loudly, because strictObject rejects it.
@@ -189,6 +229,17 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
     ...(raw.reportTimezone === undefined
       ? {}
       : { reportTimezone: raw.reportTimezone }),
+    ...(raw.calendar === undefined
+      ? {}
+      : {
+          calendar: {
+            weekdaysOnly: raw.calendar.weekdaysOnly,
+            closed: [...raw.calendar.closed],
+            ...(raw.calendar.appliesTo === undefined
+              ? {}
+              : { appliesTo: [...raw.calendar.appliesTo] }),
+          },
+        }),
     extensions: raw.extensions ?? {},
   };
 }

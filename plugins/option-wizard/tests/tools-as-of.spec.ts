@@ -9,7 +9,7 @@
  * works, until a replay quotes next week's calendar at a past instant.
  */
 import { describe, expect, it } from "vitest";
-import { buildTools, dateCutSql } from "../tools/index.js";
+import { buildTools, dateCutSql, priorOpenDay } from "../tools/index.js";
 
 const AS_OF = new Date("2026-09-02T16:45:00Z");
 
@@ -138,6 +138,21 @@ describe("as-of, history tools", () => {
       " AND r.market_date < DATE '2026-09-02'",
     );
     expect(dateCutSql("r.market_date", undefined)).toBe("");
+  });
+
+  it("walks back to the prior OPEN day, over a closed Monday and the weekend behind it", () => {
+    // 2026-09-07 is Labor Day, a Monday; the session before it is Friday
+    // 2026-09-04. Without the declared closure this returned the holiday
+    // itself, and a premarket brief for Tuesday the 8th quoted a tide labelled
+    // `prior` from a day on which nothing traded.
+    const calendar = { weekdaysOnly: true, closed: ["2026-09-07"] };
+    expect(priorOpenDay("2026-09-08", calendar)).toBe("2026-09-04");
+    // Same walk with no calendar is weekends only — the old behaviour, kept so
+    // a host that does not pass the block still gets a weekday.
+    expect(priorOpenDay("2026-09-08")).toBe("2026-09-07");
+    expect(priorOpenDay("2026-09-07")).toBe("2026-09-04");
+    // An ordinary Tuesday is just the Monday before it.
+    expect(priorOpenDay("2026-09-02", calendar)).toBe("2026-09-01");
   });
 
   it("ow_uw_calendar is refused in a replay rather than answered with the wrong week", async () => {

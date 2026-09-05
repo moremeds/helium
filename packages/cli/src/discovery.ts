@@ -120,6 +120,10 @@ export interface TenantToolConfig {
    *  and never inspects the reason — what a source is remains the tenant's
    *  business (doctrine 2). */
   pit?: { markUnavailable: (tool: string, reason: string) => void };
+  /** The tenant's own declaration of which days are closed. The runner uses it
+   *  to decide whether to run at all; a tool needs it to walk BACKWARDS to the
+   *  previous open day, which it must not guess. */
+  calendar?: { weekdaysOnly: boolean; closed: string[] };
 }
 
 export async function loadTenantTools(
@@ -135,6 +139,7 @@ export async function loadTenantTools(
       asOf?: Date;
       variant: string;
       pit?: { markUnavailable: (tool: string, reason: string) => void };
+      calendar?: { weekdaysOnly: boolean; closed: string[] };
     }) => EcosystemTool[];
   };
   if (typeof module.buildTools !== "function") return [];
@@ -144,6 +149,7 @@ export async function loadTenantTools(
     variant: cfg.variant,
     ...(cfg.asOf === undefined ? {} : { asOf: cfg.asOf }),
     ...(cfg.pit === undefined ? {} : { pit: cfg.pit }),
+    ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
   });
 }
 

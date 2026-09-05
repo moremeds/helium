@@ -78,9 +78,11 @@ function printRun(report: RunReport): void {
   }
   console.log("");
   console.log(
-    report.outcome === "completed"
-      ? `outcome: completed (${report.steps.length} steps)`
-      : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
+    report.skipped !== undefined
+      ? `outcome: skipped — ${report.skipped.reason}`
+      : report.outcome === "completed"
+        ? `outcome: completed (${report.steps.length} steps)`
+        : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
   );
   for (const sent of report.delivery) {
     console.log(

@@ -65,6 +65,16 @@ export interface RunReport {
    * look like a safety check went missing.
    */
   rendererSkipped?: { reason: string };
+  /**
+   * Set when the run did not proceed at all because the tenant's `calendar`
+   * says this `day` is closed. Not a failure: the scheduler fires every day and
+   * the tenant decides which of those days it has anything to say about, so a
+   * closed day is a completed run that produced nothing and delivered nothing.
+   * Its own field rather than `failure`, because a closed day that exits
+   * nonzero would train an operator to ignore the one signal that means the
+   * cron is broken.
+   */
+  skipped?: { reason: string };
   /** One entry per `delivery:` block in tenant.yaml. Empty when none declared. */
   delivery: DeliveryReport[];
   /** Tools this machine cannot serve: their `requiresEnv` key is unset. */

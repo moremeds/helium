@@ -42,6 +42,7 @@ import {
   type Provider,
   type RenderedReport,
   type RunReport,
+  type TenantCalendar,
   type TenantRenderer,
   type Span,
   type TargetProfile,
@@ -586,6 +587,31 @@ export function zonedDay(now: Date, timeZone: string): string {
   return zonedNow(now, timeZone).slice(0, 10);
 }
 
+/**
+ * Why `day` is closed for this tenant, or undefined when it is open.
+ *
+ * `day` is already in the tenant's `reportTimezone`, so both checks are plain
+ * string/date arithmetic on a date-only value: parsed as UTC midnight, which is
+ * the only reading under which the weekday of `2026-09-07` is a property of the
+ * date rather than of the machine running this.
+ */
+export function calendarSkipReason(
+  calendar: TenantCalendar | undefined,
+  day: string,
+  phase: string,
+): string | undefined {
+  if (calendar === undefined) return undefined;
+  // A label the calendar does not govern runs on every day, closed or not.
+  if (calendar.appliesTo !== undefined && !calendar.appliesTo.includes(phase))
+    return undefined;
+  if (calendar.closed.includes(day)) return `calendar closed ${day}`;
+  if (!calendar.weekdaysOnly) return undefined;
+  // 0 Sunday, 6 Saturday — the two the modulo picks out.
+  return new Date(`${day}T00:00:00Z`).getUTCDay() % 6 === 0
+    ? `calendar closed ${day} (weekend)`
+    : undefined;
+}
+
 export async function runTenant(options: RunOptions): Promise<RunReport> {
   const env = options.env ?? process.env;
   const runId = options.runId ?? `run-${randomUUID()}`;
@@ -597,6 +623,57 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // per surface is how a report named for one day gets charged to another.
   const reportZone = spec.reportTimezone ?? "UTC";
   const reportDay = zonedDay(options.now?.() ?? new Date(), reportZone);
+
+  // Before anything is discovered, built or called: the scheduler fires every
+  // day and only the tenant knows which of those days it has something to say
+  // about. A closed day returns a completed run with no steps and NO delivery —
+  // reached before the delivery loop, which otherwise sends even for a failed
+  // run. The audit row exists so a silent day is still a day with a record:
+  // "nothing ran" and "the cron is dead" have to be distinguishable.
+  const closedReason = calendarSkipReason(spec.calendar, reportDay, phase);
+  if (closedReason !== undefined) {
+    options.audit.append({
+      runId,
+      spanId: "calendar:closed",
+      tenant: spec.tenant,
+      role: "calendar",
+      provider: "none",
+      model: "none",
+      codeVersion: codeVersion(),
+      stepNo: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      contextSize: 0,
+      latencyMs: 0,
+      costUsd: 0,
+      toolName: "calendar:closed",
+      toolOutputBytes: Buffer.byteLength(closedReason, "utf8"),
+      summarised: false,
+      ts: new Date().toISOString(),
+    });
+    return {
+      runId,
+      tenant: spec.tenant,
+      mode: "tool-only",
+      phase,
+      day: reportDay,
+      providersLive: [],
+      providersSkipped: [],
+      steps: [],
+      outcome: "completed",
+      skipped: { reason: closedReason },
+      gatesSkipped: [],
+      delivery: [],
+      toolsUnconfigured: [],
+      ...(options.asOf === undefined
+        ? {}
+        : {
+            asOf: options.asOf.toISOString(),
+            variant: options.variant ?? "live",
+          }),
+    };
+  }
 
   const discovered =
     options.providers === undefined
@@ -621,6 +698,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       variant: options.variant ?? "live",
       pit,
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
+      ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
     }));
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 

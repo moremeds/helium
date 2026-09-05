@@ -61,6 +61,34 @@ env:
 # observe DST.
 reportTimezone: America/New_York
 
+# The days this tenant has nothing to say about, in the zone above. launchd
+# fires the five triggers below EVERY day — none of the plists carries a Weekday
+# key — so without this block a holiday produces a full run and a briefing about
+# a session that never happened. A closed day is a completed run with no steps,
+# no mail and one audit row; it is not a failure, and it must not read as one.
+#
+# NYSE full-day closures, MAINTAINED BY HAND from
+# https://www.nyse.com/markets/hours-calendars (verified against that page
+# 2026-09-05). Early closes (1:00 p.m. ET) are NOT listed: a half session is a
+# session, and the brief is still about a real tape. Whoever extends this list
+# past 2027-02 reads that page again rather than deriving the dates.
+#
+# `appliesTo` names the three session phases and NOT weekly or frank, which is
+# load-bearing: weekly fires Sunday 08:00 ET and frank Monday 09:00 ET, and both
+# are reviews of a week that has already happened. A calendar applied to every
+# phase alike would delete the Sunday briefing outright and drop frank on every
+# holiday Monday — Labor Day, MLK, Presidents Day, Memorial Day.
+calendar:
+  weekdaysOnly: true
+  appliesTo: [premarket, intraday, close]
+  closed:
+    - 2026-09-07 # Labor Day
+    - 2026-11-26 # Thanksgiving Day
+    - 2026-12-25 # Christmas Day
+    - 2027-01-01 # New Year's Day
+    - 2027-01-18 # Martin Luther King, Jr. Day
+    - 2027-02-15 # Washington's Birthday
+
 # DECLARATIVE ONLY. Nothing in this repo runs a cron loop: launchd is the
 # scheduler and `launchd/com.helium.option-wizard-<phase>.plist` is where the
 # time actually lives. These five entries exist so the schedule is readable
