@@ -11,7 +11,16 @@
     "./gates/ib-preflight": "./lib/gates/ib-preflight.js",
     "./render": "./lib/render/index.js"
   },
-  "files": ["lib", "tools", "gates", "render", "tenant.yaml", "team.yaml"],
+  "files": [
+    "lib",
+    "tools",
+    "gates",
+    "render",
+    "quality",
+    "state",
+    "tenant.yaml",
+    "team.yaml"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -124,6 +124,21 @@ export interface TenantToolConfig {
    *  to decide whether to run at all; a tool needs it to walk BACKWARDS to the
    *  previous open day, which it must not guess. */
   calendar?: { weekdaysOnly: boolean; closed: string[] };
+  /** Recorded responses from an earlier run, when the operator named one with
+   *  `--replay-from`. A tool with no history for `asOf` may answer from here
+   *  instead of refusing. The host supplies the lookup and never decides which
+   *  tools want it. */
+  recordings?: {
+    has: (tool: string) => boolean;
+    lookup: (
+      tool: string,
+      args: Record<string, unknown>,
+    ) => string | undefined;
+  };
+  /** The tenant's own opaque block, CARRIED and never read. `extensions` is
+   *  the tenant's word about itself; handing it back to the tenant's own
+   *  `buildTools` is not the host reading inside it. */
+  extensions?: Record<string, unknown>;
 }
 
 export async function loadTenantTools(
@@ -140,6 +155,14 @@ export async function loadTenantTools(
       variant: string;
       pit?: { markUnavailable: (tool: string, reason: string) => void };
       calendar?: { weekdaysOnly: boolean; closed: string[] };
+      recordings?: {
+        has: (tool: string) => boolean;
+        lookup: (
+          tool: string,
+          args: Record<string, unknown>,
+        ) => string | undefined;
+      };
+      extensions?: Record<string, unknown>;
     }) => EcosystemTool[];
   };
   if (typeof module.buildTools !== "function") return [];
@@ -150,6 +173,8 @@ export async function loadTenantTools(
     ...(cfg.asOf === undefined ? {} : { asOf: cfg.asOf }),
     ...(cfg.pit === undefined ? {} : { pit: cfg.pit }),
     ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
+    ...(cfg.recordings === undefined ? {} : { recordings: cfg.recordings }),
+    ...(cfg.extensions === undefined ? {} : { extensions: cfg.extensions }),
   });
 }
 

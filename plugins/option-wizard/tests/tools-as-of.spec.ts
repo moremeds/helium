@@ -183,3 +183,68 @@ describe("as-of, history tools", () => {
     expect(out.rows).toEqual([]);
   });
 });
+
+/**
+ * Serving a live-only tool from a recording. Fourteen tools refuse a replayed
+ * instant because their sources have no history (`AS_OF_BLIND`) — but a
+ * recording of one of OUR OWN earlier runs IS history.
+ */
+describe("as-of tools with recordings", () => {
+  it("refuses as before when the operator named no recording", async () => {
+    const marked: string[] = [];
+    const tool = toolNamed("ow_spot", {
+      asOf: AS_OF,
+      pit: { markUnavailable: (name) => marked.push(name) },
+    });
+    expect(
+      JSON.parse(await tool.run({ tickers: ["SPY"] }, {} as never)).unavailable,
+    ).toBe("as-of");
+    expect(marked).toContain("ow_spot");
+  });
+
+  it("returns the recorded response, and marks nothing unavailable", async () => {
+    const marked: string[] = [];
+    const tool = toolNamed("ow_spot", {
+      asOf: AS_OF,
+      pit: { markUnavailable: (name) => marked.push(name) },
+      recordings: {
+        has: (name) => name === "ow_spot",
+        lookup: (name, args) =>
+          name === "ow_spot" &&
+          JSON.stringify(args) === JSON.stringify({ tickers: ["SPY"] })
+            ? '{"rows":[{"ticker":"SPY","close":661.02}]}'
+            : undefined,
+      },
+    });
+    expect(await tool.run({ tickers: ["SPY"] }, {} as never)).toBe(
+      '{"rows":[{"ticker":"SPY","close":661.02}]}',
+    );
+    // `pit` is shared by every tool this build produced, and the other
+    // thirteen live-only tools have no recording here, so they are marked as
+    // they always were. The claim is about THIS tool.
+    expect(marked).not.toContain("ow_spot");
+  });
+
+  it("falls back to the refusal, lazily, when the arguments do not match", async () => {
+    const marked: string[] = [];
+    const tool = toolNamed("ow_spot", {
+      asOf: AS_OF,
+      pit: { markUnavailable: (name) => marked.push(name) },
+      recordings: { has: () => true, lookup: () => undefined },
+    });
+    // Nothing is marked until the tool is actually CALLED and misses.
+    expect(marked).toEqual([]);
+    expect(
+      JSON.parse(await tool.run({ tickers: ["QQQ"] }, {} as never)).unavailable,
+    ).toBe("as-of");
+    expect(marked).toContain("ow_spot");
+  });
+
+  it("leaves a tool that is not live-only alone", () => {
+    const tool = toolNamed("ow_macro_rates", {
+      asOf: AS_OF,
+      recordings: { has: () => true, lookup: () => "should not be used" },
+    });
+    expect(tool.description).not.toContain("Unavailable in an as-of replay");
+  });
+});

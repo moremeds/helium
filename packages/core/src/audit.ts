@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS span (
   tool_name TEXT, tool_output_bytes INTEGER, summarised INTEGER NOT NULL DEFAULT 0,
   ts TEXT NOT NULL, PRIMARY KEY (run_id, span_id));
 CREATE INDEX IF NOT EXISTS span_tenant_ts ON span(tenant, ts);
+CREATE TABLE IF NOT EXISTS metric (
+  run_id TEXT NOT NULL, name TEXT NOT NULL, value REAL, ts TEXT NOT NULL,
+  day TEXT NOT NULL, label TEXT NOT NULL,
+  PRIMARY KEY (run_id, name));
+CREATE INDEX IF NOT EXISTS metric_day_label ON metric(day, label);
 `;
 
 /** The design §5 "one query", verbatim. */
@@ -94,6 +99,35 @@ ORDER BY usd DESC`;
  */
 export function auditDbPath(env: NodeJS.ProcessEnv = process.env): string {
   return env.HELIUM_AUDIT_DB ?? join(homedir(), ".helium", "audit.db");
+}
+
+/**
+ * One named number a run produced, stored so a `SELECT` shows the trend.
+ *
+ * NOT a span. A span row is a projection folded from the session log; this is
+ * a number whoever produced the run's output computed from it, and core never
+ * learns what any `name` means. `value` is nullable because "not computable
+ * this run" is a fact worth keeping and is not the same as zero.
+ *
+ * `day` and `label` are the run's own two coordinates, carried so the table
+ * can be asked a question a human has: a run id is a UUID, and "how did this
+ * number move over the last five sessions" cannot be asked of one. Core reads
+ * neither — it stores them and compares them as strings.
+ *
+ * `MetricRow.label` is the RUN label (`premarket`, `close`); the short
+ * display key the report header prints is `RunMetric.short`, a different
+ * field on a different type — no collision between the two remains.
+ * The two live one function apart in packages/cli/src/runner.ts.
+ */
+export interface MetricRow {
+  runId: string;
+  name: string;
+  value: number | null;
+  ts: string;
+  /** The run's report day, `yyyy-mm-dd` in whatever zone the run counts in. */
+  day: string;
+  /** The run label — the same string `RunOptions.phase` carries. */
+  label: string;
 }
 
 export class AuditStore {
@@ -256,6 +290,107 @@ export class AuditStore {
       )
       .get(runId) as unknown as Record<string, unknown>;
     return { usd: Number(row.usd), tokens: Number(row.tokens) };
+  }
+
+  /**
+   * Append one named number. Idempotent on `(run_id, name)` so a re-render of
+   * the same run rewrites rather than doubles.
+   */
+  appendMetric(row: MetricRow): void {
+    this.#db
+      .prepare(
+        `INSERT INTO metric (run_id, name, value, ts, day, label)
+         VALUES (?,?,?,?,?,?)
+         ON CONFLICT(run_id, name) DO UPDATE SET
+           value=excluded.value, ts=excluded.ts,
+           day=excluded.day, label=excluded.label`,
+      )
+      .run(row.runId, row.name, row.value, row.ts, row.day, row.label);
+  }
+
+  /** Every named number one run wrote, by name. */
+  metrics(runId: string): Array<{ name: string; value: number | null }> {
+    return (
+      this.#db
+        .prepare(
+          "SELECT name, value FROM metric WHERE run_id = ? ORDER BY name",
+        )
+        .all(runId) as unknown as Array<Record<string, unknown>>
+    ).map((row) => ({
+      name: String(row.name),
+      value: row.value === null ? null : Number(row.value),
+    }));
+  }
+
+  /**
+   * One `(day, label)`'s numbers, from its NEWEST run only.
+   *
+   * Newest by `ts`, not by insertion order: a `(day, label)` runs twice more
+   * often than it looks — a retried provider, a replay under another variant —
+   * and two runs' numbers read together describe neither of them.
+   */
+  metricsFor(
+    day: string,
+    label: string,
+  ): Array<{ name: string; value: number | null }> {
+    return (
+      this.#db
+        .prepare(
+          `SELECT name, value FROM metric
+           WHERE day = ? AND label = ? AND run_id = (
+             SELECT run_id FROM metric WHERE day = ? AND label = ?
+             ORDER BY ts DESC, run_id DESC LIMIT 1)
+           ORDER BY name`,
+        )
+        .all(day, label, day, label) as unknown as Array<
+        Record<string, unknown>
+      >
+    ).map((row) => ({
+      name: String(row.name),
+      value: row.value === null ? null : Number(row.value),
+    }));
+  }
+
+  /**
+   * Every `(day, label)`'s newest run over an inclusive day range, ordered by
+   * day, then label, then name. This is the query the whole table exists for:
+   * one call answers "what happened to these numbers over the last N
+   * sessions", and the caller decides which days are sessions.
+   *
+   * Days are compared as STRINGS. `yyyy-mm-dd` sorts correctly that way, and a
+   * date function here would need a timezone the table deliberately does not
+   * have.
+   */
+  metricsBetween(
+    fromDay: string,
+    toDay: string,
+  ): Array<{
+    day: string;
+    label: string;
+    name: string;
+    value: number | null;
+  }> {
+    return (
+      this.#db
+        .prepare(
+          `SELECT m.day, m.label, m.name, m.value FROM metric m
+           JOIN (SELECT day, label, run_id,
+                        ROW_NUMBER() OVER (PARTITION BY day, label
+                          ORDER BY ts DESC, run_id DESC) rn
+                 FROM metric WHERE day >= ? AND day <= ?) newest
+             ON newest.run_id = m.run_id AND newest.rn = 1
+           WHERE m.day >= ? AND m.day <= ?
+           ORDER BY m.day, m.label, m.name`,
+        )
+        .all(fromDay, toDay, fromDay, toDay) as unknown as Array<
+        Record<string, unknown>
+      >
+    ).map((row) => ({
+      day: String(row.day),
+      label: String(row.label),
+      name: String(row.name),
+      value: row.value === null ? null : Number(row.value),
+    }));
   }
 
   close(): void {

@@ -91,13 +91,15 @@ describe("ow_prior_brief", () => {
     });
   });
 
-  it("keeps to its own phase and ignores the other four", async () => {
+  it("walks back to the run before this one, whatever phase that run was", async () => {
+    // `phase` means "the run label I am writing FOR", not "the phase to look
+    // up on an earlier day". The run before a premarket is the previous day's
+    // close, and telling premarket about the last premarket instead skips a
+    // whole session of the tape.
     const stateRoot = root([
       [
         "option-wizard-2026-09-03-close.md",
-        reportFile([
-          ["edit", "editor", JSON.stringify({ headline: "CLOSE." })],
-        ]),
+        reportFile([["edit", "editor", JSON.stringify({ headline: "CLOSE." })]]),
       ],
       [
         "option-wizard-2026-09-02-premarket.md",
@@ -105,9 +107,9 @@ describe("ow_prior_brief", () => {
       ],
     ]);
     const payload = await call(stateRoot, { today: "2026-09-04" });
-    expect(payload.prior?.day).toBe("2026-09-02");
-    expect(payload.prior?.phase).toBe("premarket");
-    expect(payload.prior?.text).not.toContain("CLOSE.");
+    expect(payload.prior?.day).toBe("2026-09-03");
+    expect(payload.prior?.phase).toBe("close");
+    expect(payload.prior?.text).toContain("CLOSE.");
   });
 
   it("falls back to the regime step for a report written before the editor existed", async () => {
@@ -165,6 +167,134 @@ describe("ow_prior_brief", () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-brief-empty-"));
     const payload = await call(stateRoot, { today: "2026-09-04" });
     expect(payload.prior).toBeNull();
-    expect(payload.reason).toContain("no reports directory");
+    expect(payload.reason).toContain("before 2026-09-04");
+  });
+});
+
+/**
+ * The structured half. `ow_prior_brief` prefers the previous run's own
+ * `regime-state` record — six fields it copied off tools — over re-reading its
+ * whole markdown brief, which is how intraday used to re-tell premarket's cause
+ * in premarket's words. The markdown path above stays as the fallback.
+ */
+function stateFile(
+  stateRoot: string,
+  day: string,
+  label: string,
+  body: Record<string, unknown>,
+): void {
+  const dir = join(stateRoot, "option-wizard", day);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${label}.regime.json`), JSON.stringify(body), "utf8");
+}
+
+function briefFile(stateRoot: string, day: string, label: string): void {
+  const dir = join(stateRoot, "reports");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `option-wizard-${day}-${label}.md`),
+    `# [TEST] ${label} ${day}\n\n## edit — editor\n\n${JSON.stringify({
+      headline: "markdown headline",
+      sections: [{ title: "t", body: "b" }],
+    })}\n`,
+    "utf8",
+  );
+}
+
+const RECORD = {
+  cause: "August payrolls printed 162k",
+  ust2y: 4.02,
+  ust10y: 4.79,
+  s2s10: 77,
+  tide: "up",
+  thesis: "No cut to give.",
+};
+
+describe("ow_prior_brief regime record", () => {
+  it("returns the newest record strictly before this run, across days", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    stateFile(stateRoot, "2026-09-03", "close", RECORD);
+    stateFile(stateRoot, "2026-09-04", "premarket", {
+      ...RECORD,
+      cause: "own",
+    });
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "premarket",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.prior.day).toBe("2026-09-03");
+    expect(out.prior.phase).toBe("close");
+    expect(out.prior.regimeState).toEqual(RECORD);
+    expect(out.fallback).toBeUndefined();
+  });
+
+  it("orders two records on the same day by their place in the day", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    stateFile(stateRoot, "2026-09-04", "premarket", RECORD);
+    stateFile(stateRoot, "2026-09-04", "intraday", { ...RECORD, cause: "mid" });
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "close",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.prior.phase).toBe("intraday");
+    expect(out.prior.regimeState.cause).toBe("mid");
+  });
+
+  it("carries the prior report's headline beside the record", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    stateFile(stateRoot, "2026-09-03", "close", RECORD);
+    briefFile(stateRoot, "2026-09-03", "close");
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "premarket",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.prior.headline).toBe("markdown headline");
+  });
+
+  it("falls back to the markdown brief when no record exists", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    briefFile(stateRoot, "2026-09-03", "close");
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "premarket",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.fallback).toBe("markdown");
+    expect(out.prior.day).toBe("2026-09-03");
+    expect(typeof out.prior.text).toBe("string");
+  });
+
+  it("ignores a record that no longer matches the schema", async () => {
+    // A record written by an older build, or by a model that drifted, is not a
+    // record: falling through to markdown is the honest answer.
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    stateFile(stateRoot, "2026-09-03", "close", { cause: "x" });
+    briefFile(stateRoot, "2026-09-03", "close");
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "premarket",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.fallback).toBe("markdown");
+  });
+
+  it("says so, and never throws, when there is nothing at all", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot).run({
+        phase: "premarket",
+        today: "2026-09-04",
+      }),
+    );
+    expect(out.prior).toBe(null);
+    expect(typeof out.reason).toBe("string");
   });
 });

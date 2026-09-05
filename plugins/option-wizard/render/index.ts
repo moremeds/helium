@@ -15,7 +15,11 @@ import { priceStructure, width, type Leg, type Pricing } from "./math.js";
 import { FLASH_BUDGET, trim } from "./budget.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
+import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
+import { qualityMetrics } from "../quality/index.js";
+
+export { extractJson } from "./json.js";
 
 export type {
   Charts,
@@ -220,37 +224,6 @@ export interface BriefView {
 
 const RIGHTS = new Set(["call", "put"]);
 const ACTIONS = new Set(["buy", "sell"]);
-
-/** The last JSON object in a step's text, fenced or bare. */
-export function extractJson(text: string): Record<string, unknown> | null {
-  const candidates: string[] = [];
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{")) candidates.push(trimmed);
-  for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)) {
-    candidates.push((match[1] ?? "").trim());
-  }
-  // Last resort: the widest brace span. A reviewer that forgets the fence still
-  // gets read rather than costing the reader the whole brief.
-  const first = text.indexOf("{");
-  const last = text.lastIndexOf("}");
-  if (first !== -1 && last > first)
-    candidates.push(text.slice(first, last + 1));
-  for (const candidate of candidates.reverse()) {
-    try {
-      const parsed: unknown = JSON.parse(candidate);
-      if (
-        parsed !== null &&
-        typeof parsed === "object" &&
-        !Array.isArray(parsed)
-      ) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch {
-      /* try the next candidate */
-    }
-  }
-  return null;
-}
 
 function toLegs(raw: unknown): Leg[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
@@ -1479,5 +1452,8 @@ export default function renderReport(
     // The same document the prose was rendered FROM, for a channel that stores
     // the data instead of mailing the rendering. Core never reads inside it.
     data: view as unknown as Record<string, unknown>,
+    // Measured over the document the READER gets, after the budget trim. The
+    // runner writes these to the audit table and prints one header line.
+    metrics: qualityMetrics({ view, report }),
   };
 }

@@ -15,6 +15,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { AuditStore } from "@helium/core";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
 import {
   candidatesFrom,
@@ -27,6 +28,7 @@ import {
   evaluateProposal,
   tenantThresholds,
 } from "../gates/ib-preflight.js";
+import { parseRegimeState } from "../state/regime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -61,6 +63,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
   ["ow_reports", { mutating: false }],
+  // Same reasoning: it reads this tenant's own report directory, its own state
+  // records and its own audit table. An empty window is a real answer.
+  ["ow_review_window", { mutating: false }],
   // Same reasoning as ow_reports: it reads the same report directory, and "no
   // brief yesterday" is an answer the editor prints in one line, not an outage.
   ["ow_prior_brief", { mutating: false }],
@@ -1043,6 +1048,60 @@ const PRIOR_BRIEF_CEILING_CHARS = 2000;
  *  "yesterday" means the same calendar day the filenames do. */
 const REPORT_ZONE = "America/New_York";
 
+const ReviewWindowParams = z.object({
+  today: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+});
+
+/**
+ * Every run's quality numbers over a day range, as `day -> label -> name ->
+ * value`, straight out of the audit table.
+ *
+ * `metricsBetween` already takes the newest run of each `(day, label)`, so
+ * this only shapes the rows. A `null` value — "not computable that run" — is
+ * DROPPED here rather than written as 0: the reviewer is asked which numbers
+ * moved, and a zero that means "we could not tell" is the one reading that
+ * would make it lie.
+ *
+ * The store is opened per call and closed in a `finally`. A tool that leaks a
+ * SQLite handle leaks one per run, forever.
+ */
+function qualityByDay(
+  env: NodeJS.ProcessEnv,
+  fromDay: string,
+  toDay: string,
+): {
+  rows: Map<string, Record<string, Record<string, number>>>;
+  note?: string;
+} {
+  const rows = new Map<string, Record<string, Record<string, number>>>();
+  let store: AuditStore | undefined;
+  try {
+    store = AuditStore.open(env);
+    for (const row of store.metricsBetween(fromDay, toDay)) {
+      if (row.value === null) continue;
+      const byLabel = rows.get(row.day) ?? {};
+      byLabel[row.label] = {
+        ...(byLabel[row.label] ?? {}),
+        [row.name]: row.value,
+      };
+      rows.set(row.day, byLabel);
+    }
+  } catch (error: unknown) {
+    return {
+      rows,
+      note: `quality unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  } finally {
+    store?.close();
+  }
+  return { rows };
+}
+
 const PriorBriefParams = z.object({
   phase: z
     .enum(["premarket", "intraday", "close", "weekly", "frank"])
@@ -1173,6 +1232,19 @@ function stepsOf(markdown: string): Map<string, string> {
 /** `option-wizard-2026-09-02-premarket.md` -> {date, phase}. Anything that does
  *  not match is not one of our reports and is ignored rather than guessed at. */
 const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
+
+/** The order the day's runs happen in, for walking BACKWARDS from one of them.
+ *  A label not listed sorts last within its day: it is a run this list has not
+ *  been taught about, and putting it after the known ones is the answer that
+ *  cannot reorder a known pair. */
+const PHASE_ORDER = ["premarket", "frank", "intraday", "close", "weekly"];
+
+function phaseRank(label: string): number {
+  const at = PHASE_ORDER.indexOf(label);
+  return at === -1 ? PHASE_ORDER.length : at;
+}
+
+const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 
 const EarningsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
@@ -1353,6 +1425,34 @@ export function dateCutSql(
   return asOfDay === undefined ? "" : ` AND ${column} < DATE '${asOfDay}'`;
 }
 
+/**
+ * Every distinct observation date carried by `ow_argon_metrics` rows —
+ * `iv.market_date`, `gex.trade_date`, `skew.market_date`. These are the only
+ * honest vintage of the numbers in that payload; the query's own as-of day is
+ * not. Anything unparseable is skipped rather than guessed at, which is why a
+ * payload with no dated row simply gets no `dataDate`.
+ */
+function argonMetricsRowDates(rows: readonly unknown[]): Set<string> {
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const cell = row as Record<string, unknown>;
+    for (const [part, key] of [
+      [cell.iv, "market_date"],
+      [cell.gex, "trade_date"],
+      [cell.skew, "market_date"],
+    ] as const) {
+      if (part === null || typeof part !== "object") continue;
+      const value = (part as Record<string, unknown>)[key];
+      // psql hands dates back through json_agg as `yyyy-mm-dd` strings; a
+      // timestamp would arrive with a `T`, and only the day is the vintage.
+      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/u.test(value))
+        out.add(value.slice(0, 10));
+    }
+  }
+  return out;
+}
+
 /** The calendar day before `day`, both `yyyy-mm-dd`. Plain calendar
  *  arithmetic on a date-only string: parsed as UTC midnight and written back
  *  the same way, so no zone can move it. */
@@ -1360,6 +1460,20 @@ function priorDay(day: string): string {
   const at = new Date(`${day}T00:00:00Z`);
   at.setUTCDate(at.getUTCDate() - 1);
   return at.toISOString().slice(0, 10);
+}
+
+/** Whether the market this tenant writes about is shut on `day`. The tenant's
+ *  own calendar declaration is the only authority; there is no derivation. */
+export function isClosedDay(
+  day: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): boolean {
+  const weekends = calendar === undefined || calendar.weekdaysOnly;
+  return (
+    (calendar?.closed ?? []).includes(day) ||
+    // 0 Sunday, 6 Saturday — the two the modulo picks out.
+    (weekends && new Date(`${day}T00:00:00Z`).getUTCDay() % 6 === 0)
+  );
 }
 
 /**
@@ -1379,20 +1493,43 @@ export function priorOpenDay(
   day: string,
   calendar?: { weekdaysOnly: boolean; closed: string[] },
 ): string {
-  const closed = new Set(calendar?.closed ?? []);
-  const weekends = calendar === undefined || calendar.weekdaysOnly;
-  const shut = (d: string): boolean =>
-    closed.has(d) ||
-    (weekends && new Date(`${d}T00:00:00Z`).getUTCDay() % 6 === 0);
   let out = priorDay(day);
   // Bounded: a run of closed days longer than a fortnight is a broken
   // declaration, not a holiday, and looping forever on it would hang the run.
-  for (let step = 0; step < 14 && shut(out); step += 1) out = priorDay(out);
+  for (let step = 0; step < 14 && isClosedDay(out, calendar); step += 1)
+    out = priorDay(out);
   return out;
+}
+
+/**
+ * The last `count` OPEN days ending at `from`, oldest first.
+ *
+ * `from` itself is included when it is open — a Friday close review counts
+ * Friday — and replaced by the previous open day when it is not, which is the
+ * Sunday case the weekly run actually runs on. Never a subtraction: 21 trading
+ * days is 29 to 31 calendar days depending on which holidays fall inside, and
+ * a date arithmetic that guesses is a window that silently moves.
+ */
+export function openDaysBack(
+  from: string,
+  count: number,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): string[] {
+  const out: string[] = [];
+  let day = isClosedDay(from, calendar) ? priorOpenDay(from, calendar) : from;
+  out.push(day);
+  while (out.length < count) {
+    day = priorOpenDay(day, calendar);
+    out.push(day);
+  }
+  return out.reverse();
 }
 
 const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
+
+const AS_OF_REPLAYED_SENTENCE =
+  "In this as-of replay the answer comes from a recording of an earlier live run of this tenant, not from the source. Treat it exactly as a live answer; the report's own header says which tools were served this way.";
 
 export function buildTools(cfg: {
   stateRoot: string;
@@ -1405,6 +1542,16 @@ export function buildTools(cfg: {
   /** The tenant's `calendar:` block, passed through by the runner. Absent in a
    *  test or an older host: the prior-day walk then skips weekends only. */
   calendar?: { weekdaysOnly: boolean; closed: string[] };
+  /** Responses recorded by an earlier run of this tenant, when the operator
+   *  passed `--replay-from`. Our OWN past call is history even where the
+   *  source has none, which is the whole reason pit coverage was stuck. */
+  recordings?: {
+    has: (tool: string) => boolean;
+    lookup: (tool: string, args: Record<string, unknown>) => string | undefined;
+  };
+  /** This tenant's own `extensions:` block, carried here by the host without
+   *  ever being opened. Only this tenant's tools read inside it. */
+  extensions?: Record<string, unknown>;
 }) {
   const { env } = cfg;
   const asOf = cfg.asOf;
@@ -1713,9 +1860,22 @@ export function buildTools(cfg: {
       //                           directional_lean, lean_confidence)
       // Every row carries its own as-of date, because these tables are fed by
       // a scanner that can fall behind and a stale number must be visibly stale.
+      //
+      // Shape re-verified 2026-09-06 against the recorded response of the
+      // 2026-09-03 close replay (`00015-ow_argon_metrics.json.gz`, sha256
+      // 9886c712…, 6553 bytes), which was cut at 2026-09-03 and returned SPY
+      // {iv.close 765.16, iv.market_date "2026-09-02", gex.trade_date
+      // "2026-09-02"} and QQQ {iv.close 709.24, same two dates}. That
+      // recording is also the defect: the payload's only top-level date was
+      // `asOf`, the day the QUERY was cut at, and the editor read it as the
+      // vintage of the numbers — merging a 09-02 close of 765.16 with the
+      // 09-03 tide's 773 in one paragraph. The query day is now
+      // `queriedAsOf`, which cannot be mistaken for a vintage, and `dataDate`
+      // carries the row dates. It is placed BEFORE `rows` so a truncated
+      // payload still shows it.
       name: "ow_argon_metrics",
       description:
-        "Per-ticker IV rank, gamma/delta exposure and 25-delta skew from argon's store, each with the date it was observed.",
+        "Per-ticker IV rank, gamma/delta exposure and 25-delta skew from argon's store. Every number is an end-of-day figure as of the top-level `dataDate` (the row dates; `dataDates` lists them when they disagree) — NOT of the day you are running. `queriedAsOf` is only the day the query was cut at.",
       paramsSchema: TickerMetricsParams,
       mutating: false,
       dshParams: {
@@ -1756,9 +1916,13 @@ export function buildTools(cfg: {
         // (market_date / trade_date / market_date); ASSUMED that argon's
         // mirror never back-dates a row it wrote later, which no column here
         // can distinguish.
+        const observed = [...argonMetricsRowDates(rows)].sort();
+        const dataDate = observed.at(-1);
         return JSON.stringify({
           source: "argon.uw_scan",
-          ...(asOfDay === undefined ? {} : { asOf: asOfDay }),
+          ...(asOfDay === undefined ? {} : { queriedAsOf: asOfDay }),
+          ...(dataDate === undefined ? {} : { dataDate }),
+          ...(observed.length > 1 ? { dataDates: observed } : {}),
           rows,
         });
       },
@@ -2402,6 +2566,158 @@ export function buildTools(cfg: {
       },
     },
     {
+      // The weekly review's whole input, gathered deterministically. The model
+      // that reads this READS numbers; it computes none of them, which is the
+      // standing rule after eight of eleven model-computed numbers audited on
+      // 2026-09-03 came back wrong.
+      //
+      // Windows are TRADING days, counted with the tenant's own calendar.
+      name: "ow_review_window",
+      description:
+        "This tenant's own last 5 / 10 / 21 TRADING days, per window: each session's cause-section titles, its regime state records, the run's own quality numbers (`metaLeakHits`, `budgetViolations`, `causeTitleSimilarity`, straight from the audit table), and the Outcome Ledger scoreboard when one exists. Everything here is read off disk or out of the audit table; nothing is estimated.",
+      paramsSchema: ReviewWindowParams,
+      mutating: false,
+      dshParams: {
+        today: {
+          type: "string",
+          description:
+            "YYYY-MM-DD day to count back FROM, inclusive when it is a session. Omit for this run's own report day.",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { today } = ReviewWindowParams.parse(args);
+        const cutoff =
+          today ??
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const declared = (
+          cfg.extensions as { review?: { windows?: unknown } } | undefined
+        )?.review?.windows;
+        const windows = (
+          Array.isArray(declared) &&
+          declared.every((n) => typeof n === "number" && n > 0 && n <= 60)
+            ? declared
+            : [5, 10, 21]
+        ) as number[];
+        const dir = join(cfg.stateRoot, "reports");
+        let names: string[] = [];
+        try {
+          names = await readdir(dir);
+        } catch {
+          names = [];
+        }
+        const byDay = new Map<string, Array<{ label: string; file: string }>>();
+        for (const name of names) {
+          const match = REPORT_NAME.exec(name);
+          if (match === null) continue;
+          const list = byDay.get(match[1]!) ?? [];
+          list.push({ label: match[2]!, file: name });
+          byDay.set(match[1]!, list);
+        }
+        const out = [];
+        for (const days of windows) {
+          const span = openDaysBack(cutoff, days, cfg.calendar);
+          // ONE query per window, not one per session: the metric table is
+          // asked for the range and the rows are handed out by day below.
+          const measured = qualityByDay(
+            cfg.env,
+            span[0] ?? cutoff,
+            span[span.length - 1] ?? cutoff,
+          );
+          const sessions = [];
+          for (const day of span) {
+            const causeTitles: Record<string, string> = {};
+            const quality = measured.rows.get(day) ?? {};
+            const regime: Record<string, unknown> = {};
+            for (const entry of byDay.get(day) ?? []) {
+              let markdown: string;
+              try {
+                markdown = await readFile(join(dir, entry.file), "utf8");
+              } catch {
+                continue;
+              }
+              const doc = extractJson(stepsOf(markdown).get("edit") ?? "");
+              const first = Array.isArray(doc?.sections)
+                ? ((doc.sections[0] ?? {}) as { title?: unknown })
+                : {};
+              if (typeof first.title === "string" && first.title !== "")
+                causeTitles[entry.label] = first.title;
+            }
+            try {
+              const stateDir = join(cfg.stateRoot, "option-wizard", day);
+              for (const file of await readdir(stateDir)) {
+                const match = STATE_FILE.exec(file);
+                if (match === null) continue;
+                const parsed = parseRegimeState(
+                  JSON.parse(await readFile(join(stateDir, file), "utf8")),
+                );
+                if (parsed !== null) regime[match[1]!] = parsed;
+              }
+            } catch {
+              // No records for that day. The empty object says so.
+            }
+            sessions.push({ day, causeTitles, regime, quality });
+          }
+          // The Outcome Ledger is a peer session's module and may not be
+          // installed. Absent is a COVERAGE NOTE, never an error: a review
+          // that refuses to run because the scoreboard is missing is a review
+          // that never runs.
+          let ledger: unknown = null;
+          const coverage: string[] = [];
+          // An audit database that would not open is one input missing, not a
+          // failed review: the cause titles and the regime records still went
+          // out above.
+          if (measured.note !== undefined) coverage.push(measured.note);
+          try {
+            const core = (await import("@helium/core")) as {
+              readLedger?: (
+                stateRoot: string,
+                tenant: string,
+                options?: { since?: string },
+              ) => unknown[];
+            };
+            // Not a literal specifier on purpose: `@helium/cli` is not yet a
+            // dependency of this tenant (the Outcome Ledger session adds it
+            // with `summarise`), and a literal would make `tsc` fail to
+            // resolve it rather than letting the runtime say so as a coverage
+            // note. Remove the indirection once the dependency lands.
+            const cliSpecifier: string = "@helium/cli";
+            const cli = (await import(cliSpecifier)) as {
+              summarise?: (
+                records: unknown[],
+                options: { deployment?: string; variant?: string },
+              ) => unknown;
+            };
+            if (core.readLedger === undefined || cli.summarise === undefined)
+              throw new Error("readLedger/summarise not installed");
+            ledger = cli.summarise(
+              core.readLedger(cfg.stateRoot, "option-wizard", {
+                since: sessions[0]?.day ?? cutoff,
+              }),
+              {},
+            );
+          } catch (error: unknown) {
+            coverage.push(
+              `ledger scoreboard unavailable: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          out.push({
+            days,
+            from: sessions[0]?.day ?? cutoff,
+            to: sessions[sessions.length - 1]?.day ?? cutoff,
+            sessions,
+            ledger,
+            coverage,
+          });
+        }
+        return JSON.stringify({ cutoff, windows: out });
+      },
+    },
+    {
       // Reads what THIS tenant wrote on earlier runs (delivery-markdown,
       // <stateRoot>/reports). It is the only way a later phase can grade an
       // earlier one, and it needs no database: the report file IS the record.
@@ -2559,14 +2875,14 @@ export function buildTools(cfg: {
       // has already read once.
       name: "ow_prior_brief",
       description:
-        "The previous day's delivered brief for a phase: its masthead headline, its decision block and the opening of each narrative section, capped at ~2 KB. Read it to say what CHANGED since; it is never evidence about today's tape.",
+        "The previous run's regime state record — its cause, the 2Y/10Y/2s10s levels it copied, its tide and its one-sentence thesis — plus that run's headline. Falls back to the previous brief's prose (`fallback: \"markdown\"`) when no record exists. Read it to say what CHANGED; it is never evidence about today's tape.",
       paramsSchema: PriorBriefParams,
       mutating: false,
       dshParams: {
         phase: {
           type: "string",
           description:
-            "premarket (default) | intraday | close | weekly | frank",
+            "The run label you are writing FOR (premarket | intraday | close | weekly | frank). The tool returns the most recent record strictly before it.",
         },
         today: {
           type: "string",
@@ -2592,47 +2908,112 @@ export function buildTools(cfg: {
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
+        const here = phaseRank(wanted);
+        const earlier = (day: string, label: string): boolean =>
+          day < cutoff || (day === cutoff && phaseRank(label) < here);
+        const stateDir = join(cfg.stateRoot, "option-wizard");
+        // 1. The newest STATE RECORD strictly before this run. Calendar-aware
+        //    for free: a closed day produced no run, so it wrote no file.
+        let best: { day: string; label: string; state: unknown } | null = null;
+        try {
+          for (const day of await readdir(stateDir)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/u.test(day)) continue;
+            for (const file of await readdir(join(stateDir, day))) {
+              const match = STATE_FILE.exec(file);
+              if (match === null) continue;
+              const label = match[1]!;
+              if (!earlier(day, label)) continue;
+              if (
+                best !== null &&
+                (day < best.day ||
+                  (day === best.day &&
+                    phaseRank(label) < phaseRank(best.label)))
+              )
+                continue;
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(
+                  await readFile(join(stateDir, day, file), "utf8"),
+                );
+              } catch {
+                continue;
+              }
+              const state = parseRegimeState(parsed);
+              // A record that no longer matches the schema is not a record.
+              if (state === null) continue;
+              best = { day, label, state };
+            }
+          }
+        } catch {
+          // No state directory yet. The markdown fallback below is the answer.
+        }
+        // 2. The prior REPORT, for its headline and for the fallback text.
         const dir = join(cfg.stateRoot, "reports");
-        let names: string[];
+        let names: string[] = [];
         try {
           names = await readdir(dir);
         } catch {
-          return JSON.stringify({
-            dir,
-            prior: null,
-            reason: "no reports directory yet",
-          });
+          names = [];
         }
         const found = names
           .map((name) => ({ name, match: REPORT_NAME.exec(name) }))
           .filter(
             (row) =>
-              row.match !== null &&
-              row.match[2] === wanted &&
-              row.match[1]! < cutoff,
+              row.match !== null && earlier(row.match[1]!, row.match[2]!),
           )
-          .sort((a, b) => b.match![1]!.localeCompare(a.match![1]!))[0];
+          .sort((a, b) => {
+            const byDay = b.match![1]!.localeCompare(a.match![1]!);
+            return byDay !== 0
+              ? byDay
+              : phaseRank(b.match![2]!) - phaseRank(a.match![2]!);
+          })[0];
+        const byStep =
+          found === undefined
+            ? new Map<string, string>()
+            : stepsOf(await readFile(join(dir, found.name), "utf8"));
+        const doc =
+          found === undefined
+            ? null
+            : extractJson(byStep.get("edit") ?? byStep.get("regime") ?? "");
+        const headline =
+          doc !== null && typeof doc.headline === "string" ? doc.headline : "";
+        if (best !== null) {
+          return JSON.stringify({
+            dir: stateDir,
+            prior: {
+              day: best.day,
+              phase: best.label,
+              headline,
+              regimeState: best.state,
+            },
+            note: "The previous run's own state record. Compare it with today's; if the cause has not changed, keep the title and write only the delta. Every number about TODAY still comes from a live tool.",
+          });
+        }
+        // 3. No record: the markdown brief, exactly as this tool used to serve
+        //    it. A run before this feature existed, or one whose regime step
+        //    did not produce a valid block, must still get something.
         if (found === undefined) {
           return JSON.stringify({
             dir,
             prior: null,
-            reason: `no ${wanted} report on disk dated before ${cutoff}`,
+            reason: `no report or state record on disk before ${cutoff}`,
           });
         }
-        const day = found.match![1]!;
-        const byStep = stepsOf(await readFile(join(dir, found.name), "utf8"));
-        // The prior run's own editor document when it had one; the regime step
-        // is the fallback for a report written before the editor existed.
-        // Either way this is prose the reader has already seen.
         const source = byStep.get("edit") ?? byStep.get("regime") ?? "";
-        const parsed = extractJson(source);
         const text = (
-          parsed === null ? source : JSON.stringify(pickBriefProse(parsed))
+          doc === null ? source : JSON.stringify(pickBriefProse(doc))
         ).slice(0, PRIOR_BRIEF_CEILING_CHARS);
         return JSON.stringify({
           dir,
-          prior: { day, phase: wanted, file: found.name, text },
-          note: "Yesterday's own words. Quote it only to say what changed; every number about TODAY comes from a live tool.",
+          fallback: "markdown",
+          prior: {
+            day: found.match![1]!,
+            phase: found.match![2]!,
+            file: found.name,
+            headline,
+            text,
+          },
+          note: "No state record for the previous run; this is its prose. Quote it only to say what changed.",
         });
       },
     },
@@ -3623,12 +4004,31 @@ export function buildTools(cfg: {
     const source = AS_OF_BLIND.get(tool.name);
     if (source === undefined) return tool;
     const reason = `${source} has no history`;
-    cfg.pit?.markUnavailable(tool.name, reason);
     const payload = JSON.stringify({
       unavailable: "as-of",
       asOf: asOfIso,
       reason,
     });
+    // A recording of one of our own earlier runs IS history for this tool.
+    // Marked unavailable LAZILY on this branch: a tool that never got called,
+    // or that got called with arguments the recording covers, is not a gap.
+    if (cfg.recordings?.has(tool.name) === true) {
+      const recordings = cfg.recordings;
+      return {
+        ...tool,
+        description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
+        run: async (args: Record<string, unknown>): Promise<string> => {
+          const recorded = recordings.lookup(tool.name, args);
+          if (recorded !== undefined) return recorded;
+          cfg.pit?.markUnavailable(
+            tool.name,
+            `${reason}, and no recording for these arguments`,
+          );
+          return payload;
+        },
+      };
+    }
+    cfg.pit?.markUnavailable(tool.name, reason);
     return {
       ...tool,
       description: `${tool.description} ${AS_OF_BLIND_SENTENCE}`,

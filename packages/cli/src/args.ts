@@ -13,12 +13,19 @@ export interface RunArgs {
   asOf?: Date;
   /** Names the run's flavour so two replays of one instant stay apart. */
   variant: string;
+  /**
+   * A previous run whose recorded tool responses serve this one. Only a tool
+   * that has NO history for `asOf` consults them; everything else runs as it
+   * always did.
+   */
+  replayFrom?: string;
 }
 
 export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
   let phase = "premarket";
   let variant = "live";
   let asOf: Date | undefined;
+  let replayFrom: string | undefined;
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i];
     const value = rest[i + 1];
@@ -60,7 +67,28 @@ export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
       i += 1;
       continue;
     }
+    if (flag === "--replay-from") {
+      const bad = needsValue();
+      if (bad !== undefined)
+        return {
+          error: "--replay-from needs a run id, e.g. --replay-from run-abc123",
+        };
+      // It becomes a path segment under <stateRoot>/runs. A run id is what
+      // `randomUUID()` produces with a `run-` in front of it; anything with a
+      // separator or a dot in it is not one, and refusing here is cheaper than
+      // discovering it as a read of some other directory.
+      if (!/^[A-Za-z0-9_-]{1,80}$/u.test(value!))
+        return { error: `--replay-from is not a run id: ${value!}` };
+      replayFrom = value!;
+      i += 1;
+      continue;
+    }
     return { error: `unknown argument: ${String(flag)}` };
   }
-  return { phase, variant, ...(asOf === undefined ? {} : { asOf }) };
+  return {
+    phase,
+    variant,
+    ...(asOf === undefined ? {} : { asOf }),
+    ...(replayFrom === undefined ? {} : { replayFrom }),
+  };
 }

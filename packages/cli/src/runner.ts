@@ -58,6 +58,14 @@ import {
   type Skipped,
 } from "./discovery.js";
 import { codeVersion } from "./code-version.js";
+import {
+  loadRecordings,
+  pruneRecordings,
+  recordingsDir,
+  sha256,
+  writeRecording,
+  type RecordingIndex,
+} from "./tool-io.js";
 
 // These moved to `@helium/core` so a tenant's own renderer can name them
 // without depending on the CLI. Re-exported here because every existing
@@ -197,6 +205,12 @@ export interface RunOptions {
   asOf?: Date;
   /** Run flavour label, forwarded to tool construction. Defaults to `live`. */
   variant?: string;
+  /**
+   * A previous run whose recorded tool responses may serve this one's. Core
+   * hands the tenant a lookup and never decides which tools want it — a tool
+   * knows what is behind it and the runner does not (doctrine 2).
+   */
+  replayFrom?: string;
 }
 
 /**
@@ -612,6 +626,63 @@ export function calendarSkipReason(
     : undefined;
 }
 
+/**
+ * A tenant-declared fenced block, lifted out of a step's text.
+ *
+ * Exported because the escaping is the whole risk: `fence` comes out of a YAML
+ * file, and an unescaped `.*` in `new RegExp` would delete the step instead of
+ * the block. Returns the text unchanged, and no `block`, when the fence is not
+ * there — which is every step of every tenant that declares none.
+ */
+export function splitStateBlock(
+  text: string,
+  fence: string,
+): { text: string; block?: string } {
+  const escaped = fence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = new RegExp(
+    `\\n?[ \\t]*\`\`\`${escaped}[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*\`\`\`[ \\t]*(?=\\r?\\n|$)`,
+    "u",
+  ).exec(text);
+  if (found === null) return { text };
+  return {
+    text: `${text.slice(0, found.index)}${text.slice(
+      found.index + found[0].length,
+    )}`.trim(),
+    block: found[1]!.trim(),
+  };
+}
+
+/**
+ * The block on disk, or nothing. A block that is not a JSON OBJECT is dropped
+ * silently HERE — the tenant's own gate is what tells the reader it was
+ * malformed, because only the tenant knows what a well-formed one contains.
+ * Core's whole test is "can this be stored at all".
+ */
+function writeStateBlock(args: {
+  stateRoot: string;
+  tenant: string;
+  day: string;
+  label: string;
+  suffix: string;
+  block: string;
+}): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(args.block);
+  } catch {
+    return;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    return;
+  const dir = join(args.stateRoot, args.tenant, args.day);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${args.label}.${args.suffix}`),
+    `${JSON.stringify(parsed, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export async function runTenant(options: RunOptions): Promise<RunReport> {
   const env = options.env ?? process.env;
   const runId = options.runId ?? `run-${randomUUID()}`;
@@ -690,6 +761,15 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       if (!pitUnavailable.has(tool)) pitUnavailable.set(tool, reason);
     },
   };
+  // Prune BEFORE recording, so a run cannot be pruned by the run that is
+  // writing it, and so the walk happens once per run rather than per call.
+  // No keep-list here: `pruneRecordings` takes one, and the caller that knows
+  // a run is still cited is the one that will pass it.
+  pruneRecordings(options.stateRoot);
+  const replayIndex: RecordingIndex | undefined =
+    options.replayFrom === undefined
+      ? undefined
+      : loadRecordings(recordingsDir(options.stateRoot, options.replayFrom));
   const tools =
     options.tools ??
     (await loadTenantTools(options.tenant.dir, {
@@ -699,8 +779,64 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       pit,
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
       ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
+      ...(replayIndex === undefined ? {} : { recordings: replayIndex }),
+      ...(Object.keys(spec.extensions).length === 0
+        ? {}
+        : { extensions: spec.extensions }),
     }));
-  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  // ONE wrapper, installed once, covering both paths a tool can be called on:
+  // the deterministic path calls `tool.run` directly and the model path hands
+  // these same objects to the provider through `selection.options.tools`.
+  // Wrapping at either call site would record half a run.
+  const ioDir = recordingsDir(options.stateRoot, runId);
+  let ioSeq = 0;
+  const recorded = tools.map((tool) => ({
+    ...tool,
+    run: async (args: Record<string, unknown>): Promise<string> => {
+      const at = new Date().toISOString();
+      ioSeq += 1;
+      const seq = ioSeq;
+      try {
+        const raw = await tool.run(args);
+        try {
+          writeRecording(ioDir, seq, {
+            tool: tool.name,
+            args,
+            at,
+            raw,
+            rawSha256: sha256(raw),
+            rawBytes: Buffer.byteLength(raw, "utf8"),
+            // Null until a summariser exists: nothing between a tool and a
+            // context rewrites the text today. The field is written anyway so
+            // a recording made after one lands is still self-describing.
+            context: null,
+          });
+        } catch {
+          // A recording that cannot be written must never cost the run the
+          // answer it already has.
+        }
+        return raw;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          writeRecording(ioDir, seq, {
+            tool: tool.name,
+            args,
+            at,
+            raw: null,
+            rawSha256: null,
+            rawBytes: 0,
+            context: null,
+            error: message,
+          });
+        } catch {
+          // Same rule.
+        }
+        throw error;
+      }
+    },
+  }));
+  const toolsByName = new Map(recorded.map((tool) => [tool.name, tool]));
 
   const loadedGates =
     options.gates === undefined
@@ -762,6 +898,26 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           asOf: options.asOf.toISOString(),
           variant: options.variant ?? "live",
         }),
+  };
+
+  // Applied AFTER the output gates and BEFORE anything keeps the text: the
+  // gate still sees exactly what the model wrote, and the report file, the
+  // renderer, the channels and every later run see it without the block.
+  // Stripping later would leave the fence in the markdown report, which is
+  // what the tenant's own tools read back.
+  const liftState = (text: string): string => {
+    if (spec.stateBlock === undefined) return text;
+    const split = splitStateBlock(text, spec.stateBlock.fence);
+    if (split.block === undefined) return text;
+    writeStateBlock({
+      stateRoot: options.stateRoot,
+      tenant: spec.tenant,
+      day: reportDay,
+      label: phase,
+      suffix: spec.stateBlock.suffix,
+      block: split.block,
+    });
+    return split.text;
   };
 
   const signal = options.signal ?? new AbortController().signal;
@@ -980,12 +1136,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         },
       );
       if (out.ran > 0) stepNo += 1;
-      produced.set(taskId, text);
+      const kept = liftState(text);
+      produced.set(taskId, kept);
       report.steps.push({
         task: taskId,
         role: task.role,
         mode: deterministic ? "deterministic" : "tool-only",
-        text,
+        text: kept,
         ...refusalFields(out.refusals),
       });
       continue;
@@ -1155,7 +1312,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         stepToolOutputs,
       });
       if (out.ran > 0) stepNo += 1;
-      produced.set(taskId, result.text);
+      const kept = liftState(result.text);
+      produced.set(taskId, kept);
       report.steps.push({
         task: taskId,
         role: task.role,
@@ -1167,7 +1325,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         ...(decision.downgradeReason === undefined
           ? {}
           : { downgradeReason: decision.downgradeReason }),
-        text: result.text,
+        text: kept,
         ...(emptyRun
           ? {
               failure: "no-model-output",
@@ -1227,12 +1385,17 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // that answers but not that far back) marks itself during the run, and a
   // count taken at build time would report it as available.
   if (options.asOf !== undefined) {
+    const served = replayIndex?.served() ?? [];
     report.pitCoverage = {
       total: tools.length,
+      // A tool that answered from a recording is available. It marked itself
+      // unavailable only if the recording missed too, so the two sets cannot
+      // both claim it.
       available: Math.max(0, tools.length - pitUnavailable.size),
       unavailable: [...pitUnavailable.keys()].sort((a, b) =>
         a.localeCompare(b, "en"),
       ),
+      ...(served.length === 0 ? {} : { served }),
     };
   }
 
@@ -1245,6 +1408,31 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         reason: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  // Written AFTER rendering and BEFORE delivery: the renderer is what
+  // computes them, and the header line the channels carry is built from
+  // `report.metrics`. Core stores name, value, day and label, and reads none
+  // of them.
+  //
+  // `label: phase` is the RUN label — premarket, close. The header's display
+  // key is `metric.short`, a different field on a different type, so there is
+  // no collision to keep straight. The row is keyed by what the run WAS; the
+  // header prints how the number READS. Without `day` and `label` this table
+  // is keyed only by a UUID, and the weekly review would have to parse its own
+  // numbers back out of a rendered markdown header.
+  if (rendered?.metrics !== undefined && rendered.metrics.length > 0) {
+    report.metrics = rendered.metrics;
+    const measuredAt = new Date().toISOString();
+    for (const metric of rendered.metrics)
+      options.audit.appendMetric({
+        runId,
+        name: metric.name,
+        value: metric.value,
+        ts: measuredAt,
+        day: report.day,
+        label: phase,
+      });
   }
 
   // Local-run inspection only: the runner otherwise renders HTML and lets it
@@ -1408,14 +1596,26 @@ function deliveryBody(report: RunReport): string {
       `- variant: \`${report.variant ?? "live"}\``,
     );
     if (report.pitCoverage !== undefined) {
-      const { available, total, unavailable } = report.pitCoverage;
+      const { available, total, unavailable, served } = report.pitCoverage;
       lines.push(
         `- pit coverage: ${String(available)}/${String(total)}` +
+          (served === undefined || served.length === 0
+            ? ""
+            : ` (from recordings: ${served.join(", ")})`) +
           (unavailable.length === 0
             ? ""
             : ` (unavailable: ${unavailable.join(", ")})`),
       );
     }
+  }
+  // One line, on every run, not only on a replay: a number nobody sees on an
+  // ordinary day is a number nobody notices moving.
+  if (report.metrics !== undefined && report.metrics.length > 0) {
+    lines.push(
+      `- quality: ${report.metrics
+        .map((metric) => `${metric.short}=${formatMetric(metric.value)}`)
+        .join(" ")}`,
+    );
   }
   for (const skip of report.providersSkipped)
     lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
@@ -1444,6 +1644,16 @@ function deliveryBody(report: RunReport): string {
     `Full per-step tokens and cost: \`helium audit ${report.runId}\``,
   );
   return lines.join("\n");
+}
+
+/**
+ * An integer prints bare, a fraction to two places, an uncomputed number as
+ * `n/a`. Two places because the header is scanned, not computed from; the
+ * audit table keeps the full value.
+ */
+function formatMetric(value: number | null): string {
+  if (value === null) return "n/a";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 /**

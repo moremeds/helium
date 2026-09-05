@@ -1,4 +1,11 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,8 +24,10 @@ import {
   registerProviders,
   retireQuotaDomain,
   runTenant,
+  splitStateBlock,
   type ModelExecutor,
 } from "./runner.js";
+import { loadRecordings, recordingsDir } from "./tool-io.js";
 
 const TEAM = `manifestVersion: "2"
 name: demo
@@ -1096,5 +1105,301 @@ describe("tenant renderer", () => {
     expect(report.gatesSkipped).toEqual([]);
     // And the transcript that DID go out says why the pretty form is missing.
     expect(String(seen[0]?.body)).toContain("**renderer failed to load:**");
+  });
+});
+
+describe("run metrics", () => {
+  const bodies: string[] = [];
+  const capture: Channel = {
+    id: "fake-mail",
+    external: false,
+    deliver: async (payload) => {
+      bodies.push(payload.body);
+      return { state: "sent" };
+    },
+  };
+
+  it("writes one audit row per metric and prints one quality line", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({
+        text: "rendered",
+        metrics: [
+          { name: "metaLeakHits", short: "leaks", value: 1 },
+          { name: "budgetViolations", short: "budget", value: 0 },
+          { name: "causeTitleSimilarity", short: "cause-sim", value: 0.107 },
+        ],
+      }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([
+      { name: "budgetViolations", value: 0 },
+      { name: "causeTitleSimilarity", value: 0.107 },
+      { name: "metaLeakHits", value: 1 },
+    ]);
+    // The same three rows, reachable WITHOUT the run id. This is what Task 15
+    // reads and it is the whole reason the two columns exist.
+    expect(audit.metricsFor(report.day, "premarket")).toEqual([
+      { name: "budgetViolations", value: 0 },
+      { name: "causeTitleSimilarity", value: 0.107 },
+      { name: "metaLeakHits", value: 1 },
+    ]);
+    expect(
+      audit.metricsBetween(report.day, report.day).map((row) => row.label),
+    ).toEqual(["premarket", "premarket", "premarket"]);
+    expect(report.metrics).toHaveLength(3);
+    expect(bodies[0]).toContain("- quality: leaks=1 budget=0 cause-sim=0.11");
+    audit.close();
+  });
+
+  it("prints n/a for a metric the run could not compute", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({
+        text: "rendered",
+        metrics: [
+          { name: "causeTitleSimilarity", short: "cause-sim", value: null },
+        ],
+      }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([
+      { name: "causeTitleSimilarity", value: null },
+    ]);
+    expect(bodies[0]).toContain("- quality: cause-sim=n/a");
+    audit.close();
+  });
+
+  it("prints no quality line when the renderer measured nothing", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({ text: "rendered" }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([]);
+    expect(report.metrics).toBeUndefined();
+    expect(bodies[0]).not.toContain("- quality:");
+    audit.close();
+  });
+});
+
+describe("state block", () => {
+  it("splits a fenced block off the end of a step's text", () => {
+    const text = [
+      '{"headline":"h","sections":[]}',
+      "",
+      "```regime-state",
+      '{"cause":"payrolls","ust10y":4.79}',
+      "```",
+      "",
+    ].join("\n");
+    const split = splitStateBlock(text, "regime-state");
+    expect(split.text).toBe('{"headline":"h","sections":[]}');
+    expect(split.block).toBe('{"cause":"payrolls","ust10y":4.79}');
+  });
+
+  it("leaves text with no such fence exactly as it was", () => {
+    const text = '{"headline":"h"}\n\n```json\n{"a":1}\n```';
+    expect(splitStateBlock(text, "regime-state")).toEqual({ text });
+  });
+
+  it("treats a fence name as a literal, never as a pattern", () => {
+    // A tenant file supplies the fence. If it reached `new RegExp` unescaped,
+    // `.*` in it would delete the whole step.
+    const text = "kept\n```a.c\n{}\n```";
+    expect(splitStateBlock(text, "abc").block).toBeUndefined();
+  });
+
+  it("writes the block to <stateRoot>/<tenant>/<day>/<label>.<suffix>", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-state-"));
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(1, "stateBlock:\n  fence: regime-state\n  suffix: s.json\n"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor: {
+        run: async () => ({
+          text: 'said it\n\n```regime-state\n{"cause":"payrolls"}\n```',
+          events: [],
+        }),
+      },
+      channels: [],
+      renderer: null,
+    });
+    const written = join(
+      stateRoot,
+      report.tenant,
+      report.day,
+      "premarket.s.json",
+    );
+    expect(JSON.parse(readFileSync(written, "utf8"))).toEqual({
+      cause: "payrolls",
+    });
+    // And the reader never sees the block.
+    expect(report.steps[0]!.text).toBe("said it");
+    audit.close();
+  });
+
+  it("keeps the text and writes nothing when the block is not JSON", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-state-"));
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(1, "stateBlock:\n  fence: regime-state\n  suffix: s.json\n"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor: {
+        run: async () => ({
+          text: "said it\n\n```regime-state\nnot json at all\n```",
+          events: [],
+        }),
+      },
+      channels: [],
+      renderer: null,
+    });
+    expect(report.steps[0]!.text).toBe("said it");
+    expect(
+      existsSync(join(stateRoot, report.tenant, report.day, "premarket.s.json")),
+    ).toBe(false);
+    audit.close();
+  });
+});
+
+describe("tool I/O recording", () => {
+  /** A deterministic team, so the run actually CALLS the tool it names. The
+   *  file's model executor never calls a tool, and a recording of a tool that
+   *  was never called proves nothing. */
+  function ioTenant(toolName: string): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-io-tenant-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      `tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n${DELIVERY_YAML}`,
+    );
+    writeFileSync(
+      join(dir, "demo", "team.yaml"),
+      `manifestVersion: "2"\nname: demo\nroles:\n  screener:\n    requires: []\n    permissions: { tools: [${toolName}] }\ntasks:\n  - id: one\n    role: screener\n    requires: []\n    prompt: rank these\n`,
+    );
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("writes one recording per tool call, and a replay serves it back", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const audit = new AuditStore(":memory:");
+    const live = await runTenant({
+      tenant: ioTenant("echo"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    const index = loadRecordings(recordingsDir(stateRoot, live.runId));
+    expect(index.size).toBeGreaterThan(0);
+    expect(index.has(echo.name)).toBe(true);
+    expect(index.lookup(echo.name, { q: "rank these" })).toBe(
+      '{"echoed":"rank these"}',
+    );
+    audit.close();
+  });
+
+  it("records a throwing tool as an error and never serves it", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const audit = new AuditStore(":memory:");
+    const boom: EcosystemTool = {
+      ...echo,
+      name: "boom",
+      run: async (): Promise<string> => {
+        throw new Error("ECONNREFUSED");
+      },
+    };
+    const report = await runTenant({
+      tenant: ioTenant("boom"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [boom],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    expect(
+      loadRecordings(recordingsDir(stateRoot, report.runId)).has("boom"),
+    ).toBe(false);
+    audit.close();
+  });
+
+  it("prunes runs older than 30 days at the start of a run", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const stale = join(stateRoot, "runs", "run-ancient");
+    mkdirSync(stale, { recursive: true });
+    const when = new Date(Date.now() - 90 * 86_400_000);
+    utimesSync(stale, when, when);
+    const audit = new AuditStore(":memory:");
+    await runTenant({
+      tenant: ioTenant("echo"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    expect(existsSync(stale)).toBe(false);
+    audit.close();
   });
 });

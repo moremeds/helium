@@ -64,6 +64,24 @@ export interface TenantDelivery {
   config: Record<string, unknown>;
 }
 
+/**
+ * One fenced block a step may end its output with, lifted out of the delivered
+ * text and kept as this run's state for the next run to read.
+ *
+ * Core learns TWO STRINGS and nothing else: the fence's info string and the
+ * file suffix. It never opens the block, never validates its contents beyond
+ * "this is a JSON object", and never learns why one run would want to tell the
+ * next one anything. A tenant that declares none is unaffected, which is every
+ * tenant that existed before this field.
+ */
+export interface TenantStateBlock {
+  /** The info string after the opening ``` of the block to lift. */
+  fence: string;
+  /** Trailing half of the file name under
+   *  `<stateRoot>/<tenant>/<day>/<label>.<suffix>`. */
+  suffix: string;
+}
+
 export interface TenantSpec {
   tenant: string;
   enabled: boolean;
@@ -94,6 +112,11 @@ export interface TenantSpec {
    * every day is open, which is what every tenant got before this existed.
    */
   calendar?: TenantCalendar;
+  /**
+   * The fenced block this tenant's steps may end their output with. Absent
+   * means no step output is post-processed at all.
+   */
+  stateBlock?: TenantStateBlock;
   /** The tenant-owned opaque block; the host never interprets its contents. */
   extensions: Record<string, unknown>;
 }
@@ -162,6 +185,18 @@ const TenantShape = z.strictObject({
         .max(400)
         .default([]),
       appliesTo: z.array(z.string().min(1).max(64)).max(32).optional(),
+    })
+    .optional(),
+  // Both halves are regex-validated because BOTH become part of a path the
+  // runner writes to. A suffix carrying `../` would let a tenant file choose
+  // any file on the machine, and a fence carrying regex metacharacters would
+  // let it choose which of a step's text to delete.
+  stateBlock: z
+    .strictObject({
+      fence: z.string().regex(/^[a-z0-9-]{1,32}$/, "fence: [a-z0-9-]{1,32}"),
+      suffix: z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9.-]{0,31}$/, "suffix: [a-z0-9.-]{1,32}"),
     })
     .optional(),
   // ONE opaque block, not a host-maintained allow-list of tenant key names. A
@@ -240,6 +275,9 @@ export function parseTenantYaml(text: string, source: string): TenantSpec {
               : { appliesTo: [...raw.calendar.appliesTo] }),
           },
         }),
+    ...(raw.stateBlock === undefined
+      ? {}
+      : { stateBlock: { ...raw.stateBlock } }),
     extensions: raw.extensions ?? {},
   };
 }
