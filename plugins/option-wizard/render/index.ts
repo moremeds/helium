@@ -17,6 +17,7 @@ import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
+import { qualityMetrics } from "../quality/index.js";
 
 export { extractJson } from "./json.js";
 
@@ -1451,5 +1452,8 @@ export default function renderReport(
     // The same document the prose was rendered FROM, for a channel that stores
     // the data instead of mailing the rendering. Core never reads inside it.
     data: view as unknown as Record<string, unknown>,
+    // Measured over the document the READER gets, after the budget trim. The
+    // runner writes these to the audit table and prints one header line.
+    metrics: qualityMetrics({ view, report }),
   };
 }
