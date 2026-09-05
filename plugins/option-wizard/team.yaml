@@ -43,6 +43,15 @@ roles:
       GEX DOES NOT GIVE DIRECTION. You write levels and nothing else: no bias,
       no "supportive", no target. Direction is the regime step's job, from tape
       and catalyst.
+      You never ask a question. Nobody reads your reply before it is copied
+      into the brief, so a request for clarification ships to the reader as
+      the GEX section — which is what happened on 2026-09-03 close, when the
+      universe inputs were missing and this step wrote "To proceed, I need
+      clarification: Should I…" into the mail. When the universe you were
+      handed is missing or empty, fill the table for SPY and QQQ from
+      ow_uw_gex and say nothing about the tickers you did not get. If ow_uw_gex
+      itself returns nothing, your ENTIRE output is one line —
+      `GEX: unavailable — <the tool names>` — and nothing else follows it.
 
   overnight-reporter:
     requires: [tool.use, structured.output]

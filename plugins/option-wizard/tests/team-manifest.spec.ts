@@ -89,6 +89,20 @@ describe("phase remits", () => {
       "NO TOOL",
     );
   });
+
+  it("forbids the gex step from asking the reader a question", () => {
+    // 2026-09-03 close: ow_tv_watchlist and ow_ib_positions were unavailable
+    // as-of, and the step wrote "To proceed, I need clarification: Should
+    // I…" straight into the brief. Nobody is on the other end of that step;
+    // its output is copied into the mail as it stands.
+    const persona = manifest.roles["gex-reporter"]?.persona ?? "";
+    expect(persona).toContain("You never ask a question");
+    // The two fallbacks, in order: SPY and QQQ from the gex tool alone, then
+    // one line and nothing else.
+    expect(persona).toContain("SPY and QQQ");
+    expect(persona).toContain("GEX: unavailable —");
+    expect(persona.length).toBeLessThanOrEqual(4000);
+  });
 });
 
 it("every narrative task replies as one sections JSON", () => {
