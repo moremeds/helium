@@ -524,6 +524,10 @@ export async function fredDirect(
       // start date) is deliberately NOT set: it would only shrink a download
       // that is already one column of dates, and a second bound is a second
       // thing to get wrong.
+      // 2026-09-05: `until` is the day BEFORE the as-of day, computed by the
+      // caller under the same rule as the SQL cuts — a daily series' row for
+      // day D is not published until D has closed, and the first replay quoted
+      // an 09-02 DGS10 into an 09-02 premarket brief.
       if (until !== undefined) url.searchParams.set("coed", until);
       try {
         const response = await doFetch(url, {
@@ -994,6 +998,27 @@ export function thinAcross<T>(rows: readonly T[], cap: number): T[] {
  *  2026-09-03 sizes to sit above the 128 KiB spill ceiling with no reader. */
 const TIDE_PRINTS = 80;
 
+/**
+ * A tide with every print later than `cut` removed, plus how many survived.
+ *
+ * 2026-09-05. VERIFIED: a tide answers `{ data: [...] }` and each print is
+ * individually timestamped — the tool already thins that array. ASSUMED: the
+ * field is `timestamp`, with `time`/`date` tried as fallbacks; a print whose
+ * stamp does not parse is DROPPED, because a print that cannot be dated cannot
+ * be shown to predate the instant, and one leaked print is the whole defect.
+ */
+function trimTide(tide: unknown, cut: number): { body: unknown; kept: number } {
+  if (tide === null || typeof tide !== "object") return { body: tide, kept: 0 };
+  const body = tide as { data?: unknown };
+  if (!Array.isArray(body.data)) return { body: tide, kept: 0 };
+  const data = body.data.filter((print) => {
+    const row = print as Record<string, unknown>;
+    const at = Date.parse(String(row.timestamp ?? row.time ?? row.date ?? ""));
+    return Number.isFinite(at) && at <= cut;
+  });
+  return { body: { ...body, data }, kept: data.length };
+}
+
 function thinTide(tide: unknown): unknown {
   if (tide === null || typeof tide !== "object") return tide;
   const body = tide as { data?: unknown };
@@ -1299,8 +1324,53 @@ const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
   ["ow_uw_iv_term", "the Unusual Whales IV-term endpoint"],
   ["ow_uw_headlines", "the Unusual Whales news endpoint"],
   ["ow_tv_commodities", "TradingView"],
+  // 2026-09-05: moved here after the first replay. GET
+  // /api/market/economic-calendar carries a SHORT FORWARD window and nothing
+  // behind it — it answered with 0 rows on 2026-09-05 — so a past instant gets
+  // either an empty list or the wrong week. Client-side filtering cannot
+  // recover a window the endpoint never returned, and an empty list read as a
+  // finding: the regime step wrote "the calendar is empty" as if that were
+  // news about the replayed day.
+  ["ow_uw_calendar", "economic calendar"],
   ["ow_frank", "the Substack reader (no dated archive access here)"],
 ]);
+
+/**
+ * ` AND <column> < DATE 'yyyy-mm-dd'`, or nothing when there is no as-of day.
+ * The date is produced by Intl, never by a caller, so it cannot carry SQL.
+ *
+ * 2026-09-05, strictly LESS THAN and not `<=`: a daily-keyed record for day D
+ * is only known once D has closed, so at 08:45 ET on 09-02 the row keyed 09-02
+ * did not exist yet. The first replay quoted a 09-02 DGS10, a 09-02 policy
+ * snapshot and 09-02 argon metrics into an 09-02 premarket brief — each one a
+ * number from later that same day, and each indistinguishable from a real
+ * premarket read. Exported so the rule can be tested without a database.
+ */
+export function dateCutSql(
+  column: string,
+  asOfDay: string | undefined,
+): string {
+  return asOfDay === undefined ? "" : ` AND ${column} < DATE '${asOfDay}'`;
+}
+
+/** The calendar day before `day`, both `yyyy-mm-dd`. Plain calendar
+ *  arithmetic on a date-only string: parsed as UTC midnight and written back
+ *  the same way, so no zone can move it. */
+function priorDay(day: string): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() - 1);
+  return at.toISOString().slice(0, 10);
+}
+
+/** The last weekday before `day`. Weekends only — a market holiday still
+ *  answers with an empty session, and an empty session labelled `prior` is
+ *  honest, while guessing a holiday calendar here would not be. */
+function priorWeekday(day: string): string {
+  let out = priorDay(day);
+  while (new Date(`${out}T00:00:00Z`).getUTCDay() % 6 === 0)
+    out = priorDay(out);
+  return out;
+}
 
 const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant.";
@@ -1327,10 +1397,7 @@ export function buildTools(cfg: {
       : new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
           asOf,
         );
-  /** ` AND <column> <= DATE 'yyyy-mm-dd'`, or nothing on a live run. The date
-   *  is produced by Intl, never by a caller, so it cannot carry SQL. */
-  const dateCut = (column: string): string =>
-    asOfDay === undefined ? "" : ` AND ${column} <= DATE '${asOfDay}'`;
+  const dateCut = (column: string): string => dateCutSql(column, asOfDay);
   const built = [
     {
       // opencli's TradingView adapter is read-only and drives the LOCAL app over
@@ -1659,9 +1726,10 @@ export function buildTools(cfg: {
                                  WHERE s.ticker = t.ticker${dateCut("s.market_date")}
                                  ORDER BY s.market_date DESC LIMIT 1) sk ON true`,
         );
-        // 2026-09-05: the `<= DATE` cut inside each LIMIT 1 subquery is the
+        // 2026-09-05: the `< DATE` cut inside each LIMIT 1 subquery is the
         // whole as-of change here — the LATERAL still takes the newest row,
-        // just the newest one that existed on the replayed day. VERIFIED
+        // just the newest one that existed BEFORE the replayed day opened; a
+        // row keyed to that day was written later that day. VERIFIED
         // against the column names already documented on this tool
         // (market_date / trade_date / market_date); ASSUMED that argon's
         // mirror never back-dates a row it wrote later, which no column here
@@ -2031,31 +2099,48 @@ export function buildTools(cfg: {
         // siblings — not read in the docs. An endpoint that ignores an unknown
         // query parameter would answer for today; the reply carries `date`
         // where UW echoes it, and the `dated` key below says what was asked.
-        const dated: Record<string, string> =
-          asOfDay === undefined ? {} : { date: asOfDay };
+        // 2026-09-05, second pass: `date=` alone is NOT point-in-time. The
+        // first replay asked for the 09-02 session at 08:45 ET and was handed
+        // that day's whole RTH tape — the entire session the premarket brief
+        // was supposed to be written before. The prints are individually
+        // timestamped, so the fix is to cut them at the instant; when nothing
+        // survives (a premarket instant, which is the normal case) the tide
+        // for the PRIOR weekday is fetched instead and labelled as such, so
+        // the model reads it as yesterday's tide and not as this morning's.
+        const tideFor = async (path: string): Promise<unknown> => {
+          if (asOf === undefined || asOfDay === undefined) {
+            return thinTide(await uwGet(env, tool, path, {}, ctx));
+          }
+          const cut = asOf.getTime();
+          const today = trimTide(
+            await uwGet(env, tool, path, { date: asOfDay }, ctx),
+            cut,
+          );
+          if (today.kept > 0) {
+            return {
+              session: "as-of",
+              date: asOfDay,
+              ...(thinTide(today.body) as Record<string, unknown>),
+            };
+          }
+          const prior = priorWeekday(asOfDay);
+          return {
+            session: "prior",
+            date: prior,
+            note: `No tide print on ${asOfDay} had happened by ${asOfIso ?? ""}; this is the ${prior} session's tide. It is the PREVIOUS session, not today's.`,
+            ...(thinTide(
+              await uwGet(env, tool, path, { date: prior }, ctx),
+            ) as Record<string, unknown>),
+          };
+        };
         return JSON.stringify({
           tidePrints: `thinned across the session to <=${String(TIDE_PRINTS)} prints per tide`,
-          ...(asOfDay === undefined ? {} : { dated: asOfDay }),
-          marketTide: thinTide(
-            await uwGet(env, tool, "/api/market/market-tide", dated, ctx),
+          marketTide: await tideFor("/api/market/market-tide"),
+          sectorTide: await tideFor(
+            `/api/market/${encodeURIComponent(sector)}/sector-tide`,
           ),
-          sectorTide: thinTide(
-            await uwGet(
-              env,
-              tool,
-              `/api/market/${encodeURIComponent(sector)}/sector-tide`,
-              dated,
-              ctx,
-            ),
-          ),
-          etfTide: thinTide(
-            await uwGet(
-              env,
-              tool,
-              `/api/market/${encodeURIComponent(etf)}/etf-tide`,
-              dated,
-              ctx,
-            ),
+          etfTide: await tideFor(
+            `/api/market/${encodeURIComponent(etf)}/etf-tide`,
           ),
         });
       },
@@ -2714,7 +2799,10 @@ export function buildTools(cfg: {
           // observations -- 271 KB for what is 8 lines a day. One row per day.
           // 2026-09-05, as-of: the lookback window slides to end at the
           // replayed day instead of at today — same width, moved. VERIFIED by
-          // construction against this table's own `obs_date` column.
+          // construction against this table's own `obs_date` column. The end
+          // of the window is `dateCut`, which is strictly LESS THAN the as-of
+          // day: a daily observation for day D is not published until D has
+          // closed.
           `SELECT DISTINCT ON (series_id, obs_date)
                   series_id, obs_date::text AS obs_date, value
              FROM uw_scan.macro_series_daily
@@ -2763,7 +2851,7 @@ export function buildTools(cfg: {
           fredDirect: await fredDirect(
             wanted.filter((id) => !TV_TWIN_IDS.has(id)),
             ctx,
-            asOfDay,
+            asOfDay === undefined ? undefined : priorDay(asOfDay),
           ),
           staleSeries: staleSeries(
             rows as Array<{ series_id?: unknown; obs_date?: unknown }>,
@@ -2938,7 +3026,11 @@ export function buildTools(cfg: {
           // halves have to move together — the latest snapshot with today's
           // meeting filter would answer about a path priced after the fact.
           // VERIFIED by construction against the two date columns this tool's
-          // comment already documents (snapshot_date, meeting_date).
+          // comment already documents (snapshot_date, meeting_date). The
+          // snapshot cut is strictly BEFORE the as-of day — the scanner writes
+          // the path for day D during D, so an 08:45 ET replay must read the
+          // previous night's snapshot — while `meeting_date >=` stays
+          // inclusive: a meeting held ON the as-of day is still ahead of it.
           `SELECT DISTINCT ON (meeting_date)
                   snapshot_date::text AS snapshot_date,
                   meeting_date::text AS meeting_date,
