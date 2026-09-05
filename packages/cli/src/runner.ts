@@ -37,6 +37,7 @@ import {
   topologicalOrder,
   type CapabilityCatalog,
   type Channel,
+  type Commitment,
   type DeliveryReport,
   type EcosystemTool,
   type Gate,
@@ -63,7 +64,8 @@ import {
   tenantToolGaps,
   type Skipped,
 } from "./discovery.js";
-import { codeVersion } from "./code-version.js";
+import { codeVersion, dshVersion } from "./code-version.js";
+import { EvidenceFile, evidencePath, sha256File } from "./evidence.js";
 import {
   loadRecordings,
   pruneRecordings,
@@ -944,6 +946,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // spend. It is a zero-token span for the same reason a gate is one — the §5
   // cost query has to be able to separate "what did thinking cost" from "what
   // did checking cost".
+  const deployment: Commitment["deployment"] =
+    options.asOf !== undefined
+      ? "backtest"
+      : env.HELIUM_DEPLOYMENT === "production"
+        ? "production"
+        : "test";
   const ledger = readLedger(options.stateRoot, spec.tenant);
   const open = outstanding(ledger);
   if (open.length > 0) {
@@ -1012,6 +1020,31 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       });
     }
   }
+
+  /** taskId -> the exact joined prompt. Kept here rather than on the step row
+   *  so no `report.steps.push` site has to change: a retry after a quota
+   *  re-route is a second row for the SAME task and the same prompt. */
+  const assembledPrompts = new Map<string, string>();
+  const evidence = new EvidenceFile(
+    evidencePath(options.stateRoot, spec.tenant, reportDay, phase, runId),
+    {
+      runId,
+      tenant: spec.tenant,
+      day: reportDay,
+      phase,
+      deployment,
+      variant: options.variant ?? "live",
+      ...(options.asOf === undefined
+        ? {}
+        : { asOf: options.asOf.toISOString() }),
+      startedAt: new Date().toISOString(),
+      codeSha: codeVersion(),
+      dshVersion: dshVersion(),
+      teamYamlSha256: sha256File(join(options.tenant.dir, spec.team)),
+      tenantYamlSha256: sha256File(join(options.tenant.dir, "tenant.yaml")),
+      toolIo: join(options.stateRoot, "runs", runId, "tool-io") + "/",
+    },
+  );
 
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
@@ -1092,6 +1125,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       },
       acceptance: { outputSchema: "text" },
     });
+    assembledPrompts.set(taskId, work.inputs.prompt ?? "");
+    evidence.sync(report, assembledPrompts);
 
     // Input gates guard the STEP, so they run in tool-only mode too: a guard
     // that only exists when a model is live is not a guard.
@@ -1492,6 +1527,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       };
     }
   }
+
+  // The last sync before anything leaves the machine: the final step's output
+  // and the rendered view are both on disk before a delivery is attempted.
+  evidence.sync(report, assembledPrompts, rendered?.data);
 
   // Written AFTER rendering and BEFORE delivery: the renderer is what
   // computes them, and the header line the channels carry is built from
