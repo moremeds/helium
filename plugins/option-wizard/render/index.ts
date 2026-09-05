@@ -135,6 +135,70 @@ export interface ScheduleRow {
 }
 
 /**
+ * The run's own directional forecast on SPY, frozen as `evaluator-v0`.
+ *
+ * `t1Down` is P(close one trading day after `referenceClose.date` is BELOW
+ * `referenceClose.value`); `t5Down` is the same five bars out. `referenceClose`
+ * is the last completed close known at issue time — the prior session on a
+ * premarket run, that session on a close run — and its value must be a verbatim
+ * tool output, which `gates/as-of-verbatim.ts` checks.
+ */
+export interface SpyForecast {
+  referenceClose: { date: string; value: number };
+  t1Down: number;
+  t5Down: number;
+}
+
+/**
+ * A forecast and whether it can be scored, with the reason when it cannot.
+ *
+ * Issue #78: a missing field must never erase a section. A malformed forecast
+ * is rendered exactly as it arrived and marked unscorable — dropping the
+ * section would hide the fault from the only person who can fix it, and
+ * normalising it with a model would invent the number being measured.
+ */
+export interface ForecastBlock {
+  forecast?: SpyForecast;
+  scorable: boolean;
+  reason?: string;
+}
+
+function probability(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+export function forecastFrom(report: RunReport): ForecastBlock | undefined {
+  const step = report.steps.find((entry) => entry.task === "scenarios");
+  if (step === undefined) return undefined;
+  const parsed = extractJson(step.text);
+  const raw = parsed?.spyForecast;
+  if (raw === undefined || raw === null || typeof raw !== "object")
+    return { scorable: false, reason: "the scenarios step wrote no spyForecast object" };
+  const row = raw as Record<string, unknown>;
+  const reference = row.referenceClose as Record<string, unknown> | undefined;
+  if (
+    reference === undefined ||
+    reference === null ||
+    typeof reference !== "object" ||
+    typeof reference.date !== "string" ||
+    typeof reference.value !== "number" ||
+    !Number.isFinite(reference.value)
+  )
+    return { scorable: false, reason: "referenceClose is not a {date, value} pair" };
+  const bad = ["t1Down", "t5Down"].filter((key) => !probability(row[key]));
+  if (bad.length > 0)
+    return { scorable: false, reason: `${bad.join(", ")} outside [0,1] or not a number` };
+  return {
+    scorable: true,
+    forecast: {
+      referenceClose: { date: reference.date, value: reference.value },
+      t1Down: row.t1Down as number,
+      t5Down: row.t5Down as number,
+    },
+  };
+}
+
+/**
  * Bumped ONLY on a breaking change to `BriefView` — a removed field, a renamed
  * field, or a changed meaning. Adding an optional field is not breaking.
  *
@@ -184,6 +248,9 @@ export interface BriefView {
    *  task order produced it. */
   coverage?: Section;
   regime: RegimeView;
+  /** The run's directional call on SPY, and whether it can be scored. Present
+   *  whenever the scenarios step ran, malformed or not. */
+  spyForecast?: ForecastBlock;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
   /** The reviewer's decision block, in the order it wrote it: every key it
@@ -1270,6 +1337,9 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
     // Filled by `buildView`, which knows which tickers reached a card.
     charts: { gex: [] },
     ...(degradation === undefined ? {} : { degradation }),
+    ...(forecastFrom(report) === undefined
+      ? {}
+      : { spyForecast: forecastFrom(report)! }),
   };
 
   if (report.outcome === "failed") {
