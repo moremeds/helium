@@ -19,6 +19,7 @@ import {
   auditDbPath,
   loadOperatorEnv,
 } from "@helium/core";
+import { parseRunArgs } from "./args.js";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
@@ -28,7 +29,21 @@ function stateRoot(env: NodeJS.ProcessEnv): string {
 }
 
 function printRun(report: RunReport): void {
-  console.log(`run ${report.runId}  tenant ${report.tenant}  mode ${report.mode}`);
+  console.log(
+    `run ${report.runId}  tenant ${report.tenant}  mode ${report.mode}`,
+  );
+  if (report.asOf !== undefined) {
+    console.log(`as-of: ${report.asOf}  variant: ${report.variant ?? "live"}`);
+  }
+  if (report.pitCoverage !== undefined) {
+    const { available, total, unavailable } = report.pitCoverage;
+    console.log(
+      `pit coverage: ${String(available)}/${String(total)}` +
+        (unavailable.length === 0
+          ? ""
+          : ` (unavailable: ${unavailable.join(", ")})`),
+    );
+  }
   if (report.providersLive.length > 0) {
     console.log(`providers live: ${report.providersLive.join(", ")}`);
   }
@@ -48,7 +63,9 @@ function printRun(report: RunReport): void {
   }
   console.log("");
   for (const step of report.steps) {
-    console.log(`── ${step.task} (${step.role}${step.targetId === undefined ? "" : `, ${step.targetId}`})`);
+    console.log(
+      `── ${step.task} (${step.role}${step.targetId === undefined ? "" : `, ${step.targetId}`})`,
+    );
     if (step.downgradeReason !== undefined) {
       console.log(`   downgrade: ${step.downgradeReason}`);
     }
@@ -61,9 +78,11 @@ function printRun(report: RunReport): void {
   }
   console.log("");
   console.log(
-    report.outcome === "completed"
-      ? `outcome: completed (${report.steps.length} steps)`
-      : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
+    report.skipped !== undefined
+      ? `outcome: skipped — ${report.skipped.reason}`
+      : report.outcome === "completed"
+        ? `outcome: completed (${report.steps.length} steps)`
+        : `outcome: FAILED ${report.failure?.class} — ${report.failure?.detail}`,
   );
   for (const sent of report.delivery) {
     console.log(
@@ -82,7 +101,18 @@ function printAudit(store: AuditStore, runId: string): number {
   // First line, before the table: which build produced these rows. More than
   // one sha means a deploy landed mid-run.
   console.log(`code: ${store.codeVersions(runId).join(", ")}`);
-  const header = ["role", "provider", "model", "tool", "spans", "tin", "tout", "cache", "usd", "sec"];
+  const header = [
+    "role",
+    "provider",
+    "model",
+    "tool",
+    "spans",
+    "tin",
+    "tout",
+    "cache",
+    "usd",
+    "sec",
+  ];
   const body = rows.map((row) => [
     row.role,
     row.provider,
@@ -111,7 +141,9 @@ function printAudit(store: AuditStore, runId: string): number {
     { usd: 0, tokens: 0 },
   );
   console.log("");
-  console.log(`total ${totals.usd.toFixed(6)} USD over ${totals.tokens} tokens`);
+  console.log(
+    `total ${totals.usd.toFixed(6)} USD over ${totals.tokens} tokens`,
+  );
   return 0;
 }
 
@@ -139,25 +171,17 @@ async function main(argv: string[]): Promise<number> {
 
   if (command === "run") {
     if (argument === undefined) {
-      console.error("usage: helium run <tenant> [--phase <phase>]");
+      console.error(
+        "usage: helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>]",
+      );
       return 2;
     }
-    let phase = "premarket";
-    const rest = argv.slice(2);
-    for (let i = 0; i < rest.length; i += 1) {
-      if (rest[i] === "--phase") {
-        const value = rest[i + 1];
-        if (value === undefined || value.startsWith("--")) {
-          console.error("--phase needs a value, e.g. --phase premarket");
-          return 2;
-        }
-        phase = value;
-        i += 1;
-        continue;
-      }
-      console.error(`unknown argument: ${rest[i]}`);
+    const parsed = parseRunArgs(argv.slice(2));
+    if ("error" in parsed) {
+      console.error(parsed.error);
       return 2;
     }
+    const { phase, asOf, variant } = parsed;
     const tenantsRoot = tenantsDir(env);
     const pluginsRoot = pluginsDir(env);
     const { tenants, skipped } = loadTenants(tenantsRoot);
@@ -192,6 +216,13 @@ async function main(argv: string[]): Promise<number> {
         providersSkipped: providers.skipped,
         catalog,
         phase,
+        variant,
+        // `--as-of` IS the run's clock, not a second timestamp beside it: the
+        // step preamble, the report day and the file name all read `now()`, so
+        // moving that one seam moves the whole run to the replayed instant.
+        ...(asOf === undefined
+          ? {}
+          : { asOf, now: (): Date => new Date(asOf.getTime()) }),
       });
       printRun(report);
       return report.outcome === "completed" ? 0 : 1;
@@ -203,7 +234,10 @@ async function main(argv: string[]): Promise<number> {
   console.error(
     [
       "usage:",
-      "  helium run <tenant> [--phase <phase>]   run one tenant's team once",
+      "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>]",
+      "      run one tenant's team once. --as-of replays a past instant: it becomes",
+      "      the run's clock, and every tool that has no history for it says so",
+      "      instead of answering with today. --variant labels the run (default live).",
       "  helium audit <run-id>   per-step cost and token rows for a run",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,

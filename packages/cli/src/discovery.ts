@@ -87,7 +87,8 @@ export async function discoverProviders(
         // cheapest. Skipping says so once, in the run output.
         skipped.push({
           id: provider.id,
-          reason: "no run(): this provider can route a step but not execute one",
+          reason:
+            "no run(): this provider can route a step but not execute one",
         });
         continue;
       }
@@ -108,9 +109,26 @@ export async function discoverProviders(
 }
 
 /** A tenant's own tools, from its built `lib/tools/index.js`. */
+export interface TenantToolConfig {
+  stateRoot: string;
+  env: NodeJS.ProcessEnv;
+  /** The past instant this run replays, when it replays one. */
+  asOf?: Date;
+  /** The run's flavour label. `live` on an ordinary run. */
+  variant: string;
+  /** Where a tool says it has no history for `asOf`. The runner counts these
+   *  and never inspects the reason — what a source is remains the tenant's
+   *  business (doctrine 2). */
+  pit?: { markUnavailable: (tool: string, reason: string) => void };
+  /** The tenant's own declaration of which days are closed. The runner uses it
+   *  to decide whether to run at all; a tool needs it to walk BACKWARDS to the
+   *  previous open day, which it must not guess. */
+  calendar?: { weekdaysOnly: boolean; closed: string[] };
+}
+
 export async function loadTenantTools(
   tenantDir: string,
-  cfg: { stateRoot: string; env: NodeJS.ProcessEnv },
+  cfg: TenantToolConfig,
 ): Promise<EcosystemTool[]> {
   const entry = join(tenantDir, "lib", "tools", "index.js");
   if (!existsSync(entry)) return [];
@@ -118,10 +136,21 @@ export async function loadTenantTools(
     buildTools?: (cfg: {
       stateRoot: string;
       env: Record<string, string | undefined>;
+      asOf?: Date;
+      variant: string;
+      pit?: { markUnavailable: (tool: string, reason: string) => void };
+      calendar?: { weekdaysOnly: boolean; closed: string[] };
     }) => EcosystemTool[];
   };
   if (typeof module.buildTools !== "function") return [];
-  return module.buildTools({ stateRoot: cfg.stateRoot, env: cfg.env });
+  return module.buildTools({
+    stateRoot: cfg.stateRoot,
+    env: cfg.env,
+    variant: cfg.variant,
+    ...(cfg.asOf === undefined ? {} : { asOf: cfg.asOf }),
+    ...(cfg.pit === undefined ? {} : { pit: cfg.pit }),
+    ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
+  });
 }
 
 /**
@@ -146,7 +175,9 @@ export async function tenantToolGaps(
   };
   if (!(module.VOCABULARY instanceof Map)) return [];
   return [...module.VOCABULARY.entries()]
-    .filter(([, spec]) => spec.requiresEnv !== undefined && !env[spec.requiresEnv])
+    .filter(
+      ([, spec]) => spec.requiresEnv !== undefined && !env[spec.requiresEnv],
+    )
     .map(([name, spec]) => `${name} (${spec.requiresEnv ?? ""} unset)`);
 }
 

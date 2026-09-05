@@ -18,7 +18,7 @@ exemplar exists to prevent.
 
 ## Masthead — one sentence, the day's call
 
-> Rates are still the first cause. No candidate ships today.
+> A bear-steepener took the 10Y to 4.788%. No candidate ships today.
 
 Short. Two clauses at most. It names the cause and the consequence. It would
 read differently on a quiet day than on a violent one — a headline that would
@@ -50,7 +50,7 @@ reader. Never the reverse, and never the meaning without the number.
 
 ## Macro read — a claim as a heading, the evidence under it
 
-> **Rates are the first cause.** The 10Y is 4.788% and the 30Y 5.261%, while
+> **The long end repriced term premium, not a cut.** The 10Y is 4.788% and the 30Y 5.261%, while
 > the 2Y at 4.375% has barely moved. That is a bear-steepener: what is being
 > repriced is term premium and a firmer policy path, not a cut. Ranked by
 > cash-flow duration, the damage runs in this order. First, the

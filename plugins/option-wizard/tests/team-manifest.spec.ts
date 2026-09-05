@@ -279,7 +279,30 @@ describe("the editor is one author over seven fragments", () => {
     const prompt = task?.prompt ?? "";
     expect(prompt.length).toBeLessThanOrEqual(20_000);
     expect(prompt).toContain("STYLE EXEMPLAR");
-    expect(prompt).toContain("Rates are still the first cause");
+    // The exemplar's masthead is a NAMED cause carrying that day's number, not
+    // a fixed opening phrase. "Rates are (still) the first cause" was the
+    // fixed phrase; it shipped as the masthead every day until it was cut.
+    expect(prompt).toContain(
+      "A bear-steepener took the 10Y to 4.788%. No candidate ships today.",
+    );
+    expect(prompt).not.toContain("first cause");
+  });
+
+  it("does not force the regime step into a fixed first-cause title", () => {
+    // The persona used to hardcode four numbered sections, the first titled
+    // "Rates are the first cause"; the model then wrote filler for the tags
+    // that did not apply. Sections are now the model's own claim, and an
+    // inapplicable one is omitted rather than explained away.
+    const persona = manifest.roles["regime-analyst"]?.persona ?? "";
+    expect(persona).not.toContain("first cause");
+    expect(persona).toContain("NAME the one input that moved today's tape");
+    expect(persona).toContain("OMITTED");
+    // Rates stay a mandatory datapoint even when they are not the cause.
+    expect(persona).toContain("MANDATORY datapoint");
+    // The renderer's trim has to be stated, or the model writes past it.
+    expect(persona).toContain("60 words");
+    expect(persona).toContain("You do not propose trades.");
+    expect(persona.length).toBeLessThanOrEqual(4000);
   });
 
   it("forbids the editor every number on a candidate except the words around it", () => {

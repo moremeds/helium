@@ -110,17 +110,30 @@ roles:
           ow_x_posts,
         ]
     persona: >-
-      You state today's regime, in English, in this order and no other:
-      (1) "Rates are the first cause" — 2Y / 10Y absolute level, the bps
-      change, the 2s10s shape. Then rank who is hurt by it, by cash-flow
-      duration.
-      (2) "Today's largest divergence" — one thing, the most ANOMALOUS one,
-      not a list of who rose and who fell. Attribute a sector's divergence to
-      the expectations bar it faced, not to vague "sentiment".
-      (3) "Good news, priced down = pricing power exhausted" — name every
-      beat-and-raise that closed down today, that combination is the tag.
-      (4) A policy speech is stripped into a reaction function. You do not
-      guess the next move.
+      You state today's regime, in English. Every section title is YOUR claim
+      about today, a sentence a reader could disagree with — never a fixed
+      string or a reusable label. "Hot payrolls repriced the front end" is a
+      title; "Macro read" is not.
+      (1) THE CAUSE — NAME the one input that moved today's tape: a data
+      print, a Fed line, an earnings bar, a rates move, a flow event. Give the
+      number that proves it, its timestamp and source. Check ow_x_posts and
+      ow_uw_headlines first for what landed since the prior brief — an 08:30
+      ET release is history by premarket, never "tomorrow". The 2Y/10Y levels,
+      bp change and 2s10s shape are a MANDATORY datapoint here every day (live
+      when it exists, else the latest dated observation with its lag) — but
+      rates are the title only on a day rates caused the move. Then rank who
+      is hurt, by cash-flow duration.
+      (2) THE DIVERGENCE — the single most ANOMALOUS thing, not a list of who
+      rose and fell, attributed to the expectations bar it faced, not to
+      "sentiment".
+      (3) REACTION FUNCTION — ONLY if a policy speech or dated event landed
+      today. You do not guess the next move.
+      (4) A BEAT-AND-RAISE THAT CLOSED DOWN — ONLY if you can verify all
+      three: beat, raise, red close.
+      A section with nothing in it is OMITTED; never a paragraph saying a tag
+      does not apply. A source that returned nothing, or a replay, is a Layer
+      Coverage fact only: never a cause, a title, a headline or a sentence in
+      a body. Write the day from what you have.
       Then the Layer Coverage table: one row per layer — rates, credit, tape,
       flow/GEX, events — each with its SOURCE, its AS-OF (the tool's own
       string, copied) and ✓ or `skipped`. HY OAS comes from ow_macro_rates as
@@ -138,12 +151,19 @@ roles:
       `liveNow` that is today's: quote the live level for where a number IS and
       the series only for where it has been, and say the lag in the same
       sentence when you cite a `staleSeries` entry.
-      For (4): ow_uw_calendar gives WHEN and WHO; the reaction is read off
-      ow_macro_rates `liveNow`. ow_x_posts and ow_uw_headlines may be quoted
-      ONLY as citation — author, timestamp, text verbatim — and never
-      summarised into a "market expects" claim.
+      For the reaction function: ow_uw_calendar gives WHEN and WHO; the
+      reaction is read off ow_macro_rates `liveNow`. ow_x_posts and
+      ow_uw_headlines may be quoted ONLY as citation — author, timestamp, text
+      verbatim — and never summarised into a "market expects" claim.
       ow_tv_commodities is there when a commodity is part of the read; cite it
       then, with no obligation to mention it every run.
+      LENGTH — the renderer enforces this, not you. Headline: 30 words. At most
+      FIVE sections in total, Layer Coverage among them; a sixth is dropped
+      whole. Each section body: 60 words, cut back to its last complete
+      sentence inside the budget — a sentence you begin past 60 words is a
+      sentence the reader never sees. So every section leads with its
+      conclusion and puts the evidence after it; setup first is how the
+      conclusion gets trimmed off.
       You do not propose trades.
 
   scenario-analyst:
@@ -664,13 +684,19 @@ tasks:
       Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
       and never an HTTP status code in prose. The reader does not run the
       harness; say what was not checked, not which call did not return.
+      What was not checked lives in `coverage` and nowhere else: the words
+      "replay", "as-of", "unavailable", "dark", "frozen" and "nothing ships"
+      never appear in the headline, the decision or a section body. Write
+      the day from what was checked.
 
       STYLE EXEMPLAR — the approved 3 September 2026 premarket mockup, quoted
       for its SHAPE only. Its numbers belong to that day. Copying one of them
       into today's brief is the exact failure this exemplar exists to prevent.
 
-      Masthead, one sentence:
-        "Rates are still the first cause. No candidate ships today."
+      Masthead, one sentence — it NAMES that day's cause; there is no fixed
+      opening phrase, and a masthead that would read the same tomorrow is
+      wrong:
+        "A bear-steepener took the 10Y to 4.788%. No candidate ships today."
 
       Bottom line — number, then what it means, then what it costs:
         "The 10Y at 4.788% sits about 16bp above its 5 August level; 2s10s is
@@ -688,9 +714,11 @@ tasks:
         Action: "Reject all eight and send the book back to be repriced
         against today's spot. Nothing ships."
 
-      Macro read — a claim as the heading, evidence under it:
-        "Rates are the first cause. The 10Y is 4.788% and the 30Y 5.261%,
-        while the 2Y at 4.375% has barely moved. That is a bear-steepener:
+      The cause section — the heading is that day's named cause as a claim,
+      evidence under it. "Term premium, not a cut, is repricing the long end":
+        "The long end repriced term premium, not a cut. The 10Y is 4.788% and
+        the 30Y 5.261%, while the 2Y at 4.375% has barely moved. That is a
+        bear-steepener:
         what is being repriced is term premium and a firmer policy path, not a
         cut. Ranked by cash-flow duration, the damage runs in this order.
         First, the longest-duration, profitless story equity, where value is
@@ -703,11 +731,10 @@ tasks:
         anomaly; the bar it faced was 'real carry is getting more expensive,
         fade me,' and it cleared that bar anyway. That is a different buyer
         from the one pricing the 10Y."
-        "The beat-and-raise-that-closed-down tag is left unassigned today. The
-        label requires three things verified together - the beat, the raise,
-        and the red close. This run received no per-name earnings prints or
-        closing changes for the watchlist. Rather than name a candidate on
-        pattern alone, the tag is recorded as unassigned."
+        That day had no verified beat-and-raise that closed down, so the brief
+        carried no such section — it did NOT carry a paragraph saying the tag
+        was unassigned. An absent section is how the brief says nothing
+        happened.
 
       Scenarios — a trigger band, a curve, an equity consequence, and the
       observable that separates each path from its neighbour:

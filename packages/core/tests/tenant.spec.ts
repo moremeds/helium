@@ -2,7 +2,12 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadTenants, parseTenantYaml, parseTeamYaml, topologicalOrder } from "../src/index.js";
+import {
+  loadTenants,
+  parseTenantYaml,
+  parseTeamYaml,
+  topologicalOrder,
+} from "../src/index.js";
 
 const TEAM = `manifestVersion: "1"
 name: t
@@ -40,7 +45,10 @@ function root(entries: Record<string, Record<string, string>>): string {
 
 describe("tenant discovery", () => {
   it("finds a tenant by glob with no registry to edit", () => {
-    const dir = root({ demo: { "tenant.yaml": TENANT, "team.yaml": TEAM }, "not-a-tenant": {} });
+    const dir = root({
+      demo: { "tenant.yaml": TENANT, "team.yaml": TEAM },
+      "not-a-tenant": {},
+    });
     const { tenants, skipped } = loadTenants(dir);
     expect(tenants.map((t) => t.spec.tenant)).toEqual(["demo"]);
     expect(tenants[0]?.spec.budget).toEqual({ usd: 0.5, tokens: 100_000 });
@@ -77,16 +85,53 @@ describe("tenant discovery", () => {
       "tenant.yaml",
     );
     expect(spec.reportTimezone).toBe("America/New_York");
-    expect(parseTenantYaml(TENANT, "tenant.yaml").reportTimezone).toBeUndefined();
+    expect(
+      parseTenantYaml(TENANT, "tenant.yaml").reportTimezone,
+    ).toBeUndefined();
+  });
+
+  it("carries a calendar, defaults both halves, and refuses a date it cannot trust", () => {
+    // The scheduler fires every day; this block is the only place that says
+    // which of those days the tenant has anything to say about. A tenant
+    // without one runs every day, exactly as it did before the field existed.
+    const spec = parseTenantYaml(
+      `${TENANT}calendar:\n  weekdaysOnly: true\n  appliesTo: [premarket]\n  closed: [2026-09-07, 2026-11-26]\n`,
+      "tenant.yaml",
+    );
+    expect(spec.calendar).toEqual({
+      weekdaysOnly: true,
+      appliesTo: ["premarket"],
+      closed: ["2026-09-07", "2026-11-26"],
+    });
+    // Unquoted `2026-09-07` must reach zod as a STRING: the day comparison is
+    // string equality against a zoned date, and a Date here would compare
+    // against nothing and close no day at all.
+    expect(typeof spec.calendar?.closed[0]).toBe("string");
+    expect(parseTenantYaml(TENANT, "tenant.yaml").calendar).toBeUndefined();
+    expect(
+      parseTenantYaml(`${TENANT}calendar: { closed: [2026-09-07] }\n`, "x")
+        .calendar,
+    ).toEqual({ weekdaysOnly: false, closed: ["2026-09-07"] });
+    // A date-shaped string only. `Sept 7` or `2026-9-7` would parse into a day
+    // that never equals a zoned `yyyy-mm-dd`, so the run would fire on a day
+    // the operator believes is closed — a silent failure, hence a load error.
+    expect(() =>
+      parseTenantYaml(`${TENANT}calendar: { closed: ["2026-9-7"] }\n`, "x"),
+    ).toThrow(/closed/);
+    expect(() =>
+      parseTenantYaml(`${TENANT}calendar: { weekdaysOnly: yes-please }\n`, "x"),
+    ).toThrow(/weekdaysOnly/);
   });
 
   it("refuses a vendor routing key anywhere in a declaration", () => {
-    expect(() => parseTenantYaml(`${TENANT}extensions: { model: some-model }\n`, "x")).toThrow(
-      /unrecognized key "model"/,
-    );
-    expect(() => parseTeamYaml(TEAM.replace("permissions: {", "permissions: { provider: x,"))).toThrow(
-      /unrecognized key "provider"/,
-    );
+    expect(() =>
+      parseTenantYaml(`${TENANT}extensions: { model: some-model }\n`, "x"),
+    ).toThrow(/unrecognized key "model"/);
+    expect(() =>
+      parseTeamYaml(
+        TEAM.replace("permissions: {", "permissions: { provider: x,"),
+      ),
+    ).toThrow(/unrecognized key "provider"/);
   });
 
   it("orders tasks by dependency", () => {
