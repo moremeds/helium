@@ -26,9 +26,12 @@ import {
   ExecutionTargetId,
   ProviderRunFailure,
   WorkOrderSchema,
+  appendLedger,
   budgetLine,
   foldSessionLog,
+  outstanding,
   projection,
+  readLedger,
   remaining,
   select,
   topologicalOrder,
@@ -40,8 +43,10 @@ import {
   type LoadedTenant,
   type ModelSelection,
   type Provider,
+  type Receipt,
   type RenderedReport,
   type RunReport,
+  type Settler,
   type TenantCalendar,
   type TenantRenderer,
   type Span,
@@ -53,6 +58,7 @@ import {
   discoverProviders,
   loadGates,
   loadRenderer,
+  loadSettler,
   loadTenantTools,
   tenantToolGaps,
   type Skipped,
@@ -182,6 +188,9 @@ export interface RunOptions {
   tools?: EcosystemTool[];
   /** Injected in tests; loaded from the tenant's `lib/gates/` when absent. */
   gates?: Gate[];
+  /** Injected in tests; loaded from the tenant's built `lib/tools/index.js`
+   *  when absent. */
+  settler?: Settler;
   /** Injected in tests; discovered from `plugins/delivery-*` when absent. */
   channels?: Channel[];
   /** Injected in tests; loaded from the tenant's `lib/render/` when absent.
@@ -929,6 +938,80 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
    *  because a gate comparing against a summary would pass a hallucination
    *  that the summary happened to paraphrase. */
   const toolOutputs: string[] = [];
+
+  // Doctrine 5: a measurement is read-only over somebody else's ground truth,
+  // so it runs BEFORE the DAG and cannot be starved by a budget the tasks
+  // spend. It is a zero-token span for the same reason a gate is one — the §5
+  // cost query has to be able to separate "what did thinking cost" from "what
+  // did checking cost".
+  const ledger = readLedger(options.stateRoot, spec.tenant);
+  const open = outstanding(ledger);
+  if (open.length > 0) {
+    const loadedSettler =
+      options.settler === undefined
+        ? // The SAME config `buildTools` was handed above, minus `pit`: a
+          // settler is not point-in-time-marked, it reads history on purpose.
+          await loadSettler(options.tenant.dir, {
+            stateRoot: options.stateRoot,
+            env,
+            variant: options.variant ?? "live",
+            ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
+            ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
+          })
+        : { settler: options.settler, skipped: [] as Skipped[] };
+    if (loadedSettler.skipped[0] !== undefined)
+      report.settlerSkipped = { reason: loadedSettler.skipped[0].reason };
+    if (loadedSettler.settler !== null) {
+      const startedAt = Date.now();
+      let receipts: Receipt[] = [];
+      let detail = "";
+      try {
+        receipts = await loadedSettler.settler.settle(
+          open,
+          options.now?.() ?? new Date(),
+        );
+        detail = `${String(receipts.length)}/${String(open.length)} settled`;
+      } catch (error: unknown) {
+        // A settler that throws leaves every commitment outstanding, which is
+        // exactly right: the next run tries again. It must never fail the run
+        // — nothing the READER gets depends on it.
+        detail = error instanceof Error ? error.message : String(error);
+        report.settlerSkipped = { reason: detail };
+      }
+      appendLedger(
+        options.stateRoot,
+        spec.tenant,
+        // `runId` is stamped HERE, not by the settler: `Settler.settle` is
+        // handed the outstanding commitments and a clock and nothing else, so a
+        // tenant that filled this field would be guessing at the id of the run
+        // it is executing inside.
+        receipts.map((receipt) => ({
+          kind: "receipt" as const,
+          receipt: { ...receipt, runId },
+        })),
+      );
+      options.audit.append({
+        runId,
+        spanId: "settler",
+        tenant: spec.tenant,
+        role: "settler",
+        provider: "none",
+        model: "none",
+        codeVersion: codeVersion(),
+        stepNo: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        contextSize: 0,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        costUsd: 0,
+        toolName: "settler",
+        toolOutputBytes: Buffer.byteLength(detail, "utf8"),
+        summarised: false,
+        ts: new Date().toISOString(),
+      });
+    }
+  }
 
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
