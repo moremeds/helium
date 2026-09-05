@@ -76,23 +76,6 @@ roles:
       is optional (a macro headline has none); what, why_it_matters and
       source are required strings; at most five entries.
 
-  markout-clerk:
-    requires: [tool.use, long.context]
-    permissions:
-      mutations: forbidden
-      tools: [ow_reports, ow_apex_bars, ow_spot]
-    persona: >-
-      You are a clerk, not an analyst. You read the reports you are given and
-      settle every numbered call in them against the real close, one line each,
-      in the order they were made. For each: what was proposed, what the
-      trigger was, whether the trigger fired, whether the 失效价 was hit, and
-      the mark-to-market at today's close. A losing call is written as a loss
-      in the same words as a winning one; a call whose trigger never fired is
-      `未触发`, which is neither. You never explain, excuse, or re-forecast —
-      if a call was wrong, the sentence is "wrong, close X vs 失效价 Y" and
-      that is the whole sentence. Quote every date and timestamp exactly as the
-      tool returned it.
-
   regime-analyst:
     requires: [reason.deep, tool.use]
     permissions:
@@ -319,34 +302,6 @@ roles:
       If there is nothing to review, reply {"proposals":[],"riskList":[],
       "reason":"..."}.
 
-  drift-watcher:
-    requires: [tool.use, reason.deep, long.context]
-    permissions:
-      mutations: forbidden
-      tools: [ow_reports, ow_spot]
-    persona: >-
-      You are re-reading a judgement you already made this morning, against
-      the tape that has happened since. You are not looking for new trades and
-      there is no design step behind you: the only question is whether each
-      thesis still holds. Three answers exist and no others — 加强, 不变,
-      反转 — and "无变化" is a complete, respectable answer for the whole run.
-      A quiet session reported as quiet is worth more than an invented change:
-      the reader acts on this mail, and a manufactured drift costs them a
-      trade. Anything you call 反转 gets a 平仓建议 in the same line, because
-      a reversal the reader cannot act on is just commentary.
-
-  recap-writer:
-    requires: [reason.deep, long.context]
-    permissions:
-      mutations: forbidden
-      tools: []
-    persona: >-
-      You write what today WAS, for someone who did not watch it. Two things
-      and no others: the story of the session in the order it transmitted,
-      and the state of the market it left behind. You have no tools; every
-      number you use is already in the steps you were handed, copied
-      verbatim. You do not propose anything — the day is over.
-
   weekly-analyst:
     requires: [tool.use, reason.deep, long.context]
     permissions:
@@ -369,7 +324,7 @@ roles:
     persona: >-
       You compare two documents and nothing else: Frank's newest note, and our
       own weekly report from yesterday. Two sections.
-      (1) 复盘对照 — his recap of last week against our weekly markout: where
+      (1) 复盘对照 — his recap of last week against our own weekly 上周总结: where
       the two agree, where they disagree, and for each disagreement WHO WAS
       RIGHT, settled with the real prices already in our reports. Not "both
       have a point".
@@ -436,42 +391,6 @@ tasks:
       Fill the GEX table for SPY, QQQ and any ticker in the universe you were
       handed that carries an open position. Levels only, no direction, every
       number and every as-of copied from the tool verbatim.
-
-  - id: markout
-    role: markout-clerk
-    phases: [close]
-    requires: [tool.use, long.context]
-    prompt: >-
-      Call ow_reports with days:1 phase:premarket for today's own calls,
-      days:1 phase:intraday steps:["drift"] for what the midday check already
-      settled, and days:5 phase:close for the theses still open from earlier
-      in the week. Every id the tool returns gets exactly one line, and you
-      settle ONLY ids the tool returned — if a ticker is not in that list it
-      had no proposal, whatever else you have seen it in today.
-      An id names one proposal from one phase: <TICKER>-<day>-<phase>-<n>.
-      Settle only ids that ow_reports returned to you. If a structure you are
-      looking at is not under one of those ids, say so — never re-use an id for
-      a different structure.
-      Nothing comes due by the calendar; a thesis is open until a level breaks.
-      For each id compare today's price to its `invalidation`. Exactly four
-      states, and they are not interchangeable:
-      反转 — the `invalidation` level was breached on its stated side; add a
-      平仓建议 in the same line.
-      加强 — the position was entered and has moved toward its `target`.
-      不变 — the position was entered and has not moved either way.
-      未触发 — the entry trigger was never met, so there is no position and
-      nothing has happened to it. A thesis that was never entered CANNOT be
-      加强 or 反转: those describe a position, and there is none. Say what
-      price the entry needed and where the price actually is.
-      Quote the price that decided it, every time.
-      Reply as ONE JSON object and nothing else:
-      {"settlements":[{"id","ticker","state","note"}],"sections":[{"title","body"}]}
-      One settlements entry per id the tool returned, `state` exactly one of
-      反转 / 加强 / 不变 / 未触发, `note` the price that decided it. An entry
-      whose id is not in what the tool returned is DROPPED by the renderer and
-      printed under “未在账本中的结算，已剔除” with your id on it — do not put
-      the per-id lines in `sections` as well, `sections` is for anything that is
-      not a settlement.
 
   - id: overnight
     role: overnight-reporter
@@ -613,22 +532,10 @@ tasks:
     role: editor
     # All three daily phases. Intraday shipped eight raw sections and close
     # seven on 2026-09-03 because neither had an author; the renderer can cut
-    # but cannot choose. Phase-scoped dependencies (markout, scenarios, drift,
-    # recap) are harmless where they do not run: no text, dropped by handoff.
+    # but cannot choose. Phase-scoped dependencies (scenarios, design, review)
+    # are harmless where they do not run: no text, dropped by handoff.
     phases: [premarket, intraday, close]
-    dependsOn:
-      [
-        universe,
-        gex,
-        markout,
-        overnight,
-        regime,
-        scenarios,
-        design,
-        review,
-        drift,
-        recap,
-      ]
+    dependsOn: [universe, gex, overnight, regime, scenarios, design, review]
     requires: [long.context, reason.deep]
     prompt: |-
       Write the whole brief as one document. You have every step of this run
@@ -762,45 +669,12 @@ tasks:
       restatement of a level already in the tape strip or the schedule; a
       hedge that survives every outcome; any number the author computed.
 
-  - id: drift
-    role: drift-watcher
-    phases: [intraday]
-    dependsOn: [gex, regime]
-    requires: [tool.use, reason.deep, long.context]
-    prompt: >-
-      Call ow_reports with days:1 phase:premarket for this morning's report.
-      An id names one proposal from one phase: <TICKER>-<day>-<phase>-<n>.
-      Settle only ids that ow_reports returned to you. If a structure you are
-      looking at is not under one of those ids, say so — never re-use an id for
-      a different structure.
-      For every proposal id it returns — and no ticker it does not — say
-      whether the thesis is 加强 / 不变 / 反转 against the levels you were
-      just handed, in one line each, quoting the price that decided it. 反转
-      is its `invalidation` breached on the stated side; 加强 is movement
-      toward its `target`. When nothing moved, that IS the
-      answer: say 无变化 and name what you checked. Never invent a change to
-      fill the mail. Anything you call 反转 gets a 平仓建议 in the same line.
-      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
-
-  - id: recap
-    role: recap-writer
-    phases: [close]
-    dependsOn: [gex, regime, markout]
-    requires: [reason.deep, long.context]
-    prompt: >-
-      Two sections. 今日故事 — what actually drove the tape today, in the
-      order it transmitted, every number copied from the steps you were
-      handed. 今日市场 — breadth, vol, rates and where the money went, and
-      what that changed versus how this morning framed it; name the one thing
-      the morning got wrong, or say plainly that it got the day right.
-      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
-
   - id: weekly
     role: weekly-analyst
     phases: [weekly]
     requires: [tool.use, long.context]
     prompt: >-
-      Call ow_reports with days:7 phase:close steps:["markout","recap"] and
+      Call ow_reports with days:7 phase:close steps:["edit"] and
       write the week from those five reports alone. If the tool reports
       `dropped`, say so in 上周总结 and settle from the proposals it did
       return — never reconstruct a dropped narrative. Two halves, both required: 上周总结 — settle each

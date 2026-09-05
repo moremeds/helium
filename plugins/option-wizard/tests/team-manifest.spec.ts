@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseTeamYaml, topologicalOrder } from "@helium/core";
 import { VOCABULARY } from "../tools/index.js";
+import flashBudget from "../gates/flash-budget.js";
 
 const TEAM = join(__dirname, "..", "team.yaml");
 const raw = readFileSync(TEAM, "utf8");
@@ -65,21 +66,6 @@ describe("option-wizard team.yaml", () => {
       );
     }
   });
-
-  it("close includes markout and weekly does not", () => {
-    const closeTasks = manifest.tasks
-      .filter(
-        (task) => task.phases === undefined || task.phases.includes("close"),
-      )
-      .map((task) => task.id);
-    const weeklyTasks = manifest.tasks
-      .filter(
-        (task) => task.phases === undefined || task.phases.includes("weekly"),
-      )
-      .map((task) => task.id);
-    expect(closeTasks).toContain("markout");
-    expect(weeklyTasks).not.toContain("markout");
-  });
 });
 
 describe("phase remits", () => {
@@ -87,14 +73,12 @@ describe("phase remits", () => {
   const runsIn = (id: string, phase: string) =>
     task(id)?.phases?.includes(phase) ?? true;
 
-  it("intraday does not design or review — it only checks drift", () => {
+  it("intraday does not design or review", () => {
     // Leaving a design step in intraday is what made the model produce a
     // fresh set of trades every run: hand it a design task and it will
     // design something, whether or not anything moved.
     expect(runsIn("design", "intraday")).toBe(false);
     expect(runsIn("review", "intraday")).toBe(false);
-    expect(runsIn("drift", "intraday")).toBe(true);
-    expect(task("drift")?.phases).toEqual(["intraday"]);
   });
 
   it("no longer claims the credit and policy layers have no tool", () => {
@@ -105,44 +89,6 @@ describe("phase remits", () => {
       "NO TOOL",
     );
   });
-
-  it("drift reads this morning's own report", () => {
-    const prompt = task("drift")?.prompt ?? "";
-    expect(prompt).toContain("phase:premarket");
-    expect(prompt).toContain("无变化");
-  });
-});
-
-describe("close settles the day it just watched", () => {
-  const task = (id: string) => manifest.tasks.find((t) => t.id === id);
-
-  it("markout settles today's own calls against their own levels", () => {
-    // It used to read days:2 phase:close and days:8 phase:weekly — a fixed
-    // window, which can never contain this morning's report.
-    const prompt = task("markout")?.prompt ?? "";
-    expect(prompt).toContain("phase:premarket");
-    expect(prompt).toContain("phase:intraday");
-    expect(prompt).toContain("invalidation");
-    expect(prompt).toContain("平仓建议");
-  });
-
-  it("markout may settle only ids the tool returned", () => {
-    // 2026-09-02 close: markout reported six intraday theses settled — MSFT
-    // 505/510, AVGO 375/385, IWM 290/285, TLT 82/81.5 — against a premarket
-    // that proposed none of them. Every one of those tickers appears in that
-    // report's GEX table, which is what survived the tool-output cut. Handed a
-    // ticker table and told to settle proposals, it settled the ticker table,
-    // and recap carried it into the delivered mail verbatim.
-    const prompt = task("markout")?.prompt ?? "";
-    expect(prompt).toContain("ONLY ids the tool returned");
-  });
-
-  it("close writes today's story", () => {
-    expect(task("recap")?.phases).toEqual(["close"]);
-    const prompt = task("recap")?.prompt ?? "";
-    expect(prompt).toContain("今日故事");
-    expect(prompt).toContain("今日市场");
-  });
 });
 
 it("every narrative task replies as one sections JSON", () => {
@@ -150,7 +96,7 @@ it("every narrative task replies as one sections JSON", () => {
   // prose contributes nothing to the mail — which is exactly how a premarket
   // run that had written four regime sections and four scenario paths
   // delivered a brief with one paragraph in it.
-  for (const id of ["scenarios", "weekly", "frank", "drift", "recap"]) {
+  for (const id of ["scenarios", "weekly", "frank"]) {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
@@ -167,21 +113,6 @@ it("every narrative task replies as one sections JSON", () => {
   expect(regimePrompt).toContain('"headline"');
   expect(regimePrompt).toContain('"tape":[...]');
   expect(regimePrompt).toContain('"schedule":[...]');
-});
-
-it("markout settles by id, in four states, so the renderer can check it", () => {
-  // Free prose cannot be gated: the 2026-09-02 close mail settled six theses
-  // that were never proposed and nothing in the pipeline could tell. A settled
-  // id is checkable against the ledger ow_reports returned; a sentence is not.
-  const prompt = manifest.tasks.find((t) => t.id === "markout")?.prompt ?? "";
-  expect(prompt).toContain(
-    '{"settlements":[{"id","ticker","state","note"}],"sections":[{"title","body"}]}',
-  );
-  // 未触发 is the state the three-state prompt had no room for, so a thesis
-  // whose entry never filled was written up as 加强 or 反转 — a judgement about
-  // a position that does not exist.
-  for (const state of ["反转", "加强", "不变", "未触发"])
-    expect(prompt, state).toContain(state);
 });
 
 it("the two judgement steps declare reason.deep on the TASK, which is what routes", () => {
@@ -249,14 +180,11 @@ describe("the editor is one author over seven fragments", () => {
     expect(task?.dependsOn ?? []).toEqual([
       "universe",
       "gex",
-      "markout",
       "overnight",
       "regime",
       "scenarios",
       "design",
       "review",
-      "drift",
-      "recap",
     ]);
     const ids = new Set(manifest.tasks.map((entry) => entry.id));
     for (const dependency of task?.dependsOn ?? [])
@@ -333,4 +261,45 @@ describe("the editor is one author over seven fragments", () => {
     // A day with no prior report is one line, not a silent gap.
     expect(prompt).toContain("prior:null");
   });
+});
+
+it("carries no settlement ceremony: no markout, no drift, no recap", () => {
+  // Candidate selection is moving to its own team and settlement is the
+  // Outcome Ledger's job. Until then these three steps spent one section per
+  // run saying "nothing to settle", and the recap step wrote Chinese titles
+  // into an English brief. The tools stay registered; only the steps go.
+  const ids = manifest.tasks.map((entry) => entry.id);
+  for (const gone of ["markout", "drift", "recap"])
+    expect(ids, gone).not.toContain(gone);
+  for (const gone of ["markout-clerk", "drift-watcher", "recap-writer"])
+    expect(Object.keys(manifest.roles), gone).not.toContain(gone);
+});
+
+it("asks no step for a CJK section title", () => {
+  // The delivered brief is English. 今日故事 / 今日市场 / 无变化 were section
+  // titles the manifest DEMANDED, so no persona rule could keep them out.
+  const prompts = manifest.tasks.map((entry) => entry.prompt ?? "").join("\n");
+  for (const title of ["今日故事", "今日市场", "无变化"])
+    expect(prompts, title).not.toContain(title);
+});
+
+it("no task depends on a step that no longer exists", () => {
+  const ids = new Set(manifest.tasks.map((entry) => entry.id));
+  for (const entry of manifest.tasks)
+    for (const dependency of entry.dependsOn ?? [])
+      expect(ids.has(dependency), `${entry.id} -> ${dependency}`).toBe(true);
+});
+
+it("no prompt asks ow_reports for a step id that no longer exists", () => {
+  // `weekly` used to read steps:["markout","recap"]. Those files will never
+  // contain those headings again, so the tool would return nothing and the
+  // week would be written from an empty page.
+  const prompts = manifest.tasks.map((entry) => entry.prompt ?? "").join("\n");
+  for (const gone of ['"markout"', '"drift"', '"recap"'])
+    expect(prompts, gone).not.toContain(gone);
+});
+
+it("flash-budget guards only roles that still exist", () => {
+  for (const role of flashBudget.appliesTo)
+    expect(Object.keys(manifest.roles), role).toContain(role);
 });

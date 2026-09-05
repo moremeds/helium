@@ -30,8 +30,10 @@ const gate: Gate = {
   id: "flash-budget",
   phase: "output",
   advisory: true,
-  // Every role that can put a `sections` array into a brief.
-  appliesTo: ["editor", "regime-analyst", "drift-watcher", "recap-writer"],
+  // Every role that can put a `sections` array into a brief. `drift-watcher`
+  // and `recap-writer` were removed with the settlement steps on 2026-09-05;
+  // a gate naming a role the manifest does not declare guards nothing.
+  appliesTo: ["editor", "regime-analyst"],
   async check(
     input: unknown,
     _ctx: GateCtx,
