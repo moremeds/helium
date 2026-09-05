@@ -143,9 +143,20 @@ export function fixtureBarSource(doc: {
 
 /**
  * apex over HTTP, mirroring `ow_apex_bars`: `start` must be offset-aware or
- * apex answers 500, `price_mode=adjusted` is equity-only, and no credential is
- * needed. The window is widened by a day on each side and then filtered by ET
- * session, because an ET session date is not a UTC date.
+ * apex answers 500, and no credential is needed. The window is widened by a
+ * day on each side and then filtered by ET session, because an ET session date
+ * is not a UTC date.
+ *
+ * `price_mode=raw`, NOT `adjusted`. Verified against the live apex at
+ * `OW_APEX_API_BASE` on 2026-09-06: `adjusted` silently truncates the daily
+ * series at the last date its factor coverage reaches — 08-20..09-10 returned
+ * 7 bars ending 2026-08-28 where `raw` returned 12 ending 2026-09-04 — and for
+ * 1m it refuses outright with `adjusted_unavailable: incomplete or overlapping
+ * factor coverage for SPY 1m`. A settler reading `adjusted` therefore reports
+ * `pending` forever on the newest sessions, which is the one failure mode that
+ * looks exactly like a quiet market. Raw is also what the receipt already
+ * claims (`priceBasis: "raw, not dividend-adjusted"`), so this is the mode the
+ * evidence was always describing.
  */
 export function apexBarSource(
   base: string,
@@ -162,8 +173,7 @@ export function apexBarSource(
     url.searchParams.set("timeframe", timeframe);
     url.searchParams.set("start", fromIso);
     url.searchParams.set("end", toIso);
-    url.searchParams.set("price_mode", "adjusted");
-    url.searchParams.set("limit", "0");
+    url.searchParams.set("price_mode", "raw");
     const response = await fetchImpl(url);
     if (!response.ok)
       throw new Error(
@@ -188,10 +198,14 @@ export function apexBarSource(
         new Date(Date.parse(`${fromDate}T00:00:00Z`) - day).toISOString(),
         new Date(Date.parse(`${toDate}T00:00:00Z`) + day).toISOString(),
       );
-      // apex returns a UTC instant for a daily bar too; the trade date is the
-      // ET session it belongs to.
+      // A daily bar is a DATE that apex serves as UTC midnight of the trade
+      // date — verified live 2026-09-06: `2026-09-03T00:00:00+00:00` carries
+      // close 773.17, the same close the lake's `trade_date` 2026-09-03 row
+      // holds. Reading it through `etSession` would call it 20:00 on 09-02 and
+      // move every daily bar back one day, which is why the UTC date is taken
+      // literally here while every intraday bar goes through the ET session.
       return rows
-        .map((bar) => ({ ...bar, time: etSession(bar.time).date }))
+        .map((bar) => ({ ...bar, time: bar.time.slice(0, 10) }))
         .filter((bar) => bar.time >= fromDate && bar.time <= toDate);
     },
   };
