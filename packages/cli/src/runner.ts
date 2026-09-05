@@ -1532,6 +1532,30 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // and the rendered view are both on disk before a delivery is attempted.
   evidence.sync(report, assembledPrompts, rendered?.data);
 
+  // Records precede side effects. The commitment is on disk BEFORE the mail is
+  // attempted, so a delivery that half-succeeds cannot leave a promise nobody
+  // recorded — the same ordering the topology boundary already demands of
+  // intent and evidence.
+  const stamp = new Date().toISOString();
+  const context = {
+    runId,
+    tenant: spec.tenant,
+    issuedAt: stamp,
+    deployment,
+    variant: options.variant ?? "live",
+    ...(options.asOf === undefined ? {} : { asOf: options.asOf.toISOString() }),
+  };
+  appendLedger(options.stateRoot, spec.tenant, [
+    ...(rendered?.commitments ?? []).map((draft) => ({
+      kind: "commitment" as const,
+      commitment: { ...context, id: draft.id, payload: draft.payload },
+    })),
+    ...(rendered?.baselines ?? []).map((draft) => ({
+      kind: "baseline" as const,
+      baseline: { ...context, id: draft.id, payload: draft.payload },
+    })),
+  ]);
+
   // Written AFTER rendering and BEFORE delivery: the renderer is what
   // computes them, and the header line the channels carry is built from
   // `report.metrics`. Core stores name, value, day and label, and reads none

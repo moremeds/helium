@@ -14,4 +14,9 @@ budget:
   usd: 0.05
   tokens: 20000
 triggers: []
-delivery: []
+# One channel, and the file channel specifically: it exists so the ledger's
+# write-before-side-effect ordering has a delivery to be ordered against, and
+# a file write leaves the machine no more than a log line does.
+delivery:
+  - channel: file
+    config: {}
