@@ -186,6 +186,16 @@ export interface RunOptions {
   phase?: string;
   /** Injected in tests so the clock in the step preamble can be frozen. */
   now?: () => Date;
+  /**
+   * Point-in-time replay: the past instant the run is reproducing. It is NOT a
+   * second clock — the caller sets `now` to the same instant — it is the flag
+   * the tools read to decide whether they have history for it. Core stays
+   * domain-free here: it forwards an instant and a label and never learns what
+   * a source is.
+   */
+  asOf?: Date;
+  /** Run flavour label, forwarded to tool construction. Defaults to `live`. */
+  variant?: string;
 }
 
 /**
@@ -505,7 +515,9 @@ async function runGates(
       refusals.push({
         id: gate.id,
         reason: verdict.reason,
-        ...(gate.advisory === true && phase === "output" ? { advisory: true } : {}),
+        ...(gate.advisory === true && phase === "output"
+          ? { advisory: true }
+          : {}),
       });
   }
   return { ran: applicable.length, refusals };
@@ -590,11 +602,25 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     options.providers === undefined
       ? await discoverProviders(options.pluginsDir)
       : { live: options.providers, skipped: options.providersSkipped ?? [] };
+  // Which tools have no history for the replayed instant. The tools mark
+  // themselves — a tool knows what is behind it and the runner does not
+  // (doctrine 2) — and the runner only counts. Written once per tool: the
+  // first reason is the one that stands, so a tool called twenty times does
+  // not turn into twenty rows.
+  const pitUnavailable = new Map<string, string>();
+  const pit = {
+    markUnavailable(tool: string, reason: string): void {
+      if (!pitUnavailable.has(tool)) pitUnavailable.set(tool, reason);
+    },
+  };
   const tools =
     options.tools ??
     (await loadTenantTools(options.tenant.dir, {
       stateRoot: options.stateRoot,
       env,
+      variant: options.variant ?? "live",
+      pit,
+      ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
     }));
   const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
 
@@ -652,6 +678,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       options.tools === undefined
         ? await tenantToolGaps(options.tenant.dir, env)
         : [],
+    ...(options.asOf === undefined
+      ? {}
+      : {
+          asOf: options.asOf.toISOString(),
+          variant: options.variant ?? "live",
+        }),
   };
 
   const signal = options.signal ?? new AbortController().signal;
@@ -1112,6 +1144,20 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // throws costs the run its rich email and nothing else: delivery still
   // happens with the generic transcript. Losing the send because the pretty
   // version failed would trade a readable email for no email at all.
+  // Read AFTER the steps, not at load: a tool that only discovers it has
+  // nothing for the instant when it is called (an exhausted window, a source
+  // that answers but not that far back) marks itself during the run, and a
+  // count taken at build time would report it as available.
+  if (options.asOf !== undefined) {
+    report.pitCoverage = {
+      total: tools.length,
+      available: Math.max(0, tools.length - pitUnavailable.size),
+      unavailable: [...pitUnavailable.keys()].sort((a, b) =>
+        a.localeCompare(b, "en"),
+      ),
+    };
+  }
+
   let rendered: RenderedReport | undefined;
   if (loadedRenderer.renderer !== null) {
     try {
@@ -1273,6 +1319,25 @@ function deliveryBody(report: RunReport): string {
       "",
       "_No live provider: no model ran, so nothing below was reasoned about._",
     );
+  }
+  // A replay must be unmistakable in the artifact itself. A report file that
+  // reads like today's, written from a week-old instant, is the one failure
+  // mode of this feature that nothing downstream can catch.
+  if (report.asOf !== undefined) {
+    lines.push(
+      "",
+      `- as-of: \`${report.asOf}\``,
+      `- variant: \`${report.variant ?? "live"}\``,
+    );
+    if (report.pitCoverage !== undefined) {
+      const { available, total, unavailable } = report.pitCoverage;
+      lines.push(
+        `- pit coverage: ${String(available)}/${String(total)}` +
+          (unavailable.length === 0
+            ? ""
+            : ` (unavailable: ${unavailable.join(", ")})`),
+      );
+    }
   }
   for (const skip of report.providersSkipped)
     lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);

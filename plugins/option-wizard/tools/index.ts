@@ -505,12 +505,26 @@ export function parseFredCsv(
 export async function fredDirect(
   series: readonly string[],
   ctx?: ToolRunContext,
+  until?: string,
 ): Promise<{ points: FredPoint[]; skipped: FredSkip[] }> {
   const doFetch = ctx?.fetchImpl ?? fetch;
   const settled = await Promise.all(
     series.slice(0, 8).map(async (id): Promise<FredPoint | FredSkip> => {
       const url = new URL(FRED_CSV);
       url.searchParams.set("id", symbolLiteral(id, "ow_macro_rates"));
+      // 2026-09-05, as-of: `coed` (cut-off end date) is what makes the CSV
+      // STOP at the replayed day, and `parseFredCsv` then takes the last row
+      // that carries a number — the same rule as a live run, applied to a
+      // shorter file. `cosd` only bounds the download. ASSUMED, from
+      // fredgraph.csv's documented query parameters; not re-fetched here,
+      // because this host cannot reach the FRED CDN at all (the tool comment
+      // above records that the laptop's SSL fails and the mini's does not). If
+      // a future run shows `asOf` past the last row, the observation date on
+      // the point is the tell — it is carried on every point. `cosd` (the
+      // start date) is deliberately NOT set: it would only shrink a download
+      // that is already one column of dates, and a second bound is a second
+      // thing to get wrong.
+      if (until !== undefined) url.searchParams.set("coed", until);
       try {
         const response = await doFetch(url, {
           signal: AbortSignal.timeout(15_000),
@@ -1256,12 +1270,68 @@ export function firstDatedPostUrl(markdown: string): string | undefined {
   return undefined;
 }
 
+/**
+ * The tools with no dated archive behind them, mapped to the source that has
+ * none — a live quote, a live chain, a live account, a live browser session.
+ * In an as-of replay each one refuses BEFORE the network, which is the whole
+ * point: a live source asked about last Tuesday answers about today, and an
+ * answer about today inside a replay is worse than no answer at all.
+ *
+ * 2026-09-05, what was checked and what was assumed: assumed for all thirteen.
+ * None of these routes has a documented dated form we use — TradingView's
+ * opencli quote route, xenon's live account/greeks endpoints, argon's live
+ * regime views and UW's chain/metrics/GEX/earnings/IV-term/headlines endpoints
+ * are read here in their current-value form only. Where UW does expose a
+ * historic variant (`/api/historic_chains`, dated GEX), wiring it is separate
+ * work; until then the honest answer is "unavailable", not a today value with
+ * a past label on it.
+ */
+const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
+  ["ow_tv_watchlist", "TradingView"],
+  ["ow_spot", "the live quote route"],
+  ["ow_strike_check", "the live quote route"],
+  ["ow_argon_levels", "argon's live regime API"],
+  ["ow_ib_positions", "xenon's live account API"],
+  ["ow_uw_chain", "the Unusual Whales chain endpoint as used here"],
+  ["ow_uw_ticker_metrics", "the Unusual Whales ticker-metrics endpoint"],
+  ["ow_uw_gex", "the Unusual Whales exposure endpoints as used here"],
+  ["ow_uw_earnings", "the Unusual Whales earnings endpoint"],
+  ["ow_uw_iv_term", "the Unusual Whales IV-term endpoint"],
+  ["ow_uw_headlines", "the Unusual Whales news endpoint"],
+  ["ow_tv_commodities", "TradingView"],
+  ["ow_frank", "the Substack reader (no dated archive access here)"],
+]);
+
+const AS_OF_BLIND_SENTENCE =
+  "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant.";
+
 export function buildTools(cfg: {
   stateRoot: string;
   env: Record<string, string | undefined>;
+  /** Point-in-time replay instant. Undefined is an ordinary run and every
+   *  tool below behaves exactly as it did before this flag existed. */
+  asOf?: Date;
+  variant?: string;
+  pit?: { markUnavailable: (tool: string, reason: string) => void };
 }) {
   const { env } = cfg;
-  return [
+  const asOf = cfg.asOf;
+  const asOfIso = asOf?.toISOString();
+  // The as-of DAY in the zone this tenant files its reports in. Every dated
+  // filter below is a date, not an instant, and taking that date off the
+  // process clock's zone is how a replay of a US morning reads as the previous
+  // day — the same trap ow_reports and ow_prior_brief already document.
+  const asOfDay =
+    asOf === undefined
+      ? undefined
+      : new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+          asOf,
+        );
+  /** ` AND <column> <= DATE 'yyyy-mm-dd'`, or nothing on a live run. The date
+   *  is produced by Intl, never by a caller, so it cannot carry SQL. */
+  const dateCut = (column: string): string =>
+    asOfDay === undefined ? "" : ` AND ${column} <= DATE '${asOfDay}'`;
+  const built = [
     {
       // opencli's TradingView adapter is read-only and drives the LOCAL app over
       // CDP. Installed on both boxes, but a GUI app is never a guarantee: it can
@@ -1580,16 +1650,27 @@ export function buildTools(cfg: {
                   to_jsonb(sk)                                    AS skew
              FROM (SELECT unnest(ARRAY[${list}]) AS ticker) t
              LEFT JOIN LATERAL (SELECT * FROM uw_scan.iv_rank_history r
-                                 WHERE r.ticker = t.ticker
+                                 WHERE r.ticker = t.ticker${dateCut("r.market_date")}
                                  ORDER BY r.market_date DESC LIMIT 1) iv ON true
              LEFT JOIN LATERAL (SELECT * FROM uw_scan.greek_exposure_daily g
-                                 WHERE g.ticker = t.ticker
+                                 WHERE g.ticker = t.ticker${dateCut("g.trade_date")}
                                  ORDER BY g.trade_date DESC LIMIT 1) gx ON true
              LEFT JOIN LATERAL (SELECT * FROM uw_scan.skew_analytics_snapshot s
-                                 WHERE s.ticker = t.ticker
+                                 WHERE s.ticker = t.ticker${dateCut("s.market_date")}
                                  ORDER BY s.market_date DESC LIMIT 1) sk ON true`,
         );
-        return JSON.stringify({ source: "argon.uw_scan", rows });
+        // 2026-09-05: the `<= DATE` cut inside each LIMIT 1 subquery is the
+        // whole as-of change here — the LATERAL still takes the newest row,
+        // just the newest one that existed on the replayed day. VERIFIED
+        // against the column names already documented on this tool
+        // (market_date / trade_date / market_date); ASSUMED that argon's
+        // mirror never back-dates a row it wrote later, which no column here
+        // can distinguish.
+        return JSON.stringify({
+          source: "argon.uw_scan",
+          ...(asOfDay === undefined ? {} : { asOf: asOfDay }),
+          rows,
+        });
       },
     },
     {
@@ -1940,17 +2021,30 @@ export function buildTools(cfg: {
       ): Promise<string> {
         const { sector, etf } = MarketStateParams.parse(args);
         const tool = "ow_uw_market_state";
+        // 2026-09-05, as-of: the three tide endpoints take an optional
+        // `date=YYYY-MM-DD` and answer for that trading day. VERIFIED for
+        // /api/market/market-tide and /api/market/{sector}/sector-tide against
+        // the Unusual Whales OpenAPI docs read that day ("Date must be the
+        // current or a past date. If no date is given, returns data for the
+        // current/last market day"; tide history goes back to 2022-09-28).
+        // ASSUMED for /api/market/{etf}/etf-tide by analogy with its two
+        // siblings — not read in the docs. An endpoint that ignores an unknown
+        // query parameter would answer for today; the reply carries `date`
+        // where UW echoes it, and the `dated` key below says what was asked.
+        const dated: Record<string, string> =
+          asOfDay === undefined ? {} : { date: asOfDay };
         return JSON.stringify({
           tidePrints: `thinned across the session to <=${String(TIDE_PRINTS)} prints per tide`,
+          ...(asOfDay === undefined ? {} : { dated: asOfDay }),
           marketTide: thinTide(
-            await uwGet(env, tool, "/api/market/market-tide", {}, ctx),
+            await uwGet(env, tool, "/api/market/market-tide", dated, ctx),
           ),
           sectorTide: thinTide(
             await uwGet(
               env,
               tool,
               `/api/market/${encodeURIComponent(sector)}/sector-tide`,
-              {},
+              dated,
               ctx,
             ),
           ),
@@ -1959,7 +2053,7 @@ export function buildTools(cfg: {
               env,
               tool,
               `/api/market/${encodeURIComponent(etf)}/etf-tide`,
-              {},
+              dated,
               ctx,
             ),
           ),
@@ -2271,6 +2365,14 @@ export function buildTools(cfg: {
           const match = REPORT_NAME.exec(name);
           if (match === null) continue;
           const [, date, found] = match;
+          // 2026-09-05, as-of: a report written AFTER the replayed instant is
+          // this tenant reading its own future. The day is in the filename
+          // (REPORT_NAME group 1), stamped in the same zone `asOfDay` is
+          // computed in, so the comparison is a string compare on two dates
+          // from one zone — VERIFIED by construction, no clock involved.
+          // `days` then counts back from the newest SURVIVING date, which is
+          // the as-of day's report rather than today's.
+          if (asOfDay !== undefined && date > asOfDay) continue;
           if (!seen.has(date)) {
             if (seen.size >= days) break;
             seen.add(date);
@@ -2372,8 +2474,14 @@ export function buildTools(cfg: {
         // reasoning as ow_reports' date counting: a cutoff taken from this
         // process's clock disagrees with the filenames by a whole day for a
         // HK-scheduled run reading ET-dated files.
+        // 2026-09-05, as-of: the replayed day replaces "today" as the
+        // exclusive cutoff, so a replay of 09-02 reads the 09-01 brief and not
+        // whatever the last run on disk happened to write. An explicit `today`
+        // argument still wins — a caller naming a day means that day. VERIFIED
+        // by construction (same zone as the filenames); nothing external.
         const cutoff =
           today ??
+          asOfDay ??
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
@@ -2604,11 +2712,14 @@ export function buildTools(cfg: {
           // DISTINCT ON: argon's mirror holds ~30 copies of every (series, day)
           // row, and 2026-09-03 measured 4,391 rows for 145 distinct
           // observations -- 271 KB for what is 8 lines a day. One row per day.
+          // 2026-09-05, as-of: the lookback window slides to end at the
+          // replayed day instead of at today — same width, moved. VERIFIED by
+          // construction against this table's own `obs_date` column.
           `SELECT DISTINCT ON (series_id, obs_date)
                   series_id, obs_date::text AS obs_date, value
              FROM uw_scan.macro_series_daily
             WHERE series_id IN (${list})
-              AND obs_date >= current_date - ${String(Math.trunc(days))}
+              AND obs_date >= ${asOfDay === undefined ? "current_date" : `DATE '${asOfDay}'`} - ${String(Math.trunc(days))}${dateCut("obs_date")}
             ORDER BY series_id, obs_date DESC`,
         );
         if (rows.length === 0) {
@@ -2631,13 +2742,28 @@ export function buildTools(cfg: {
         // remove.
         return JSON.stringify({
           series: { source: "argon.uw_scan.macro_series_daily", rows },
-          liveNow: {
-            source: "tradingview",
-            ...(await tvLiveLevels(env, "ow_macro_rates")),
-          },
+          // 2026-09-05, as-of: TradingView quotes ONE level, the current one,
+          // so in a replay the live overlay is removed rather than filled with
+          // today's curve sitting under a past date — the single most
+          // dangerous number this tool could hand a replay. The daily series
+          // above is then the only thing quotable, and the note says so.
+          liveNow:
+            asOf === undefined
+              ? {
+                  source: "tradingview",
+                  ...(await tvLiveLevels(env, "ow_macro_rates")),
+                }
+              : {
+                  unavailable: "as-of",
+                  asOf: asOfIso,
+                  reason:
+                    "TradingView quotes the current level only; there is no live level for a past instant",
+                  note: "Quote `series` and `fredDirect` with their own observation dates. There is NO live level in this run — do not describe any number here as today's or as the current print.",
+                },
           fredDirect: await fredDirect(
             wanted.filter((id) => !TV_TWIN_IDS.has(id)),
             ctx,
+            asOfDay,
           ),
           staleSeries: staleSeries(
             rows as Array<{ series_id?: unknown; obs_date?: unknown }>,
@@ -2685,13 +2811,23 @@ export function buildTools(cfg: {
         const ticker = symbolLiteral(symbol, tool);
         const klass = assetClass ?? "equity";
         const back = lookbackDays ?? 180;
-        const start = new Date(Date.now() - back * 86_400_000).toISOString();
+        // 2026-09-05, as-of: the window ENDS at the replayed instant and the
+        // lookback is measured back from it, so a replay sees the same depth
+        // of history the live run would have seen on that day and not one bar
+        // after it. VERIFIED: `/v1/{asset_class}/{symbol}/bars` takes an
+        // optional `end: datetime` beside `start`
+        // (apex `src/api/routes/chart.py:228-242`, read 2026-09-05), and both
+        // are parsed the same way — so `end` needs the same offset-aware form
+        // the existing comment demands of `start`. `toISOString()` gives it.
+        const until = asOf?.getTime() ?? Date.now();
+        const start = new Date(until - back * 86_400_000).toISOString();
         const url = new URL(
           `/v1/${encodeURIComponent(klass)}/${encodeURIComponent(ticker)}/bars`,
           base,
         );
         url.searchParams.set("timeframe", timeframe ?? "1d");
         url.searchParams.set("start", start);
+        if (asOf !== undefined) url.searchParams.set("end", asOf.toISOString());
         if (klass === "equity") url.searchParams.set("price_mode", "adjusted");
         const doFetch = ctx?.fetchImpl ?? fetch;
         let response: Response;
@@ -2746,7 +2882,15 @@ export function buildTools(cfg: {
           data?: unknown;
         };
         const all = Array.isArray(raw.data) ? raw.data : [];
-        const now = Date.now();
+        // 2026-09-05, as-of: the 7-day window slides to start at the replayed
+        // instant, so a replay is told what was still AHEAD on that day rather
+        // than what is ahead now. VERIFIED by construction — the endpoint takes
+        // no parameters (see the comment above) and returns a multi-week
+        // window, so the filter is entirely client-side and needs nothing from
+        // UW. Its limit is the same window: an instant older than what the
+        // endpoint still carries filters down to nothing, and an empty `rows`
+        // with the as-of stamped on it is the honest reading of that.
+        const now = asOf?.getTime() ?? Date.now();
         const horizon = now + 7 * 86_400_000;
         const rows = (all as Array<Record<string, unknown>>)
           .filter((row) => {
@@ -2761,7 +2905,7 @@ export function buildTools(cfg: {
             prev: row.prev ?? null,
           }))
           .sort((a, b) => String(a.time).localeCompare(String(b.time)));
-        return JSON.stringify({ asOf: new Date().toISOString(), rows });
+        return JSON.stringify({ asOf: new Date(now).toISOString(), rows });
       },
     },
     {
@@ -2789,13 +2933,20 @@ export function buildTools(cfg: {
         const rows = await pgJson(
           env,
           "ow_argon_policy_path",
+          // 2026-09-05, as-of: the newest snapshot that existed ON the
+          // replayed day, and the meetings that were still ahead of it. Both
+          // halves have to move together — the latest snapshot with today's
+          // meeting filter would answer about a path priced after the fact.
+          // VERIFIED by construction against the two date columns this tool's
+          // comment already documents (snapshot_date, meeting_date).
           `SELECT DISTINCT ON (meeting_date)
                   snapshot_date::text AS snapshot_date,
                   meeting_date::text AS meeting_date,
                   payload
              FROM uw_scan.rates_policy_path
-            WHERE snapshot_date = (SELECT max(snapshot_date) FROM uw_scan.rates_policy_path)
-              AND meeting_date >= current_date
+            WHERE snapshot_date = (SELECT max(snapshot_date) FROM uw_scan.rates_policy_path
+                                    WHERE true${dateCut("snapshot_date")})
+              AND meeting_date >= ${asOfDay === undefined ? "current_date" : `DATE '${asOfDay}'`}
             ORDER BY meeting_date, last_seen_at DESC`,
         );
         if (rows.length === 0) {
@@ -3088,7 +3239,7 @@ export function buildTools(cfg: {
           );
         }
         const parsedOut: unknown = JSON.parse(stdout);
-        const rows = (Array.isArray(parsedOut) ? parsedOut : []).map(
+        const all = (Array.isArray(parsedOut) ? parsedOut : []).map(
           (row: Record<string, unknown>) => ({
             author: row.author,
             created_at: row.created_at,
@@ -3096,7 +3247,35 @@ export function buildTools(cfg: {
             text: row.text,
           }),
         );
-        return JSON.stringify({ rows });
+        // 2026-09-05, as-of: X has no dated archive on this route — the
+        // timeline is fetched live and filtered here to what had been POSTED
+        // by the replayed instant. That works only while the wanted posts are
+        // still inside the newest `limit`; a replay far enough back keeps
+        // nothing, and an empty list would read as "this reporter said
+        // nothing that week", which is a false and quotable fact. So an empty
+        // filter result is an explicit as-of unavailability instead.
+        // VERIFIED: `created_at` is on every row (the shape this tool already
+        // returns). ASSUMED: that it is an ISO instant parseable by Date —
+        // a row whose timestamp does not parse is DROPPED rather than kept,
+        // because a row that cannot be dated cannot be shown to predate the
+        // instant.
+        if (asOf === undefined) return JSON.stringify({ rows: all });
+        const cut = asOf.getTime();
+        const rows = all.filter((row) => {
+          const at = Date.parse(String(row.created_at ?? ""));
+          return Number.isFinite(at) && at <= cut;
+        });
+        if (rows.length === 0) {
+          const reason = "timeline window exhausted";
+          cfg.pit?.markUnavailable("ow_x_posts", reason);
+          return JSON.stringify({
+            unavailable: "as-of",
+            asOf: asOfIso,
+            reason,
+            detail: `the newest ${String(all.length)} posts on this timeline are all later than the replayed instant`,
+          });
+        }
+        return JSON.stringify({ asOf: asOfIso, rows });
       },
     },
     {
@@ -3321,4 +3500,25 @@ export function buildTools(cfg: {
       },
     },
   ];
+  if (asOf === undefined) return built;
+  // One place, not thirteen edits: a live-only tool in a replay is replaced by
+  // its refusal wholesale, so there is no path through its body that could
+  // still reach the network. Thirteen inline guards would each have to be
+  // right; this has to be right once.
+  return built.map((tool) => {
+    const source = AS_OF_BLIND.get(tool.name);
+    if (source === undefined) return tool;
+    const reason = `${source} has no history`;
+    cfg.pit?.markUnavailable(tool.name, reason);
+    const payload = JSON.stringify({
+      unavailable: "as-of",
+      asOf: asOfIso,
+      reason,
+    });
+    return {
+      ...tool,
+      description: `${tool.description} ${AS_OF_BLIND_SENTENCE}`,
+      run: async (): Promise<string> => payload,
+    };
+  });
 }

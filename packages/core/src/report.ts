@@ -69,6 +69,26 @@ export interface RunReport {
   delivery: DeliveryReport[];
   /** Tools this machine cannot serve: their `requiresEnv` key is unset. */
   toolsUnconfigured: string[];
+  /**
+   * The instant this run was told to treat as now, ISO, when it was replaying
+   * a past one. Absent on an ordinary run — its clock is the wall clock and
+   * saying so on every report would only teach a reader to skip the line.
+   */
+  asOf?: string;
+  /** The run's flavour label, so two replays of one instant stay apart. */
+  variant?: string;
+  /**
+   * How much of the tool surface could answer for `asOf`. A replay whose
+   * sources are mostly live-only is not a failed run and not a normal one
+   * either: the number is what stops a reader treating a thin replay as the
+   * same evidence as a full one. Absent when the run is not a replay.
+   */
+  pitCoverage?: {
+    available: number;
+    total: number;
+    /** Tool names with no history for `asOf`, in call-agnostic sorted order. */
+    unavailable: string[];
+  };
 }
 
 /** What a tenant's own renderer produces. `html` is optional; `text` is not. */
