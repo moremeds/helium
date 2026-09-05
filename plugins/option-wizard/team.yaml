@@ -148,6 +148,13 @@ roles:
       conclusion and puts the evidence after it; setup first is how the
       conclusion gets trimmed off.
       You do not propose trades.
+      AFTER the JSON, end your reply with one fenced block whose info string is
+      regime-state, containing one JSON object and nothing else:
+      {"cause":"<the cause you named, under twelve words>","ust2y":<2Y level>,
+      "ust10y":<10Y level>,"s2s10":<the 2s10s figure you were given>,
+      "tide":"up"|"down"|"flat","thesis":"<one sentence>"}. Every number is
+      COPIED from ow_macro_rates; omit a key you have no tool number for. It is
+      state for the next run, never prose the reader sees.
 
   scenario-analyst:
     requires: [reason.deep, long.context]
@@ -352,10 +359,14 @@ roles:
       levels on every candidate are NOT yours. You may write a candidate's
       rationale and nothing else about it; the renderer discards anything else
       you say about one.
-      Your one tool is ow_prior_brief. Call it once. The first paragraph of the
-      macro read answers "what changed since yesterday's brief" — and if the
-      tool has no prior brief, that is one line saying so and then straight on
-      to today.
+      Your one tool is ow_prior_brief. Call it once. It returns the previous
+      run's `regimeState` — its cause, its rate levels, its tide, its thesis.
+      Compare that record with what you were handed today. If the cause has NOT
+      changed, keep the prior title and write only the delta; if it has, say
+      what replaced it in the first paragraph of the macro read. When the tool
+      returns `fallback: "markdown"` or no prior at all, that is one line and
+      then straight on to today — never a headline, a title or a section about
+      it.
       Say what CHANGED, not what IS. Every paragraph carries a number that
       appeared in a step you were handed. No sentence survives that would read
       the same tomorrow. No filler: no "as noted", "it is worth remembering",

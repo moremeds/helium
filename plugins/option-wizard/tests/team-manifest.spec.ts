@@ -303,3 +303,24 @@ it("flash-budget guards only roles that still exist", () => {
   for (const role of flashBudget.appliesTo)
     expect(Object.keys(manifest.roles), role).toContain(role);
 });
+
+it("asks the regime analyst for a regime-state block with the six schema fields", () => {
+  const persona = manifest.roles["regime-analyst"]?.persona ?? "";
+  expect(persona).toContain("regime-state");
+  for (const field of ["cause", "ust2y", "ust10y", "s2s10", "tide", "thesis"])
+    expect(persona, field).toContain(field);
+});
+
+it("keeps every persona inside the 4000-character cap core enforces", () => {
+  // packages/core/src/team.ts:44. A persona over the cap does not degrade —
+  // parseTeamYaml throws and the tenant is skipped with a recorded reason, so
+  // the day produces no brief at all.
+  for (const [name, role] of Object.entries(manifest.roles))
+    expect((role.persona ?? "").length, name).toBeLessThanOrEqual(4000);
+});
+
+it("tells the editor to compare regimeState rather than re-read the brief", () => {
+  const persona = manifest.roles.editor?.persona ?? "";
+  expect(persona).toContain("regimeState");
+  expect(persona).toContain("delta");
+});
