@@ -4,6 +4,10 @@ dist/
 *.env
 .DS_Store
 state/
+# ...except the tenant's own source directory: `state/` above is meant for
+# runtime state dirs, and plugins/option-wizard/state/ is checked-in source
+# (the regime-state record contract two runs share).
+!plugins/option-wizard/state/
 *.tsbuildinfo
 .worktrees/
 
