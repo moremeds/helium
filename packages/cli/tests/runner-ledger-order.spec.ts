@@ -92,7 +92,7 @@ describe("ledger write ordering", () => {
       env: { HELIUM_STATE_ROOT: stateRoot, HELIUM_TENANT_DELIVERY: "1" },
       channels: [
         {
-          id: "file",
+          id: "markdown",
           external: false,
           async deliver() {
             atDeliver = readLedger(stateRoot, "fake-tenant").commitments.length;

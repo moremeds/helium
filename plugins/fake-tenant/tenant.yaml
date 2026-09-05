@@ -14,9 +14,11 @@ budget:
   usd: 0.05
   tokens: 20000
 triggers: []
-# One channel, and the file channel specifically: it exists so the ledger's
+# One channel, and the markdown one specifically: it exists so the ledger's
 # write-before-side-effect ordering has a delivery to be ordered against, and
-# a file write leaves the machine no more than a log line does.
+# `markdown` declares `external = false`, so the seam drill needs no operator
+# brake, no credential and no network. `file` is not a channel that ships.
 delivery:
-  - channel: file
-    config: {}
+  - channel: markdown
+    config:
+      dir: reports
