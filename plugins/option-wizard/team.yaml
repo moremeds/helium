@@ -553,6 +553,12 @@ tasks:
       dropped before it reaches the reader, because a later run settles a
       thesis by comparing a spot to this number and nothing else can be
       checked. Do NOT write an id; the harness mints it.
+      ow_argon_metrics is END-OF-DAY data. When you quote one of its closes,
+      IV ranks or gamma figures — in `reason` or anywhere else — stamp it with
+      that payload's own `dataDate` and never with the report day. Its
+      `queriedAsOf` is the day the query was cut at, not the day the number
+      closed; the two differ, and a 09-02 close of 765.16 was read into a
+      09-03 brief beside that day's 773 because only the query day was on it.
 
   - id: review
     role: risk-reviewer
@@ -570,6 +576,9 @@ tasks:
       rather than a level — the close run settles a thesis by comparing a spot
       to this number, so a sentence there is a thesis nobody can ever settle.
       Do NOT write an id; the harness mints it.
+      ow_argon_metrics is END-OF-DAY data. Any close, IV rank or gamma figure
+      you repeat from it carries that payload's own `dataDate`, never the
+      report day — `queriedAsOf` is only when the query was cut.
 
   # The last step of a premarket run, and the only one that sees all of it.
   # `dependsOn` is what feeds it: runner.ts forwards each named step's whole

@@ -1425,6 +1425,34 @@ export function dateCutSql(
   return asOfDay === undefined ? "" : ` AND ${column} < DATE '${asOfDay}'`;
 }
 
+/**
+ * Every distinct observation date carried by `ow_argon_metrics` rows —
+ * `iv.market_date`, `gex.trade_date`, `skew.market_date`. These are the only
+ * honest vintage of the numbers in that payload; the query's own as-of day is
+ * not. Anything unparseable is skipped rather than guessed at, which is why a
+ * payload with no dated row simply gets no `dataDate`.
+ */
+function argonMetricsRowDates(rows: readonly unknown[]): Set<string> {
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (row === null || typeof row !== "object") continue;
+    const cell = row as Record<string, unknown>;
+    for (const [part, key] of [
+      [cell.iv, "market_date"],
+      [cell.gex, "trade_date"],
+      [cell.skew, "market_date"],
+    ] as const) {
+      if (part === null || typeof part !== "object") continue;
+      const value = (part as Record<string, unknown>)[key];
+      // psql hands dates back through json_agg as `yyyy-mm-dd` strings; a
+      // timestamp would arrive with a `T`, and only the day is the vintage.
+      if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/u.test(value))
+        out.add(value.slice(0, 10));
+    }
+  }
+  return out;
+}
+
 /** The calendar day before `day`, both `yyyy-mm-dd`. Plain calendar
  *  arithmetic on a date-only string: parsed as UTC midnight and written back
  *  the same way, so no zone can move it. */
@@ -1519,10 +1547,7 @@ export function buildTools(cfg: {
    *  source has none, which is the whole reason pit coverage was stuck. */
   recordings?: {
     has: (tool: string) => boolean;
-    lookup: (
-      tool: string,
-      args: Record<string, unknown>,
-    ) => string | undefined;
+    lookup: (tool: string, args: Record<string, unknown>) => string | undefined;
   };
   /** This tenant's own `extensions:` block, carried here by the host without
    *  ever being opened. Only this tenant's tools read inside it. */
@@ -1835,9 +1860,22 @@ export function buildTools(cfg: {
       //                           directional_lean, lean_confidence)
       // Every row carries its own as-of date, because these tables are fed by
       // a scanner that can fall behind and a stale number must be visibly stale.
+      //
+      // Shape re-verified 2026-09-06 against the recorded response of the
+      // 2026-09-03 close replay (`00015-ow_argon_metrics.json.gz`, sha256
+      // 9886c712…, 6553 bytes), which was cut at 2026-09-03 and returned SPY
+      // {iv.close 765.16, iv.market_date "2026-09-02", gex.trade_date
+      // "2026-09-02"} and QQQ {iv.close 709.24, same two dates}. That
+      // recording is also the defect: the payload's only top-level date was
+      // `asOf`, the day the QUERY was cut at, and the editor read it as the
+      // vintage of the numbers — merging a 09-02 close of 765.16 with the
+      // 09-03 tide's 773 in one paragraph. The query day is now
+      // `queriedAsOf`, which cannot be mistaken for a vintage, and `dataDate`
+      // carries the row dates. It is placed BEFORE `rows` so a truncated
+      // payload still shows it.
       name: "ow_argon_metrics",
       description:
-        "Per-ticker IV rank, gamma/delta exposure and 25-delta skew from argon's store, each with the date it was observed.",
+        "Per-ticker IV rank, gamma/delta exposure and 25-delta skew from argon's store. Every number is an end-of-day figure as of the top-level `dataDate` (the row dates; `dataDates` lists them when they disagree) — NOT of the day you are running. `queriedAsOf` is only the day the query was cut at.",
       paramsSchema: TickerMetricsParams,
       mutating: false,
       dshParams: {
@@ -1878,9 +1916,13 @@ export function buildTools(cfg: {
         // (market_date / trade_date / market_date); ASSUMED that argon's
         // mirror never back-dates a row it wrote later, which no column here
         // can distinguish.
+        const observed = [...argonMetricsRowDates(rows)].sort();
+        const dataDate = observed.at(-1);
         return JSON.stringify({
           source: "argon.uw_scan",
-          ...(asOfDay === undefined ? {} : { asOf: asOfDay }),
+          ...(asOfDay === undefined ? {} : { queriedAsOf: asOfDay }),
+          ...(dataDate === undefined ? {} : { dataDate }),
+          ...(observed.length > 1 ? { dataDates: observed } : {}),
           rows,
         });
       },
@@ -2833,7 +2875,7 @@ export function buildTools(cfg: {
       // has already read once.
       name: "ow_prior_brief",
       description:
-        'The previous run\'s regime state record — its cause, the 2Y/10Y/2s10s levels it copied, its tide and its one-sentence thesis — plus that run\'s headline. Falls back to the previous brief\'s prose (`fallback: "markdown"`) when no record exists. Read it to say what CHANGED; it is never evidence about today\'s tape.',
+        "The previous run's regime state record — its cause, the 2Y/10Y/2s10s levels it copied, its tide and its one-sentence thesis — plus that run's headline. Falls back to the previous brief's prose (`fallback: \"markdown\"`) when no record exists. Read it to say what CHANGED; it is never evidence about today's tape.",
       paramsSchema: PriorBriefParams,
       mutating: false,
       dshParams: {
@@ -2916,7 +2958,8 @@ export function buildTools(cfg: {
         const found = names
           .map((name) => ({ name, match: REPORT_NAME.exec(name) }))
           .filter(
-            (row) => row.match !== null && earlier(row.match[1]!, row.match[2]!),
+            (row) =>
+              row.match !== null && earlier(row.match[1]!, row.match[2]!),
           )
           .sort((a, b) => {
             const byDay = b.match![1]!.localeCompare(a.match![1]!);

@@ -16,7 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildTools, tvLiveLevels } from "../tools/index.js";
 
 function tool(name: string, env: Record<string, string | undefined>) {
-  const found = buildTools({ stateRoot: "/nonexistent", env }).find((t) => t.name === name);
+  const found = buildTools({ stateRoot: "/nonexistent", env }).find(
+    (t) => t.name === name,
+  );
   if (found === undefined) throw new Error(`no tool ${name}`);
   return found;
 }
@@ -51,7 +53,10 @@ describe("tvLiveLevels", () => {
       ].join("\n"),
     );
     chmodSync(bin, 0o755);
-    const live = await tvLiveLevels({ OW_TV_ENABLED: "1", OPENCLI_BIN: bin }, "test");
+    const live = await tvLiveLevels(
+      { OW_TV_ENABLED: "1", OPENCLI_BIN: bin },
+      "test",
+    );
     // (4.772 - 4.371) x 100 = 40.1 bps.
     expect(live).toMatchObject({ spreads: { "2s10s": 40.1 } });
   });
@@ -61,10 +66,20 @@ describe("tvLiveLevels", () => {
     const bin = join(dir, "fake");
     writeFileSync(
       bin,
-      ["#!/bin/sh", 'case "$4" in', "  US10Y) echo '[{\"close\":4.772}]' ;;", "  *) echo '[]' ;;", "esac", ""].join("\n"),
+      [
+        "#!/bin/sh",
+        'case "$4" in',
+        "  US10Y) echo '[{\"close\":4.772}]' ;;",
+        "  *) echo '[]' ;;",
+        "esac",
+        "",
+      ].join("\n"),
     );
     chmodSync(bin, 0o755);
-    const live = await tvLiveLevels({ OW_TV_ENABLED: "1", OPENCLI_BIN: bin }, "test");
+    const live = await tvLiveLevels(
+      { OW_TV_ENABLED: "1", OPENCLI_BIN: bin },
+      "test",
+    );
     expect(live).not.toHaveProperty("spreads");
   });
 });
@@ -113,7 +128,9 @@ describe("ow_uw_calendar", () => {
 
   it("returns the next 7 days in time order, dropping what already happened", async () => {
     const out = JSON.parse(
-      await tool("ow_uw_calendar", UW).run({}, { fetchImpl: json({ data: DATA }) } as never),
+      await tool("ow_uw_calendar", UW).run({}, {
+        fetchImpl: json({ data: DATA }),
+      } as never),
     ) as { asOf: string; rows: Array<Record<string, unknown>> };
     // The 09-01 ISM print is behind us; a past release is not a scheduled event.
     expect(out.rows.map((r) => r.time)).toEqual([
@@ -177,9 +194,12 @@ describe("ow_uw_iv_term", () => {
 
   it("refuses more than three tickers instead of firing four round trips", async () => {
     await expect(
-      tool("ow_uw_iv_term", UW).run({ tickers: ["NVDA", "AMD", "AVGO", "MU"] }, {
-        fetchImpl: json({ data: [] }),
-      } as never),
+      tool("ow_uw_iv_term", UW).run(
+        { tickers: ["NVDA", "AMD", "AVGO", "MU"] },
+        {
+          fetchImpl: json({ data: [] }),
+        } as never,
+      ),
     ).rejects.toThrow(/1 to 3 symbols/u);
   });
 });
@@ -195,7 +215,8 @@ describe("ow_uw_headlines", () => {
       created_at: "2026-09-03T07:46:12Z",
       tags: [],
       tickers: [],
-      headline: "ITALIAN COMPOSITE PMI ACTUAL 53.6 (FORECAST 53.1, PREVIOUS 52.5) $MACRO",
+      headline:
+        "ITALIAN COMPOSITE PMI ACTUAL 53.6 (FORECAST 53.1, PREVIOUS 52.5) $MACRO",
       is_major: true,
       sentiment: "neutral",
     },
@@ -204,20 +225,18 @@ describe("ow_uw_headlines", () => {
   it("returns the citable fields only, with no url", async () => {
     let seen: URL | undefined;
     const out = JSON.parse(
-      await tool("ow_uw_headlines", UW).run(
-        { limit: 25, ticker: "spy" },
-        {
-          fetchImpl: async (url: URL) => {
-            seen = url;
-            return new Response(JSON.stringify({ data: DATA }), { status: 200 });
-          },
-        } as never,
-      ),
+      await tool("ow_uw_headlines", UW).run({ limit: 25, ticker: "spy" }, {
+        fetchImpl: async (url: URL) => {
+          seen = url;
+          return new Response(JSON.stringify({ data: DATA }), { status: 200 });
+        },
+      } as never),
     ) as { rows: Array<Record<string, unknown>> };
     expect(out.rows).toEqual([
       {
         created_at: "2026-09-03T07:46:12Z",
-        headline: "ITALIAN COMPOSITE PMI ACTUAL 53.6 (FORECAST 53.1, PREVIOUS 52.5) $MACRO",
+        headline:
+          "ITALIAN COMPOSITE PMI ACTUAL 53.6 (FORECAST 53.1, PREVIOUS 52.5) $MACRO",
         tickers: [],
         sentiment: "neutral",
       },
@@ -232,8 +251,128 @@ describe("ow_uw_headlines", () => {
 
   it("refuses a limit past the 25 that fit under the summariser cut", async () => {
     await expect(
-      tool("ow_uw_headlines", UW).run({ limit: 40 }, { fetchImpl: json({ data: DATA }) } as never),
+      tool("ow_uw_headlines", UW).run({ limit: 40 }, {
+        fetchImpl: json({ data: DATA }),
+      } as never),
     ).rejects.toThrow(/25/u);
+  });
+});
+
+describe("ow_argon_metrics", () => {
+  // The two rows of the 2026-09-05 recording
+  // (`00015-ow_argon_metrics.json.gz`, sha256 9886c712…), trimmed to the
+  // fields this test reads — every value is the one argon actually returned.
+  // Both rows are dated 2026-09-02 while the run was cut at 2026-09-03: that
+  // gap is the whole point of the tool. Lives in this file rather than
+  // tools.spec.ts because `fakeBin` is here — the psql path is a subprocess
+  // and mocking execFile would test the mock.
+  const SPY = {
+    ticker: "SPY",
+    iv: {
+      close: 765.16,
+      ticker: "SPY",
+      iv_rank_1y: 8.0306,
+      volatility: 0.123,
+      market_date: "2026-09-02",
+    },
+    gex: { ticker: "SPY", net_gex: -1372850.3181, trade_date: "2026-09-02" },
+    skew: {
+      spot: 765.16,
+      ticker: "SPY",
+      regime: "LOW",
+      market_date: "2026-09-02",
+    },
+  };
+  const QQQ = {
+    ticker: "QQQ",
+    iv: {
+      close: 709.24,
+      ticker: "QQQ",
+      iv_rank_1y: 20.6943,
+      volatility: 0.178,
+      market_date: "2026-09-02",
+    },
+    gex: { ticker: "QQQ", net_gex: -1250254.5998, trade_date: "2026-09-02" },
+    skew: {
+      spot: 709.24,
+      ticker: "QQQ",
+      regime: "LOW",
+      market_date: "2026-09-02",
+    },
+  };
+  const PG = "postgres://frozen/fixture";
+  /** The recording's own instant: 2026-09-03 close, 16:15 ET. */
+  const AS_OF = new Date("2026-09-03T20:15:00.000Z");
+  function metrics(env: Record<string, string | undefined>) {
+    const found = buildTools({
+      stateRoot: "/nonexistent",
+      env,
+      asOf: AS_OF,
+    }).find((t) => t.name === "ow_argon_metrics");
+    if (found === undefined) throw new Error("no tool ow_argon_metrics");
+    return found;
+  }
+
+  interface Out {
+    source: string;
+    queriedAsOf?: string;
+    dataDate?: string;
+    dataDates?: string[];
+    rows: unknown[];
+    asOf?: string;
+  }
+
+  it("dates the numbers by the ROW, not by the day the query ran", async () => {
+    // The 2026-09-03 close brief merged SPY 765.16 — a 09-02 close — with the
+    // 09-03 tide's 773, because the only date on this payload was `asOf`, the
+    // day the query was cut at. `asOf` is now `queriedAsOf` and cannot be read
+    // as the vintage of a number; `dataDate` is the vintage.
+    const env = {
+      OW_ARGON_PG_URL: PG,
+      OW_PSQL_BIN: fakeBin(JSON.stringify([SPY, QQQ])),
+    };
+    const out = JSON.parse(
+      await metrics(env).run({ tickers: ["SPY", "QQQ"] }),
+    ) as Out;
+    // The run was cut at 2026-09-03; every number in it closed on 09-02.
+    expect(out).not.toHaveProperty("asOf");
+    expect(out.queriedAsOf).toBe("2026-09-03");
+    expect(out.dataDate).toBe("2026-09-02");
+    // Both rows agree, so no per-date list is needed.
+    expect(out).not.toHaveProperty("dataDates");
+    // `dataDate` precedes `rows`, so a summariser that truncates the payload
+    // still leaves the reader the date.
+    expect(Object.keys(out).indexOf("dataDate")).toBeLessThan(
+      Object.keys(out).indexOf("rows"),
+    );
+  });
+
+  it("takes the newest row date and names them all when the rows disagree", async () => {
+    // A scanner that fell behind on one ticker: the same QQQ row a day older.
+    const stale = {
+      ...QQQ,
+      iv: { ...QQQ.iv, market_date: "2026-09-01" },
+      gex: { ...QQQ.gex, trade_date: "2026-09-01" },
+      skew: { ...QQQ.skew, market_date: "2026-09-01" },
+    };
+    const env = {
+      OW_ARGON_PG_URL: PG,
+      OW_PSQL_BIN: fakeBin(JSON.stringify([SPY, stale])),
+    };
+    const out = JSON.parse(
+      await metrics(env).run({ tickers: ["SPY", "QQQ"] }),
+    ) as Out;
+    expect(out.dataDate).toBe("2026-09-02");
+    expect(out.dataDates).toEqual(["2026-09-01", "2026-09-02"]);
+  });
+
+  it("says in its own description that the numbers are EOD as of dataDate", () => {
+    // A role reads the description before it reads a row.
+    const found = buildTools({ stateRoot: "/nonexistent", env: {} }).find(
+      (t) => t.name === "ow_argon_metrics",
+    );
+    expect(found?.description).toContain("dataDate");
+    expect(found?.description).toContain("end-of-day");
   });
 });
 
@@ -282,7 +421,9 @@ describe("ow_argon_policy_path", () => {
       OW_ARGON_PG_URL: "postgres://frozen/fixture",
       OW_PSQL_BIN: fakeBin("[]"),
     };
-    await expect(tool("ow_argon_policy_path", env).run({})).rejects.toThrow(/no fed-funds path/u);
+    await expect(tool("ow_argon_policy_path", env).run({})).rejects.toThrow(
+      /no fed-funds path/u,
+    );
   });
 });
 
@@ -305,8 +446,13 @@ describe("ow_x_posts", () => {
   };
 
   it("returns author, time, link and text — and no engagement counts", async () => {
-    const env = { OW_TV_ENABLED: "1", OPENCLI_BIN: fakeBin(JSON.stringify([POST])) };
-    const out = JSON.parse(await tool("ow_x_posts", env).run({ handle: "NickTimiraos" })) as {
+    const env = {
+      OW_TV_ENABLED: "1",
+      OPENCLI_BIN: fakeBin(JSON.stringify([POST])),
+    };
+    const out = JSON.parse(
+      await tool("ow_x_posts", env).run({ handle: "NickTimiraos" }),
+    ) as {
       rows: Array<Record<string, unknown>>;
     };
     expect(out.rows).toEqual([
@@ -323,9 +469,9 @@ describe("ow_x_posts", () => {
     // @gregip resolved to an unrelated Polish account on 2026-09-03; a
     // near-miss handle answers confidently with the wrong person.
     const env = { OW_TV_ENABLED: "1", OPENCLI_BIN: fakeBin("[]") };
-    await expect(tool("ow_x_posts", env).run({ handle: "gregip" })).rejects.toThrow(
-      /handle must be one of .*NickTimiraos/su,
-    );
+    await expect(
+      tool("ow_x_posts", env).run({ handle: "gregip" }),
+    ).rejects.toThrow(/handle must be one of .*NickTimiraos/su);
   });
 });
 
@@ -365,6 +511,8 @@ describe("ow_tv_commodities", () => {
   });
 
   it("says so when the machine has no browser bridge", async () => {
-    await expect(tool("ow_tv_commodities", {}).run({})).rejects.toThrow(/OW_TV_ENABLED/u);
+    await expect(tool("ow_tv_commodities", {}).run({})).rejects.toThrow(
+      /OW_TV_ENABLED/u,
+    );
   });
 });
