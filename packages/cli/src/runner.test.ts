@@ -1098,3 +1098,109 @@ describe("tenant renderer", () => {
     expect(String(seen[0]?.body)).toContain("**renderer failed to load:**");
   });
 });
+
+describe("run metrics", () => {
+  const bodies: string[] = [];
+  const capture: Channel = {
+    id: "fake-mail",
+    external: false,
+    deliver: async (payload) => {
+      bodies.push(payload.body);
+      return { state: "sent" };
+    },
+  };
+
+  it("writes one audit row per metric and prints one quality line", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({
+        text: "rendered",
+        metrics: [
+          { name: "metaLeakHits", short: "leaks", value: 1 },
+          { name: "budgetViolations", short: "budget", value: 0 },
+          { name: "causeTitleSimilarity", short: "cause-sim", value: 0.107 },
+        ],
+      }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([
+      { name: "budgetViolations", value: 0 },
+      { name: "causeTitleSimilarity", value: 0.107 },
+      { name: "metaLeakHits", value: 1 },
+    ]);
+    // The same three rows, reachable WITHOUT the run id. This is what Task 15
+    // reads and it is the whole reason the two columns exist.
+    expect(audit.metricsFor(report.day, "premarket")).toEqual([
+      { name: "budgetViolations", value: 0 },
+      { name: "causeTitleSimilarity", value: 0.107 },
+      { name: "metaLeakHits", value: 1 },
+    ]);
+    expect(
+      audit.metricsBetween(report.day, report.day).map((row) => row.label),
+    ).toEqual(["premarket", "premarket", "premarket"]);
+    expect(report.metrics).toHaveLength(3);
+    expect(bodies[0]).toContain("- quality: leaks=1 budget=0 cause-sim=0.11");
+    audit.close();
+  });
+
+  it("prints n/a for a metric the run could not compute", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({
+        text: "rendered",
+        metrics: [
+          { name: "causeTitleSimilarity", short: "cause-sim", value: null },
+        ],
+      }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([
+      { name: "causeTitleSimilarity", value: null },
+    ]);
+    expect(bodies[0]).toContain("- quality: cause-sim=n/a");
+    audit.close();
+  });
+
+  it("prints no quality line when the renderer measured nothing", async () => {
+    const audit = new AuditStore(":memory:");
+    bodies.length = 0;
+    const report = await runTenant({
+      tenant: tenant(1, DELIVERY_YAML),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot: "/tmp",
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [capture],
+      renderer: () => ({ text: "rendered" }),
+    });
+    expect(audit.metrics(report.runId)).toEqual([]);
+    expect(report.metrics).toBeUndefined();
+    expect(bodies[0]).not.toContain("- quality:");
+    audit.close();
+  });
+});

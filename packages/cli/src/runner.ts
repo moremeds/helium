@@ -1247,6 +1247,31 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     }
   }
 
+  // Written AFTER rendering and BEFORE delivery: the renderer is what
+  // computes them, and the header line the channels carry is built from
+  // `report.metrics`. Core stores name, value, day and label, and reads none
+  // of them.
+  //
+  // `label: phase` is the RUN label — premarket, close. The header's display
+  // key is `metric.short`, a different field on a different type, so there is
+  // no collision to keep straight. The row is keyed by what the run WAS; the
+  // header prints how the number READS. Without `day` and `label` this table
+  // is keyed only by a UUID, and the weekly review would have to parse its own
+  // numbers back out of a rendered markdown header.
+  if (rendered?.metrics !== undefined && rendered.metrics.length > 0) {
+    report.metrics = rendered.metrics;
+    const measuredAt = new Date().toISOString();
+    for (const metric of rendered.metrics)
+      options.audit.appendMetric({
+        runId,
+        name: metric.name,
+        value: metric.value,
+        ts: measuredAt,
+        day: report.day,
+        label: phase,
+      });
+  }
+
   // Local-run inspection only: the runner otherwise renders HTML and lets it
   // fall on the floor (only the .md transcript is written to disk). Opt-in
   // via a domain-free env var so a laptop run can dump the exact HTML a
@@ -1417,6 +1442,15 @@ function deliveryBody(report: RunReport): string {
       );
     }
   }
+  // One line, on every run, not only on a replay: a number nobody sees on an
+  // ordinary day is a number nobody notices moving.
+  if (report.metrics !== undefined && report.metrics.length > 0) {
+    lines.push(
+      `- quality: ${report.metrics
+        .map((metric) => `${metric.short}=${formatMetric(metric.value)}`)
+        .join(" ")}`,
+    );
+  }
   for (const skip of report.providersSkipped)
     lines.push(`- provider unavailable: ${skip.id} — ${skip.reason}`);
   for (const skip of report.gatesSkipped)
@@ -1444,6 +1478,16 @@ function deliveryBody(report: RunReport): string {
     `Full per-step tokens and cost: \`helium audit ${report.runId}\``,
   );
   return lines.join("\n");
+}
+
+/**
+ * An integer prints bare, a fraction to two places, an uncomputed number as
+ * `n/a`. Two places because the header is scanned, not computed from; the
+ * audit table keeps the full value.
+ */
+function formatMetric(value: number | null): string {
+  if (value === null) return "n/a";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 /**
