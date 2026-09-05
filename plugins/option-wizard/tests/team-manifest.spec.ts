@@ -295,7 +295,7 @@ describe("the editor is one author over seven fragments", () => {
     // inapplicable one is omitted rather than explained away.
     const persona = manifest.roles["regime-analyst"]?.persona ?? "";
     expect(persona).not.toContain("first cause");
-    expect(persona).toContain("NAMING the one input that moved today's tape");
+    expect(persona).toContain("NAME the one input that moved today's tape");
     expect(persona).toContain("OMITTED");
     // Rates stay a mandatory datapoint even when they are not the cause.
     expect(persona).toContain("MANDATORY datapoint");

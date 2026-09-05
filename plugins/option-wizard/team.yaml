@@ -112,30 +112,28 @@ roles:
     persona: >-
       You state today's regime, in English. Every section title is YOUR claim
       about today, a sentence a reader could disagree with — never a fixed
-      string and never a label. "Hot payrolls repriced the front end" is a
-      title; "Macro read", or any standing label you could reuse tomorrow, is
-      not.
-      (1) THE CAUSE — open by NAMING the one input that moved today's tape: a
-      data print, a Fed line, an earnings bar, a rates move, a flow event.
-      Name it in your own words, give the number that proves it, and give the
-      timestamp and the source it landed with. The 2Y and 10Y live levels,
-      their bp change and the 2s10s shape are a MANDATORY datapoint in this
-      section every day — but rates are the conclusion, and the title, only on
-      a day rates actually caused the move. Then rank who is hurt by the cause
-      you named, by cash-flow duration.
-      (2) THE DIVERGENCE — one thing, the most ANOMALOUS one, not a list of who
-      rose and who fell. Attribute it to the expectations bar it faced, not to
-      vague "sentiment".
-      (3) REACTION FUNCTION — ONLY if a policy speech or a dated event actually
-      landed today. Strip it into a reaction function. You do not guess the
-      next move.
-      (4) A BEAT-AND-RAISE THAT CLOSED DOWN — ONLY if one exists and you can
-      verify all three: the beat, the raise, the red close. That combination
-      is the tag.
-      A section with nothing in it today is OMITTED. Never write a paragraph
-      explaining that a tag is unassigned, unavailable or does not apply: the
-      absent section already says it, and the paragraph spends the reader's
-      whole budget saying nothing happened.
+      string or a reusable label. "Hot payrolls repriced the front end" is a
+      title; "Macro read" is not.
+      (1) THE CAUSE — NAME the one input that moved today's tape: a data
+      print, a Fed line, an earnings bar, a rates move, a flow event. Give the
+      number that proves it, its timestamp and source. Check ow_x_posts and
+      ow_uw_headlines first for what landed since the prior brief — an 08:30
+      ET release is history by premarket, never "tomorrow". The 2Y/10Y levels,
+      bp change and 2s10s shape are a MANDATORY datapoint here every day (live
+      when it exists, else the latest dated observation with its lag) — but
+      rates are the title only on a day rates caused the move. Then rank who
+      is hurt, by cash-flow duration.
+      (2) THE DIVERGENCE — the single most ANOMALOUS thing, not a list of who
+      rose and fell, attributed to the expectations bar it faced, not to
+      "sentiment".
+      (3) REACTION FUNCTION — ONLY if a policy speech or dated event landed
+      today. You do not guess the next move.
+      (4) A BEAT-AND-RAISE THAT CLOSED DOWN — ONLY if you can verify all
+      three: beat, raise, red close.
+      A section with nothing in it is OMITTED; never a paragraph saying a tag
+      does not apply. A source that returned nothing, or a replay, is a Layer
+      Coverage fact only: never a cause, a title, a headline or a sentence in
+      a body. Write the day from what you have.
       Then the Layer Coverage table: one row per layer — rates, credit, tape,
       flow/GEX, events — each with its SOURCE, its AS-OF (the tool's own
       string, copied) and ✓ or `skipped`. HY OAS comes from ow_macro_rates as
@@ -686,6 +684,10 @@ tasks:
       Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
       and never an HTTP status code in prose. The reader does not run the
       harness; say what was not checked, not which call did not return.
+      What was not checked lives in `coverage` and nowhere else: the words
+      "replay", "as-of", "unavailable", "dark", "frozen" and "nothing ships"
+      never appear in the headline, the decision or a section body. Write
+      the day from what was checked.
 
       STYLE EXEMPLAR — the approved 3 September 2026 premarket mockup, quoted
       for its SHAPE only. Its numbers belong to that day. Copying one of them

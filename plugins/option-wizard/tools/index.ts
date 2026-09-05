@@ -1373,7 +1373,7 @@ function priorWeekday(day: string): string {
 }
 
 const AS_OF_BLIND_SENTENCE =
-  "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant.";
+  "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
 
 export function buildTools(cfg: {
   stateRoot: string;
