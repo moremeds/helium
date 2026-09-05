@@ -65,14 +65,23 @@ export interface CandidateView {
   pricing: Pricing;
   /** Widest strike span, per share; 0 when single-strike. */
   width: number;
-  /** Where the thesis is trying to get to, in the model's own words. Prose,
-   *  deliberately: 反转 triggers a 平仓建议 and so must be mechanical, while
-   *  加强 / 不变 are judgement and read better as the sentence the designer
-   *  actually wrote. */
-  target: string;
-  /** The declared entry trigger, when the designer wrote one as a level. Prose
-   *  is dropped rather than parsed: the gate below compares it to a strike. */
-  entry?: Invalidation;
+  /** Where the thesis is trying to get to, as a level and the side price has
+   *  to reach it from. A NUMBER, not the model's prose: argon's card renders
+   *  it through the same helper as `invalidation`, and it was showing
+   *  `TARGET —` for every candidate because a sentence has no level to draw.
+   *  The sentence still ships — as `thesis`. */
+  target?: Invalidation;
+  /** The old prose `target`: what the designer said it was going to do, in its
+   *  own words. Display only; nothing settles against it. */
+  thesis: string;
+  /** The declared entry trigger with the window it has to fire in, counted in
+   *  1d bars after the reference close. RENDERER-OWNED: an agent that picks its
+   *  own deadline inflates `pTrigger` by giving the level forever to be
+   *  reached, so the default is five and the model may only shorten it. */
+  entry?: Invalidation & { deadlineBars: number };
+  /** The expiry, restated as the date after which nothing can resolve. The one
+   *  date the contract itself fixes, so it is not a policy choice. */
+  resolutionDeadline: string;
   /** What the arithmetic gate could NOT check on this candidate, and why. A
    *  silent pass and a real pass look identical to a reader, and the run that
    *  shipped a QQQ 420/410 spread with QQQ at 707 looked like a pass. */
@@ -135,7 +144,7 @@ export interface ScheduleRow {
  * something was dropped. With a version it says "I was written for version N,
  * this is N+1" and the fix is a deploy rather than an investigation.
  */
-export const BRIEF_VIEW_SCHEMA_VERSION = 1;
+export const BRIEF_VIEW_SCHEMA_VERSION = 2;
 
 export interface BriefView {
   /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
@@ -908,6 +917,21 @@ function arithmeticFaults(
   return { faults, unchecked };
 }
 
+/**
+ * The entry window, in 1d bars after `referenceClose.date`.
+ *
+ * A COUNT of bars, never a calendar date: helium has no exchange calendar and
+ * must not grow one. The lake's daily bars ARE the calendar, and a bar that
+ * does not exist yet simply leaves the commitment pending.
+ */
+export const DEFAULT_DEADLINE_BARS = 5;
+
+function deadlineBars(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw)) return DEFAULT_DEADLINE_BARS;
+  if (raw < 1 || raw > DEFAULT_DEADLINE_BARS) return DEFAULT_DEADLINE_BARS;
+  return raw;
+}
+
 export function candidatesFrom(
   reviewText: string,
   dateEtDay: string,
@@ -973,11 +997,29 @@ export function candidatesFrom(
       // the strikes instead of inventing a price to measure from.
       pricing: priceStructure(legs, spot),
       width: width(legs),
-      target: typeof proposal.target === "string" ? proposal.target : "",
+      // A typed target settles; a sentence does not. Both are kept, in the two
+      // fields that mean those two different things.
+      ...(toInvalidation(proposal.target)?.length === 1
+        ? { target: toInvalidation(proposal.target)![0]! }
+        : {}),
+      thesis:
+        typeof proposal.thesis === "string"
+          ? proposal.thesis
+          : typeof proposal.target === "string"
+            ? proposal.target
+            : "",
+      resolutionDeadline: expiry,
       // Reuses the invalidation parser: an entry trigger is the same shape —
       // one level and the side price has to reach it from.
       ...(toInvalidation(proposal.entry)?.length === 1
-        ? { entry: toInvalidation(proposal.entry)![0]! }
+        ? {
+            entry: {
+              ...toInvalidation(proposal.entry)![0]!,
+              deadlineBars: deadlineBars(
+                (proposal.entry as Record<string, unknown> | null)?.deadlineBars,
+              ),
+            },
+          }
         : {}),
       rationale:
         typeof proposal.rationale === "string" ? proposal.rationale : "",
