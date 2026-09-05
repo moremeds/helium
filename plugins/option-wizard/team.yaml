@@ -323,6 +323,30 @@ roles:
       you did not read carefully. Every timestamp and price you quote comes out
       of those reports verbatim.
 
+  week-reviewer:
+    requires: [reason.deep, long.context, tool.use]
+    permissions:
+      mutations: forbidden
+      tools: [ow_review_window]
+    persona: >-
+      You review THIS DESK'S OWN OUTPUT over three windows — the last 5, 10 and
+      21 trading days — and nothing else. You have one tool and no live data:
+      every title, record and number you write is copied out of what it
+      returned, and you never compute, average or re-derive one.
+      Per window, three answers and no more:
+      (1) WHICH CAUSES HELD — a cause named on more than one day whose later
+      sessions did not contradict it. Name the days.
+      (2) WHICH DID NOT — a cause that appeared once and was replaced, or one
+      the ledger settled against. Say what replaced it.
+      (3) WHAT TO CHANGE NEXT WEEK — one concrete change to how the desk
+      writes, sourced from the numbers: a rising `metaLeakHits`, a
+      `causeTitleSimilarity` that stays high (the brief is re-telling itself), a
+      `budgetViolations` count that will not come down, a window with sessions
+      missing entirely.
+      A window whose sessions are empty is reported as empty, in one line. A
+      missing ledger is one line in the same place. You do not fill a gap with
+      a plausible sentence: an unwritten week is the finding.
+
   frank-comparator:
     requires: [tool.use, reason.deep, long.context]
     permissions:
@@ -695,6 +719,28 @@ tasks:
       Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
       — one entry per section you were asked for, in that order, no prose
       outside the JSON. Your working notes are not a section.
+
+  - id: week-review
+    role: week-reviewer
+    phases: [weekly]
+    requires: [reason.deep, long.context]
+    prompt: >-
+      Call ow_review_window once, with no arguments, and write one page from
+      what it returns. It gives you three windows — 5, 10 and 21 TRADING days,
+      counted with this tenant's own calendar — and for each one every
+      session's cause titles, its regime state records, that run's quality
+      numbers (`metaLeakHits`, `budgetViolations`, `causeTitleSimilarity`) and the Outcome Ledger
+      scoreboard when there is one.
+      One section per window, in the order the tool returned them, titled with
+      the window's own dates ("5 sessions, 2026-08-31 to 2026-09-04"). In each:
+      which causes held, which did not, and the one change to make next week.
+      Copy every number and every date from the tool; never compute one, and
+      never estimate a figure the tool did not give you. Where a window's
+      `coverage` names something unavailable, say it in ONE clause at the end
+      of that section and move on.
+      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
+      — one entry per window, in that order, no prose outside the JSON. Your
+      working notes are not a section.
 
   - id: frank
     role: frank-comparator

@@ -324,3 +324,47 @@ it("tells the editor to compare regimeState rather than re-read the brief", () =
   expect(persona).toContain("regimeState");
   expect(persona).toContain("delta");
 });
+
+describe("the weekly review", () => {
+  it("runs in the weekly phase and adds no sixth phase", () => {
+    // A sixth phase costs a sixth launchd plist, a sixth triggers entry, a
+    // sixth argon `kinds` entry and a recount of maxPerDay (tenant.yaml
+    // :150-166, peak 4 of 5). The Sunday run is already after Friday's close.
+    const task = manifest.tasks.find((entry) => entry.id === "week-review");
+    expect(task).toBeDefined();
+    expect(task?.phases).toEqual(["weekly"]);
+    const phases = new Set(
+      manifest.tasks.flatMap((entry) => entry.phases ?? []),
+    );
+    expect([...phases].sort()).toEqual([
+      "close",
+      "frank",
+      "intraday",
+      "premarket",
+      "weekly",
+    ]);
+  });
+
+  it("does not collide with the pre-flight `review` step", () => {
+    const ids = manifest.tasks.map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain("review");
+    expect(ids).toContain("week-review");
+  });
+
+  it("gives the reviewer ow_review_window and nothing live", () => {
+    expect(manifest.roles["week-reviewer"]?.permissions.tools).toEqual([
+      "ow_review_window",
+    ]);
+    expect(manifest.roles["week-reviewer"]?.permissions.mutations).toBe(
+      "forbidden",
+    );
+  });
+
+  it("names the three windows in the prompt and forbids arithmetic", () => {
+    const task = manifest.tasks.find((entry) => entry.id === "week-review");
+    for (const window of ["5", "10", "21"])
+      expect(task?.prompt ?? "", window).toContain(window);
+    expect(task?.prompt ?? "").toContain("never compute");
+  });
+});
