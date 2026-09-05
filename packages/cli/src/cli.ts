@@ -144,6 +144,14 @@ function printAudit(store: AuditStore, runId: string): number {
   console.log(
     `total ${totals.usd.toFixed(6)} USD over ${totals.tokens} tokens`,
   );
+  const measured = store.metrics(runId);
+  if (measured.length > 0) {
+    console.log("");
+    for (const row of measured)
+      console.log(
+        `${row.name}: ${row.value === null ? "n/a" : String(row.value)}`,
+      );
+  }
   return 0;
 }
 
