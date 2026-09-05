@@ -250,6 +250,7 @@ function candidateRows(candidates: CandidateView[]): string {
     <td class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Structure</td>
     <td align="right" class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Net · share</td>
     <td align="right" class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Max loss</td>
+    <td align="right" class="ink-dim" style="padding:0 10px 7px 0;${LBL}">Target</td>
     <td align="right" class="ink-dim" style="padding:0 0 7px 0;${LBL}">Invalidation</td>
   </tr>`;
   const body = candidates
@@ -267,14 +268,20 @@ function candidateRows(candidates: CandidateView[]): string {
         )
         .join(" / ");
       const cell = `padding:9px 10px 9px 0;border-top:1px solid ${BORDER}`;
+      const targetLabel =
+        candidate.target === undefined
+          ? "\u2014"
+          : invalidationLabel([candidate.target]);
       return `<tr>
         <td valign="top" class="ink rule" style="${cell};color:${INK};font-size:14px;font-weight:650;white-space:nowrap">${esc(candidate.ticker)}</td>
         <td valign="top" class="ink rule" style="${cell};color:${INK};font-size:13px;line-height:1.45">${esc(candidate.strategy)}
           <div class="ink-dim" style="color:${DIM};font-size:11px;line-height:1.45;padding-top:3px">${esc(legs)} · exp ${esc(candidate.expiry)}</div>
+          ${candidate.thesis === "" ? "" : `<div class="ink-dim" style="color:${DIM};font-size:11px;line-height:1.45;padding-top:3px">${esc(candidate.thesis)}</div>`}
           ${priced ? "" : `<div class="neg" style="color:${WARN};font-size:11px;line-height:1.45;padding-top:3px">${esc(pricing.reason)}</div>`}
         </td>
         <td valign="top" align="right" class="ink rule" style="${cell};color:${INK};font-size:13px;white-space:nowrap">${esc(net)}</td>
         <td valign="top" align="right" class="ink rule" style="${cell};color:${INK};font-size:13px;white-space:nowrap">${esc(maxLoss)}</td>
+        <td valign="top" align="right" class="ink rule" style="${cell};color:${INK};font-size:13px;white-space:nowrap">${esc(targetLabel)}</td>
         <td valign="top" align="right" class="neg rule" style="padding:9px 0 9px 0;border-top:1px solid ${BORDER};color:${NEG};font-size:13px;white-space:nowrap">${esc(invalidationLabel(candidate.invalidation))}</td>
       </tr>`;
     })
