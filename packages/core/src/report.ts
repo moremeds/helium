@@ -36,6 +36,23 @@ export interface DeliveryReport {
   detail?: string;
 }
 
+/**
+ * A deterministic number one run produced, on its way to the audit table and
+ * to the report header.
+ *
+ * Core never reads a `name` or a `short` and never computes a `value`: whoever
+ * rendered the run is the only thing that knows what any of them mean, the
+ * same rule that keeps `toolOutputs` a string. `value` is `null` when the run
+ * could not compute the number — which is not zero.
+ */
+export interface RunMetric {
+  /** Storage key, written to the audit table verbatim. */
+  name: string;
+  /** Short display key for the one-line header. */
+  short: string;
+  value: number | null;
+}
+
 export interface RunReport {
   runId: string;
   tenant: string;
@@ -99,6 +116,11 @@ export interface RunReport {
     /** Tool names with no history for `asOf`, in call-agnostic sorted order. */
     unavailable: string[];
   };
+  /**
+   * What the tenant's renderer measured about this run. Absent when the
+   * tenant ships no renderer or its renderer computes nothing.
+   */
+  metrics?: RunMetric[];
 }
 
 /** What a tenant's own renderer produces. `html` is optional; `text` is not. */
@@ -126,6 +148,12 @@ export interface RenderedReport {
    * which makes every renderer change a silent data corruption somewhere else.
    */
   data?: Record<string, unknown>;
+  /**
+   * Numbers the renderer computed while it built the document. The runner
+   * copies them to the audit table and prints one line of them in the header;
+   * it does not interpret them.
+   */
+  metrics?: RunMetric[];
 }
 
 /**
