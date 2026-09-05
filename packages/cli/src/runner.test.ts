@@ -1,4 +1,10 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +23,7 @@ import {
   registerProviders,
   retireQuotaDomain,
   runTenant,
+  splitStateBlock,
   type ModelExecutor,
 } from "./runner.js";
 
@@ -1201,6 +1208,99 @@ describe("run metrics", () => {
     expect(audit.metrics(report.runId)).toEqual([]);
     expect(report.metrics).toBeUndefined();
     expect(bodies[0]).not.toContain("- quality:");
+    audit.close();
+  });
+});
+
+describe("state block", () => {
+  it("splits a fenced block off the end of a step's text", () => {
+    const text = [
+      '{"headline":"h","sections":[]}',
+      "",
+      "```regime-state",
+      '{"cause":"payrolls","ust10y":4.79}',
+      "```",
+      "",
+    ].join("\n");
+    const split = splitStateBlock(text, "regime-state");
+    expect(split.text).toBe('{"headline":"h","sections":[]}');
+    expect(split.block).toBe('{"cause":"payrolls","ust10y":4.79}');
+  });
+
+  it("leaves text with no such fence exactly as it was", () => {
+    const text = '{"headline":"h"}\n\n```json\n{"a":1}\n```';
+    expect(splitStateBlock(text, "regime-state")).toEqual({ text });
+  });
+
+  it("treats a fence name as a literal, never as a pattern", () => {
+    // A tenant file supplies the fence. If it reached `new RegExp` unescaped,
+    // `.*` in it would delete the whole step.
+    const text = "kept\n```a.c\n{}\n```";
+    expect(splitStateBlock(text, "abc").block).toBeUndefined();
+  });
+
+  it("writes the block to <stateRoot>/<tenant>/<day>/<label>.<suffix>", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-state-"));
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(1, "stateBlock:\n  fence: regime-state\n  suffix: s.json\n"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor: {
+        run: async () => ({
+          text: 'said it\n\n```regime-state\n{"cause":"payrolls"}\n```',
+          events: [],
+        }),
+      },
+      channels: [],
+      renderer: null,
+    });
+    const written = join(
+      stateRoot,
+      report.tenant,
+      report.day,
+      "premarket.s.json",
+    );
+    expect(JSON.parse(readFileSync(written, "utf8"))).toEqual({
+      cause: "payrolls",
+    });
+    // And the reader never sees the block.
+    expect(report.steps[0]!.text).toBe("said it");
+    audit.close();
+  });
+
+  it("keeps the text and writes nothing when the block is not JSON", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-state-"));
+    const audit = new AuditStore(":memory:");
+    const report = await runTenant({
+      tenant: tenant(1, "stateBlock:\n  fence: regime-state\n  suffix: s.json\n"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      phase: "premarket",
+      modelExecutor: {
+        run: async () => ({
+          text: "said it\n\n```regime-state\nnot json at all\n```",
+          events: [],
+        }),
+      },
+      channels: [],
+      renderer: null,
+    });
+    expect(report.steps[0]!.text).toBe("said it");
+    expect(
+      existsSync(join(stateRoot, report.tenant, report.day, "premarket.s.json")),
+    ).toBe(false);
     audit.close();
   });
 });

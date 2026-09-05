@@ -89,6 +89,18 @@ calendar:
     - 2027-01-18 # Martin Luther King, Jr. Day
     - 2027-02-15 # Washington's Birthday
 
+# The regime step ends its reply with one ```regime-state fence. The runner
+# lifts it out before anything keeps the text and writes it to
+# <stateRoot>/option-wizard/<day>/<phase>.regime.json; ow_prior_brief reads
+# that record instead of re-reading yesterday's whole markdown brief, which is
+# how intraday used to re-tell premarket's cause in premarket's words.
+# The host validates only that the block is a JSON object; the SHAPE is
+# plugins/option-wizard/state/regime.ts and the gate that enforces it is
+# plugins/option-wizard/gates/regime-state.ts.
+stateBlock:
+  fence: regime-state
+  suffix: regime.json
+
 # DECLARATIVE ONLY. Nothing in this repo runs a cron loop: launchd is the
 # scheduler and `launchd/com.helium.option-wizard-<phase>.plist` is where the
 # time actually lives. These five entries exist so the schedule is readable

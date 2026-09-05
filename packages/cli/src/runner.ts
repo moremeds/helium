@@ -612,6 +612,63 @@ export function calendarSkipReason(
     : undefined;
 }
 
+/**
+ * A tenant-declared fenced block, lifted out of a step's text.
+ *
+ * Exported because the escaping is the whole risk: `fence` comes out of a YAML
+ * file, and an unescaped `.*` in `new RegExp` would delete the step instead of
+ * the block. Returns the text unchanged, and no `block`, when the fence is not
+ * there — which is every step of every tenant that declares none.
+ */
+export function splitStateBlock(
+  text: string,
+  fence: string,
+): { text: string; block?: string } {
+  const escaped = fence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const found = new RegExp(
+    `\\n?[ \\t]*\`\`\`${escaped}[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*\`\`\`[ \\t]*(?=\\r?\\n|$)`,
+    "u",
+  ).exec(text);
+  if (found === null) return { text };
+  return {
+    text: `${text.slice(0, found.index)}${text.slice(
+      found.index + found[0].length,
+    )}`.trim(),
+    block: found[1]!.trim(),
+  };
+}
+
+/**
+ * The block on disk, or nothing. A block that is not a JSON OBJECT is dropped
+ * silently HERE — the tenant's own gate is what tells the reader it was
+ * malformed, because only the tenant knows what a well-formed one contains.
+ * Core's whole test is "can this be stored at all".
+ */
+function writeStateBlock(args: {
+  stateRoot: string;
+  tenant: string;
+  day: string;
+  label: string;
+  suffix: string;
+  block: string;
+}): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(args.block);
+  } catch {
+    return;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+    return;
+  const dir = join(args.stateRoot, args.tenant, args.day);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${args.label}.${args.suffix}`),
+    `${JSON.stringify(parsed, null, 2)}\n`,
+    "utf8",
+  );
+}
+
 export async function runTenant(options: RunOptions): Promise<RunReport> {
   const env = options.env ?? process.env;
   const runId = options.runId ?? `run-${randomUUID()}`;
@@ -762,6 +819,26 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
           asOf: options.asOf.toISOString(),
           variant: options.variant ?? "live",
         }),
+  };
+
+  // Applied AFTER the output gates and BEFORE anything keeps the text: the
+  // gate still sees exactly what the model wrote, and the report file, the
+  // renderer, the channels and every later run see it without the block.
+  // Stripping later would leave the fence in the markdown report, which is
+  // what the tenant's own tools read back.
+  const liftState = (text: string): string => {
+    if (spec.stateBlock === undefined) return text;
+    const split = splitStateBlock(text, spec.stateBlock.fence);
+    if (split.block === undefined) return text;
+    writeStateBlock({
+      stateRoot: options.stateRoot,
+      tenant: spec.tenant,
+      day: reportDay,
+      label: phase,
+      suffix: spec.stateBlock.suffix,
+      block: split.block,
+    });
+    return split.text;
   };
 
   const signal = options.signal ?? new AbortController().signal;
@@ -980,12 +1057,13 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         },
       );
       if (out.ran > 0) stepNo += 1;
-      produced.set(taskId, text);
+      const kept = liftState(text);
+      produced.set(taskId, kept);
       report.steps.push({
         task: taskId,
         role: task.role,
         mode: deterministic ? "deterministic" : "tool-only",
-        text,
+        text: kept,
         ...refusalFields(out.refusals),
       });
       continue;
@@ -1155,7 +1233,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         stepToolOutputs,
       });
       if (out.ran > 0) stepNo += 1;
-      produced.set(taskId, result.text);
+      const kept = liftState(result.text);
+      produced.set(taskId, kept);
       report.steps.push({
         task: taskId,
         role: task.role,
@@ -1167,7 +1246,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         ...(decision.downgradeReason === undefined
           ? {}
           : { downgradeReason: decision.downgradeReason }),
-        text: result.text,
+        text: kept,
         ...(emptyRun
           ? {
               failure: "no-model-output",
