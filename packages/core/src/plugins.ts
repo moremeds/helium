@@ -168,6 +168,74 @@ export interface Gate {
   ): Promise<{ pass: boolean; reason: string }>;
 }
 
+/**
+ * A settleable promise a tenant made in one run and can be checked on later.
+ *
+ * Core never looks inside `payload` and never interprets a `Receipt.status`
+ * other than the single word `"pending"` (doctrine 2). What is being promised,
+ * and what settles it, is the tenant's own business; the harness owns only the
+ * bookkeeping that makes the promise findable days later.
+ */
+export interface Commitment {
+  /** Tenant-minted and stable. One per settleable thing: a receipt has ONE
+   *  status, so two things that settle on different days are two ids. */
+  id: string;
+  runId: string;
+  tenant: string;
+  /** ISO instant. */
+  issuedAt: string;
+  /** Derived by the runner: an `asOf` run is a backtest whatever the machine
+   *  says; otherwise the operator's declared deployment, defaulting to test. */
+  deployment: "production" | "backtest" | "test";
+  /** The run's flavour label; `live` for a scheduled run. */
+  variant: string;
+  /** The replayed instant, when the run replayed one. Absent means live. */
+  asOf?: string;
+  /** Opaque to core. */
+  payload: unknown;
+}
+
+/** What a settler concluded about one commitment. */
+export interface Receipt {
+  commitmentId: string;
+  /** The run that SETTLED it, not the run that made it. */
+  runId: string;
+  settledAt: string;
+  /** Tenant vocabulary. `"pending"` is the one word core knows: it means the
+   *  commitment stays outstanding and will be offered to a later settler. */
+  status: string;
+  /** Aggregated by key by the scoreboard, and by nothing else. */
+  scores: Record<string, number>;
+  /** sha256 of the exact ground-truth rows used, so a later repair of the
+   *  source data is detectable. */
+  evidenceHash?: string;
+  /** Tenant-specific extras. Core stores it and never reads it. */
+  detail?: unknown;
+}
+
+/**
+ * `plugins/<tenant>/tools/index.ts`, `export function buildSettler(cfg)` —
+ * the same factory shape as `buildTools(cfg)`, and for the same reason: a
+ * settler needs the run's environment keys and the tenant's calendar, and a
+ * module-level constant cannot be handed either. Optional: a tenant that ships
+ * none is measured by nothing, which is what every tenant got before this
+ * existed.
+ */
+export interface Settler {
+  settle(outstanding: Commitment[], now: Date): Promise<Receipt[]>;
+}
+
+/**
+ * What a renderer emits: the identity and the payload. The runner stamps the
+ * run context (`runId`, `tenant`, `issuedAt`, `deployment`, `variant`, `asOf`)
+ * because a renderer that minted its own would be guessing at facts the runner
+ * already holds — the same reason `RenderedReport.subject` is discouraged.
+ */
+export interface CommitmentDraft {
+  id: string;
+  payload: unknown;
+}
+
 export interface DeliveryPayload {
   tenant: string;
   runId: string;

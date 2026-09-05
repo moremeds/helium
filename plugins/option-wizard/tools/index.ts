@@ -2676,7 +2676,7 @@ export function buildTools(cfg: {
                 stateRoot: string,
                 tenant: string,
                 options?: { since?: string },
-              ) => unknown[];
+              ) => unknown;
             };
             // Not a literal specifier on purpose: `@helium/cli` is not yet a
             // dependency of this tenant (the Outcome Ledger session adds it
@@ -2686,7 +2686,7 @@ export function buildTools(cfg: {
             const cliSpecifier: string = "@helium/cli";
             const cli = (await import(cliSpecifier)) as {
               summarise?: (
-                records: unknown[],
+                records: unknown,
                 options: { deployment?: string; variant?: string },
               ) => unknown;
             };

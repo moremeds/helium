@@ -8,7 +8,12 @@
  * @module dsh-plugin-tenant-fake/tools
  */
 import { z } from "zod";
-import type { ToolVocabularyEntry } from "@helium/core";
+import type {
+  Commitment,
+  Receipt,
+  Settler,
+  ToolVocabularyEntry,
+} from "@helium/core";
 
 const ProbeParams = z.object({ q: z.string().min(1) });
 const CountParams = z.object({ text: z.string().min(1) });
@@ -55,4 +60,33 @@ export function buildTools(_cfg: {
       },
     },
   ];
+}
+
+/**
+ * The seam proof for measurement, and nothing more.
+ *
+ * It settles everything it is handed with one constant score, so CI can prove
+ * that a tenant can be measured — and removed — without any edit to
+ * `packages/core`. A settler that computed something real would make the drill
+ * depend on the computation instead of on the seam.
+ */
+export function buildSettler(_cfg: {
+  stateRoot: string;
+  env: Record<string, string | undefined>;
+  variant: string;
+  asOf?: Date;
+  calendar?: { weekdaysOnly: boolean; closed: string[] };
+}): Settler {
+  return {
+    async settle(open: Commitment[], now: Date): Promise<Receipt[]> {
+      return open.map((commitment) => ({
+        commitmentId: commitment.id,
+        // Overwritten by the runner with the id of the run that settled it.
+        runId: "",
+        settledAt: now.toISOString(),
+        status: "settled",
+        scores: { fakeScore: 1 },
+      }));
+    },
+  };
 }
