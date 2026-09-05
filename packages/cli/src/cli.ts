@@ -18,11 +18,17 @@ import {
   loadTenants,
   auditDbPath,
   loadOperatorEnv,
+  readLedger,
 } from "@helium/core";
 import { parseRunArgs } from "./args.js";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
+import {
+  parseScoreboardArgs,
+  renderScoreboard,
+  summarise,
+} from "./scoreboard.js";
 
 function stateRoot(env: NodeJS.ProcessEnv): string {
   return env.HELIUM_STATE_ROOT ?? resolve(process.cwd(), ".helium-state");
@@ -158,6 +164,52 @@ function printAudit(store: AuditStore, runId: string): number {
   return 0;
 }
 
+/** `helium scoreboard <tenant> [--since] [--deployment] [--variant]`. */
+export function printScoreboard(
+  store: AuditStore,
+  root: string,
+  argv: string[],
+): number {
+  const parsed = parseScoreboardArgs(argv);
+  if ("error" in parsed) {
+    console.error(parsed.error);
+    return 2;
+  }
+  if (parsed.tenant === undefined) {
+    console.error(
+      "usage: helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>]",
+    );
+    return 2;
+  }
+  const records = readLedger(
+    root,
+    parsed.tenant,
+    parsed.since === undefined ? {} : { since: parsed.since },
+  );
+  const board = summarise(records, {
+    deployment: parsed.deployment,
+    ...(parsed.variant === undefined ? {} : { variant: parsed.variant }),
+  });
+  // Cost is JOINED, never recomputed: the audit table is the one place that
+  // knows what a run cost, and a second arithmetic here would eventually
+  // disagree with `helium audit`.
+  const runsByVariant = new Map<string, Set<string>>();
+  for (const commitment of records.commitments) {
+    const set = runsByVariant.get(commitment.variant) ?? new Set<string>();
+    set.add(commitment.runId);
+    runsByVariant.set(commitment.variant, set);
+  }
+  const costByVariant: Record<string, number> = {};
+  for (const [variant, runIds] of runsByVariant) {
+    let usd = 0;
+    for (const runId of runIds)
+      for (const row of store.runCost(runId)) usd += row.usd;
+    costByVariant[variant] = usd;
+  }
+  for (const line of renderScoreboard(board, costByVariant)) console.log(line);
+  return 0;
+}
+
 async function main(argv: string[]): Promise<number> {
   const [command, argument] = argv;
   // Before anything reads a credential or a proxy. Ambient values still win,
@@ -175,6 +227,15 @@ async function main(argv: string[]): Promise<number> {
     const store = AuditStore.open(env);
     try {
       return printAudit(store, argument);
+    } finally {
+      store.close();
+    }
+  }
+
+  if (command === "scoreboard") {
+    const store = AuditStore.open(env);
+    try {
+      return printScoreboard(store, stateRoot(env), argv.slice(1));
     } finally {
       store.close();
     }
@@ -254,6 +315,9 @@ async function main(argv: string[]): Promise<number> {
       "      earlier run instead of refusing it. Recordings live under",
       "      <stateRoot>/runs/<runId>/tool-io and are pruned after 30 days.",
       "  helium audit <run-id>   per-step cost and token rows for a run",
+      "  helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>]",
+      "      what the outcome ledger says: mean and observed range per score key,",
+      "      grouped by variant, pending counted separately. Production only unless told otherwise.",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,
       `tenants:  ${tenantsDir(env)} (override with HELIUM_TENANTS_DIR)`,
