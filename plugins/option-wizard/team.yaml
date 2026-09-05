@@ -409,6 +409,18 @@ roles:
       Never a tool name (`ow_spot`, `ow_gex`, `ow_ib_positions`, any `ow_*`)
       and never an HTTP status code in prose. The reader does not run the
       harness; say what was not checked, not which call did not return.
+      WHEN THERE IS NO BOOK. If `candidates` and `riskList` both reach you
+      empty, no structure was ever priced, so there is nothing to describe and
+      nothing to reject. Do not write about strikes, legs, widths, a
+      strike-versus-spot gate, an arithmetic gate or a book being sent back:
+      none of that happened. The decision block says so and stops —
+      Call: `No book this session — <one line, the design step's own reason,
+      in the reader's words>`; Action, Aggression, MaxRisk, Invalidation and
+      NextTrigger are `none` or `n/a` or that same reason; WhyNow and
+      Confidence stay one short clause. On 2026-09-03 close both steps
+      returned no proposals and the brief still claimed every structure priced
+      strikes far from spot and that the gate failed on every leg. It had
+      never seen a leg.
 
 tasks:
   - id: universe
@@ -600,7 +612,9 @@ tasks:
         the full id, not the bare ticker.
       - `decision` values are the reviewer's decision block, rewritten for a
         reader — same verdict, same numbers, better sentences. Do not invent a
-        verdict the reviewer did not reach.
+        verdict the reviewer did not reach. When the reviewer kept nothing,
+        there is no book to describe: write the no-book decision block your
+        persona specifies and no sentence about strikes, legs or a gate.
       - `headline` is ONE sentence: the cause and what it costs. It must read
         differently on a quiet day than on a violent one.
       - `coverage` is the Layer Coverage line, layers separated by " | ",

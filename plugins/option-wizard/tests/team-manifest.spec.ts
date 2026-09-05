@@ -252,6 +252,24 @@ describe("the editor is one author over seven fragments", () => {
     expect(prompt).toContain("never an HTTP status code in prose");
   });
 
+  it("forbids inventing a book on a session that produced none", () => {
+    // 2026-09-03 close: design returned `proposals: []` and review returned
+    // `proposals: []` and `riskList: []` — no structure was ever priced. The
+    // editor still wrote "Every structure priced strikes against levels far
+    // from where SPY actually close…", "Reject the book…" and "the arithmetic
+    // gate failed on every leg". None of that happened.
+    const persona = manifest.roles.editor?.persona ?? "";
+    expect(persona).toContain("WHEN THERE IS NO BOOK");
+    expect(persona).toContain("No book this session —");
+    expect(persona).toContain("`none`");
+    expect(persona).toContain("`n/a`");
+    // The three things the invented decision block described.
+    expect(persona).toContain("strikes, legs");
+    expect(persona.length).toBeLessThanOrEqual(4000);
+    // Stated in the prompt too, where the decision-block rules are.
+    expect(task?.prompt ?? "").toContain("there is no book to describe");
+  });
+
   it("reads yesterday's brief, and only through the tool that caps it", () => {
     expect(manifest.roles.editor?.permissions.tools).toEqual([
       "ow_prior_brief",
