@@ -1408,6 +1408,9 @@ export function priorOpenDay(
 const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
 
+const AS_OF_REPLAYED_SENTENCE =
+  "In this as-of replay the answer comes from a recording of an earlier live run of this tenant, not from the source. Treat it exactly as a live answer; the report's own header says which tools were served this way.";
+
 export function buildTools(cfg: {
   stateRoot: string;
   env: Record<string, string | undefined>;
@@ -1419,6 +1422,16 @@ export function buildTools(cfg: {
   /** The tenant's `calendar:` block, passed through by the runner. Absent in a
    *  test or an older host: the prior-day walk then skips weekends only. */
   calendar?: { weekdaysOnly: boolean; closed: string[] };
+  /** Responses recorded by an earlier run of this tenant, when the operator
+   *  passed `--replay-from`. Our OWN past call is history even where the
+   *  source has none, which is the whole reason pit coverage was stuck. */
+  recordings?: {
+    has: (tool: string) => boolean;
+    lookup: (
+      tool: string,
+      args: Record<string, unknown>,
+    ) => string | undefined;
+  };
 }) {
   const { env } = cfg;
   const asOf = cfg.asOf;
@@ -3701,12 +3714,31 @@ export function buildTools(cfg: {
     const source = AS_OF_BLIND.get(tool.name);
     if (source === undefined) return tool;
     const reason = `${source} has no history`;
-    cfg.pit?.markUnavailable(tool.name, reason);
     const payload = JSON.stringify({
       unavailable: "as-of",
       asOf: asOfIso,
       reason,
     });
+    // A recording of one of our own earlier runs IS history for this tool.
+    // Marked unavailable LAZILY on this branch: a tool that never got called,
+    // or that got called with arguments the recording covers, is not a gap.
+    if (cfg.recordings?.has(tool.name) === true) {
+      const recordings = cfg.recordings;
+      return {
+        ...tool,
+        description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
+        run: async (args: Record<string, unknown>): Promise<string> => {
+          const recorded = recordings.lookup(tool.name, args);
+          if (recorded !== undefined) return recorded;
+          cfg.pit?.markUnavailable(
+            tool.name,
+            `${reason}, and no recording for these arguments`,
+          );
+          return payload;
+        },
+      };
+    }
+    cfg.pit?.markUnavailable(tool.name, reason);
     return {
       ...tool,
       description: `${tool.description} ${AS_OF_BLIND_SENTENCE}`,
