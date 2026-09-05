@@ -18,6 +18,7 @@ import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
 import { qualityMetrics } from "../quality/index.js";
+import { baselineDraft, forecastCommitments } from "./ledger.js";
 
 export { extractJson } from "./json.js";
 
@@ -1553,6 +1554,13 @@ export default function renderReport(
   cfg: TenantSpec,
 ): RenderedReport {
   const view = buildView(report, cfg);
+  // What this run promised, handed to the runner to stamp and write to the
+  // ledger BEFORE any delivery is attempted. The renderer mints the ids and
+  // the payloads; it never stamps the run context, because the runner already
+  // holds it.
+  const label = report.phase;
+  const commitments = forecastCommitments(view, label);
+  const baselines = [baselineDraft(view, report, label)];
   // NO SUBJECT. The renderer does not know the phase — render.spec.ts forbids
   // it naming one — so every subject it could mint reads `option-wizard
   // 2026-09-03`, and the day's five mails arrive indistinguishable. The runner
@@ -1567,5 +1575,7 @@ export default function renderReport(
     // Measured over the document the READER gets, after the budget trim. The
     // runner writes these to the audit table and prints one header line.
     metrics: qualityMetrics({ view, report }),
+    ...(commitments.length === 0 ? {} : { commitments }),
+    baselines,
   };
 }
