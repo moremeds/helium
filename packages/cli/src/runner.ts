@@ -58,6 +58,14 @@ import {
   type Skipped,
 } from "./discovery.js";
 import { codeVersion } from "./code-version.js";
+import {
+  loadRecordings,
+  pruneRecordings,
+  recordingsDir,
+  sha256,
+  writeRecording,
+  type RecordingIndex,
+} from "./tool-io.js";
 
 // These moved to `@helium/core` so a tenant's own renderer can name them
 // without depending on the CLI. Re-exported here because every existing
@@ -197,6 +205,12 @@ export interface RunOptions {
   asOf?: Date;
   /** Run flavour label, forwarded to tool construction. Defaults to `live`. */
   variant?: string;
+  /**
+   * A previous run whose recorded tool responses may serve this one's. Core
+   * hands the tenant a lookup and never decides which tools want it — a tool
+   * knows what is behind it and the runner does not (doctrine 2).
+   */
+  replayFrom?: string;
 }
 
 /**
@@ -747,6 +761,15 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       if (!pitUnavailable.has(tool)) pitUnavailable.set(tool, reason);
     },
   };
+  // Prune BEFORE recording, so a run cannot be pruned by the run that is
+  // writing it, and so the walk happens once per run rather than per call.
+  // No keep-list here: `pruneRecordings` takes one, and the caller that knows
+  // a run is still cited is the one that will pass it.
+  pruneRecordings(options.stateRoot);
+  const replayIndex: RecordingIndex | undefined =
+    options.replayFrom === undefined
+      ? undefined
+      : loadRecordings(recordingsDir(options.stateRoot, options.replayFrom));
   const tools =
     options.tools ??
     (await loadTenantTools(options.tenant.dir, {
@@ -756,8 +779,61 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       pit,
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
       ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
+      ...(replayIndex === undefined ? {} : { recordings: replayIndex }),
     }));
-  const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+  // ONE wrapper, installed once, covering both paths a tool can be called on:
+  // the deterministic path calls `tool.run` directly and the model path hands
+  // these same objects to the provider through `selection.options.tools`.
+  // Wrapping at either call site would record half a run.
+  const ioDir = recordingsDir(options.stateRoot, runId);
+  let ioSeq = 0;
+  const recorded = tools.map((tool) => ({
+    ...tool,
+    run: async (args: Record<string, unknown>): Promise<string> => {
+      const at = new Date().toISOString();
+      ioSeq += 1;
+      const seq = ioSeq;
+      try {
+        const raw = await tool.run(args);
+        try {
+          writeRecording(ioDir, seq, {
+            tool: tool.name,
+            args,
+            at,
+            raw,
+            rawSha256: sha256(raw),
+            rawBytes: Buffer.byteLength(raw, "utf8"),
+            // Null until a summariser exists: nothing between a tool and a
+            // context rewrites the text today. The field is written anyway so
+            // a recording made after one lands is still self-describing.
+            context: null,
+          });
+        } catch {
+          // A recording that cannot be written must never cost the run the
+          // answer it already has.
+        }
+        return raw;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          writeRecording(ioDir, seq, {
+            tool: tool.name,
+            args,
+            at,
+            raw: null,
+            rawSha256: null,
+            rawBytes: 0,
+            context: null,
+            error: message,
+          });
+        } catch {
+          // Same rule.
+        }
+        throw error;
+      }
+    },
+  }));
+  const toolsByName = new Map(recorded.map((tool) => [tool.name, tool]));
 
   const loadedGates =
     options.gates === undefined
@@ -1306,12 +1382,17 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // that answers but not that far back) marks itself during the run, and a
   // count taken at build time would report it as available.
   if (options.asOf !== undefined) {
+    const served = replayIndex?.served() ?? [];
     report.pitCoverage = {
       total: tools.length,
+      // A tool that answered from a recording is available. It marked itself
+      // unavailable only if the recording missed too, so the two sets cannot
+      // both claim it.
       available: Math.max(0, tools.length - pitUnavailable.size),
       unavailable: [...pitUnavailable.keys()].sort((a, b) =>
         a.localeCompare(b, "en"),
       ),
+      ...(served.length === 0 ? {} : { served }),
     };
   }
 
@@ -1512,9 +1593,12 @@ function deliveryBody(report: RunReport): string {
       `- variant: \`${report.variant ?? "live"}\``,
     );
     if (report.pitCoverage !== undefined) {
-      const { available, total, unavailable } = report.pitCoverage;
+      const { available, total, unavailable, served } = report.pitCoverage;
       lines.push(
         `- pit coverage: ${String(available)}/${String(total)}` +
+          (served === undefined || served.length === 0
+            ? ""
+            : ` (from recordings: ${served.join(", ")})`) +
           (unavailable.length === 0
             ? ""
             : ` (unavailable: ${unavailable.join(", ")})`),

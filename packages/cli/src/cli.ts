@@ -36,9 +36,12 @@ function printRun(report: RunReport): void {
     console.log(`as-of: ${report.asOf}  variant: ${report.variant ?? "live"}`);
   }
   if (report.pitCoverage !== undefined) {
-    const { available, total, unavailable } = report.pitCoverage;
+    const { available, total, unavailable, served } = report.pitCoverage;
     console.log(
       `pit coverage: ${String(available)}/${String(total)}` +
+        (served === undefined || served.length === 0
+          ? ""
+          : ` (from recordings: ${served.join(", ")})`) +
         (unavailable.length === 0
           ? ""
           : ` (unavailable: ${unavailable.join(", ")})`),
@@ -180,7 +183,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === "run") {
     if (argument === undefined) {
       console.error(
-        "usage: helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>]",
+        "usage: helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>]",
       );
       return 2;
     }
@@ -189,7 +192,7 @@ async function main(argv: string[]): Promise<number> {
       console.error(parsed.error);
       return 2;
     }
-    const { phase, asOf, variant } = parsed;
+    const { phase, asOf, variant, replayFrom } = parsed;
     const tenantsRoot = tenantsDir(env);
     const pluginsRoot = pluginsDir(env);
     const { tenants, skipped } = loadTenants(tenantsRoot);
@@ -231,6 +234,7 @@ async function main(argv: string[]): Promise<number> {
         ...(asOf === undefined
           ? {}
           : { asOf, now: (): Date => new Date(asOf.getTime()) }),
+        ...(replayFrom === undefined ? {} : { replayFrom }),
       });
       printRun(report);
       return report.outcome === "completed" ? 0 : 1;
@@ -242,10 +246,13 @@ async function main(argv: string[]): Promise<number> {
   console.error(
     [
       "usage:",
-      "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>]",
+      "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>]",
       "      run one tenant's team once. --as-of replays a past instant: it becomes",
       "      the run's clock, and every tool that has no history for it says so",
       "      instead of answering with today. --variant labels the run (default live).",
+      "      --replay-from serves a live-only tool's recorded response from an",
+      "      earlier run instead of refusing it. Recordings live under",
+      "      <stateRoot>/runs/<runId>/tool-io and are pruned after 30 days.",
       "  helium audit <run-id>   per-step cost and token rows for a run",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,

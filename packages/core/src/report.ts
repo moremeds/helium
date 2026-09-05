@@ -115,6 +115,9 @@ export interface RunReport {
     total: number;
     /** Tool names with no history for `asOf`, in call-agnostic sorted order. */
     unavailable: string[];
+    /** Names answered from a stored response rather than by their source.
+     *  Absent when nothing was. Core stores the names and reads none. */
+    served?: string[];
   };
   /**
    * What the tenant's renderer measured about this run. Absent when the

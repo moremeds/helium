@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +27,7 @@ import {
   splitStateBlock,
   type ModelExecutor,
 } from "./runner.js";
+import { loadRecordings, recordingsDir } from "./tool-io.js";
 
 const TEAM = `manifestVersion: "2"
 name: demo
@@ -1301,6 +1303,103 @@ describe("state block", () => {
     expect(
       existsSync(join(stateRoot, report.tenant, report.day, "premarket.s.json")),
     ).toBe(false);
+    audit.close();
+  });
+});
+
+describe("tool I/O recording", () => {
+  /** A deterministic team, so the run actually CALLS the tool it names. The
+   *  file's model executor never calls a tool, and a recording of a tool that
+   *  was never called proves nothing. */
+  function ioTenant(toolName: string): LoadedTenant {
+    const dir = mkdtempSync(join(tmpdir(), "helium-io-tenant-"));
+    mkdirSync(join(dir, "demo"));
+    writeFileSync(
+      join(dir, "demo", "tenant.yaml"),
+      `tenant: demo\nenabled: true\nteam: team.yaml\nbudget: { usd: 1, tokens: 100000 }\n${DELIVERY_YAML}`,
+    );
+    writeFileSync(
+      join(dir, "demo", "team.yaml"),
+      `manifestVersion: "2"\nname: demo\nroles:\n  screener:\n    requires: []\n    permissions: { tools: [${toolName}] }\ntasks:\n  - id: one\n    role: screener\n    requires: []\n    prompt: rank these\n`,
+    );
+    return loadTenants(dir).tenants[0]!;
+  }
+
+  it("writes one recording per tool call, and a replay serves it back", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const audit = new AuditStore(":memory:");
+    const live = await runTenant({
+      tenant: ioTenant("echo"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    const index = loadRecordings(recordingsDir(stateRoot, live.runId));
+    expect(index.size).toBeGreaterThan(0);
+    expect(index.has(echo.name)).toBe(true);
+    expect(index.lookup(echo.name, { q: "rank these" })).toBe(
+      '{"echoed":"rank these"}',
+    );
+    audit.close();
+  });
+
+  it("records a throwing tool as an error and never serves it", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const audit = new AuditStore(":memory:");
+    const boom: EcosystemTool = {
+      ...echo,
+      name: "boom",
+      run: async (): Promise<string> => {
+        throw new Error("ECONNREFUSED");
+      },
+    };
+    const report = await runTenant({
+      tenant: ioTenant("boom"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [boom],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    expect(
+      loadRecordings(recordingsDir(stateRoot, report.runId)).has("boom"),
+    ).toBe(false);
+    audit.close();
+  });
+
+  it("prunes runs older than 30 days at the start of a run", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-io-run-"));
+    const stale = join(stateRoot, "runs", "run-ancient");
+    mkdirSync(stale, { recursive: true });
+    const when = new Date(Date.now() - 90 * 86_400_000);
+    utimesSync(stale, when, when);
+    const audit = new AuditStore(":memory:");
+    await runTenant({
+      tenant: ioTenant("echo"),
+      audit,
+      pluginsDir: "/nonexistent",
+      stateRoot,
+      env: {},
+      providers: [provider],
+      tools: [echo],
+      catalog: catalogFor([provider]),
+      modelExecutor,
+      channels: [],
+      renderer: null,
+    });
+    expect(existsSync(stale)).toBe(false);
     audit.close();
   });
 });
