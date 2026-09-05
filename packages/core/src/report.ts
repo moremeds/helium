@@ -7,6 +7,7 @@
  * wrote it is the only one who knows what it means (doctrine 2).
  * @module @helium/core/report
  */
+import type { CommitmentDraft } from "./plugins.js";
 import type { TenantSpec } from "./tenant.js";
 
 export interface StepReport {
@@ -74,6 +75,10 @@ export interface RunReport {
   failure?: { class: string; detail: string };
   /** Gates that failed to LOAD. A gate that stopped loading stopped guarding. */
   gatesSkipped: Array<{ id: string; reason: string }>;
+  /** Why the settler did not run, or threw. A settler failure is recorded and
+   *  never blocks the run: the commitments stay outstanding and the next run
+   *  tries again. */
+  settlerSkipped?: { reason: string };
   /**
    * Set when a tenant ships a renderer and it failed to load or threw. Its own
    * field, not a row in `gatesSkipped`: a gate that stopped loading stopped
@@ -151,6 +156,18 @@ export interface RenderedReport {
    * which makes every renderer change a silent data corruption somewhere else.
    */
   data?: Record<string, unknown>;
+  /**
+   * Promises this render is making, to be settled by a later run. Written to
+   * the ledger BEFORE any delivery intent: a record precedes its side effect,
+   * never follows it. Opaque — core stamps the run context and stores the rest.
+   */
+  commitments?: CommitmentDraft[];
+  /**
+   * The trivial predictors this run is to be measured against. Same shape and
+   * same opacity as `commitments`; kept a separate field because a baseline is
+   * never outstanding and must never be offered to a settler.
+   */
+  baselines?: CommitmentDraft[];
   /**
    * Numbers the renderer computed while it built the document. The runner
    * copies them to the audit table and prints one line of them in the header;
