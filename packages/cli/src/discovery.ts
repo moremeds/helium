@@ -135,6 +135,10 @@ export interface TenantToolConfig {
       args: Record<string, unknown>,
     ) => string | undefined;
   };
+  /** The tenant's own opaque block, CARRIED and never read. `extensions` is
+   *  the tenant's word about itself; handing it back to the tenant's own
+   *  `buildTools` is not the host reading inside it. */
+  extensions?: Record<string, unknown>;
 }
 
 export async function loadTenantTools(
@@ -158,6 +162,7 @@ export async function loadTenantTools(
           args: Record<string, unknown>,
         ) => string | undefined;
       };
+      extensions?: Record<string, unknown>;
     }) => EcosystemTool[];
   };
   if (typeof module.buildTools !== "function") return [];
@@ -169,6 +174,7 @@ export async function loadTenantTools(
     ...(cfg.pit === undefined ? {} : { pit: cfg.pit }),
     ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
     ...(cfg.recordings === undefined ? {} : { recordings: cfg.recordings }),
+    ...(cfg.extensions === undefined ? {} : { extensions: cfg.extensions }),
   });
 }
 

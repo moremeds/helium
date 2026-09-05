@@ -210,4 +210,10 @@ delivery:
 #     event_window:      { minDte: <n>, maxDte: <n> }
 #     position_conflict: { maxPerUnderlyingFractionOfNetLiq: <n>,
 #                          maxPortfolioFractionOfNetLiq: <n> }
-extensions: {}
+extensions:
+  # The weekly review's lookback windows, in TRADING days — counted with the
+  # `calendar` block above, never with a subtraction from a date. 5 is the week
+  # just ended, 10 the fortnight, 21 the month. Read only by this tenant's own
+  # ow_review_window tool; the host carries this block and never opens it.
+  review:
+    windows: [5, 10, 21]

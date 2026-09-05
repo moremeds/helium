@@ -780,6 +780,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
       ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
       ...(replayIndex === undefined ? {} : { recordings: replayIndex }),
+      ...(Object.keys(spec.extensions).length === 0
+        ? {}
+        : { extensions: spec.extensions }),
     }));
   // ONE wrapper, installed once, covering both paths a tool can be called on:
   // the deterministic path calls `tool.run` directly and the model path hands

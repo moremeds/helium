@@ -15,6 +15,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { AuditStore } from "@helium/core";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
 import {
   candidatesFrom,
@@ -62,6 +63,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
   ["ow_reports", { mutating: false }],
+  // Same reasoning: it reads this tenant's own report directory, its own state
+  // records and its own audit table. An empty window is a real answer.
+  ["ow_review_window", { mutating: false }],
   // Same reasoning as ow_reports: it reads the same report directory, and "no
   // brief yesterday" is an answer the editor prints in one line, not an outage.
   ["ow_prior_brief", { mutating: false }],
@@ -1044,6 +1048,60 @@ const PRIOR_BRIEF_CEILING_CHARS = 2000;
  *  "yesterday" means the same calendar day the filenames do. */
 const REPORT_ZONE = "America/New_York";
 
+const ReviewWindowParams = z.object({
+  today: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+});
+
+/**
+ * Every run's quality numbers over a day range, as `day -> label -> name ->
+ * value`, straight out of the audit table.
+ *
+ * `metricsBetween` already takes the newest run of each `(day, label)`, so
+ * this only shapes the rows. A `null` value — "not computable that run" — is
+ * DROPPED here rather than written as 0: the reviewer is asked which numbers
+ * moved, and a zero that means "we could not tell" is the one reading that
+ * would make it lie.
+ *
+ * The store is opened per call and closed in a `finally`. A tool that leaks a
+ * SQLite handle leaks one per run, forever.
+ */
+function qualityByDay(
+  env: NodeJS.ProcessEnv,
+  fromDay: string,
+  toDay: string,
+): {
+  rows: Map<string, Record<string, Record<string, number>>>;
+  note?: string;
+} {
+  const rows = new Map<string, Record<string, Record<string, number>>>();
+  let store: AuditStore | undefined;
+  try {
+    store = AuditStore.open(env);
+    for (const row of store.metricsBetween(fromDay, toDay)) {
+      if (row.value === null) continue;
+      const byLabel = rows.get(row.day) ?? {};
+      byLabel[row.label] = {
+        ...(byLabel[row.label] ?? {}),
+        [row.name]: row.value,
+      };
+      rows.set(row.day, byLabel);
+    }
+  } catch (error: unknown) {
+    return {
+      rows,
+      note: `quality unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  } finally {
+    store?.close();
+  }
+  return { rows };
+}
+
 const PriorBriefParams = z.object({
   phase: z
     .enum(["premarket", "intraday", "close", "weekly", "frank"])
@@ -1376,6 +1434,20 @@ function priorDay(day: string): string {
   return at.toISOString().slice(0, 10);
 }
 
+/** Whether the market this tenant writes about is shut on `day`. The tenant's
+ *  own calendar declaration is the only authority; there is no derivation. */
+export function isClosedDay(
+  day: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): boolean {
+  const weekends = calendar === undefined || calendar.weekdaysOnly;
+  return (
+    (calendar?.closed ?? []).includes(day) ||
+    // 0 Sunday, 6 Saturday — the two the modulo picks out.
+    (weekends && new Date(`${day}T00:00:00Z`).getUTCDay() % 6 === 0)
+  );
+}
+
 /**
  * The last OPEN day before `day`, per the calendar the tenant declares. Both
  * `yyyy-mm-dd`.
@@ -1393,16 +1465,36 @@ export function priorOpenDay(
   day: string,
   calendar?: { weekdaysOnly: boolean; closed: string[] },
 ): string {
-  const closed = new Set(calendar?.closed ?? []);
-  const weekends = calendar === undefined || calendar.weekdaysOnly;
-  const shut = (d: string): boolean =>
-    closed.has(d) ||
-    (weekends && new Date(`${d}T00:00:00Z`).getUTCDay() % 6 === 0);
   let out = priorDay(day);
   // Bounded: a run of closed days longer than a fortnight is a broken
   // declaration, not a holiday, and looping forever on it would hang the run.
-  for (let step = 0; step < 14 && shut(out); step += 1) out = priorDay(out);
+  for (let step = 0; step < 14 && isClosedDay(out, calendar); step += 1)
+    out = priorDay(out);
   return out;
+}
+
+/**
+ * The last `count` OPEN days ending at `from`, oldest first.
+ *
+ * `from` itself is included when it is open — a Friday close review counts
+ * Friday — and replaced by the previous open day when it is not, which is the
+ * Sunday case the weekly run actually runs on. Never a subtraction: 21 trading
+ * days is 29 to 31 calendar days depending on which holidays fall inside, and
+ * a date arithmetic that guesses is a window that silently moves.
+ */
+export function openDaysBack(
+  from: string,
+  count: number,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): string[] {
+  const out: string[] = [];
+  let day = isClosedDay(from, calendar) ? priorOpenDay(from, calendar) : from;
+  out.push(day);
+  while (out.length < count) {
+    day = priorOpenDay(day, calendar);
+    out.push(day);
+  }
+  return out.reverse();
 }
 
 const AS_OF_BLIND_SENTENCE =
@@ -1432,6 +1524,9 @@ export function buildTools(cfg: {
       args: Record<string, unknown>,
     ) => string | undefined;
   };
+  /** This tenant's own `extensions:` block, carried here by the host without
+   *  ever being opened. Only this tenant's tools read inside it. */
+  extensions?: Record<string, unknown>;
 }) {
   const { env } = cfg;
   const asOf = cfg.asOf;
@@ -2426,6 +2521,158 @@ export function buildTools(cfg: {
           rows,
           missing,
         });
+      },
+    },
+    {
+      // The weekly review's whole input, gathered deterministically. The model
+      // that reads this READS numbers; it computes none of them, which is the
+      // standing rule after eight of eleven model-computed numbers audited on
+      // 2026-09-03 came back wrong.
+      //
+      // Windows are TRADING days, counted with the tenant's own calendar.
+      name: "ow_review_window",
+      description:
+        "This tenant's own last 5 / 10 / 21 TRADING days, per window: each session's cause-section titles, its regime state records, the run's own quality numbers (`metaLeakHits`, `budgetViolations`, `causeTitleSimilarity`, straight from the audit table), and the Outcome Ledger scoreboard when one exists. Everything here is read off disk or out of the audit table; nothing is estimated.",
+      paramsSchema: ReviewWindowParams,
+      mutating: false,
+      dshParams: {
+        today: {
+          type: "string",
+          description:
+            "YYYY-MM-DD day to count back FROM, inclusive when it is a session. Omit for this run's own report day.",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const { today } = ReviewWindowParams.parse(args);
+        const cutoff =
+          today ??
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const declared = (
+          cfg.extensions as { review?: { windows?: unknown } } | undefined
+        )?.review?.windows;
+        const windows = (
+          Array.isArray(declared) &&
+          declared.every((n) => typeof n === "number" && n > 0 && n <= 60)
+            ? declared
+            : [5, 10, 21]
+        ) as number[];
+        const dir = join(cfg.stateRoot, "reports");
+        let names: string[] = [];
+        try {
+          names = await readdir(dir);
+        } catch {
+          names = [];
+        }
+        const byDay = new Map<string, Array<{ label: string; file: string }>>();
+        for (const name of names) {
+          const match = REPORT_NAME.exec(name);
+          if (match === null) continue;
+          const list = byDay.get(match[1]!) ?? [];
+          list.push({ label: match[2]!, file: name });
+          byDay.set(match[1]!, list);
+        }
+        const out = [];
+        for (const days of windows) {
+          const span = openDaysBack(cutoff, days, cfg.calendar);
+          // ONE query per window, not one per session: the metric table is
+          // asked for the range and the rows are handed out by day below.
+          const measured = qualityByDay(
+            cfg.env,
+            span[0] ?? cutoff,
+            span[span.length - 1] ?? cutoff,
+          );
+          const sessions = [];
+          for (const day of span) {
+            const causeTitles: Record<string, string> = {};
+            const quality = measured.rows.get(day) ?? {};
+            const regime: Record<string, unknown> = {};
+            for (const entry of byDay.get(day) ?? []) {
+              let markdown: string;
+              try {
+                markdown = await readFile(join(dir, entry.file), "utf8");
+              } catch {
+                continue;
+              }
+              const doc = extractJson(stepsOf(markdown).get("edit") ?? "");
+              const first = Array.isArray(doc?.sections)
+                ? ((doc.sections[0] ?? {}) as { title?: unknown })
+                : {};
+              if (typeof first.title === "string" && first.title !== "")
+                causeTitles[entry.label] = first.title;
+            }
+            try {
+              const stateDir = join(cfg.stateRoot, "option-wizard", day);
+              for (const file of await readdir(stateDir)) {
+                const match = STATE_FILE.exec(file);
+                if (match === null) continue;
+                const parsed = parseRegimeState(
+                  JSON.parse(await readFile(join(stateDir, file), "utf8")),
+                );
+                if (parsed !== null) regime[match[1]!] = parsed;
+              }
+            } catch {
+              // No records for that day. The empty object says so.
+            }
+            sessions.push({ day, causeTitles, regime, quality });
+          }
+          // The Outcome Ledger is a peer session's module and may not be
+          // installed. Absent is a COVERAGE NOTE, never an error: a review
+          // that refuses to run because the scoreboard is missing is a review
+          // that never runs.
+          let ledger: unknown = null;
+          const coverage: string[] = [];
+          // An audit database that would not open is one input missing, not a
+          // failed review: the cause titles and the regime records still went
+          // out above.
+          if (measured.note !== undefined) coverage.push(measured.note);
+          try {
+            const core = (await import("@helium/core")) as {
+              readLedger?: (
+                stateRoot: string,
+                tenant: string,
+                options?: { since?: string },
+              ) => unknown[];
+            };
+            // Not a literal specifier on purpose: `@helium/cli` is not yet a
+            // dependency of this tenant (the Outcome Ledger session adds it
+            // with `summarise`), and a literal would make `tsc` fail to
+            // resolve it rather than letting the runtime say so as a coverage
+            // note. Remove the indirection once the dependency lands.
+            const cliSpecifier: string = "@helium/cli";
+            const cli = (await import(cliSpecifier)) as {
+              summarise?: (
+                records: unknown[],
+                options: { deployment?: string; variant?: string },
+              ) => unknown;
+            };
+            if (core.readLedger === undefined || cli.summarise === undefined)
+              throw new Error("readLedger/summarise not installed");
+            ledger = cli.summarise(
+              core.readLedger(cfg.stateRoot, "option-wizard", {
+                since: sessions[0]?.day ?? cutoff,
+              }),
+              {},
+            );
+          } catch (error: unknown) {
+            coverage.push(
+              `ledger scoreboard unavailable: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+          out.push({
+            days,
+            from: sessions[0]?.day ?? cutoff,
+            to: sessions[sessions.length - 1]?.day ?? cutoff,
+            sessions,
+            ledger,
+            coverage,
+          });
+        }
+        return JSON.stringify({ cutoff, windows: out });
       },
     },
     {
