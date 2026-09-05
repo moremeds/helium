@@ -1,0 +1,16 @@
+{
+ "asOf": "2026-09-06",
+ "note": "ow_argon_metrics envelope (tools/index.ts:1920-1932, post-PR #92) around the real SPY row observed on macmini 2026-09-06 via OW_PSQL_BIN against uw_scan.iv_rank_history. #92 added the top-level dataDate (the row dates) and queriedAsOf (the day the query was cut at); queriedAsOf is omitted here because a live run does not cut. No signal / expectedReturn20d / confidence column exists on this table.",
+ "response": {
+  "source": "argon.uw_scan",
+  "dataDate": "2026-09-04",
+  "rows": [
+   {
+    "ticker": "SPY",
+    "iv": { "close": 770.19, "ticker": "SPY", "iv_rank_1y": 3.5692, "volatility": 0.116, "market_date": "2026-09-04" },
+    "gex": null,
+    "skew": null
+   }
+  ]
+ }
+}
