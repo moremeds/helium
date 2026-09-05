@@ -33,3 +33,23 @@ Residual defects visible in v3, not fixed here:
 
 Eyeball comparison only. No ground-truth scoring exists yet; the Outcome
 Ledger settles forward from production runs.
+
+## fix-v1 — the three content defects, re-run
+
+`fix-v1/option-wizard-2026-09-03-close.md`, the same 2026-09-03 20:15Z close
+instant re-run after the three fixes on `feat/quality-loop`
+(run `run-a6c307ef-5879-4f13-b241-088ba743fedd`). What the previous run of this
+instant (`argon-local`) got wrong, and what this one shows:
+
+- The editor invented a rejected book out of two empty proposal lists —
+  "Every structure priced strikes against levels far from where SPY … actually
+  close", "Reject the book", "the arithmetic gate failed on every leg". Now:
+  `Call: "No book this session — without a live spot no strike can be checked
+  …"`, with Aggression `none` and MaxRisk/Invalidation `n/a`. No strike, leg or
+  gate is described.
+- The gex step asked the reader a question ("To proceed, I need clarification:
+  Should I…"). Now the whole section is `GEX: unavailable — ow_uw_gex`.
+- `ow_argon_metrics` dated its payload by the query day. The recording of this
+  run (`00017-ow_argon_metrics.json.gz`) reads
+  `{"source":…,"queriedAsOf":"2026-09-03","dataDate":"2026-09-02","rows":[…]}`,
+  and the brief's own prose now says "End-of-day metrics dated 2026-09-02".
