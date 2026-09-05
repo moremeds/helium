@@ -30,11 +30,37 @@ function textOf(input: unknown): string {
 const gate: Gate = {
   id: "as-of-verbatim",
   phase: "output",
-  appliesTo: ["regime-analyst", "gex-reporter", "risk-reviewer"],
+  appliesTo: [
+    "regime-analyst",
+    "gex-reporter",
+    "risk-reviewer",
+    "scenario-analyst",
+  ],
   async check(
     input: unknown,
     ctx: GateCtx,
   ): Promise<{ pass: boolean; reason: string }> {
+    // A REFERENCE CLOSE is a price, not a timestamp, and it is the anchor every
+    // Brier score is measured from: a value the model rounded or remembered
+    // makes the whole forecast unfalsifiable while looking perfectly plausible.
+    // Same rule as the clock, same reason — copy it, never compute it.
+    const reference = /"referenceClose"\s*:\s*\{[^}]*"value"\s*:\s*(-?\d+(?:\.\d+)?)/u.exec(
+      textOf(input),
+    );
+    if (reference !== null) {
+      const value = reference[1]!;
+      const step = ctx.stepToolOutputs ?? [];
+      if (step.length === 0)
+        return {
+          pass: false,
+          reason: `referenceClose.value ${value} but this step called no tool — there was nothing to copy it from`,
+        };
+      if (!step.some((out) => out.includes(value)))
+        return {
+          pass: false,
+          reason: `referenceClose.value ${value} appears in no tool output from THIS step — quote the close the tool returned`,
+        };
+    }
     const found = [...new Set(textOf(input).match(ISO) ?? [])];
     if (found.length === 0)
       return { pass: true, reason: "no explicit timestamp to check" };
