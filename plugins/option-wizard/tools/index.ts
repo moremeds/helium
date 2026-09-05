@@ -27,6 +27,7 @@ import {
   evaluateProposal,
   tenantThresholds,
 } from "../gates/ib-preflight.js";
+import { parseRegimeState } from "../state/regime.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1173,6 +1174,19 @@ function stepsOf(markdown: string): Map<string, string> {
 /** `option-wizard-2026-09-02-premarket.md` -> {date, phase}. Anything that does
  *  not match is not one of our reports and is ignored rather than guessed at. */
 const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
+
+/** The order the day's runs happen in, for walking BACKWARDS from one of them.
+ *  A label not listed sorts last within its day: it is a run this list has not
+ *  been taught about, and putting it after the known ones is the answer that
+ *  cannot reorder a known pair. */
+const PHASE_ORDER = ["premarket", "frank", "intraday", "close", "weekly"];
+
+function phaseRank(label: string): number {
+  const at = PHASE_ORDER.indexOf(label);
+  return at === -1 ? PHASE_ORDER.length : at;
+}
+
+const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 
 const EarningsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
@@ -2559,14 +2573,14 @@ export function buildTools(cfg: {
       // has already read once.
       name: "ow_prior_brief",
       description:
-        "The previous day's delivered brief for a phase: its masthead headline, its decision block and the opening of each narrative section, capped at ~2 KB. Read it to say what CHANGED since; it is never evidence about today's tape.",
+        'The previous run\'s regime state record — its cause, the 2Y/10Y/2s10s levels it copied, its tide and its one-sentence thesis — plus that run\'s headline. Falls back to the previous brief\'s prose (`fallback: "markdown"`) when no record exists. Read it to say what CHANGED; it is never evidence about today\'s tape.',
       paramsSchema: PriorBriefParams,
       mutating: false,
       dshParams: {
         phase: {
           type: "string",
           description:
-            "premarket (default) | intraday | close | weekly | frank",
+            "The run label you are writing FOR (premarket | intraday | close | weekly | frank). The tool returns the most recent record strictly before it.",
         },
         today: {
           type: "string",
@@ -2592,47 +2606,111 @@ export function buildTools(cfg: {
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
+        const here = phaseRank(wanted);
+        const earlier = (day: string, label: string): boolean =>
+          day < cutoff || (day === cutoff && phaseRank(label) < here);
+        const stateDir = join(cfg.stateRoot, "option-wizard");
+        // 1. The newest STATE RECORD strictly before this run. Calendar-aware
+        //    for free: a closed day produced no run, so it wrote no file.
+        let best: { day: string; label: string; state: unknown } | null = null;
+        try {
+          for (const day of await readdir(stateDir)) {
+            if (!/^\d{4}-\d{2}-\d{2}$/u.test(day)) continue;
+            for (const file of await readdir(join(stateDir, day))) {
+              const match = STATE_FILE.exec(file);
+              if (match === null) continue;
+              const label = match[1]!;
+              if (!earlier(day, label)) continue;
+              if (
+                best !== null &&
+                (day < best.day ||
+                  (day === best.day &&
+                    phaseRank(label) < phaseRank(best.label)))
+              )
+                continue;
+              let parsed: unknown;
+              try {
+                parsed = JSON.parse(
+                  await readFile(join(stateDir, day, file), "utf8"),
+                );
+              } catch {
+                continue;
+              }
+              const state = parseRegimeState(parsed);
+              // A record that no longer matches the schema is not a record.
+              if (state === null) continue;
+              best = { day, label, state };
+            }
+          }
+        } catch {
+          // No state directory yet. The markdown fallback below is the answer.
+        }
+        // 2. The prior REPORT, for its headline and for the fallback text.
         const dir = join(cfg.stateRoot, "reports");
-        let names: string[];
+        let names: string[] = [];
         try {
           names = await readdir(dir);
         } catch {
-          return JSON.stringify({
-            dir,
-            prior: null,
-            reason: "no reports directory yet",
-          });
+          names = [];
         }
         const found = names
           .map((name) => ({ name, match: REPORT_NAME.exec(name) }))
           .filter(
-            (row) =>
-              row.match !== null &&
-              row.match[2] === wanted &&
-              row.match[1]! < cutoff,
+            (row) => row.match !== null && earlier(row.match[1]!, row.match[2]!),
           )
-          .sort((a, b) => b.match![1]!.localeCompare(a.match![1]!))[0];
+          .sort((a, b) => {
+            const byDay = b.match![1]!.localeCompare(a.match![1]!);
+            return byDay !== 0
+              ? byDay
+              : phaseRank(b.match![2]!) - phaseRank(a.match![2]!);
+          })[0];
+        const byStep =
+          found === undefined
+            ? new Map<string, string>()
+            : stepsOf(await readFile(join(dir, found.name), "utf8"));
+        const doc =
+          found === undefined
+            ? null
+            : extractJson(byStep.get("edit") ?? byStep.get("regime") ?? "");
+        const headline =
+          doc !== null && typeof doc.headline === "string" ? doc.headline : "";
+        if (best !== null) {
+          return JSON.stringify({
+            dir: stateDir,
+            prior: {
+              day: best.day,
+              phase: best.label,
+              headline,
+              regimeState: best.state,
+            },
+            note: "The previous run's own state record. Compare it with today's; if the cause has not changed, keep the title and write only the delta. Every number about TODAY still comes from a live tool.",
+          });
+        }
+        // 3. No record: the markdown brief, exactly as this tool used to serve
+        //    it. A run before this feature existed, or one whose regime step
+        //    did not produce a valid block, must still get something.
         if (found === undefined) {
           return JSON.stringify({
             dir,
             prior: null,
-            reason: `no ${wanted} report on disk dated before ${cutoff}`,
+            reason: `no report or state record on disk before ${cutoff}`,
           });
         }
-        const day = found.match![1]!;
-        const byStep = stepsOf(await readFile(join(dir, found.name), "utf8"));
-        // The prior run's own editor document when it had one; the regime step
-        // is the fallback for a report written before the editor existed.
-        // Either way this is prose the reader has already seen.
         const source = byStep.get("edit") ?? byStep.get("regime") ?? "";
-        const parsed = extractJson(source);
         const text = (
-          parsed === null ? source : JSON.stringify(pickBriefProse(parsed))
+          doc === null ? source : JSON.stringify(pickBriefProse(doc))
         ).slice(0, PRIOR_BRIEF_CEILING_CHARS);
         return JSON.stringify({
           dir,
-          prior: { day, phase: wanted, file: found.name, text },
-          note: "Yesterday's own words. Quote it only to say what changed; every number about TODAY comes from a live tool.",
+          fallback: "markdown",
+          prior: {
+            day: found.match![1]!,
+            phase: found.match![2]!,
+            file: found.name,
+            headline,
+            text,
+          },
+          note: "No state record for the previous run; this is its prose. Quote it only to say what changed.",
         });
       },
     },
