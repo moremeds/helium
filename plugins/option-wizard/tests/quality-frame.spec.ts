@@ -339,3 +339,42 @@ describe("frameFrom", () => {
     expect(frameFrom(report(['{"other":1}', "not json"]))).toBeNull();
   });
 });
+
+describe("frameFrom reads both places the runner puts a tool result", () => {
+  // THE 2026-09-06 ACCEPTANCE DEFECT. `packages/cli/src/runner.ts` pushes a
+  // DETERMINISTIC step's report row without `toolOutputs`; the results live in
+  // `step.text`, one `<toolName> -> <json>` line per call. The frame step ran,
+  // ow_session_frame answered, and the renderer saw nothing — so the weekly
+  // reached argon with no review sections and an empty masthead.
+  const payload = JSON.stringify({ kind: SESSION_FRAME_KIND, day: "2026-09-06" });
+
+  it("finds the payload in a model step's toolOutputs", () => {
+    const report = {
+      steps: [{ task: "frame", role: "frame-clerk", mode: "model", text: "", toolOutputs: [payload] }],
+    } as never;
+    expect(frameFrom(report)?.day).toBe("2026-09-06");
+  });
+
+  it("finds the payload in a deterministic step's own text", () => {
+    const report = {
+      steps: [
+        {
+          task: "frame",
+          role: "frame-clerk",
+          mode: "deterministic",
+          text: `ow_session_frame -> ${payload}`,
+        },
+      ],
+    } as never;
+    expect(frameFrom(report)?.day).toBe("2026-09-06");
+  });
+
+  it("ignores a line that is prose with an arrow in it", () => {
+    const report = {
+      steps: [
+        { task: "x", role: "r", mode: "deterministic", text: "the 10Y -> 4.79 today" },
+      ],
+    } as never;
+    expect(frameFrom(report)).toBe(null);
+  });
+});

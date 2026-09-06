@@ -47,7 +47,7 @@ import {
   REVIEW_PERIODS,
   type ReviewPeriod,
 } from "../quality/review-config.js";
-import type { SessionFrame } from "../quality/frame.js";
+import { toolPayloadStrings, type SessionFrame } from "../quality/frame.js";
 import type { RotationRow } from "../quality/themes.js";
 
 export { extractJson } from "./json.js";
@@ -1693,7 +1693,7 @@ function proseWordsOf(view: BriefView): number {
  * beside a `rows` array is a shape nothing else in this tenant emits.
  */
 function rotationFrom(report: RunReport): RotationResult | null {
-  for (const raw of report.steps.flatMap((step) => step.toolOutputs ?? [])) {
+  for (const raw of toolPayloadStrings(report)) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -1716,7 +1716,7 @@ function rotationFrom(report: RunReport): RotationResult | null {
 /** The dated rows `ow_uw_calendar` answered with. Same shape lookup: a `rows`
  *  array whose entries carry a `time` and an `event`. */
 function calendarRowsFrom(report: RunReport): CalendarRow[] {
-  for (const raw of report.steps.flatMap((step) => step.toolOutputs ?? [])) {
+  for (const raw of toolPayloadStrings(report)) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);

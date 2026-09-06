@@ -527,21 +527,49 @@ export function buildFrame(args: {
   };
 }
 
+/**
+ * Every JSON payload a finished run's steps produced, from BOTH places the
+ * runner puts one.
+ *
+ * A model step carries its tool results in `step.toolOutputs`. A DETERMINISTIC
+ * step does not: `packages/cli/src/runner.ts` pushes its report row without
+ * that field, and the results live in `step.text`, one `<toolName> -> <json>`
+ * line per call. The 2026-09-06 acceptance run is how that was found — the
+ * frame step ran, `ow_session_frame` answered, and the renderer saw nothing,
+ * so the weekly reached argon with no review sections and no masthead.
+ *
+ * Read here rather than fixed in the runner: `runner.ts` belongs to another
+ * change, and a reader that copes with both shapes is correct whichever way
+ * that lands.
+ */
+export function toolPayloadStrings(report: RunReport): string[] {
+  const out: string[] = [];
+  for (const step of report.steps) {
+    out.push(...(step.toolOutputs ?? []));
+    for (const line of (step.text ?? "").split("\n")) {
+      const arrow = line.indexOf(" -> ");
+      if (arrow <= 0) continue;
+      const name = line.slice(0, arrow);
+      if (!/^[a-z][a-z0-9_]*$/u.test(name)) continue;
+      out.push(line.slice(arrow + 4));
+    }
+  }
+  return out;
+}
+
 /** The same payload back out of a finished run. Null when the step did not run.
  *  Found BY SHAPE, the way `argonBaseline` already finds argon's. */
 export function frameFrom(report: RunReport): SessionFrame | null {
-  for (const step of report.steps) {
-    for (const raw of step.toolOutputs ?? []) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        continue;
-      }
-      if (parsed === null || typeof parsed !== "object") continue;
-      if ((parsed as { kind?: unknown }).kind === SESSION_FRAME_KIND)
-        return parsed as SessionFrame;
+  for (const raw of toolPayloadStrings(report)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
     }
+    if (parsed === null || typeof parsed !== "object") continue;
+    if ((parsed as { kind?: unknown }).kind === SESSION_FRAME_KIND)
+      return parsed as SessionFrame;
   }
   return null;
 }
