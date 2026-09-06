@@ -1,0 +1,625 @@
+{
+ "commitments": [
+  {
+   "id": "2026-09-04-close-verdict-rates.long",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "rates.long",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-policy.path",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "policy.path",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-credit",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "credit",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-04-close-verdict-vol",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "vol",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-dealer.positioning",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "dealer.positioning",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-flow",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "flow",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-04-close-verdict-fx",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "fx",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-equity.internals",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "equity.internals",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Computer/GPU",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Computer/GPU",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Semi-Logic/ASIC",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Semi-Logic/ASIC",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Foundry",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Foundry",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Semi-Cap/EDA",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Semi-Cap/EDA",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Memory/Storage",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Memory/Storage",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Cybersecurity",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Cybersecurity",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Software/SaaS",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Software/SaaS",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Cloud/Hyperscaler",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Cloud/Hyperscaler",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Foundation-Model-Proxy",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Foundation-Model-Proxy",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-sector:Devices/Endpoint",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Devices/Endpoint",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-theme:el-nino-ag-2026",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "coverage-verdict",
+   "rowId": "theme:el-nino-ag-2026",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-focus-ADBE",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "ADBE",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-04-close-focus-ORCL",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "ORCL",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-04-close-focus-MU",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "MU",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-04-close-focus-ASML",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "ASML",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-04-close-focus-TSM",
+   "issuedAt": "2026-09-06T21:26:47.840Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "TSM",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-spy-t1",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "spy-direction",
+   "rowId": null,
+   "ticker": null,
+   "token": null,
+   "p": null
+  },
+  {
+   "id": "2026-09-06-weekly-spy-t5",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "spy-direction",
+   "rowId": null,
+   "ticker": null,
+   "token": null,
+   "p": null
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-rates.long",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "rates.long",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-policy.path",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "policy.path",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-credit",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "credit",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-vol",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "vol",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-dealer.positioning",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "dealer.positioning",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-flow",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "flow",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-fx",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "fx",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-equity.internals",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "equity.internals",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Computer/GPU",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Computer/GPU",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Semi-Logic/ASIC",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Semi-Logic/ASIC",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Foundry",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Foundry",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Semi-Cap/EDA",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Semi-Cap/EDA",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Memory/Storage",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Memory/Storage",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Cybersecurity",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Cybersecurity",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Software/SaaS",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Software/SaaS",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Cloud/Hyperscaler",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Cloud/Hyperscaler",
+   "ticker": null,
+   "token": "fade",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Foundation-Model-Proxy",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Foundation-Model-Proxy",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-sector:Devices/Endpoint",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "sector:Devices/Endpoint",
+   "ticker": null,
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-theme:el-nino-ag-2026",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "coverage-verdict",
+   "rowId": "theme:el-nino-ag-2026",
+   "ticker": null,
+   "token": "strengthen",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-focus-TSLA",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "TSLA",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-AVGO",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "AVGO",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-TXN",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "TXN",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-IBM",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "IBM",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-INTC",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "INTC",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-CDNS",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "CDNS",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-STX",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "STX",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-TER",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "TER",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-LRCX",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "LRCX",
+   "token": null,
+   "p": 0.5
+  },
+  {
+   "id": "2026-09-06-weekly-focus-AAPL",
+   "issuedAt": "2026-09-06T21:28:52.917Z",
+   "kind": "focus-admit",
+   "rowId": null,
+   "ticker": "AAPL",
+   "token": null,
+   "p": 0.5
+  }
+ ],
+ "receipts": [
+  {
+   "commitmentId": "2026-09-04-close-verdict-rates.long",
+   "status": "pending",
+   "reason": "no later observation of rates.long yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-policy.path",
+   "status": "pending",
+   "reason": "no later observation of policy.path yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-credit",
+   "status": "pending",
+   "reason": "no later observation of credit yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-vol",
+   "status": "pending",
+   "reason": "no later observation of vol yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-dealer.positioning",
+   "status": "pending",
+   "reason": "no later observation of dealer.positioning yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-flow",
+   "status": "pending",
+   "reason": "no later observation of flow yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-fx",
+   "status": "pending",
+   "reason": "no later observation of fx yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-equity.internals",
+   "status": "pending",
+   "reason": "no later observation of equity.internals yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Computer/GPU",
+   "status": "pending",
+   "reason": "no later observation of sector:Computer/GPU yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Semi-Logic/ASIC",
+   "status": "pending",
+   "reason": "no later observation of sector:Semi-Logic/ASIC yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Foundry",
+   "status": "pending",
+   "reason": "no later observation of sector:Foundry yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Semi-Cap/EDA",
+   "status": "pending",
+   "reason": "no later observation of sector:Semi-Cap/EDA yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Memory/Storage",
+   "status": "pending",
+   "reason": "no later observation of sector:Memory/Storage yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Cybersecurity",
+   "status": "pending",
+   "reason": "no later observation of sector:Cybersecurity yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Software/SaaS",
+   "status": "pending",
+   "reason": "no later observation of sector:Software/SaaS yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Cloud/Hyperscaler",
+   "status": "pending",
+   "reason": "no later observation of sector:Cloud/Hyperscaler yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Foundation-Model-Proxy",
+   "status": "pending",
+   "reason": "no later observation of sector:Foundation-Model-Proxy yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-sector:Devices/Endpoint",
+   "status": "pending",
+   "reason": "no later observation of sector:Devices/Endpoint yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-verdict-theme:el-nino-ag-2026",
+   "status": "pending",
+   "reason": "no later observation of theme:el-nino-ag-2026 yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-focus-ADBE",
+   "status": "pending",
+   "reason": "no daily bar for ADBE on 2026-09-11 yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-focus-ORCL",
+   "status": "pending",
+   "reason": "no daily bar for ORCL on 2026-09-11 yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-focus-MU",
+   "status": "pending",
+   "reason": "no daily bar for MU on or before 2026-09-29 yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-focus-ASML",
+   "status": "pending",
+   "reason": "no daily bar for ASML on or before 2026-10-13 yet"
+  },
+  {
+   "commitmentId": "2026-09-04-close-focus-TSM",
+   "status": "pending",
+   "reason": "no daily bar for TSM on or before 2026-10-14 yet"
+  }
+ ],
+ "baselines": [
+  "baseline",
+  "baseline"
+ ]
+}

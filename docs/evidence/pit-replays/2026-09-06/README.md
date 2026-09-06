@@ -36,6 +36,8 @@ a commit on this branch.
 | `review-v5-replay` | `run-76a4152d-0237-4005-8679-2e300f79685a` | weekly | `--replay-from run-091729d0…` | completed |
 | `review-v6`        | `run-ff4af333-a2b7-4321-8a45-01424aa77fd3` | close  | `2026-09-04T20:15:00Z`        | completed |
 | `review-v6`        | `run-347fbbd9-706c-4a6c-a9cf-e2f3860887ff` | weekly | live (no `--as-of`)           | completed |
+| `review-v7`        | `run-e7abdf17-ab5e-4dee-ac74-5d5450bea282` | close  | `2026-09-04T20:15:00Z`        | completed |
+| `review-v7`        | `run-bf4b1795-b627-4df8-a5fe-b744ffb8e0d1` | weekly | live (no `--as-of`)           | completed |
 
 Earlier variants `review-v1` … `review-v4` were the same pair re-run after each
 defect below was fixed; only the final pair is kept here. `n = 1` per variant:
@@ -202,6 +204,79 @@ haiku 3 / 1872 / 22.5 s; `scenario-analyst` opus 6 / 1198 / 34.1 s;
   documented above, deliberately not changed.
 - `MASSIVE_API_KEY` is still absent, so `corporate` and `assignmentRisk` are
   still unexercised.
+
+## review-v7 — the same pair after five more fixes, 2026-09-07
+
+`review-v6` left three things open and one of them was the document's own
+content: 11 of 23 coverage rows carried a verdict on BOTH documents, over a
+frame that had priced every one of them. `review-v7` is the same pair (`close`
+`2026-09-04T20:15:00Z`, then `weekly` live) into a fresh state root at
+`9372ce6`, after five fixes.
+
+| #   | v6 defect                                                            | Root cause                                                                                                                                     | v7                                                                                             |
+| --- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| 1   | 11 of 23 coverage rows answered; the omission was not measured        | the prompt said "one entry per row you were given" and never said WHICH rows; `coverageGaps` counts an unpriceable row and an unanswered one alike | both prompts list the 23 ids; the renderer names omitted priced ids in `faults`. **19 of 19 answerable rows called, on both documents** |
+| 2   | §5 dropped a paragraph for naming ADBE 2026-09-10                    | the admitted set held only `ow_uw_calendar` and `ow_argon_policy_path`; the focus rows' own earnings never reached it                          | `attachFocusCalendar` puts them on `frame.calendar` with the §G.5 implied move as the forecast — **18 admitted rows, and §5's paragraph survived** |
+| 3   | `flow — 39758465 → +0 USD — CONTINUE (0USD..0USD)`                   | every band is a multiple of the prior magnitude, and 0.5x0 = 1.5x0 = 0                                                                          | `(no prior move)`, and `classify` returns null so `settleVerdict` pends rather than scoring it |
+| 4   | §4 restated `55.7`, which §3 printed                                  | the rule was prose in the persona; the author had to derive the list from the payload                                                          | `frame.noRestate` is the exact `{id, level}` list, from the same `printedLevels` the fault uses. **Still fired — see below** |
+| 5   | —                                                                     | the `0 scored` branch said to stop, and the v7 weekly stopped writing the DOCUMENT: one sentence and five empty fields, 0 of 23 rows           | the branch names the paragraph it ends and the five fields written regardless                  |
+
+Defect 5 is the rerun's own: the FIRST v7 weekly (`run-30f4f3a0`, discarded)
+returned `{"review": "<one sentence>", "outlook": "", "catalysts": "",
+"coverage": [], "focus": [], "themes": []}` and said why in its working notes.
+That was a wording bug in the persona, not a routing one, and the pair was
+re-run from a clean state root after it was fixed.
+
+### What the v7 weekly delivered
+
+Sections `1 · Scorecard` … `7 · Open calls` in order, then the week reviewer's
+three windows. 23 coverage rows: **3 UNTESTED** (`rates.front` and
+`curve.shape` — DGS2 is not ingested; `commodities` — no payload, the
+TradingView app was not running), 1 renderer-filled (`calls.open`), and **19
+answered with a token, a `p`, a `why` and an observable**. `coverageGaps` 3,
+against 14 on v6. 12 rotation rows plus the benchmark footer, as of
+2026-09-04. 15 focus rows, all 15 dated, 5 with a `why`.
+
+**§5 now names the focus list's own earnings.** 18 admitted rows — 15 focus
+earnings dates carrying their implied move as the forecast, plus the three
+FOMC meetings — and the model's paragraph about ADBE, ORCL, MU, ASML and TSM
+printed rather than being dropped.
+
+**The ledger:** 55 commitments over the pair (38 `coverage-verdict`, 15
+`focus-admit`, 2 `spy-direction`) and 24 receipts, all `pending`. Nineteen
+pend on `no later observation of <rowId> yet` and five on `no daily bar for
+<ticker> …` — the same-day settlement clock documented above is unchanged and
+was not changed to make this pass.
+
+### Still open after v7
+
+- **§4 still restates a level.** `下周展望 restates the level 14.32, which
+  section 3 already printed` — the exact figure was on `frame.noRestate`, and
+  the author used it anyway. Handing over the numbers did not stop it; the
+  renderer records the fault and prints the paragraph regardless, which is the
+  behaviour §J asks for. A stripping renderer is the next lever, and it was
+  deliberately not pulled here.
+- **The close leaks one meta word.** `gate meta-leak refused: 1 meta leak:
+  section 3 body /\bfrozen\b/` — a model-written `why` clause on a coverage
+  row. `metaLeakHits` 1 on the close, 0 on the weekly; it appeared only
+  because the author now answers nineteen rows instead of eleven.
+- **The close discards two focus lines.** `focus TSLA` and `focus AVGO`: the
+  editor wrote a line for seven names when the daily list is five.
+- **`ow_tv_commodities` answered nothing** on this machine, which is why
+  `commodities` is one of the three untested rows. Not a code defect.
+- Nothing settles inside one sitting; `MASSIVE_API_KEY` is still absent.
+  Both unchanged and both documented above.
+
+Tokens per role on the v7 pair (audit `span`, both runs, model spans only):
+`editor` opus 6 in / 3582 out; `regime-analyst` opus 6 / 2101; `weekly-analyst`
+haiku 8 / 2837; `scenario-analyst` opus 6 / 918; `week-reviewer` opus 4 / 1224;
+`structure-designer` opus 4 / 885; `risk-reviewer` opus 4 / 867; `gex-reporter`
+haiku 3696 / 110. 258.4 s of model wall time over the two runs.
+
+Artifacts in `review-v7/`: both rendered reports, the 114-row `metric` dump
+(`metrics.txt`), the ledger (`ledger.json`), and `weekly-view.json` — the
+delivered `view` payload, kept because it is the sample the argon consumer
+builds against.
 
 ## Deploy step — not optional
 
