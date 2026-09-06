@@ -216,6 +216,15 @@ export function forecastFrom(report: RunReport): ForecastBlock | undefined {
     !Number.isFinite(reference.value)
   )
     return { scorable: false, reason: "referenceClose is not a {date, value} pair" };
+  // A zero anchor is not a price, and every direction leg minted against one is
+  // unfalsifiable: `settleSpy` compares the settling close to it, and every
+  // close is above zero. A laptop PIT replay minted t1/t5 commitments anchored
+  // at 0 before this refusal existed.
+  if (!(reference.value > 0))
+    return {
+      scorable: false,
+      reason: "referenceClose.value is not a positive price",
+    };
   const bad = ["t1Down", "t5Down"].filter((key) => !probability(row[key]));
   if (bad.length > 0)
     return { scorable: false, reason: `${bad.join(", ")} outside [0,1] or not a number` };
