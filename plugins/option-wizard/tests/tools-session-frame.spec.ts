@@ -51,7 +51,12 @@ describe("ow_session_frame", () => {
   it("never throws, and every unanswered sibling is a named skip", async () => {
     const frame = JSON.parse(await frameTool.run({})) as {
       kind: string;
-      rows: Array<{ id: string; untested?: string }>;
+      rows: Array<{
+        id: string;
+        untested?: string;
+        level?: string;
+        rendererFilled?: boolean;
+      }>;
       coverage: Array<{
         layer: string;
         source: string;
@@ -64,7 +69,17 @@ describe("ow_session_frame", () => {
     };
     expect(frame.kind).toBe(SESSION_FRAME_KIND);
     expect(frame.rows.length).toBe(expectedRows);
-    expect(frame.rows.every((row) => row.untested !== undefined)).toBe(true);
+    // Every row but one. `calls.open` is renderer-filled from the ledger this
+    // same function reads, so it answers `0` even on a machine with no keys.
+    expect(
+      frame.rows
+        .filter((row) => row.rendererFilled !== true)
+        .every((row) => row.untested !== undefined),
+    ).toBe(true);
+    const calls = frame.rows.find((row) => row.id === "calls.open")!;
+    expect(calls.rendererFilled).toBe(true);
+    expect(calls.level).toBe("0");
+    expect(calls.untested).toBeUndefined();
     expect(frame.mode).toBe("no-data");
     expect(frame.ledger.open).toEqual([]);
     for (const row of frame.coverage) {

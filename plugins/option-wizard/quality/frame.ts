@@ -496,6 +496,16 @@ export function buildFrame(args: {
   const days = read.commitments
     .map((commitment) => commitment.issuedAt.slice(0, 10))
     .sort();
+  // `calls.open` is the ledger's OWN open count, and the ledger is read here.
+  // The row was reaching the model as an ordinary coverage row with
+  // "no ledger read for this run" on it, and coming back `untested` — a
+  // verdict token on a number this function already holds.
+  for (const row of rows)
+    if (row.rendererFilled === true && row.id === "calls.open") {
+      row.level = String(open.length);
+      row.delta = open.length;
+      delete row.untested;
+    }
   const ledger: SessionFrame["ledger"] = {
     settledToday,
     open,

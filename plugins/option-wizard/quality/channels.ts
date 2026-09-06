@@ -80,6 +80,16 @@ export interface CoverageRow {
   };
   /** Set iff the datum is absent. The row still prints, as `untested`. */
   untested?: string;
+  /**
+   * The renderer fills this row itself and the MODEL must not answer it.
+   *
+   * `calls.open` is the ledger's own open count. It was handed to the model as
+   * an ordinary coverage row on 2026-09-06 and came back `untested` — a
+   * verdict token on a number the renderer already holds, which can never be
+   * anything but noise. It still occupies its declared slot, so the row count
+   * is unchanged; only the authorship moves.
+   */
+  rendererFilled?: true;
 }
 
 export interface ChannelInputs {
@@ -795,9 +805,9 @@ function callsOpenRow(inputs: ChannelInputs, order: number): CoverageRow {
   // COUNT is the whole datum this row carries.
   const count = inputs.openCalls;
   if (count === undefined || !Number.isFinite(count)) {
-    return { ...base, untested: "no ledger read for this run" };
+    return { ...base, rendererFilled: true, untested: "no ledger read for this run" };
   }
-  return { ...base, level: String(count), delta: count };
+  return { ...base, rendererFilled: true, level: String(count), delta: count };
 }
 
 function sectorRow(

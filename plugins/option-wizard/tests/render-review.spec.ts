@@ -1238,3 +1238,81 @@ describe("the theme view block", () => {
     expect(row.excess1w).toBe("+1.7%");
   });
 });
+
+describe("calls.open is the renderer's row, not the model's", () => {
+  // It was handed to the model as an ordinary coverage row on 2026-09-06 and
+  // came back `untested` — a verdict token on a number the renderer already
+  // holds. It keeps its declared slot, so the row count does not move.
+  const withOpen = (openRows: OpenRow[]) =>
+    frame({
+      rows: fullRows().map((row) =>
+        row.id === "calls.open"
+          ? {
+              ...row,
+              rendererFilled: true as const,
+              level: String(openRows.length),
+              delta: openRows.length,
+            }
+          : row,
+      ),
+      ledger: { settledToday: [], open: openRows, totalCommitments: 3 },
+    });
+
+  const open: OpenRow[] = [
+    {
+      id: "2026-09-04-close-verdict-rates.long",
+      issuedDay: "2026-09-04",
+      issuedPhase: "close",
+      payload: { kind: "coverage-verdict", rowId: "rates.long" },
+    },
+    {
+      id: "2026-09-04-close-verdict-credit",
+      issuedDay: "2026-09-04",
+      issuedPhase: "close",
+      payload: { kind: "coverage-verdict", rowId: "credit" },
+    },
+  ];
+
+  it("prints the ledger's open count and no verdict token", () => {
+    const out = render({ frame: withOpen(open) });
+    const line = body(out.sections, 3)
+      .split("\n")
+      .find((row) => row.startsWith("- calls.open"))!;
+    expect(line).toBe("- calls.open — 2 — printed from the ledger");
+    expect(line).not.toContain("UNTESTED");
+  });
+
+  it("keeps the declared row count and is never a coverage gap", () => {
+    const out = render({ frame: withOpen(open) });
+    const lines = body(out.sections, 3)
+      .split("\n")
+      .filter((row) => row.startsWith("- "));
+    expect(lines.length).toBe(ROW_COUNT);
+    expect(body(out.sections, 3)).not.toContain("left out: calls.open");
+    // Every OTHER row is a gap here (this document answers none of them);
+    // `calls.open` is not one of them.
+    expect(out.gaps).toBe(ROW_COUNT - 1);
+  });
+
+  it("mints no commitment even when the model answers it anyway", () => {
+    const drafts = verdictCommitments({
+      frame: withOpen(open),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "calls.open",
+            token: "continue",
+            p: 0.7,
+            why: "two still pending",
+            observable: "the ledger",
+            scorable: true,
+          },
+        ],
+      },
+      day: "2026-09-06",
+      phase: "weekly",
+    });
+    expect(drafts).toEqual([]);
+  });
+});

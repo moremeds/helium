@@ -511,6 +511,10 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   // disagree with itself: the 2026-09-06 acceptance run printed 19 `UNTESTED`
   // rows over a `coverageGaps` of 16.
   const untestedReason = (row: CoverageRow): string | undefined => {
+    // A renderer-filled row is never a gap: the number is in hand, and no
+    // model entry is expected for it.
+    if (row.rendererFilled === true && row.untested === undefined)
+      return undefined;
     if (row.untested !== undefined) return row.untested;
     const entry = entries.get(row.id);
     if (entry === undefined) return "no verdict token for this row";
@@ -589,6 +593,11 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     if (row.asOf !== undefined && row.asOf.slice(0, 10) < staleBefore)
       stale.push(row);
     if (row.level !== undefined) levels.push(row.level);
+    // §J. The ledger's own count, printed by the renderer that holds it. No
+    // verdict token, no probability, no model words — and it still occupies
+    // its declared slot, so the row count does not move.
+    if (row.rendererFilled === true && row.untested === undefined)
+      return `- ${row.id} — ${row.level ?? "—"} — printed from the ledger`;
     if (untestedReason(row) !== undefined || entry === undefined)
       return `- ${row.id} — untested — UNTESTED — ${NO_DATUM} — settles: ${NO_DATUM}`;
     const shown = row.id.startsWith("theme:")
@@ -990,8 +999,10 @@ export function verdictCommitments(args: {
   for (const entry of args.doc?.coverage ?? []) {
     if (!entry.scorable || entry.token === "untested") continue;
     const row = rows.get(entry.id);
-    // A row with no observation is not a forecast.
+    // A row with no observation is not a forecast, and a row the RENDERER
+    // fills is not the model's to forecast either.
     if (row === undefined || row.untested !== undefined) continue;
+    if (row.rendererFilled === true) continue;
     drafts.push({
       id: `${args.day}-${args.phase}-verdict-${entry.id}`,
       payload: {

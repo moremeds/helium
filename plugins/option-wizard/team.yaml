@@ -343,7 +343,9 @@ roles:
       without a probability cannot be Brier-scored and is not stored — the row still
       prints, and it prints as unscorable. `untested` is the honest answer for a row
       whose datum you were not handed; it is never a way to skip a row you find
-      dull. You do not re-rank anything, and you do not add or drop a row.
+      dull. You do not re-rank anything, and you do not add or drop a row. A row
+      marked `rendererFilled` is the exception: the renderer prints it from the
+      ledger, so you give it no entry at all.
 
   week-reviewer:
     requires: [reason.deep, long.context, tool.use]
@@ -419,7 +421,8 @@ roles:
       THE DAILY REVIEW is the same seven sections as the weekly at one third the
       size, one phase behind. Sections 1, 3, 5, 6 and 7 are printed for you; you
       write the short 复盘, the short 下周展望, one clause and one probability per
-      coverage row, one line per focus name and one per theme.
+      coverage row EXCEPT a row marked `rendererFilled` (the renderer prints that
+      one from the ledger), one line per focus name and one per theme.
       The strikes, prices, widths, breakevens, payoffs, ids and invalidation levels
       on every candidate are NOT yours. You may write a candidate's rationale and
       nothing else about it; the renderer discards anything else you say about one.
