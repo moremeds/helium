@@ -110,10 +110,16 @@ it("every narrative task replies as one sections JSON", () => {
   // prose contributes nothing to the mail — which is exactly how a premarket
   // run that had written four regime sections and four scenario paths
   // delivered a brief with one paragraph in it.
-  for (const id of ["weekly", "frank"]) {
+  // `weekly` left this list on 2026-09-06: it now returns the REVIEW document
+  // (`review`/`outlook`/`catalysts`/`coverage`/`focus`/`themes`), and the seven
+  // section titles are the renderer's, not the model's.
+  for (const id of ["frank"]) {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
+  expect(
+    manifest.tasks.find((t) => t.id === "weekly")?.prompt ?? "",
+  ).toContain('"coverage":[{"id","token","p","why","observable"}]');
   // `scenarios` is the second task whose reply is no longer JUST a sections
   // object: it also states the scored `spyForecast`, so its `sections` key
   // opens a larger object. Same check as `regime` below — the load-bearing
@@ -231,12 +237,15 @@ describe("the editor is one author over seven fragments", () => {
     );
     const prompt = task?.prompt ?? "";
     expect(prompt.length).toBeLessThanOrEqual(20_000);
-    expect(prompt).toContain("STYLE EXEMPLAR");
+    // The 2.5 KB five-section STYLE EXEMPLAR was replaced by brief-craft.md's
+    // blueprint, which is the shape of the document this PR actually ships.
+    expect(prompt).toContain("BLUEPRINT");
+    expect(prompt).not.toContain("STYLE EXEMPLAR");
     // The exemplar's masthead is a NAMED cause carrying that day's number, not
     // a fixed opening phrase. "Rates are (still) the first cause" was the
     // fixed phrase; it shipped as the masthead every day until it was cut.
     expect(prompt).toContain(
-      "A bear-steepener took the 10Y to 4.788%. No candidate ships today.",
+      "Volatility fell 1.14 points on the day the 10-year ground to",
     );
     expect(prompt).not.toContain("first cause");
   });
@@ -250,10 +259,15 @@ describe("the editor is one author over seven fragments", () => {
     expect(persona).not.toContain("first cause");
     expect(persona).toContain("NAME the one input that moved today's tape");
     expect(persona).toContain("OMITTED");
-    // Rates stay a mandatory datapoint even when they are not the cause.
-    expect(persona).toContain("MANDATORY datapoint");
-    // The renderer's trim has to be stated, or the model writes past it.
-    expect(persona).toContain("60 words");
+    // The "MANDATORY datapoint" rule was DELETED on 2026-09-06: it guaranteed
+    // rates prose on days rates did nothing, and it produced "Rates are the
+    // story" three sessions running. The ranked list decides instead.
+    expect(persona).not.toContain("MANDATORY datapoint");
+    expect(persona).toContain("You may not re-rank it");
+    // The renderer's trim has to be stated, or the model writes past it — but
+    // the flat 60-word cap is gone with it; the per-field caps live in the
+    // prompt and in render/budget.ts.
+    expect(persona).toContain("the renderer enforces it, not you");
     expect(persona).toContain("You do not propose trades.");
     expect(persona.length).toBeLessThanOrEqual(4000);
   });
@@ -264,16 +278,23 @@ describe("the editor is one author over seven fragments", () => {
       "`candidates` entries carry ONLY `id` and `rationale`",
     );
     expect(prompt).toContain("cannot be changed here");
-    // The three rules the brief is judged on.
-    expect(prompt).toContain("what CHANGED");
-    expect(prompt).toContain("No filler sentence");
+    // The three rules the brief is judged on. "Say what CHANGED, not what IS"
+    // was deleted: it asked for a delta the model had to work out. The delta is
+    // now handed to it in the frame's `move` field, and the rule says so.
+    expect(prompt).not.toContain("what CHANGED");
+    expect(prompt).toContain("The delta is handed to you");
+    expect(prompt).toContain("No filler");
     // The word budget replaced the flat 120-words-per-section cap on
     // 2026-09-04; since the flash-format change it is a statement of what the
     // renderer does (render/budget.ts), not a request — the prompt must say
     // so, or the model writes past a cut it does not know is coming.
     expect(prompt).toContain("enforced by the renderer");
-    expect(prompt).toContain("60 words");
-    expect(prompt).toContain("at most FIVE");
+    // Per-FIELD caps replaced the flat 60-words-per-section and the
+    // five-section ceiling on 2026-09-06: the document is seven fixed sections
+    // plus the lead item, so "choose the five that matter" had nothing left to
+    // choose from.
+    expect(prompt).toContain("`oneThing`: 180 words");
+    expect(prompt).toContain("`everythingElse`: 5 lines of 12 words");
     expect(prompt).toContain("never an HTTP status code in prose");
   });
 
@@ -510,5 +531,108 @@ describe("the flash page is public — no role reads the book", () => {
         /\b(position|held|holding)\b/u,
       );
     }
+  });
+});
+
+/**
+ * The rewritten personas and prompts (Task 15).
+ *
+ * These are REWRITES, not appends: a persona that carried both "choose the
+ * five that matter" and "print every row" is a persona the model obeys
+ * whichever half it read last. Measured, not eyeballed — the 2026-09-05
+ * rewrite came within 580 characters of `TeamRoleSchema.persona`'s 4000 cap.
+ */
+describe("the review authors, rewritten", () => {
+  it("every persona fits the 4000-character cap, and the rewritten ones with room to spare", () => {
+    // Measured, not eyeballed: the 2026-09-05 rewrite came within 580
+    // characters of `TeamRoleSchema.persona`'s 4000 cap, and a persona over it
+    // does not degrade — parseTeamYaml throws and the tenant is skipped.
+    for (const [name, role] of Object.entries(manifest.roles))
+      expect((role.persona ?? "").length, name).toBeLessThanOrEqual(4000);
+    // The five this PR rewrote are held to 3800. `structure-designer` is 3987
+    // and is NOT rewritten here: trimming it would change design behaviour
+    // outside this change, and it is recorded rather than quietly relaxed.
+    for (const name of [
+      "regime-analyst",
+      "scenario-analyst",
+      "weekly-analyst",
+      "week-reviewer",
+      "editor",
+    ])
+      expect((manifest.roles[name]?.persona ?? "").length, name).toBeLessThan(
+        3800,
+      );
+  });
+
+  it("every prompt fits the 20000-character cap", () => {
+    for (const task of manifest.tasks)
+      expect((task.prompt ?? "").length, task.id).toBeLessThan(20000);
+  });
+
+  it("no persona or prompt still asks for the deleted formats", () => {
+    const text = [
+      ...Object.values(manifest.roles).map((role) => role.persona ?? ""),
+      ...manifest.tasks.map((task) => task.prompt ?? ""),
+    ].join("\n");
+    for (const gone of [
+      "choose the five that matter",
+      "Choose the five that matter",
+      "At most FIVE sections",
+      "at most FIVE",
+      "Layer Coverage",
+      "MANDATORY datapoint",
+      "BEAT-AND-RAISE",
+      "Say what CHANGED",
+      "settle each of the week's numbered calls by name",
+    ])
+      expect(text, gone).not.toContain(gone);
+  });
+
+  it("exactly one role is asked for the regime-state fence, and it is the editor", () => {
+    // `liftState` runs on EVERY step and a later fence overwrites an earlier
+    // one, so two authors would silently race.
+    const authors = Object.entries(manifest.roles)
+      .filter(([, role]) => (role.persona ?? "").includes("regime-state"))
+      .map(([name]) => name);
+    expect(authors).toEqual(["editor"]);
+  });
+
+  it("the review author is bound to the ledger and to one largest miss", () => {
+    const persona = manifest.roles["weekly-analyst"]?.persona ?? "";
+    expect(persona).toContain("exactly one");
+    expect(persona).toContain("ow_session_frame");
+    expect(manifest.roles["weekly-analyst"]?.permissions.tools).toContain(
+      "ow_session_frame",
+    );
+    expect(manifest.roles["weekly-analyst"]?.permissions.tools).toContain(
+      "ow_rotation",
+    );
+  });
+
+  it("the scenario analyst is bounded to section 5", () => {
+    const persona = manifest.roles["scenario-analyst"]?.persona ?? "";
+    expect(persona).toContain("150");
+    expect(persona).toContain("base case");
+  });
+
+  it("the week reviewer is forbidden P/L outside the longest window", () => {
+    const persona = manifest.roles["week-reviewer"]?.persona ?? "";
+    expect(persona).toContain("no P/L");
+    expect(persona).toContain("sample too small to score edge");
+  });
+
+  it("both review authors are bounded on the focus and theme lines", () => {
+    for (const id of ["weekly", "edit"]) {
+      const prompt = manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
+      expect(prompt, id).toContain("at most 20 words");
+      expect(prompt, id).toContain("never a direction");
+      expect(prompt, id).toContain("PROPOSED:");
+    }
+  });
+
+  it("the review authors are told the verdict needs a probability", () => {
+    const persona = manifest.roles["weekly-analyst"]?.persona ?? "";
+    expect(persona).toContain("0.50");
+    expect(persona).toContain("0.95");
   });
 });
