@@ -612,12 +612,12 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // its declared slot, so the row count does not move.
     if (row.rendererFilled === true && row.untested === undefined)
       return `- ${row.id} — ${row.level ?? "—"} — printed from the ledger`;
-    // THREE FIELDS AND NO MORE. It used to read
+    // THREE FIELDS AND NO MORE WHEN THERE IS NO DATUM. It used to read
     // `rates.front — untested — UNTESTED — data not printed this period —
     // settles: data not printed this period`: five fields, four of which say
-    // the same nothing, on 18 of 23 rows. The REASON goes here; the
-    // `left out:` line below still carries the source's own words.
-    if (untestedReason(row) !== undefined || entry === undefined)
+    // the same nothing, on 18 of 23 rows. The `left out:` line below still
+    // carries the source's own words.
+    if (row.untested !== undefined)
       return `- ${row.id} — ${NO_DATUM} — UNTESTED`;
     const shown = row.id.startsWith("theme:")
       ? (() => {
@@ -625,12 +625,22 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
           return `${triple.week} (1w) · ${triple.since} (since ${row.theme === undefined ? "?" : (frame.declared.themes.find((t) => `theme:${t.id}` === row.id)?.entered ?? "?")})`;
         })()
       : `${row.level ?? "—"} → ${row.move ?? row.prior ?? "—"}`;
+    const members =
+      row.members === undefined ? "" : ` — members: ${row.members.join(", ")}`;
+    // A DATUM NOBODY CALLED STILL PRINTS ITS NUMBER. Folding this into the
+    // no-datum line put "no datum this period" beside ten sector rows the
+    // frame had just priced, on the review-v6 rerun where the author answered
+    // the macro rows and stopped. It stays a gap and it stays UNTESTED — the
+    // count is what `coverageGaps` is measured against — but it does not
+    // claim the frame came back empty.
+    if (entry === undefined)
+      return `- ${row.id} — ${shown} — UNTESTED — not called this period${members}`;
+    if (entry.token === "untested")
+      return `- ${row.id} — ${shown} — UNTESTED — ${entry.why || "—"}${members}`;
     const band =
       row.delta === undefined
         ? ""
         : ` ${bandText(entry.token, row.delta, unitOf(row.move))}`;
-    const members =
-      row.members === undefined ? "" : ` — members: ${row.members.join(", ")}`;
     return `- ${row.id} — ${shown} — ${entry.token.toUpperCase()}${band} — ${entry.why || "—"} — settles: ${entry.observable || "—"}${members}`;
   };
 

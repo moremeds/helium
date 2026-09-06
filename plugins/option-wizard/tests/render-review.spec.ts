@@ -1379,6 +1379,31 @@ describe("an untested coverage row prints three fields and no more", () => {
 
   it("still carries the source's own reason on the left-out line", () => {
     const out = render({});
-    expect(body(out.sections, 3)).toContain("left out: rates.front — tool absent");
+    expect(body(out.sections, 3)).toContain(
+      "left out: rates.front — tool absent",
+    );
+  });
+
+  // On the review-v6 rerun the author answered the macro rows and stopped, and
+  // all ten sector rows printed "no datum this period" over a frame that had
+  // just priced every one of them.
+  it("a priced row nobody called prints its number, not `no datum`", () => {
+    const out = render({ frame: frame({ rows: fullRows() }), doc: DOC_EMPTY });
+    const line = body(out.sections, 3)
+      .split("\n")
+      .find((row) => row.startsWith("- sector:Computer/GPU"))!;
+    expect(line).toContain("4.34 → -3.1 bp");
+    expect(line).toContain("UNTESTED — not called this period");
+    expect(line).toContain("members: NVDA, AMD");
+    expect(line).not.toContain("no datum this period");
+    // It is still a gap, and still one of the UNTESTED lines `coverageGaps`
+    // is measured against.
+    expect(out.gaps).toBe(ROW_COUNT);
+    expect(
+      body(out.sections, 3)
+        .split("\n")
+        .filter((row) => row.startsWith("- ") && row.includes("UNTESTED"))
+        .length,
+    ).toBe(ROW_COUNT);
   });
 });
