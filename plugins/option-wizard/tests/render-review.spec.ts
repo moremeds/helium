@@ -274,7 +274,9 @@ describe("section 3 — the coverage list never shrinks", () => {
     const out = render({});
     const section = body(out.sections, 3);
     for (const line of section.split("\n").filter((l) => l.startsWith("- ")))
-      expect(line).toContain("untested");
+      expect(line).toBe(
+        `- ${line.split(" — ")[0]!.slice(2)} — no datum this period — UNTESTED`,
+      );
     expect(out.gaps).toBe(ROW_COUNT);
     expect(
       section.split("\n").filter((l) => l.startsWith("left out:")).length,
@@ -1314,5 +1316,24 @@ describe("calls.open is the renderer's row, not the model's", () => {
       phase: "weekly",
     });
     expect(drafts).toEqual([]);
+  });
+});
+
+describe("an untested coverage row prints three fields and no more", () => {
+  // It read `rates.front — untested — UNTESTED — data not printed this period
+  // — settles: data not printed this period` on 18 of 23 rows: five fields,
+  // four of them saying the same nothing.
+  it("names the row, says there was no datum, and stops", () => {
+    const out = render({});
+    const line = body(out.sections, 3)
+      .split("\n")
+      .find((row) => row.startsWith("- rates.front"))!;
+    expect(line).toBe("- rates.front — no datum this period — UNTESTED");
+    expect(line).not.toContain("settles:");
+  });
+
+  it("still carries the source's own reason on the left-out line", () => {
+    const out = render({});
+    expect(body(out.sections, 3)).toContain("left out: rates.front — tool absent");
   });
 });

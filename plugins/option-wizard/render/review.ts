@@ -243,7 +243,7 @@ export interface ThemeViewRow {
   killMet: boolean;
 }
 
-const NO_DATUM = "data not printed this period";
+const NO_DATUM = "no datum this period";
 /** No inline emphasis in a section body, anywhere. argon's `SectionsPanel`
  *  renders BLOCK-level markdown only — paragraphs, pipe tables, dash lists —
  *  so a `**token**` reaches the public /flash page as literal asterisks. The
@@ -598,8 +598,13 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // its declared slot, so the row count does not move.
     if (row.rendererFilled === true && row.untested === undefined)
       return `- ${row.id} — ${row.level ?? "—"} — printed from the ledger`;
+    // THREE FIELDS AND NO MORE. It used to read
+    // `rates.front — untested — UNTESTED — data not printed this period —
+    // settles: data not printed this period`: five fields, four of which say
+    // the same nothing, on 18 of 23 rows. The REASON goes here; the
+    // `left out:` line below still carries the source's own words.
     if (untestedReason(row) !== undefined || entry === undefined)
-      return `- ${row.id} — untested — UNTESTED — ${NO_DATUM} — settles: ${NO_DATUM}`;
+      return `- ${row.id} — ${NO_DATUM} — UNTESTED`;
     const shown = row.id.startsWith("theme:")
       ? (() => {
           const triple = themeTriple(row);
