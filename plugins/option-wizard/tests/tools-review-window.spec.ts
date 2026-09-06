@@ -275,3 +275,127 @@ describe("ow_review_window", () => {
     ]);
   });
 });
+
+/**
+ * The defect spec §E names, and the counters that replace `week-reviewer`'s
+ * second page.
+ *
+ * The 2026-09-06 weekly reported 20 of 21 sessions as "not written" while the
+ * reports for those days sat on disk: `ow_review_window` decided a session
+ * existed by looking in the STATE tree, which only began being written in
+ * PR #92. A day with a report is a day that ran.
+ */
+describe("ow_review_window — a missing regime record is not a missing session", () => {
+  function tool(stateRoot: string, dbPath = auditDb()) {
+    return buildTools({
+      stateRoot,
+      env: { HELIUM_AUDIT_DB: dbPath },
+      variant: "live",
+      calendar: CALENDAR,
+      extensions: REVIEW_EXTENSIONS,
+    }).find((entry) => entry.name === "ow_review_window")!;
+  }
+
+  async function threeDays(dbPath: string, stateRoot: string) {
+    for (const day of ["2026-09-02", "2026-09-03", "2026-09-04"])
+      report(stateRoot, day, "close", `cause on ${day}`);
+    // Only ONE of the three has a regime record.
+    state(stateRoot, "2026-09-04", "close", "cause on 2026-09-04");
+    return JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+  }
+
+  it("reports every day with a report as a session, and an absent record as unavailable", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = await threeDays(auditDb(), stateRoot);
+    const window = out.windows[0];
+    const days = ["2026-09-02", "2026-09-03", "2026-09-04"].map((day) =>
+      window.sessions.find((s: { day: string }) => s.day === day),
+    );
+    for (const session of days) expect(session.causeTitles.close).toBeDefined();
+    expect(days[0].regime.close.regime).toBe("unavailable");
+    expect(days[1].regime.close.regime).toBe("unavailable");
+    expect(days[2].regime.close.cause).toBe("cause on 2026-09-04");
+    expect(JSON.stringify(window)).not.toContain("not written");
+    expect(window.counters.sessionsWithReport).toBe(3);
+    expect(window.counters.sessionsWithRegime).toBe(1);
+    expect(window.counters.sessionsWithRegime).toBeLessThanOrEqual(
+      window.counters.sessionsWithReport,
+    );
+  });
+
+  it("sums the stored checks, mode and focus rows into the window counters", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const dbPath = auditDb();
+    seedMetrics(dbPath, "2026-09-03", "close", {
+      "checks.scored": 3,
+      "checks.hit": 2,
+      "checks.miss": 1,
+      "checks.notObserved": 0,
+      "select.mode": 0,
+      focusChurn: 2,
+      focusWhyRejected: 1,
+      coverageGaps: 4,
+      budgetViolations: 1,
+    });
+    seedMetrics(dbPath, "2026-09-04", "close", {
+      "checks.scored": 3,
+      "checks.hit": 1,
+      "checks.miss": 0,
+      "checks.notObserved": 2,
+      "select.mode": 3,
+      focusChurn: 1,
+      focusWhyRejected: 0,
+      coverageGaps: 5,
+      budgetViolations: 0,
+    });
+    const out = JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+    const counters = out.windows[0].counters;
+    expect(counters.checks).toEqual({
+      scored: 6,
+      hit: 3,
+      miss: 1,
+      notObserved: 2,
+    });
+    expect(counters.modeHistogram).toEqual({
+      ratio: 1,
+      persistence: 0,
+      invalidation: 0,
+      "no-data": 1,
+    });
+    expect(counters.focus.churn).toBe(3);
+    expect(counters.focus.whyRejected).toBe(1);
+    expect(counters.coverageGaps).toBe(9);
+    expect(counters.budgetViolations).toBe(1);
+  });
+
+  it("keeps P/L out of every window but the longest, and says nothing about divergence", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    expect(out.windows).toHaveLength(3);
+    // Process review and P/L review are different documents; mixing them
+    // anchors judgement to outcome. Asserted as an ABSENCE, deliberately.
+    expect("pnl" in out.windows[0].counters).toBe(false);
+    expect("pnl" in out.windows[1].counters).toBe(false);
+    expect("pnl" in out.windows[2].counters).toBe(true);
+    expect(out.windows[2].counters.pnl).toBe(null);
+    for (const window of out.windows)
+      expect(JSON.stringify(window.counters)).not.toContain("divergence");
+  });
+
+  it("still returns three windows with exactly one scoreboard note when the ledger is missing", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    for (const window of out.windows) {
+      const notes = (window.coverage as string[]).filter((line) =>
+        line.includes("ledger scoreboard unavailable"),
+      );
+      expect(notes).toHaveLength(1);
+      expect(window.counters.verdicts.settled).toBe(0);
+      expect(window.counters.calls.hitRate).toBe(null);
+    }
+  });
+});

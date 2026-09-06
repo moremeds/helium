@@ -15,7 +15,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { AuditStore } from "@helium/core";
+import { AuditStore, readLedger } from "@helium/core";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
 import {
   candidatesFrom,
@@ -1150,6 +1150,16 @@ const ReviewWindowParams = z.object({
  * The store is opened per call and closed in a `finally`. A tool that leaks a
  * SQLite handle leaks one per run, forever.
  */
+/** `select.mode` is stored as a NUMBER (the audit table holds numbers), and
+ *  `render/one-thing.ts`'s `MODE_CODE` is what wrote it. This is that map read
+ *  backwards, so the histogram's keys are the mode names a reader knows. */
+const MODE_NAMES: Record<number, string> = {
+  0: "ratio",
+  1: "persistence",
+  2: "invalidation",
+  3: "no-data",
+};
+
 function qualityByDay(
   env: NodeJS.ProcessEnv,
   fromDay: string,
@@ -2764,6 +2774,12 @@ export function buildTools(cfg: {
             span[span.length - 1] ?? cutoff,
           );
           const sessions = [];
+          // The counters are a FOLD over what this loop already holds — the
+          // metric rows `qualityByDay` returned and the per-day regime records
+          // — never a second audit query.
+          const realRegime = new Set<string>();
+          let reported = 0;
+          let withRegime = 0;
           for (const day of span) {
             const causeTitles: Record<string, string> = {};
             const quality = measured.rows.get(day) ?? {};
@@ -2782,6 +2798,7 @@ export function buildTools(cfg: {
               if (typeof first.title === "string" && first.title !== "")
                 causeTitles[entry.label] = first.title;
             }
+            let stateReason = "no regime record on disk for this session";
             try {
               const stateDir = join(cfg.stateRoot, "option-wizard", day);
               for (const file of await readdir(stateDir)) {
@@ -2790,11 +2807,35 @@ export function buildTools(cfg: {
                 const parsed = parseRegimeState(
                   JSON.parse(await readFile(join(stateDir, file), "utf8")),
                 );
-                if (parsed !== null) regime[match[1]!] = parsed;
+                if (parsed !== null) {
+                  regime[match[1]!] = parsed;
+                  realRegime.add(`${day}/${match[1]!}`);
+                }
               }
-            } catch {
-              // No records for that day. The empty object says so.
+            } catch (error: unknown) {
+              // THE 2026-09-06 DEFECT. This catch used to be silent, with the
+              // comment "No records for that day. The empty object says so."
+              // It did not say so: `<stateRoot>/option-wizard/<day>/` only
+              // began being written in PR #92, so for every earlier day the
+              // directory is absent — and `week-reviewer`'s rule "a window
+              // whose sessions are empty is reported as empty" turned that
+              // into the weekly's claim that 20 of 21 sessions were "not
+              // written", while the reports for those days sat on disk.
+              //
+              // A session's EXISTENCE is decided by the report file below. A
+              // missing state record is an unavailable BLOCK, and it says
+              // which error made it unavailable.
+              stateReason = `no regime record: ${
+                error instanceof Error ? error.message : String(error)
+              }`;
             }
+            const labels = (byDay.get(day) ?? []).map((entry) => entry.label);
+            for (const label of labels)
+              if (regime[label] === undefined)
+                regime[label] = { regime: "unavailable", reason: stateReason };
+            if (labels.length > 0) reported += 1;
+            if (labels.some((label) => realRegime.has(`${day}/${label}`)))
+              withRegime += 1;
             sessions.push({ day, causeTitles, regime, quality });
           }
           // The Outcome Ledger is a peer session's module and may not be
@@ -2803,6 +2844,27 @@ export function buildTools(cfg: {
           // that never runs.
           let ledger: unknown = null;
           const coverage: string[] = [];
+          // The ledger itself, read LITERALLY: `@helium/core` is a real
+          // dependency of this tenant. Only `summarise` still goes through the
+          // `cliSpecifier` indirection below, because `@helium/cli` is not.
+          let receipts: Array<{
+            commitmentId: string;
+            status: string;
+            scores: Record<string, number>;
+            detail?: unknown;
+          }> = [];
+          let commitments: Array<{ id: string; issuedAt: string; payload: unknown }> =
+            [];
+          try {
+            const read = readLedger(cfg.stateRoot, "option-wizard", {
+              since: sessions[0]?.day ?? cutoff,
+            });
+            receipts = read.receipts as typeof receipts;
+            commitments = read.commitments as typeof commitments;
+          } catch {
+            // An unreadable ledger is a zero, not a throw. The scoreboard note
+            // below already tells the reader the ledger was not available.
+          }
           // An audit database that would not open is one input missing, not a
           // failed review: the cause titles and the regime records still went
           // out above.
@@ -2842,12 +2904,130 @@ export function buildTools(cfg: {
               }`,
             );
           }
+          // ---- the counters: one fold over data already in hand ----
+          const sumOf = (name: string): number => {
+            let total = 0;
+            for (const day of span)
+              for (const byName of Object.values(measured.rows.get(day) ?? {}))
+                total += byName[name] ?? 0;
+            return total;
+          };
+          const modeHistogram: Record<string, number> = {
+            ratio: 0,
+            persistence: 0,
+            invalidation: 0,
+            "no-data": 0,
+          };
+          for (const day of span)
+            for (const byName of Object.values(measured.rows.get(day) ?? {})) {
+              const code = byName["select.mode"];
+              const name = MODE_NAMES[code ?? -1];
+              if (name !== undefined) modeHistogram[name] += 1;
+            }
+          // The one-thing leader is the channel with the top stored score on
+          // that session. Read back out of the metric rows the renderer wrote,
+          // so the counter and the audit table cannot disagree.
+          const leaders: Array<{ day: string; id: string }> = [];
+          for (const day of span) {
+            let best: { id: string; score: number } | undefined;
+            for (const byName of Object.values(measured.rows.get(day) ?? {}))
+              for (const [name, value] of Object.entries(byName)) {
+                const match = /^channel\.([a-z]+)\.score$/u.exec(name);
+                if (match === null) continue;
+                if (best === undefined || value > best.score)
+                  best = { id: match[1]!, score: value };
+              }
+            if (best !== undefined) leaders.push({ day, id: best.id });
+          }
+          const stillTop = (gap: number): number => {
+            let held = 0;
+            for (const [index, row] of leaders.entries()) {
+              const later = leaders[index + gap];
+              if (later === undefined) continue;
+              if (later.id === row.id) held += 1;
+            }
+            return held;
+          };
+          const settledVerdicts = receipts.filter(
+            (row) => row.status !== "pending" && "verdictBrier" in row.scores,
+          );
+          const byToken: Record<string, number> = {};
+          for (const row of settledVerdicts) {
+            const got = (row.detail as { got?: unknown } | undefined)?.got;
+            if (typeof got === "string") byToken[got] = (byToken[got] ?? 0) + 1;
+          }
+          const settledFocus = receipts.filter(
+            (row) => row.status === "hit" || row.status === "miss",
+          );
+          const decided = receipts.filter((row) => row.status !== "pending");
+          const hit = decided.filter((row) => {
+            if (row.status === "hit") return true;
+            const detail = row.detail as
+              | { said?: unknown; got?: unknown }
+              | undefined;
+            return (
+              typeof detail?.said === "string" &&
+              typeof detail.got === "string" &&
+              detail.said === detail.got
+            );
+          }).length;
+          const settledIds = new Set(receipts.map((row) => row.commitmentId));
+          const counters = {
+            sessionsWithReport: reported,
+            sessionsWithRegime: withRegime,
+            checks: {
+              hit: sumOf("checks.hit"),
+              miss: sumOf("checks.miss"),
+              notObserved: sumOf("checks.notObserved"),
+              scored: sumOf("checks.scored"),
+            },
+            oneThingHitRate: {
+              leaderStillTopAt1: stillTop(1),
+              leaderStillTopAt3: stillTop(3),
+              of: leaders.length,
+            },
+            modeHistogram,
+            budgetViolations: sumOf("budgetViolations"),
+            coverageGaps: sumOf("coverageGaps"),
+            verdicts: {
+              settled: settledVerdicts.length,
+              meanBrier:
+                settledVerdicts.length === 0
+                  ? null
+                  : settledVerdicts.reduce(
+                      (total, row) => total + (row.scores.verdictBrier ?? 0),
+                      0,
+                    ) / settledVerdicts.length,
+              byToken,
+            },
+            focus: {
+              churn: sumOf("focusChurn"),
+              hitRate:
+                settledFocus.length === 0
+                  ? null
+                  : settledFocus.filter((row) => row.status === "hit").length /
+                    settledFocus.length,
+              whyRejected: sumOf("focusWhyRejected"),
+            },
+            calls: {
+              scored: decided.length,
+              outstanding: commitments.filter(
+                (row) => !settledIds.has(row.id),
+              ).length,
+              hitRate: decided.length === 0 ? null : hit / decided.length,
+            },
+            // P/L lands ONLY on the longest window: process review and outcome
+            // review are different documents, and mixing them anchors
+            // judgement to outcome. `null` until closed trades exist.
+            ...(days === Math.max(...windows) ? { pnl: null } : {}),
+          };
           out.push({
             days,
             from: sessions[0]?.day ?? cutoff,
             to: sessions[sessions.length - 1]?.day ?? cutoff,
             sessions,
             ledger,
+            counters,
             coverage,
           });
         }
