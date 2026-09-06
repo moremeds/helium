@@ -190,6 +190,44 @@ describe("ow_review_window", () => {
     });
   });
 
+  // THE 2026-09-06 DEFECT. All three windows carried "ledger scoreboard
+  // unavailable: Cannot find package '@helium/cli'", and the week reviewer
+  // wrote "Ledger scoreboard unavailable this window" three times. The import
+  // went through a `const cliSpecifier: string` indirection precisely because
+  // the package was not a dependency — so it could only ever fail.
+  it("carries the ledger scoreboard rather than a note saying it is missing", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    for (const window of out.windows as Array<{
+      ledger: { byGroup?: unknown } | null;
+      coverage?: string[];
+    }>) {
+      expect(window.ledger).not.toBeNull();
+      // The shape `summarise` returns after core PR #97: grouped by
+      // `variant@codeSha`, not by variant.
+      expect(window.ledger!.byGroup).toEqual({});
+      for (const note of window.coverage ?? [])
+        expect(note).not.toContain("ledger scoreboard unavailable");
+    }
+  });
+
+  it("rounds a stored score before the reviewer ever reads it", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const dbPath = auditDb();
+    report(stateRoot, "2026-09-04", "close", "t");
+    // The real value the 2026-09-06 run stored and handed to the reviewer.
+    seedMetrics(dbPath, "2026-09-04", "close", {
+      "channel.vol.score": 1.3037037037037023,
+    });
+    const out = JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+    const friday = out.windows[0].sessions.find(
+      (s: { day: string }) => s.day === "2026-09-04",
+    );
+    expect(friday.quality.close["channel.vol.score"]).toBe(1.3037);
+  });
+
   it("reads only the newest run when a (day, label) ran twice", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
     const dbPath = auditDb();
@@ -233,11 +271,18 @@ describe("ow_review_window", () => {
     });
   });
 
-  it("notes the ledger as unavailable rather than failing", async () => {
+  it("summarises an empty ledger as an empty scoreboard, not as an absence", async () => {
+    // It used to assert `ledger === null` with a coverage note, and that was
+    // the DEFECT being asserted: `@helium/cli` was not a dependency, so the
+    // import could only ever fail. An empty ledger is `{byGroup: {}}` — a
+    // scoreboard with nothing on it, which is a different statement from
+    // "the scoreboard could not be read".
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
     const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
-    expect(out.windows[0].ledger).toBe(null);
-    expect(out.windows[0].coverage.join(" ")).toContain("ledger");
+    expect(out.windows[0].ledger).toEqual({ byGroup: {} });
+    expect(out.windows[0].coverage.join(" ")).not.toContain(
+      "ledger scoreboard unavailable",
+    );
   });
 
   it("notes an unreadable audit database rather than failing", async () => {
@@ -386,14 +431,16 @@ describe("ow_review_window — a missing regime record is not a missing session"
       expect(JSON.stringify(window.counters)).not.toContain("divergence");
   });
 
-  it("still returns three windows with exactly one scoreboard note when the ledger is missing", async () => {
+  it("still returns three windows, with an empty scoreboard and no note, when the ledger is empty", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
     const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
     for (const window of out.windows) {
-      const notes = (window.coverage as string[]).filter((line) =>
-        line.includes("ledger scoreboard unavailable"),
-      );
-      expect(notes).toHaveLength(1);
+      expect(
+        (window.coverage as string[]).filter((line) =>
+          line.includes("ledger scoreboard unavailable"),
+        ),
+      ).toHaveLength(0);
+      expect(window.ledger).toEqual({ byGroup: {} });
       expect(window.counters.verdicts.settled).toBe(0);
       expect(window.counters.calls.hitRate).toBe(null);
     }

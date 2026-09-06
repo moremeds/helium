@@ -228,6 +228,9 @@ importers:
 
   plugins/option-wizard:
     dependencies:
+      '@helium/cli':
+        specifier: file:../../packages/cli
+        version: link:../../packages/cli
       '@helium/core':
         specifier: file:../../packages/core
         version: link:../../packages/core

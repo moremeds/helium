@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { z } from "zod";
 import { AuditStore, readLedger } from "@helium/core";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
+import { summarise } from "@helium/cli/scoreboard";
 import {
   candidatesFrom,
   extractJson,
@@ -2885,11 +2886,16 @@ export function buildTools(cfg: {
             // handed sixteen decimals will quote sixteen decimals.
             const quality = Object.fromEntries(
               Object.entries(measured.rows.get(day) ?? {}).map(
-                ([name, value]) => [
-                  name,
-                  typeof value === "number" && Number.isFinite(value)
-                    ? Math.round(value * 1e4) / 1e4
-                    : value,
+                ([label, byName]) => [
+                  label,
+                  Object.fromEntries(
+                    Object.entries(byName).map(([name, value]) => [
+                      name,
+                      typeof value === "number" && Number.isFinite(value)
+                        ? Math.round(value * 1e4) / 1e4
+                        : value,
+                    ]),
+                  ),
                 ],
               ),
             );
@@ -2983,29 +2989,18 @@ export function buildTools(cfg: {
           // out above.
           if (measured.note !== undefined) coverage.push(measured.note);
           try {
-            const core = (await import("@helium/core")) as {
-              readLedger?: (
-                stateRoot: string,
-                tenant: string,
-                options?: { since?: string },
-              ) => unknown;
-            };
-            // Not a literal specifier on purpose: `@helium/cli` is not yet a
-            // dependency of this tenant (the Outcome Ledger session adds it
-            // with `summarise`), and a literal would make `tsc` fail to
-            // resolve it rather than letting the runtime say so as a coverage
-            // note. Remove the indirection once the dependency lands.
-            const cliSpecifier: string = "@helium/cli";
-            const cli = (await import(cliSpecifier)) as {
-              summarise?: (
-                records: unknown,
-                options: { deployment?: string; variant?: string },
-              ) => unknown;
-            };
-            if (core.readLedger === undefined || cli.summarise === undefined)
-              throw new Error("readLedger/summarise not installed");
-            ledger = cli.summarise(
-              core.readLedger(cfg.stateRoot, "option-wizard", {
+            // A LITERAL specifier, and `@helium/cli` is a real dependency of
+            // this tenant. It went through a `const cliSpecifier: string`
+            // indirection while it was not, which meant the import could only
+            // ever fail: on 2026-09-06 all three windows carried
+            // "ledger scoreboard unavailable: Cannot find package
+            // '@helium/cli'", and the week reviewer wrote "Ledger scoreboard
+            // unavailable this window" three times. `summarise` was also not
+            // reachable from that package's entry point, so declaring the
+            // dependency alone would have swapped one failure for another —
+            // it is exported through `@helium/cli/scoreboard`.
+            ledger = summarise(
+              readLedger(cfg.stateRoot, "option-wizard", {
                 since: sessions[0]?.day ?? cutoff,
               }),
               {},
