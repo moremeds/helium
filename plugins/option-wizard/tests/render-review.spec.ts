@@ -1073,3 +1073,82 @@ describe("the masthead a review document carries", () => {
     expect(built.headline).toContain("issued");
   });
 });
+
+describe("the section list a review document delivers", () => {
+  // THE 2026-09-06 DEFECT. The delivered weekly opened with the scenario
+  // step's own "Section 5 — Dated Catalysts" and the week-reviewer's three
+  // window sections, and reached "1 · Scorecard" fifth. The seven ARE the
+  // document.
+  const built = () =>
+    buildView(
+      report({
+        steps: [
+          {
+            task: "frame",
+            role: "frame-clerk",
+            mode: "deterministic",
+            text: "",
+            toolOutputs: [JSON.stringify(frame({ rows: fullRows() }))],
+          },
+          {
+            task: "scenarios",
+            role: "scenario-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              sections: [
+                {
+                  title: "Section 5 — Dated Catalysts",
+                  body: "No dated calendar rows were admitted to this run.",
+                },
+              ],
+            }),
+          },
+          {
+            task: REVIEW_PERIODS[0],
+            role: "weekly-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              review: "We read the front end wrong.",
+              outlook: "The front end is the question.",
+              catalysts: "",
+              coverage: [],
+              focus: [],
+              themes: [],
+            }),
+          },
+          {
+            task: "week-review",
+            role: "week-reviewer",
+            mode: "model",
+            text: JSON.stringify({
+              sections: [
+                { title: "5 sessions, 2026-08-31 to 2026-09-04", body: "one." },
+                { title: "10 sessions, 2026-08-24 to 2026-09-04", body: "two." },
+                { title: "21 sessions, 2026-08-07 to 2026-09-04", body: "three." },
+              ],
+            }),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+
+  it("opens with the seven fixed titles, in order", () => {
+    const titles = built().sections.map((section) => section.title);
+    expect(titles.slice(0, REVIEW_TITLES.length)).toEqual([...REVIEW_TITLES]);
+  });
+
+  it("appends the week-reviewer's windows after the seventh, unchanged", () => {
+    const titles = built().sections.map((section) => section.title);
+    expect(titles.slice(REVIEW_TITLES.length)).toEqual([
+      "5 sessions, 2026-08-31 to 2026-09-04",
+      "10 sessions, 2026-08-24 to 2026-09-04",
+      "21 sessions, 2026-08-07 to 2026-09-04",
+    ]);
+  });
+
+  it("drops the scenario step's own section — §5 is that content", () => {
+    const titles = built().sections.map((section) => section.title);
+    expect(titles).not.toContain("Section 5 — Dated Catalysts");
+  });
+});
