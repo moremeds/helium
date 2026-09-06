@@ -810,7 +810,14 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   if (catalysts !== "") {
     const haystack = args.calendarRows
       .filter((row) => admitted.includes(row.event))
-      .map((row) => `${row.time} ${row.type} ${row.event}`)
+      // The WHOLE admitted row, forecast and prior included. Keying on the
+      // event name alone dropped a paragraph on the review-v6 close for
+      // saying "HOLD" and "HIKE" — the two words the admitted FOMC rows carry
+      // in their own `forecast` field.
+      .map(
+        (row) =>
+          `${row.time} ${row.type} ${row.event} ${row.forecast ?? ""} ${row.prev ?? ""}`,
+      )
       .join(" ")
       .toLowerCase();
     const unsourced = [

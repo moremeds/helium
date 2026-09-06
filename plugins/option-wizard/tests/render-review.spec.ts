@@ -636,6 +636,39 @@ describe("section 5 — dated catalysts", () => {
     expect(out.faults.join("\n")).toContain("2026-09-16");
   });
 
+  // The review-v6 close dropped a whole §5 paragraph for saying "HOLD" and
+  // "HIKE" — the two words the admitted FOMC rows carry in their own
+  // `forecast` field, which the first version of the check did not read.
+  it("counts the admitted row's forecast and prior as words it carries", () => {
+    const out = render({
+      // The two rows the review-v6 close actually admitted, out of argon's
+      // own policy path.
+      calendarRows: [
+        {
+          time: "2026-09-16",
+          type: "policy path",
+          event: "FOMC 9/16",
+          forecast: "HOLD 50.7%",
+          prev: "3.50-3.75%",
+        },
+        {
+          time: "2026-12-09",
+          type: "policy path",
+          event: "FOMC 12/9",
+          forecast: "HIKE 58%",
+          prev: "3.75-4.00%",
+        },
+      ],
+      doc: {
+        ...DOC_EMPTY,
+        catalysts:
+          "The 2026-09-16 FOMC is a coin flip between HOLD and a HIKE at 50.7%.",
+      },
+    });
+    expect(body(out.sections, 5)).toContain("coin flip");
+    expect(out.faults).toEqual([]);
+  });
+
   it("keeps a paragraph whose every named event an admitted row carries", () => {
     const out = render({
       calendarRows: [admitted],
