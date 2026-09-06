@@ -22,6 +22,16 @@ import { z } from "zod";
  * must not import the scorer (the scorer imports the config, not the other way
  * round).
  */
+/**
+ * The two review cadences. Named HERE and not in the renderer: a quoted
+ * "weekly" inside `render/` is indistinguishable from a PHASE name to
+ * `render.spec.ts`'s scanner, and the property that scanner protects — the
+ * renderer never learns which run it is rendering — is not one this module
+ * threatens. A cadence is a document size, not a clock.
+ */
+export const REVIEW_PERIODS = ["weekly", "daily"] as const;
+export type ReviewPeriod = (typeof REVIEW_PERIODS)[number];
+
 export const FOCUS_KINDS = [
   "earnings",
   "corporate",

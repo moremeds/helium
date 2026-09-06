@@ -147,7 +147,15 @@ export interface SessionFrame {
   caps: { weekly: Caps; daily: Caps };
   /** The declaration the row list was built from, so the renderer and the tests
    *  can recompute the expected count instead of holding a constant. */
-  declared: { coverage: string[]; sectors: string[]; themes: ThemeSpec[] };
+  declared: {
+    coverage: string[];
+    sectors: string[];
+    themes: ThemeSpec[];
+    /** §G.4's "exactly 15 / exactly 5, or the row says why not". The renderer
+     *  needs the DECLARED size to know a short list is short — the list it was
+     *  handed cannot tell it. Absent when the tenant declared no `focus:`. */
+    focus?: { weekly: number; daily: number };
+  };
   coverage: Array<{
     layer: string;
     source: string;
@@ -337,10 +345,13 @@ export function buildFrame(args: {
       })),
   ];
 
-  const declared = {
+  const declared: SessionFrame["declared"] = {
     coverage: review.coverage,
     sectors: review.sectors,
     themes: review.themes,
+    ...(review.focus === undefined
+      ? {}
+      : { focus: { weekly: review.focus.weekly, daily: review.focus.daily } }),
   };
   const rows = coverageRows(inputs, declared);
 

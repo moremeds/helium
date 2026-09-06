@@ -31,6 +31,23 @@ import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
 import { qualityMetrics } from "../quality/index.js";
 import { baselineDraft, forecastCommitments } from "./ledger.js";
+import {
+  parseReviewDoc,
+  reviewMetrics,
+  reviewSections,
+  verdictCommitments,
+  type CalendarRow,
+  type FocusViewRow,
+  type ReviewDoc,
+  type RotationResult,
+  type ThemeViewRow,
+} from "./review.js";
+import {
+  REVIEW_PERIODS,
+  type ReviewPeriod,
+} from "../quality/review-config.js";
+import type { SessionFrame } from "../quality/frame.js";
+import type { RotationRow } from "../quality/themes.js";
 
 export { extractJson } from "./json.js";
 
@@ -326,6 +343,23 @@ export interface BriefView {
   /** One line per renderer-detected authoring fault. NOT `degradation`:
    *  nothing failed. */
   faults?: string[];
+  /** §G. The list this run printed, already trimmed and already filtered.
+   *  `period` is which list it is — from the emitting TASK id, never a run
+   *  label. Additive and optional: argon's `SectionsPanel` renders the seven
+   *  sections generically today, and these three fields exist for a future
+   *  component that wants a real table. */
+  focus?: {
+    period: ReviewPeriod;
+    rows: FocusViewRow[];
+    /** Present only when fewer rows than declared were available — §G.4's
+     *  "exactly 15 / exactly 5 rows, or the row says why not". */
+    shortfall?: string;
+    churn: number;
+  };
+  /** §H. One entry per declared theme, in declared order. */
+  themes?: ThemeViewRow[];
+  /** §H.4. Weekly only. */
+  rotation?: { asOf: string; benchmark: string; rows: RotationRow[] };
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -1652,6 +1686,109 @@ function proseWordsOf(view: BriefView): number {
   );
 }
 
+/**
+ * The `ow_rotation` payload, found BY SHAPE the way `argonBaseline` finds
+ * argon's. A tool output does not record its producer, and `benchmarkReturns`
+ * beside a `rows` array is a shape nothing else in this tenant emits.
+ */
+function rotationFrom(report: RunReport): RotationResult | null {
+  for (const raw of report.steps.flatMap((step) => step.toolOutputs ?? [])) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    const envelope = parsed as Record<string, unknown>;
+    if (
+      envelope.benchmarkReturns === undefined ||
+      !Array.isArray(envelope.rows) ||
+      typeof envelope.benchmark !== "string"
+    )
+      continue;
+    return parsed as RotationResult;
+  }
+  return null;
+}
+
+/** The dated rows `ow_uw_calendar` answered with. Same shape lookup: a `rows`
+ *  array whose entries carry a `time` and an `event`. */
+function calendarRowsFrom(report: RunReport): CalendarRow[] {
+  for (const raw of report.steps.flatMap((step) => step.toolOutputs ?? [])) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    const rows = (parsed as { rows?: unknown }).rows;
+    if (!Array.isArray(rows) || rows.length === 0) continue;
+    const first = rows[0] as Record<string, unknown>;
+    if (typeof first.time !== "string" || typeof first.event !== "string")
+      continue;
+    return rows as CalendarRow[];
+  }
+  return [];
+}
+
+/**
+ * The seven review sections, when a step that writes them ran.
+ *
+ * Which cadence is decided by the emitting TASK id — `weekly` writes the full
+ * document, `edit` writes the same seven sections at a third the size. That is
+ * a manifest fact, not a clock fact: the renderer still does not know what a
+ * run label is.
+ */
+function reviewOf(
+  report: RunReport,
+  frame: SessionFrame | null,
+): {
+  sections: Section[];
+  faults: string[];
+  gaps: number;
+  citations: number;
+  focusWhyMissing: number;
+  focusWhyRejected: number;
+  staleRowsQuoted: number;
+  proposed: Array<{ id: string; thesis: string; evidence: string }>;
+  view: {
+    focus?: BriefView["focus"];
+    themes?: ThemeViewRow[];
+    rotation?: BriefView["rotation"];
+  };
+  doc: ReviewDoc | null;
+  period: ReviewPeriod;
+  rotationRows: number | null;
+} | null {
+  if (frame === null) return null;
+  const weeklyTask = REVIEW_PERIODS[0];
+  const step =
+    report.steps.find((entry) => entry.task === weeklyTask) ??
+    report.steps.find((entry) => entry.task === "edit");
+  if (step === undefined) return null;
+  const period: ReviewPeriod =
+    step.task === weeklyTask ? REVIEW_PERIODS[0] : REVIEW_PERIODS[1];
+  const parsed = extractJson(step.text);
+  const doc = parsed === null ? null : parseReviewDoc(parsed).doc;
+  const rotation = period === REVIEW_PERIODS[0] ? rotationFrom(report) : null;
+  const out = reviewSections({
+    frame,
+    rotation,
+    doc,
+    caps: period === REVIEW_PERIODS[0] ? frame.caps.weekly : frame.caps.daily,
+    period,
+    calendarRows: calendarRowsFrom(report),
+  });
+  return {
+    ...out,
+    doc,
+    period,
+    rotationRows: rotation === null ? null : rotation.rows.length,
+  };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   const doc = editorDocFrom(report);
   const frame = frameFrom(report);
@@ -1683,13 +1820,32 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     body: base.oneThing?.body ?? "",
     problems: doc?.problems ?? [],
   });
+  const review = reviewOf(report, frame);
+  const faults = [...(lead.faults ?? []), ...(review?.faults ?? [])];
   return {
     ...base,
     ...(lead.oneThing === undefined
       ? { oneThing: undefined }
       : { oneThing: lead.oneThing }),
     footer: lead.footer,
-    ...(lead.faults === undefined ? {} : { faults: lead.faults }),
+    ...(faults.length === 0 ? {} : { faults }),
+    // Appended AFTER the budget trim on purpose: sections 1/3/5/6/7 are the
+    // renderer's own prints, and a word cap on the model's prose must not eat
+    // a coverage row.
+    ...(review === null
+      ? {}
+      : {
+          sections: [...base.sections, ...review.sections],
+          ...(review.view.focus === undefined
+            ? {}
+            : { focus: review.view.focus }),
+          ...(review.view.themes === undefined
+            ? {}
+            : { themes: review.view.themes }),
+          ...(review.view.rotation === undefined
+            ? {}
+            : { rotation: review.view.rotation }),
+        }),
   };
 }
 
@@ -1704,7 +1860,19 @@ export default function renderReport(
   // the payloads; it never stamps the run context, because the runner already
   // holds it.
   const label = report.phase;
-  const commitments = forecastCommitments(view, label);
+  const review = reviewOf(report, frame);
+  const commitments = [
+    ...forecastCommitments(view, label),
+    ...(review === null || frame === null
+      ? []
+      : verdictCommitments({
+          frame,
+          doc: review.doc,
+          day: report.day,
+          phase: label,
+          period: review.period,
+        })),
+  ];
   const baselines = [baselineDraft(view, report, label)];
   // NO SUBJECT. The renderer does not know the phase — render.spec.ts forbids
   // it naming one — so every subject it could mint reads `option-wizard
@@ -1731,6 +1899,27 @@ export default function renderReport(
             order: frame.ranked.map((row) => row.id),
             proseWords: proseWordsOf(view),
             invalidationComplete: view.changeMyMind !== undefined,
+          })),
+      // The §F/§G/§H rows. Written only when a review step ran: a screen of
+      // nulls on a run that writes no review says nothing.
+      ...(review === null || frame === null
+        ? []
+        : reviewMetrics({
+            frame,
+            sections: review.sections,
+            gaps: review.gaps,
+            citations: review.citations,
+            focus: {
+              churn: frame.focus.churn,
+              whyMissing: review.focusWhyMissing,
+              whyRejected: review.focusWhyRejected,
+            },
+            themes: {
+              rows: frame.declared.themes.length,
+              proposed: review.proposed.length,
+            },
+            rotationRows: review.rotationRows,
+            staleRowsQuoted: review.staleRowsQuoted,
           })),
     ],
     ...(commitments.length === 0 ? {} : { commitments }),
