@@ -399,6 +399,37 @@ describe("section 3 — the coverage list never shrinks", () => {
     expect(body(out.sections, 3)).toContain(">5bp");
     expect(body(out.sections, 3)).not.toContain("4.65");
   });
+
+  // review-v6 close: `flow — 39758465 → +0 USD — CONTINUE (0USD..0USD)`. A
+  // band is a multiple of the prior magnitude, and a nil prior has none.
+  it("prints no band at all when the prior move was nil", () => {
+    const rows = fullRows().map((row) =>
+      row.id === "flow"
+        ? { ...row, level: "39758465", move: "+0 USD", delta: 0 }
+        : row,
+    );
+    const out = render({
+      frame: frame({ rows }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "flow",
+            token: "continue",
+            p: 0.7,
+            why: "the tide did not turn",
+            observable: "next close",
+            scorable: true,
+          },
+        ],
+      },
+    });
+    const line = body(out.sections, 3)
+      .split("\n")
+      .find((row) => row.startsWith("- flow"))!;
+    expect(line).toContain("CONTINUE (no prior move)");
+    expect(line).not.toContain("0USD..0USD");
+  });
 });
 
 describe("what argon's section renderer can actually show", () => {

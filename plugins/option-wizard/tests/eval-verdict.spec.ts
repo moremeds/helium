@@ -58,6 +58,15 @@ describe("classify", () => {
     expect(classify(-3.1, -0.05)).toBe("fade");
     expect(classify(-3.1, 0.05)).toBe("fade");
   });
+
+  // review-v6 close: `flow — 39758465 → +0 USD — CONTINUE (0USD..0USD)`.
+  // Every band is a multiple of the prior magnitude, so a nil prior has no
+  // band and there is nothing to be right about.
+  it("a NIL prior has no band at all — neither continue nor strengthen", () => {
+    expect(classify(0, 0)).toBe(null);
+    expect(classify(0, 4.4)).toBe(null);
+    expect(classify(-0, -9)).toBe(null);
+  });
 });
 
 describe("settleVerdict", () => {
@@ -104,6 +113,25 @@ describe("settleVerdict", () => {
     expect((receipt.detail as { reason: string }).reason).toContain(
       "rates.front",
     );
+  });
+
+  it("pends rather than scoring a verdict whose prior move was nil", () => {
+    const receipt = settleVerdict({
+      commitment: verdict({ rowId: "flow", token: "continue", delta: 0 }),
+      later: [
+        verdict({
+          rowId: "flow",
+          issuedAt: "2026-09-11T20:30:00Z",
+          delta: 39_758_465,
+        }),
+      ],
+      now: NOW,
+    });
+    expect(receipt.status).toBe("pending");
+    expect((receipt.detail as { reason: string }).reason).toContain(
+      "was nil: no band to score",
+    );
+    expect(receipt.scores.verdictBrier).toBeUndefined();
   });
 
   it("pends when fewer open days have passed than the cadence asks for", () => {

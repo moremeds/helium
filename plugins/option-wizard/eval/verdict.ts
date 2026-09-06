@@ -29,13 +29,20 @@ export const VERDICT_BANDS = {
 
 export type RealisedToken = "continue" | "reverse" | "strengthen" | "fade";
 
-/** The class the NEXT observation puts this row in, given the prior move. */
-export function classify(prior: number, next: number): RealisedToken {
+/**
+ * The class the NEXT observation puts this row in, given the prior move.
+ *
+ * `null` when the prior move was NIL. Every band above is a multiple of the
+ * prior magnitude, so a prior of zero has no band at all: 0.5x0 and 1.5x0 are
+ * both 0, and the review-v6 close printed exactly that — `flow — 39758465 →
+ * +0 USD — CONTINUE (0USD..0USD)`, a verdict inside an empty interval. There
+ * is nothing here to be right or wrong about, so the row is untested for the
+ * band rather than scored against one.
+ */
+export function classify(prior: number, next: number): RealisedToken | null {
   const magnitude = Math.abs(prior);
   const size = Math.abs(next);
-  // A prior of nil has no magnitude to measure against: any move at all is a
-  // strengthening of nothing, and nil-on-nil continues.
-  if (magnitude === 0) return size === 0 ? "continue" : "strengthen";
+  if (magnitude === 0) return null;
   const ratio = size / magnitude;
   if (ratio < VERDICT_BANDS.nilFraction) return "fade";
   if (Math.sign(next) !== Math.sign(prior)) return "reverse";
@@ -159,6 +166,14 @@ export function settleVerdict(args: {
   const prior = payload.observed?.delta ?? 0;
   const later = (next.payload as VerdictPayload).observed?.delta ?? 0;
   const realised = classify(prior, later);
+  // A nil prior gives no band, so there is no claim to score. Pending, not a
+  // hit and not a miss: the next dated observation may carry a real move.
+  if (realised === null)
+    return pending(
+      commitment,
+      now,
+      `prior move on ${payload.rowId} was nil: no band to score`,
+    );
   return {
     commitmentId: commitment.id,
     runId: "",

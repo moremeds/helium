@@ -382,6 +382,12 @@ function outcomeOf(row: SettledRow): "hit" | "miss" | null {
 function bandText(token: string, delta: number, unit: string): string {
   const named = unitFromToken(unit);
   const size = Math.abs(delta);
+  // Every band is a multiple of the prior magnitude, so a nil prior has no
+  // band: the review-v6 close printed `flow — 39758465 → +0 USD — CONTINUE
+  // (0USD..0USD)`, a verdict inside an empty interval. `classify` returns null
+  // on the same input and the receipt stays pending; this is the same fact,
+  // printed.
+  if (size === 0) return "(no prior move)";
   const low = fmt(size * VERDICT_BANDS.continueLow, named);
   const high = fmt(size * VERDICT_BANDS.continueHigh, named);
   const mag = fmt(size, named);
