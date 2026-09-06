@@ -26,22 +26,28 @@ import {
   ExecutionTargetId,
   ProviderRunFailure,
   WorkOrderSchema,
+  appendLedger,
   budgetLine,
   foldSessionLog,
+  outstanding,
   projection,
+  readLedger,
   remaining,
   select,
   topologicalOrder,
   type CapabilityCatalog,
   type Channel,
+  type Commitment,
   type DeliveryReport,
   type EcosystemTool,
   type Gate,
   type LoadedTenant,
   type ModelSelection,
   type Provider,
+  type Receipt,
   type RenderedReport,
   type RunReport,
+  type Settler,
   type TenantCalendar,
   type TenantRenderer,
   type Span,
@@ -53,11 +59,13 @@ import {
   discoverProviders,
   loadGates,
   loadRenderer,
+  loadSettler,
   loadTenantTools,
   tenantToolGaps,
   type Skipped,
 } from "./discovery.js";
-import { codeVersion } from "./code-version.js";
+import { codeVersion, dshVersion } from "./code-version.js";
+import { EvidenceFile, evidencePath, sha256File } from "./evidence.js";
 import {
   loadRecordings,
   pruneRecordings,
@@ -182,6 +190,9 @@ export interface RunOptions {
   tools?: EcosystemTool[];
   /** Injected in tests; loaded from the tenant's `lib/gates/` when absent. */
   gates?: Gate[];
+  /** Injected in tests; loaded from the tenant's built `lib/tools/index.js`
+   *  when absent. */
+  settler?: Settler;
   /** Injected in tests; discovered from `plugins/delivery-*` when absent. */
   channels?: Channel[];
   /** Injected in tests; loaded from the tenant's `lib/render/` when absent.
@@ -930,6 +941,111 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
    *  that the summary happened to paraphrase. */
   const toolOutputs: string[] = [];
 
+  // Doctrine 5: a measurement is read-only over somebody else's ground truth,
+  // so it runs BEFORE the DAG and cannot be starved by a budget the tasks
+  // spend. It is a zero-token span for the same reason a gate is one — the §5
+  // cost query has to be able to separate "what did thinking cost" from "what
+  // did checking cost".
+  const deployment: Commitment["deployment"] =
+    options.asOf !== undefined
+      ? "backtest"
+      : env.HELIUM_DEPLOYMENT === "production"
+        ? "production"
+        : "test";
+  const ledger = readLedger(options.stateRoot, spec.tenant);
+  const open = outstanding(ledger);
+  if (open.length > 0) {
+    const loadedSettler =
+      options.settler === undefined
+        ? // The SAME config `buildTools` was handed above, minus `pit`: a
+          // settler is not point-in-time-marked, it reads history on purpose.
+          await loadSettler(options.tenant.dir, {
+            stateRoot: options.stateRoot,
+            env,
+            variant: options.variant ?? "live",
+            ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
+            ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
+          })
+        : { settler: options.settler, skipped: [] as Skipped[] };
+    if (loadedSettler.skipped[0] !== undefined)
+      report.settlerSkipped = { reason: loadedSettler.skipped[0].reason };
+    if (loadedSettler.settler !== null) {
+      const startedAt = Date.now();
+      let receipts: Receipt[] = [];
+      let detail = "";
+      try {
+        receipts = await loadedSettler.settler.settle(
+          open,
+          options.now?.() ?? new Date(),
+        );
+        detail = `${String(receipts.length)}/${String(open.length)} settled`;
+      } catch (error: unknown) {
+        // A settler that throws leaves every commitment outstanding, which is
+        // exactly right: the next run tries again. It must never fail the run
+        // — nothing the READER gets depends on it.
+        detail = error instanceof Error ? error.message : String(error);
+        report.settlerSkipped = { reason: detail };
+      }
+      appendLedger(
+        options.stateRoot,
+        spec.tenant,
+        // `runId` is stamped HERE, not by the settler: `Settler.settle` is
+        // handed the outstanding commitments and a clock and nothing else, so a
+        // tenant that filled this field would be guessing at the id of the run
+        // it is executing inside.
+        receipts.map((receipt) => ({
+          kind: "receipt" as const,
+          receipt: { ...receipt, runId },
+        })),
+      );
+      options.audit.append({
+        runId,
+        spanId: "settler",
+        tenant: spec.tenant,
+        role: "settler",
+        provider: "none",
+        model: "none",
+        codeVersion: codeVersion(),
+        stepNo: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        contextSize: 0,
+        latencyMs: Math.max(0, Date.now() - startedAt),
+        costUsd: 0,
+        toolName: "settler",
+        toolOutputBytes: Buffer.byteLength(detail, "utf8"),
+        summarised: false,
+        ts: new Date().toISOString(),
+      });
+    }
+  }
+
+  /** taskId -> the exact joined prompt. Kept here rather than on the step row
+   *  so no `report.steps.push` site has to change: a retry after a quota
+   *  re-route is a second row for the SAME task and the same prompt. */
+  const assembledPrompts = new Map<string, string>();
+  const evidence = new EvidenceFile(
+    evidencePath(options.stateRoot, spec.tenant, reportDay, phase, runId),
+    {
+      runId,
+      tenant: spec.tenant,
+      day: reportDay,
+      phase,
+      deployment,
+      variant: options.variant ?? "live",
+      ...(options.asOf === undefined
+        ? {}
+        : { asOf: options.asOf.toISOString() }),
+      startedAt: new Date().toISOString(),
+      codeSha: codeVersion(),
+      dshVersion: dshVersion(),
+      teamYamlSha256: sha256File(join(options.tenant.dir, spec.team)),
+      tenantYamlSha256: sha256File(join(options.tenant.dir, "tenant.yaml")),
+      toolIo: join(options.stateRoot, "runs", runId, "tool-io") + "/",
+    },
+  );
+
   tasks: for (const taskId of topologicalOrder(manifest)) {
     const task = manifest.tasks.find((entry) => entry.id === taskId)!;
     // A task that names phases and does not name THIS one does not run. It is
@@ -1009,6 +1125,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       },
       acceptance: { outputSchema: "text" },
     });
+    assembledPrompts.set(taskId, work.inputs.prompt ?? "");
+    evidence.sync(report, assembledPrompts);
 
     // Input gates guard the STEP, so they run in tool-only mode too: a guard
     // that only exists when a model is live is not a guard.
@@ -1409,6 +1527,34 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       };
     }
   }
+
+  // The last sync before anything leaves the machine: the final step's output
+  // and the rendered view are both on disk before a delivery is attempted.
+  evidence.sync(report, assembledPrompts, rendered?.data);
+
+  // Records precede side effects. The commitment is on disk BEFORE the mail is
+  // attempted, so a delivery that half-succeeds cannot leave a promise nobody
+  // recorded — the same ordering the topology boundary already demands of
+  // intent and evidence.
+  const stamp = new Date().toISOString();
+  const context = {
+    runId,
+    tenant: spec.tenant,
+    issuedAt: stamp,
+    deployment,
+    variant: options.variant ?? "live",
+    ...(options.asOf === undefined ? {} : { asOf: options.asOf.toISOString() }),
+  };
+  appendLedger(options.stateRoot, spec.tenant, [
+    ...(rendered?.commitments ?? []).map((draft) => ({
+      kind: "commitment" as const,
+      commitment: { ...context, id: draft.id, payload: draft.payload },
+    })),
+    ...(rendered?.baselines ?? []).map((draft) => ({
+      kind: "baseline" as const,
+      baseline: { ...context, id: draft.id, payload: draft.payload },
+    })),
+  ]);
 
   // Written AFTER rendering and BEFORE delivery: the renderer is what
   // computes them, and the header line the channels carry is built from

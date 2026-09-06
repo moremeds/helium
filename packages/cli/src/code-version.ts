@@ -47,3 +47,24 @@ function resolveCodeVersion(env: NodeJS.ProcessEnv): string {
   }
   return "unknown";
 }
+
+let cachedDsh: string | undefined;
+
+/**
+ * Which dsh the edge is running, from the root manifest. The evidence file
+ * records it because dsh — not this repo — owns the system prompt and the tool
+ * specs that surround `assembledPrompt`, so a prompt is only reproducible
+ * beside the version that wrapped it.
+ */
+export function dshVersion(): string {
+  if (cachedDsh !== undefined) return cachedDsh;
+  try {
+    const manifest = JSON.parse(
+      readFileSync(join(repoRoot, "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    cachedDsh = manifest.dependencies?.["@deepseek-ai/dsh"] ?? "unknown";
+  } catch {
+    cachedDsh = "unknown";
+  }
+  return cachedDsh;
+}

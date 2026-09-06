@@ -14,6 +14,7 @@ import type {
   EcosystemTool,
   Gate,
   Provider,
+  Settler,
   TenantRenderer,
 } from "@helium/core";
 
@@ -245,6 +246,71 @@ export async function loadGates(
     }
   }
   return { gates, skipped };
+}
+
+/**
+ * A tenant's settler: `<tenant>/tools/index.ts`, `export function
+ * buildSettler(cfg)`, built to `lib/tools/index.js`. Same discovery style as
+ * `VOCABULARY` above, and the same FACTORY shape as `buildTools` — a settler
+ * needs the run's environment keys and the tenant's calendar, and a
+ * module-level constant would have to reach around the host for both.
+ *
+ * Absent is normal and silent: most tenants promise nothing measurable. A
+ * PRESENT but broken settler is a skip with a reason, like a gate, because a
+ * measurement that stopped running must not look like a tenant that never
+ * asked to be measured. A factory that THROWS is the same kind of skip: a
+ * tenant refusing to build a settler it cannot configure is telling the truth,
+ * and the reason travels.
+ */
+export async function loadSettler(
+  tenantDir: string,
+  cfg: TenantToolConfig,
+): Promise<{ settler: Settler | null; skipped: Skipped[] }> {
+  const entry = join(tenantDir, "lib", "tools", "index.js");
+  if (!existsSync(entry)) return { settler: null, skipped: [] };
+  try {
+    const module = (await import(pathToFileURL(entry).href)) as {
+      buildSettler?: unknown;
+    };
+    const factory = module.buildSettler;
+    if (factory === undefined) return { settler: null, skipped: [] };
+    if (typeof factory !== "function") {
+      return {
+        settler: null,
+        skipped: [{ id: "settler", reason: "buildSettler is not a function" }],
+      };
+    }
+    const settler = (factory as (config: TenantToolConfig) => unknown)({
+      stateRoot: cfg.stateRoot,
+      env: cfg.env,
+      variant: cfg.variant,
+      ...(cfg.asOf === undefined ? {} : { asOf: cfg.asOf }),
+      ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
+    });
+    if (
+      settler === null ||
+      typeof settler !== "object" ||
+      typeof (settler as Settler).settle !== "function"
+    ) {
+      return {
+        settler: null,
+        skipped: [
+          { id: "settler", reason: "buildSettler returned no settle()" },
+        ],
+      };
+    }
+    return { settler: settler as Settler, skipped: [] };
+  } catch (error: unknown) {
+    return {
+      settler: null,
+      skipped: [
+        {
+          id: "settler",
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
 }
 
 /**
