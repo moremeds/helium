@@ -18,7 +18,7 @@ import {
 import { channelMetrics, parseOneThingDoc } from "../render/one-thing.js";
 import { parseReviewDoc } from "../render/review.js";
 import { buildView } from "../render/index.js";
-import { MOVE_METRIC } from "../quality/history.js";
+import { LEVEL_METRIC, MOVE_METRIC } from "../quality/history.js";
 import { SPEC, report } from "./fixture-report.js";
 
 const doc = (over: Record<string, unknown> = {}) => ({
@@ -423,5 +423,50 @@ describe("channel metric rows", () => {
     expect(by.get("checks.notObserved")).toBe(0);
     expect(by.get("brief.proseWords")).toBe(123);
     expect(by.get("brief.invalidationComplete")).toBe(1);
+  });
+
+  // Nothing wrote these three rows until 2026-09-06, so `policy.path`, `flow`
+  // and `curve.shape` had no prior to difference against — on any run, ever.
+  // The level is stored EVEN for an excluded channel: "no prior observation
+  // for the policy path" is exactly the state the row exists to end.
+  it("stores the level of the three channels whose payload carries no prior", () => {
+    const rows = channelMetrics({
+      frame: {
+        mode: "ratio",
+        why: "",
+        ranked: [
+          {
+            id: "policy",
+            series: "9/16 hike probability",
+            level: "60",
+            score: null,
+            medianSource: null,
+            excluded: "no prior observation for the policy path",
+          },
+          {
+            id: "flow",
+            series: "market tide net premium",
+            level: "39758465",
+            score: 1,
+            medianSource: 0,
+          },
+          { id: "rates", series: "DGS10", level: "4.77", score: 1, medianSource: 0 },
+        ],
+        checks: { line: "", scored: [] },
+        coverage: [],
+      },
+      moveMetric: MOVE_METRIC,
+      levelMetric: LEVEL_METRIC,
+      order: ["policy", "flow", "rates"],
+      proseWords: 0,
+      invalidationComplete: false,
+    });
+    const by = new Map(rows.map((row) => [row.name, row.value]));
+    expect(by.get(LEVEL_METRIC.policy!)).toBe(60);
+    expect(by.get(LEVEL_METRIC.flow!)).toBe(39758465);
+    // A FRED series carries yesterday inside its own payload, so it needs no
+    // stored level and gets no row.
+    expect(by.has("channel.rates.level")).toBe(false);
+    expect(LEVEL_METRIC.rates).toBeUndefined();
   });
 });

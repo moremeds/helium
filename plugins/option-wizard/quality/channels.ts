@@ -29,14 +29,7 @@ import type { ThemeSpec } from "./review-config.js";
 import { themeRow, type BasketExcess } from "./themes.js";
 
 export type ChannelId =
-  | "rates"
-  | "curve"
-  | "policy"
-  | "credit"
-  | "vol"
-  | "dealer"
-  | "flow"
-  | "event";
+  "rates" | "curve" | "policy" | "credit" | "vol" | "dealer" | "flow" | "event";
 
 export interface Channel {
   id: ChannelId;
@@ -142,10 +135,16 @@ function unavailable(payload: unknown): string | undefined {
   if (payload === undefined || payload === null) return "no payload";
   if (typeof payload !== "object") return "no payload";
   const row = payload as { unavailable?: unknown; reason?: unknown };
-  if (row.unavailable === undefined) return undefined;
-  const kind = String(row.unavailable);
+  // A NON-EMPTY STRING and nothing else. The marker is `{unavailable: "as-of"}`
+  // — a kind, spelled out. `ow_uw_gex` uses the same key for something else
+  // entirely: a per-ticker array of the tickers that did NOT answer, which is
+  // `[]` on a completely successful call. `String([])` is `""`, so every
+  // healthy gex payload read as "unavailable, reason blank" and
+  // `dealer.positioning` printed UNTESTED with an empty reason on every run.
+  if (typeof row.unavailable !== "string" || row.unavailable === "")
+    return undefined;
   const why = typeof row.reason === "string" ? ` — ${row.reason}` : "";
-  return `${kind}${why}`;
+  return `${row.unavailable}${why}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,8 +204,7 @@ function fredPoint(
     ?.fredDirect?.points;
   if (!Array.isArray(points)) return undefined;
   const hit = points.find((p) => (p as { series?: unknown })?.series === id) as
-    | { value?: unknown; asOf?: unknown }
-    | undefined;
+    { value?: unknown; asOf?: unknown } | undefined;
   const value = finite(hit?.value);
   if (value === undefined || typeof hit?.asOf !== "string") return undefined;
   return { value, asOf: hit.asOf };
@@ -234,7 +232,11 @@ function levelChannel(args: {
         ? live.last - live.changeAbs
         : finite(prior?.value);
     if (priorValue === undefined) {
-      return { ...base, level: String(live.last), excluded: `no prior observation for ${fredId}` };
+      return {
+        ...base,
+        level: String(live.last),
+        excluded: `no prior observation for ${fredId}`,
+      };
     }
     const raw = live.last - priorValue;
     const delta = round4(unit === "bp" ? raw * 100 : raw);
@@ -312,7 +314,8 @@ function policyChannel(inputs: ChannelInputs): Channel {
   if (meeting === undefined || probability === undefined) {
     return { ...base, excluded: "no dated meeting in the policy path" };
   }
-  const label = meeting.payload?.label ?? meeting.meeting_date ?? "next meeting";
+  const label =
+    meeting.payload?.label ?? meeting.meeting_date ?? "next meeting";
   const stance = (meeting.payload?.stance ?? "").toLowerCase();
   const series = `${label} ${stance || "policy"} probability`;
   const asOf = meeting.snapshot_date;
@@ -376,7 +379,10 @@ function curveChannel(inputs: ChannelInputs): Channel {
     return { ...base, excluded: "DGS2 not ingested; 2s10s cannot be computed" };
   }
   if (ten.length === 0) {
-    return { ...base, excluded: "DGS10 not ingested; 2s10s cannot be computed" };
+    return {
+      ...base,
+      excluded: "DGS10 not ingested; 2s10s cannot be computed",
+    };
   }
   const now = round4((ten[0]!.value - two[0]!.value) * 100);
   const before =
@@ -416,15 +422,18 @@ function dealerChannel(inputs: ChannelInputs): Channel {
   if (excluded !== undefined) return { ...base, excluded };
   const levels = (inputs.gex as { levels?: unknown }).levels;
   const first = (Array.isArray(levels) ? levels[0] : undefined) as
-    | GexLevel
-    | undefined;
+    GexLevel | undefined;
   if (first === undefined) {
     return { ...base, excluded: "no dealer levels in the payload" };
   }
   const ticker = String(first.ticker ?? "index");
   const flip = first.gammaFlip;
   if (flip === undefined || flip === null) {
-    return { ...base, series: `${ticker} gamma flip`, excluded: "no gamma flip level" };
+    return {
+      ...base,
+      series: `${ticker} gamma flip`,
+      excluded: "no gamma flip level",
+    };
   }
   // ow_uw_gex returns every level as a STRING on purpose; it is copied, and
   // only the parsed copy is ever subtracted.
@@ -479,7 +488,9 @@ function flowChannel(inputs: ChannelInputs): Channel {
   const net = round4(call - put);
   const prior = inputs.priorMetrics?.["channel.flow.net_premium_usd"];
   const asOf =
-    typeof last.timestamp === "string" ? last.timestamp : last.date ?? undefined;
+    typeof last.timestamp === "string"
+      ? last.timestamp
+      : (last.date ?? undefined);
   if (prior === undefined || prior === null || !Number.isFinite(prior)) {
     return {
       ...base,
@@ -603,10 +614,7 @@ const CHANNEL_SERIES: Partial<Record<ChannelId, string>> = {
 
 /** The observation history a channel can supply from its OWN payload, newest
  *  first. Empty when the payload carries no series for it. */
-export function seriesHistory(
-  inputs: ChannelInputs,
-  id: ChannelId,
-): number[] {
+export function seriesHistory(inputs: ChannelInputs, id: ChannelId): number[] {
   const fredId = CHANNEL_SERIES[id];
   if (fredId === undefined) return [];
   return seriesRows(inputs.macro, fredId).map((row) => row.value);
@@ -627,7 +635,8 @@ interface WatchlistChain {
 }
 
 function watchlistChains(watchlist: unknown): WatchlistChain[] {
-  if (watchlist === undefined || unavailable(watchlist) !== undefined) return [];
+  if (watchlist === undefined || unavailable(watchlist) !== undefined)
+    return [];
   const chains = (watchlist as { chains?: unknown }).chains;
   return Array.isArray(chains) ? (chains as WatchlistChain[]) : [];
 }
@@ -725,7 +734,11 @@ function fxRow(inputs: ChannelInputs, order: number): CoverageRow {
       ? {}
       : {
           prior: String(broad[1].value),
-          move: signed(round4(broad[0]!.value - broad[1].value), 4, "index pts"),
+          move: signed(
+            round4(broad[0]!.value - broad[1].value),
+            4,
+            "index pts",
+          ),
         }),
     asOf: broad[0]!.obs_date,
   };

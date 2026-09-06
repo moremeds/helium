@@ -176,6 +176,9 @@ export interface LeadFrame {
   ranked: Array<{
     id: string;
     series: string;
+    /** The channel's own number, as its source spelled it. Read back as a
+     *  string and parsed only where a `LEVEL_METRIC` row needs it. */
+    level?: string;
     move?: string;
     score: number | null;
     medianSource: 0 | 1 | null;
@@ -259,6 +262,11 @@ export function leadFields(args: {
 export function channelMetrics(args: {
   frame: LeadFrame;
   moveMetric: Readonly<Record<string, string>>;
+  /** `quality/history.ts`'s `LEVEL_METRIC` — the three channels whose payload
+   *  carries no prior of its own, so the d1 has to be read back out of this
+   *  table next session. Nothing wrote these rows until 2026-09-06, which is
+   *  why `policy.path` and `flow` printed a level and never a move. */
+  levelMetric?: Readonly<Record<string, string | undefined>>;
   order: readonly string[];
   proseWords: number;
   invalidationComplete: boolean;
@@ -284,9 +292,24 @@ export function channelMetrics(args: {
       name,
       short: shorts[id] ?? id,
       value:
-        row === undefined || row.excluded !== undefined || row.delta === undefined
+        row === undefined ||
+        row.excluded !== undefined ||
+        row.delta === undefined
           ? null
           : row.delta,
+    });
+  }
+  // The LEVEL rows. Written even for an EXCLUDED channel: "no prior
+  // observation for the policy path" is exactly the state this row exists to
+  // end, and refusing to store the level would keep it excluded for ever.
+  for (const id of args.order) {
+    const name = args.levelMetric?.[id];
+    if (name === undefined) continue;
+    const level = Number(byId.get(id)?.level);
+    rows.push({
+      name,
+      short: `${shorts[id] ?? id}.l`,
+      value: Number.isFinite(level) ? level : null,
     });
   }
   for (const id of args.order) {
@@ -335,7 +358,11 @@ export function channelMetrics(args: {
     short: "nob",
     value: scored.filter((row) => row.verdict === "not-observed").length,
   });
-  rows.push({ name: "brief.proseWords", short: "words", value: args.proseWords });
+  rows.push({
+    name: "brief.proseWords",
+    short: "words",
+    value: args.proseWords,
+  });
   // `invalidation-triple` was CONSIDERED AS A GATE AND REJECTED (doctrine 6):
   // the renderer already drops the incomplete object, already flags it in
   // `view.faults` beside `staleness`, and this row already answers "how often

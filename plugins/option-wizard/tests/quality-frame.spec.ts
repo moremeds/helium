@@ -17,7 +17,7 @@ import {
   parseTenantYaml,
   type RunReport,
 } from "@helium/core";
-import { MIN_HISTORY, MOVE_METRIC } from "../quality/history.js";
+import { LEVEL_METRIC, MIN_HISTORY, MOVE_METRIC } from "../quality/history.js";
 import { parseReviewConfig } from "../quality/review-config.js";
 import {
   SESSION_FRAME_KIND,
@@ -499,5 +499,38 @@ describe("the frame's dated calendar", () => {
         prev: "3.0%",
       },
     ]);
+  });
+});
+
+describe("the prior LEVEL a channel has no payload for", () => {
+  // The write half is `channelMetrics`' `LEVEL_METRIC` rows; the read half is
+  // `channelHistory`'s `priorMetrics`. Round-tripped here, because the two
+  // lived in different files and neither end existed: `policy.path` and `flow`
+  // printed a level and never a move on every run.
+  it("is stored by one run and differenced by the next", () => {
+    const { stateRoot, env } = scratch();
+    const store = new AuditStore(env.HELIUM_AUDIT_DB!);
+    try {
+      store.appendMetric({
+        runId: "run-2026-09-02-close",
+        name: LEVEL_METRIC.policy!,
+        value: 55.7,
+        ts: "2026-09-02T20:15:00.000Z",
+        day: "2026-09-02",
+        label: "close",
+      });
+    } finally {
+      store.close();
+    }
+    const frame = frameOf({
+      stateRoot,
+      env,
+      days: ["2026-09-01", "2026-09-02", "2026-09-03"],
+    });
+    const policyRow = frame.rows.find((row) => row.id === "policy.path")!;
+    expect(policyRow.untested).toBeUndefined();
+    expect(policyRow.level).toBe("60");
+    expect(policyRow.prior).toBe("55.7");
+    expect(policyRow.move).toBe("+4.3 pp");
   });
 });

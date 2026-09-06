@@ -30,7 +30,7 @@ import {
   type OneThingDoc,
 } from "./one-thing.js";
 import { frameFrom } from "../quality/frame.js";
-import { MOVE_METRIC } from "../quality/history.js";
+import { LEVEL_METRIC, MOVE_METRIC } from "../quality/history.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
@@ -1998,6 +1998,7 @@ export default function renderReport(
         : channelMetrics({
             frame: frame as unknown as LeadFrame,
             moveMetric: MOVE_METRIC,
+            levelMetric: LEVEL_METRIC,
             order: frame.ranked.map((row) => row.id),
             proseWords: proseWordsOf(view),
             invalidationComplete: view.changeMyMind !== undefined,

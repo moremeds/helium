@@ -14,7 +14,12 @@
  * gets a ranking, scored from the channels' own series instead.
  */
 import { AuditStore } from "@helium/core";
-import { seriesHistory, type Channel, type ChannelId, type ChannelInputs } from "./channels.js";
+import {
+  seriesHistory,
+  type Channel,
+  type ChannelId,
+  type ChannelInputs,
+} from "./channels.js";
 
 export interface ChannelHistory {
   /** Absolute moves, newest first. */
@@ -45,6 +50,30 @@ export const MOVE_METRIC: Record<ChannelId, string> = {
   event: "channel.event.count",
 };
 
+/**
+ * The metric row each channel's LEVEL is stored under — the d1 half, distinct
+ * from `MOVE_METRIC`'s "how big is big".
+ *
+ * Only three channels need one. The rest carry a prior inside their own
+ * payload (a FRED series has yesterday's observation in it; a gamma flip has
+ * spot beside it), but a policy probability, a 2s10s spread taken from a live
+ * overlay and a market-tide net premium each arrive as ONE number with nothing
+ * to difference against.
+ *
+ * THE 2026-09-06 DEFECT. `quality/channels.ts` has always read these three
+ * names — and nothing has ever written one, and nothing has ever supplied
+ * `priorMetrics` at all. So `policy.path` and `flow` printed a level and no
+ * move on every run since the coverage list existed, the weekly analyst read
+ * that as "no datum" and called both `untested`, and `curve.shape` could never
+ * have used its live-overlay branch either. The names are MOVED here, beside
+ * `MOVE_METRIC`, so a rename can only break in one place.
+ */
+export const LEVEL_METRIC: Partial<Record<ChannelId, string>> = {
+  curve: "channel.curve.spread_bp",
+  policy: "channel.policy.prob_pp",
+  flow: "channel.flow.net_premium_usd",
+};
+
 /** Yields are stored in percent and moved in basis points; everything else
  *  moves in its own unit. One place, so the series-derived denominator and the
  *  metric-derived one are on the same scale. */
@@ -54,10 +83,7 @@ const MOVE_SCALE: Partial<Record<ChannelId, number>> = {
   credit: 100,
 };
 
-function movesFromSeries(
-  inputs: ChannelInputs,
-  id: ChannelId,
-): number[] {
+function movesFromSeries(inputs: ChannelInputs, id: ChannelId): number[] {
   const levels = seriesHistory(inputs, id);
   const scale = MOVE_SCALE[id] ?? 1;
   const moves: number[] = [];
@@ -73,11 +99,20 @@ export function channelHistory(args: {
   inputs: ChannelInputs;
   days: string[];
   env?: NodeJS.ProcessEnv;
-}): { history: Map<ChannelId, ChannelHistory>; note?: string } {
+}): {
+  history: Map<ChannelId, ChannelHistory>;
+  note?: string;
+  /** The newest stored value of every `LEVEL_METRIC`, SIGNED, from the same
+   *  single read the medians come out of. This is what a channel with no prior
+   *  inside its own payload differences against. */
+  priorMetrics: Record<string, number>;
+} {
   const { channels, inputs, days } = args;
   const env = args.env ?? process.env;
   const history = new Map<ChannelId, ChannelHistory>();
   const stored = new Map<string, number[]>();
+  const wanted = new Set(Object.values(LEVEL_METRIC));
+  const priorMetrics: Record<string, number> = {};
   let note: string | undefined;
   if (days.length > 0) {
     let store: AuditStore | undefined;
@@ -91,6 +126,10 @@ export function channelHistory(args: {
         from <= to ? to : from,
       )) {
         if (row.value === null || !Number.isFinite(row.value)) continue;
+        // metricsBetween is oldest first, so the LAST row of a name is the
+        // newest one — including a second run on the same day, which is what a
+        // weekly reading the close's own level depends on.
+        if (wanted.has(row.name)) priorMetrics[row.name] = row.value;
         const list = stored.get(row.name) ?? [];
         list.push(Math.abs(row.value));
         stored.set(row.name, list);
@@ -124,7 +163,12 @@ export function channelHistory(args: {
     // Neither source answered. An EMPTY moves array, never a zero: a zero
     // denominator makes a missing history look like the biggest move of the
     // year.
-    history.set(channel.id, { moves: [], medianSource: rows.length > 0 ? 1 : 0 });
+    history.set(channel.id, {
+      moves: [],
+      medianSource: rows.length > 0 ? 1 : 0,
+    });
   }
-  return note === undefined ? { history } : { history, note };
+  return note === undefined
+    ? { history, priorMetrics }
+    : { history, note, priorMetrics };
 }

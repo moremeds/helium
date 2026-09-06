@@ -371,18 +371,28 @@ export function buildFrame(args: {
   skipped?: Record<string, string>;
   env?: NodeJS.ProcessEnv;
 }): SessionFrame {
-  const { inputs, review } = args;
-  const day = inputs.day;
+  const { review } = args;
+  const day = args.inputs.day;
   const notes: string[] = [];
 
-  const channels = extractChannels(inputs);
-  const { history, note } = channelHistory({
-    channels,
-    inputs,
+  // Extracted TWICE, on purpose. `extractChannels` is pure and cheap, and the
+  // first pass exists only to name the channel ids the one audit read needs;
+  // the second is the real one, and it is the only one that has the stored
+  // prior LEVELS. Before this, `priorMetrics` was never supplied by anybody,
+  // so `policy.path`, `flow` and `curve.shape` could never compute a move.
+  const seed = extractChannels(args.inputs);
+  const { history, note, priorMetrics } = channelHistory({
+    channels: seed,
+    inputs: args.inputs,
     days: args.days,
     ...(args.env === undefined ? {} : { env: args.env }),
   });
   if (note !== undefined) notes.push(note);
+  const inputs: ChannelInputs = {
+    ...args.inputs,
+    priorMetrics: { ...priorMetrics, ...args.inputs.priorMetrics },
+  };
+  const channels = extractChannels(inputs);
 
   // The standing invalidation is the prior record's, and it is what lets a
   // breached view win the ranking outright.

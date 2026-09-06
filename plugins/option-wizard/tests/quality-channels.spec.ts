@@ -109,3 +109,88 @@ describe("extractChannels with nothing to read", () => {
     }
   });
 });
+
+describe("the `unavailable` key is a KIND, never a per-ticker list", () => {
+  // THE 2026-09-06 DEFECT. `ow_uw_gex` returns `{levels, unavailable}` where
+  // `unavailable` is the array of tickers that did NOT answer — `[]` on a
+  // completely successful call. `String([])` is `""`, so every healthy gex
+  // payload read as "unavailable, reason blank" and `dealer.positioning`
+  // printed UNTESTED with an empty reason on every run since.
+  const levels = [
+    {
+      ticker: "SPY",
+      gammaFlip: "766.0",
+      callWall: "770.0",
+      putWall: "760.0",
+      asOf: "2026-09-03",
+    },
+  ];
+  const spot = {
+    fetchedAt: "2026-09-03T20:15:00.000Z",
+    quotes: [{ ticker: "SPY", last: 768.86, changeAbs: "+1.20" }],
+  };
+
+  it("computes the gamma-flip distance when the failed-ticker list is empty", () => {
+    const dealer = byId(
+      extractChannels({
+        ...inputs,
+        gex: { levels, unavailable: [] },
+        spot,
+      }),
+      "dealer",
+    );
+    expect(dealer.excluded).toBeUndefined();
+    expect(dealer.series).toBe("SPY gamma flip");
+    expect(dealer.level).toBe("766.0");
+    expect(dealer.move).toBe("+2.86 pts");
+  });
+
+  it("still honours the string marker a source sets on itself", () => {
+    const dealer = byId(
+      extractChannels({ ...inputs, gex: { unavailable: "as-of" }, spot }),
+      "dealer",
+    );
+    expect(dealer.excluded).toContain("as-of");
+  });
+});
+
+describe("the three channels whose prior lives in the audit table", () => {
+  // Nothing wrote `channel.policy.prob_pp` or `channel.flow.net_premium_usd`
+  // and nothing supplied `priorMetrics`, so `policy.path` and `flow` printed a
+  // level and never a move — which the weekly analyst read as "no datum" and
+  // called untested, on a run whose footer said both tools answered ok.
+  it("differences the policy probability against the stored one", () => {
+    const none = byId(extractChannels(inputs), "policy");
+    expect(none.level).toBe("60");
+    expect(none.move).toBeUndefined();
+    expect(none.excluded).toBe("no prior observation for the policy path");
+
+    const withPrior = byId(
+      extractChannels({
+        ...inputs,
+        priorMetrics: { "channel.policy.prob_pp": 55.7 },
+      }),
+      "policy",
+    );
+    expect(withPrior.level).toBe("60");
+    expect(withPrior.prior).toBe("55.7");
+    expect(withPrior.move).toBe("+4.3 pp");
+    expect(withPrior.excluded).toBeUndefined();
+  });
+
+  it("differences the market tide net premium against the stored one", () => {
+    const none = byId(extractChannels(inputs), "flow");
+    expect(none.level).toBeDefined();
+    expect(none.move).toBeUndefined();
+    const level = Number(none.level);
+    const withPrior = byId(
+      extractChannels({
+        ...inputs,
+        priorMetrics: { "channel.flow.net_premium_usd": level - 1_000_000 },
+      }),
+      "flow",
+    );
+    expect(withPrior.move).toBe("+1000000 USD");
+    expect(withPrior.excluded).toBeUndefined();
+  });
+});
