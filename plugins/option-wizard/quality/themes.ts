@@ -152,3 +152,165 @@ export function themeRow(
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// §H.4 rotation
+// ---------------------------------------------------------------------------
+
+export interface RotationRow {
+  /** "XLK" or "theme:el-nino-ag-2026". */
+  symbol: string;
+  label: string;
+  w1: number | null;
+  w4: number | null;
+  w12: number | null;
+  excess1w: number | null;
+  excess4w: number | null;
+  excess12w: number | null;
+  untested?: string;
+}
+
+/** The newest bar day at or before `day`, or undefined. */
+function newestDay(
+  bars: readonly Bar[] | undefined,
+  day: string,
+): string | undefined {
+  let best: string | undefined;
+  for (const bar of bars ?? []) {
+    const stamp = bar.time.slice(0, 10);
+    if (stamp > day) continue;
+    if (best === undefined || stamp > best) best = stamp;
+  }
+  return best;
+}
+
+/**
+ * The sector-and-theme rotation table: each row's 1/4/12-week return and its
+ * excess over the declared benchmark, ranked by the one-week excess.
+ *
+ * Two rules make the table trustworthy rather than merely present:
+ *
+ * - **A symbol is never dropped.** One that cannot be priced prints `untested`
+ *   with the reason, exactly like a coverage row (§C.2). A silently shorter
+ *   table is the failure this design exists to prevent.
+ * - **A STALE series is untested, not flat.** `closeAt` answers with the newest
+ *   close at or before the day, so a symbol whose data stopped two months ago
+ *   would otherwise report a perfectly calm 0.00 % week. The table's as-of is
+ *   the BENCHMARK's newest bar, and a symbol without a bar on that day is
+ *   untested with both dates named.
+ */
+export function rotationTable(args: {
+  sectorEtfs: readonly string[];
+  themes: readonly ThemeSpec[];
+  benchmark: string;
+  lookbacks: { w1: number; w4: number; w12: number };
+  bars: ReadonlyMap<string, readonly Bar[]>;
+  day: string;
+  /** The day `n` OPEN sessions before `from`. Injected: no calendar here. */
+  openDaysBack: (from: string, n: number) => string;
+}): {
+  asOf: string;
+  benchmark: string;
+  benchmarkReturns: { w1: number | null; w4: number | null; w12: number | null };
+  rows: RotationRow[];
+  notes: string[];
+} {
+  const { sectorEtfs, themes, benchmark, lookbacks, bars, day } = args;
+  const notes: string[] = [];
+  const asOf = newestDay(bars.get(benchmark), day) ?? day;
+  if (asOf !== day)
+    notes.push(
+      `${benchmark}: newest bar ${asOf}, so the table is as of ${asOf} rather than ${day}`,
+    );
+  const from = {
+    w1: args.openDaysBack(asOf, lookbacks.w1),
+    w4: args.openDaysBack(asOf, lookbacks.w4),
+    w12: args.openDaysBack(asOf, lookbacks.w12),
+  };
+  const bench = {
+    w1: basketExcess({ members: [benchmark], benchmark, bars, fromDay: from.w1, toDay: asOf }),
+    w4: basketExcess({ members: [benchmark], benchmark, bars, fromDay: from.w4, toDay: asOf }),
+    w12: basketExcess({ members: [benchmark], benchmark, bars, fromDay: from.w12, toDay: asOf }),
+  };
+  const benchmarkReturns = {
+    w1: bench.w1?.benchPct ?? null,
+    w4: bench.w4?.benchPct ?? null,
+    w12: bench.w12?.benchPct ?? null,
+  };
+
+  const untestedRow = (
+    symbol: string,
+    label: string,
+    why: string,
+  ): RotationRow => {
+    notes.push(`${symbol}: ${why}`);
+    return {
+      symbol,
+      label,
+      w1: null,
+      w4: null,
+      w12: null,
+      excess1w: null,
+      excess4w: null,
+      excess12w: null,
+      untested: why,
+    };
+  };
+
+  const rowFrom = (
+    symbol: string,
+    label: string,
+    members: readonly string[],
+  ): RotationRow => {
+    const stale = members.filter((member) => {
+      const newest = newestDay(bars.get(member), asOf);
+      return newest === undefined || newest < asOf;
+    });
+    if (stale.length === members.length) {
+      const newest = newestDay(bars.get(members[0]!), asOf);
+      return untestedRow(
+        symbol,
+        label,
+        newest === undefined
+          ? `no bars at or before ${asOf}`
+          : `no bar on ${asOf}; newest ${newest}`,
+      );
+    }
+    const triple = {
+      w1: basketExcess({ members, benchmark, bars, fromDay: from.w1, toDay: asOf }),
+      w4: basketExcess({ members, benchmark, bars, fromDay: from.w4, toDay: asOf }),
+      w12: basketExcess({ members, benchmark, bars, fromDay: from.w12, toDay: asOf }),
+    };
+    if (stale.length > 0)
+      notes.push(`${symbol}: ${stale.join(", ")} have no bar on ${asOf}`);
+    return {
+      symbol,
+      label,
+      w1: triple.w1?.basketPct ?? null,
+      w4: triple.w4?.basketPct ?? null,
+      w12: triple.w12?.basketPct ?? null,
+      excess1w: triple.w1?.excessPct ?? null,
+      excess4w: triple.w4?.excessPct ?? null,
+      excess12w: triple.w12?.excessPct ?? null,
+    };
+  };
+
+  const rows: RotationRow[] = [
+    ...sectorEtfs.map((symbol) => rowFrom(symbol, symbol, [symbol])),
+    ...themes.map((theme) =>
+      rowFrom(`theme:${theme.id}`, theme.id, theme.instruments),
+    ),
+  ];
+  // excess1w DESC, null last, ties by symbol — the same stability rule the
+  // focus tie-break uses, for the same reason: a table that reorders between
+  // two runs of the same data is not a ranking.
+  rows.sort((a, b) => {
+    if (a.excess1w === null && b.excess1w === null)
+      return a.symbol.localeCompare(b.symbol, "en");
+    if (a.excess1w === null) return 1;
+    if (b.excess1w === null) return -1;
+    if (a.excess1w !== b.excess1w) return b.excess1w - a.excess1w;
+    return a.symbol.localeCompare(b.symbol, "en");
+  });
+  return { asOf, benchmark, benchmarkReturns, rows, notes };
+}

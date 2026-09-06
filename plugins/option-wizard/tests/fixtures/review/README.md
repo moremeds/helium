@@ -131,3 +131,32 @@ the current documentation names.
   FRED CDN), which is why the credit row falls through to `series.rows`.
 - `DGS2` is **not ingested** in argon's mirror at all, so the front-end and
   curve rows have no source and must print `untested`.
+
+## Rotation symbols — probed live, and one real gap
+
+Every one of the 16 symbols `extensions.review.rotation` and the theme register
+name (XLB XLC XLE XLF XLI XLK XLP XLRE XLU XLV XLY · SPY · DBA MOS NTR DE) was
+requested from apex on **2026-09-06**:
+
+```
+GET $OW_APEX_API_BASE/v1/equity/<symbol>/bars?timeframe=1d&start=2026-05-01T00:00:00Z
+```
+
+All 16 answered `200`. Fifteen returned **83 daily bars, 2026-05-01 to
+2026-08-28**. **XLE returned 49, ending 2026-07-13** — a real gap in the lake,
+not a bad request, and it is why `rotationTable` marks a symbol whose newest
+bar is behind the table's as-of `untested` instead of reporting the perfectly
+calm 0.00 % week that a newest-close-at-or-before lookup would otherwise give
+it. The apex lake is a few sessions behind the calendar (newest bar 2026-08-28
+on 2026-09-06), so the table's as-of is the BENCHMARK's newest bar, never
+today's date.
+
+| file | source | rawSha256 | rawBytes |
+| ---- | ------ | --------- | -------- |
+| `rotation-closes-2026-08-28.json` | the 16 responses above, CLOSES only | `75915b9ad4b1fd55c98cf349fa85437946ce23c14e83d71b78e896eeddb5ad26` | 29088 |
+
+Closes only, and the file says so in its own `note`: `rotationTable` reads
+closes and nothing else, so carrying open/high/low/volume would only make the
+fixture bigger. The tests rebuild a structurally complete `Bar` by setting the
+other price fields to the close and the volume to 0, and assert on none of
+them — the same convention `closes-2026-09-03-04.json` already uses.

@@ -461,6 +461,23 @@ describe("the flash page is public — no role reads the book", () => {
       );
   });
 
+  it("prices the rotation table once a week, in a deterministic step", () => {
+    // 12 + N ow_apex_bars calls is a weekly cost, not a daily one, and the
+    // MANIFEST is where that belongs: the renderer may not learn a phase and
+    // the tool is handed {}.
+    const rotation = manifest.tasks.find((e) => e.id === "rotation");
+    expect(rotation?.requires).toEqual([]);
+    expect(rotation?.phases).toEqual(["weekly"]);
+    expect(rotation?.dependsOn).toContain("frame");
+    expect(manifest.roles["frame-clerk"]?.permissions.tools).toEqual([
+      "ow_session_frame",
+      "ow_rotation",
+    ]);
+    expect(manifest.tasks.find((e) => e.id === "weekly")?.dependsOn).toContain(
+      "rotation",
+    );
+  });
+
   it("no persona or prompt speaks of positions or holdings outside a ban clause", () => {
     // `position`, `held` and `holding` may appear ONLY inside an explicit
     // "Never …" / "never a …" ban sentence — that is the one place the words

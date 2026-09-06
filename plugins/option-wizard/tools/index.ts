@@ -34,6 +34,8 @@ import type { ChannelInputs } from "../quality/channels.js";
 import type { FocusInputs } from "../quality/focus.js";
 import { MIN_HISTORY } from "../quality/history.js";
 import { buildFrame } from "../quality/frame.js";
+import { rotationTable } from "../quality/themes.js";
+import type { Bar } from "../eval/bars.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -95,6 +97,10 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // about saying the gap's name at the top of the run report, not about
   // stopping the run.
   ["ow_session_frame", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  // 12 + N ow_apex_bars calls, weekly only. apex is the only source, so a
+  // machine without it prints a table of `untested` rows rather than a shorter
+  // one.
+  ["ow_rotation", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -4202,6 +4208,130 @@ export function buildTools(cfg: {
             env,
           }),
         );
+      },
+    },
+    {
+      // 2026-09-06. Eleven Select Sector SPDRs plus each active theme's basket,
+      // against the declared benchmark, over 5/20/60 OPEN sessions — the rank
+      // ORDER is the rotation signal (§H.4), so it is computed here and the
+      // model gets one sentence about it and no arithmetic. Symbols come from
+      // extensions.review.rotation and .themes; a symbol apex cannot answer
+      // prints `untested` and is NOT dropped, exactly like a coverage row.
+      //
+      // Cost: 12 + N ow_apex_bars calls, weekly only — which is why this is a
+      // separate step with `phases: [weekly]` rather than a field on the frame.
+      // A daily table would pay that on each of four daily runs for a ranking
+      // that moves by rounding between sessions.
+      //
+      // Every one of the 16 shipped symbols was confirmed to answer on
+      // 2026-09-06 (tests/fixtures/review/README.md records the probe and the
+      // one real gap it found: XLE's daily series stops at 2026-07-13).
+      name: "ow_rotation",
+      description:
+        "Sector and theme rotation: for each sector ETF and each active theme basket, the 1-week, 4-week and 12-week return and the excess over the benchmark, ranked by the 1-week excess. Every number is computed here from daily bars — read the ranking and say what it confirms or contradicts; compute nothing.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const rotation = review?.rotation;
+        if (rotation === undefined) {
+          return JSON.stringify({
+            unavailable: "not declared",
+            reason:
+              "ow_rotation: extensions.review.rotation is not declared for this tenant",
+          });
+        }
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const themes = review?.themes ?? [];
+        const symbols = [
+          ...new Set([
+            rotation.benchmark,
+            ...rotation.sectorEtfs,
+            ...themes.flatMap((theme) => theme.instruments),
+          ]),
+        ];
+        const bars = new Map<string, Bar[]>();
+        const notes: string[] = [];
+        const barsTool = built.find((entry) => entry.name === "ow_apex_bars");
+        // 12+N symbols, one round trip each. One failure is that symbol's
+        // `untested` row and nothing else — the table still prints in full.
+        const answered = await Promise.allSettled(
+          symbols.map(async (symbol) => ({
+            symbol,
+            body:
+              barsTool === undefined
+                ? undefined
+                : (JSON.parse(
+                    await barsTool.run(
+                      {
+                        symbol,
+                        timeframe: "1d",
+                        // 60 OPEN sessions is roughly 90 calendar days; 150
+                        // gives the w12 window room for a holiday run and for
+                        // a lake that is a few sessions behind.
+                        lookbackDays: 150,
+                      },
+                      ctx,
+                    ),
+                  ) as { bars?: unknown[] }),
+          })),
+        );
+        answered.forEach((result, index) => {
+          const symbol = symbols[index]!;
+          if (result.status === "rejected") {
+            const why: unknown = result.reason;
+            notes.push(
+              `${symbol}: ${why instanceof Error ? why.message : String(why)}`,
+            );
+            return;
+          }
+          const rows = result.value.body?.bars;
+          if (!Array.isArray(rows)) {
+            notes.push(`${symbol}: ow_apex_bars is not built`);
+            return;
+          }
+          bars.set(
+            symbol,
+            rows.flatMap((raw) => {
+              const bar = raw as Record<string, unknown>;
+              const close = numeric(bar.close);
+              if (typeof bar.time !== "string" || close === undefined)
+                return [];
+              return [
+                {
+                  time: bar.time,
+                  open: numeric(bar.open) ?? close,
+                  high: numeric(bar.high) ?? close,
+                  low: numeric(bar.low) ?? close,
+                  close,
+                  volume: numeric(bar.volume) ?? 0,
+                },
+              ];
+            }),
+          );
+        });
+        const table = rotationTable({
+          sectorEtfs: rotation.sectorEtfs,
+          themes,
+          benchmark: rotation.benchmark,
+          lookbacks: rotation.lookbacks,
+          bars,
+          day,
+          // n OPEN sessions back from `from`, `from` counting as session 0.
+          openDaysBack: (from: string, n: number) =>
+            openDaysBack(from, n + 1, cfg.calendar)[0]!,
+        });
+        return JSON.stringify({
+          ...table,
+          notes: [...notes, ...table.notes],
+        });
       },
     },
     {

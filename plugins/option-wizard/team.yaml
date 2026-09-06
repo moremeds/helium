@@ -28,7 +28,7 @@ roles:
     requires: []
     permissions:
       mutations: forbidden
-      tools: [ow_session_frame]
+      tools: [ow_session_frame, ow_rotation]
 
   gex-reporter:
     requires: [structured.output, tool.use]
@@ -455,6 +455,13 @@ tasks:
     requires: []
     prompt: Call ow_session_frame once with no arguments and return its payload unchanged.
 
+  - id: rotation
+    role: frame-clerk
+    phases: [weekly]
+    dependsOn: [frame]
+    requires: []
+    prompt: Call ow_rotation once with no arguments and return its payload unchanged.
+
   - id: gex
     role: gex-reporter
     phases: [premarket, intraday, close]
@@ -767,7 +774,7 @@ tasks:
   - id: weekly
     role: weekly-analyst
     phases: [weekly]
-    dependsOn: [frame]
+    dependsOn: [frame, rotation]
     requires: [tool.use, long.context]
     prompt: >-
       Call ow_reports with days:7 phase:close steps:["edit"] and
