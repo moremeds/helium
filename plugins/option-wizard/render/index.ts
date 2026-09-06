@@ -33,6 +33,7 @@ import { qualityMetrics } from "../quality/index.js";
 import { baselineDraft, forecastCommitments } from "./ledger.js";
 import {
   parseReviewDoc,
+  reviewHeadline,
   reviewMetrics,
   reviewSections,
   verdictCommitments,
@@ -1836,6 +1837,20 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       ? {}
       : {
           sections: [...base.sections, ...review.sections],
+          // A review run has no `regime` step, so nothing upstream fills the
+          // masthead and the 2026-09-06 weekly reached argon with an empty
+          // one. Renderer-computed, never empty, never a model sentence.
+          headline:
+            base.headline.trim() === ""
+              ? reviewHeadline({
+                  period: review.period,
+                  scorecard: review.sections[0]?.body ?? "",
+                  ...(lead.oneThing === undefined
+                    ? {}
+                    : { oneThing: lead.oneThing.body }),
+                  checksLine: frame.checks.line,
+                })
+              : base.headline,
           ...(review.view.focus === undefined
             ? {}
             : { focus: review.view.focus }),

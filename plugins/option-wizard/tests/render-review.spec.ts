@@ -10,6 +10,8 @@
  * invented tickers and no round placeholder prices.
  */
 import { describe, expect, it } from "vitest";
+import { buildView } from "../render/index.js";
+import { SPEC, report } from "./fixture-report.js";
 import type { CoverageRow } from "../quality/channels.js";
 import type { OpenRow, SessionFrame, SettledRow } from "../quality/frame.js";
 import type { ThemeSpec } from "../quality/review-config.js";
@@ -25,6 +27,7 @@ import {
   type CalendarRow,
 } from "../render/review.js";
 import type { ReviewDoc } from "../render/review.js";
+import { REVIEW_PERIODS } from "../quality/review-config.js";
 
 const THEME: ThemeSpec = {
   id: "el-nino-ag-2026",
@@ -361,6 +364,33 @@ describe("section 3 — the coverage list never shrinks", () => {
       },
     });
     expect(body(out.sections, 3)).toContain(">4.65bp");
+  });
+});
+
+describe("what argon's section renderer can actually show", () => {
+  it("prints the verdict token in plain uppercase and no inline emphasis anywhere", () => {
+    // argon's SectionsPanel renders BLOCK-level markdown only, so `**x**` in a
+    // section body reaches the public /flash page as literal asterisks.
+    const out = render({
+      frame: frame({ rows: fullRows() }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "rates.front",
+            token: "continue",
+            p: 0.7,
+            why: "front end still bid",
+            observable: "DGS2 next Friday",
+            scorable: true,
+          },
+        ],
+      },
+    });
+    expect(body(out.sections, 3)).toContain("— CONTINUE");
+    expect(body(out.sections, 3)).toContain("— UNTESTED");
+    for (const section of out.sections)
+      expect(section.body, section.title).not.toMatch(/\*\*|__|(?<!`)`(?!`)/u);
   });
 });
 
@@ -968,5 +998,51 @@ describe("privacy — the /flash page is public", () => {
     // Nothing in SessionFrame can carry a holding: a positions-shaped payload
     // beside the frame contributes no ticker to the document.
     expect(serialised).not.toContain("hyg");
+  });
+});
+
+describe("the masthead a review document carries", () => {
+  // The 2026-09-06 W36 weekly reached argon with `headline: ""`: a review run
+  // has no `regime` step, and nothing else fills the masthead.
+  const view = (task: string) =>
+    buildView(
+      report({
+        steps: [
+          {
+            task: "frame",
+            role: "frame-clerk",
+            mode: "deterministic",
+            text: "",
+            toolOutputs: [JSON.stringify(frame({ rows: fullRows() }))],
+          },
+          {
+            task,
+            role: "weekly-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              review: "We read the front end wrong.",
+              outlook: "The front end is the question.",
+              catalysts: "",
+              coverage: [],
+              focus: [],
+              themes: [],
+            }),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+
+  it("is never empty on either review period", () => {
+    for (const task of [REVIEW_PERIODS[0], "edit"]) {
+      const built = view(task);
+      expect(built.headline.length, task).toBeGreaterThan(0);
+    }
+  });
+
+  it("the weekly masthead is the scorecard header the renderer printed", () => {
+    const built = view(REVIEW_PERIODS[0]);
+    expect(built.headline).toContain("scored of");
+    expect(built.headline).toContain("issued");
   });
 });

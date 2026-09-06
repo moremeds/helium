@@ -245,6 +245,11 @@ export interface ThemeViewRow {
 }
 
 const NO_DATUM = "data not printed this period";
+/** No inline emphasis in a section body, anywhere. argon's `SectionsPanel`
+ *  renders BLOCK-level markdown only — paragraphs, pipe tables, dash lists —
+ *  so a `**token**` reaches the public /flash page as literal asterisks. The
+ *  verdict token is printed in plain uppercase instead, which reads as
+ *  emphasis in both renderings. */
 /** How far back a datum may be dated before §2/§4 must not quote it. Calendar
  *  days, because an as-of is a wall-clock stamp and the period is a wall-clock
  *  window; the OPEN-session arithmetic lives in the frame, not here. */
@@ -564,7 +569,7 @@ export function reviewSections(
       stale.push(row);
     if (row.level !== undefined) levels.push(row.level);
     if (row.untested !== undefined || entry === undefined)
-      return `- ${row.id} — untested — **untested** — ${NO_DATUM} — settles: ${NO_DATUM}`;
+      return `- ${row.id} — untested — UNTESTED — ${NO_DATUM} — settles: ${NO_DATUM}`;
     const shown =
       row.id.startsWith("theme:")
         ? (() => {
@@ -576,7 +581,7 @@ export function reviewSections(
       row.delta === undefined ? "" : ` ${bandText(entry.token, row.delta, unitOf(row.move))}`;
     const members =
       row.members === undefined ? "" : ` — members: ${row.members.join(", ")}`;
-    return `- ${row.id} — ${shown} — **${entry.token}**${band} — ${entry.why || "—"} — settles: ${entry.observable || "—"}${members}`;
+    return `- ${row.id} — ${shown} — ${entry.token.toUpperCase()}${band} — ${entry.why || "—"} — settles: ${entry.observable || "—"}${members}`;
   };
 
   const macroRows = rows.filter(
@@ -878,6 +883,33 @@ export function reviewSections(
         : {}),
     },
   };
+}
+
+/**
+ * The masthead line a review document carries when no regime step supplied one.
+ *
+ * NEVER empty. A weekly run has no `regime` step at all, so the 2026-09-06 W36
+ * document reached argon with `headline: ""` and the page had nothing to head
+ * itself with. This is renderer-computed from what the run already printed —
+ * the scorecard's own header for a weekly, the lead item or yesterday's checks
+ * for a daily — so it is not a model sentence and cannot be a model invention.
+ */
+export function reviewHeadline(args: {
+  period: ReviewPeriod;
+  /** Section 1's body, whose FIRST line is the scored/issued header. */
+  scorecard: string;
+  oneThing?: string;
+  checksLine?: string;
+}): string {
+  const header = (args.scorecard.split("\n")[0] ?? "").trim();
+  if (args.period === WEEKLY) return header;
+  const lead = (args.oneThing ?? "").trim();
+  if (lead !== "") {
+    const first = /^[^.。!?]{1,160}[.。!?]?/u.exec(lead)?.[0]?.trim() ?? "";
+    if (first !== "") return first;
+  }
+  const checks = (args.checksLine ?? "").trim();
+  return checks !== "" ? checks : header;
 }
 
 // --- what a review mints ----------------------------------------------------
