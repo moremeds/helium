@@ -15,6 +15,9 @@ export interface GroupSummary {
   /** Receipts in this group, pending included. */
   n: number;
   pending: number;
+  /** Receipts per status word, pending included. Tenant vocabulary; the
+   *  scoreboard counts it and never interprets it (doctrine 2). */
+  statuses: Record<string, number>;
   /** Mean per score key over NON-pending receipts. */
   means: Record<string, number>;
   /** Observed spread per key, and how many receipts carried it. */
@@ -63,10 +66,11 @@ export function summarise(
     const key = groupKey(commitment);
     let row = byGroup[key];
     if (row === undefined) {
-      row = { n: 0, pending: 0, means: {}, ranges: {} };
+      row = { n: 0, pending: 0, statuses: {}, means: {}, ranges: {} };
       byGroup[key] = row;
     }
     row.n += 1;
+    row.statuses[receipt.status] = (row.statuses[receipt.status] ?? 0) + 1;
     if (receipt.status === "pending") {
       row.pending += 1;
       continue;
@@ -153,6 +157,13 @@ export function renderScoreboard(
     lines.push(
       `${group}: ${String(row.n)} receipts, ${String(row.pending)} pending` +
         (cost === undefined ? "" : `, ${cost.toFixed(6)} USD`),
+    );
+    lines.push(
+      "  status  " +
+        Object.entries(row.statuses)
+          .sort()
+          .map(([status, count]) => `${status}=${String(count)}`)
+          .join("  "),
     );
     for (const [name, mean] of Object.entries(row.means).sort()) {
       const range = row.ranges[name]!;

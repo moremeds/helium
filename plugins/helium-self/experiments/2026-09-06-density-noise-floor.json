@@ -1,0 +1,16 @@
+{
+  "id": "2026-09-06-density-noise-floor",
+  "repo": "argon",
+  "hypothesis": "Control, not a change: regenerating the production arm G with the Monte Carlo seed shifted by +1 for every as_of measures the simulation noise floor of the cone metrics. If the deltas approach the 0.03 q05 threshold, the improvement rule of loop 1 is inside noise and must be widened; expected verdict flat with |delta q05 ratio| well under 0.01.",
+  "change": "none to production; argon scripts/research/spx_density_arm_h.py replay with arm=G and seed_for(i)+1",
+  "baselineSweepRun": 3,
+  "candidateSweepRun": null,
+  "candidateSweepStrategy": "spx-density-calibration-arm-G-seed1",
+  "holdout": { "origin": "prospective", "rows": 80 },
+  "decisionSet": { "origin": "reconstructed", "rows": 320 },
+  "metrics": {
+    "q05PinballRatio": { "improveIfDeltaAtMost": -0.03 },
+    "meanPinball": { "regressIfDeltaAbove": 0.01 }
+  },
+  "rule": "Same rule as 2026-09-06-density-arm-h so the noise floor is measured against the same bands: on the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.03 vs run 3 AND mean pinball does not rise by > 0.01; regressed if either q05 ratio rises by > 0.03 or mean pinball rises by > 0.01; otherwise flat. Thresholds fixed at mint time; never edited after."
+}

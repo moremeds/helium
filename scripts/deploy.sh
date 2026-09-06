@@ -50,6 +50,10 @@ SHA="$(git rev-parse --short HEAD)"
 # Read by packages/cli at startup: the mini has no repository to ask, so the
 # tarball has to carry its own provenance. Gitignored; never committed.
 printf '%s\n' "$SHA" > RELEASE
+# The stamp is for the tarball only. Left behind, it makes every later laptop
+# run report the last DEPLOYED sha as its codeSha (seen 2026-09-06: two
+# helium-self commitments stamped 35db17e from a 6ae2ede checkout).
+trap 'rm -f RELEASE' EXIT
 say "sending $SHA ($PHASE) to $HELIUM_HOST"
 
 # `git archive` cannot do this: lib/ and node_modules/ are both gitignored, and
