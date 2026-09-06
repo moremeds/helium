@@ -659,7 +659,8 @@ tasks:
     # but cannot choose. Phase-scoped dependencies (scenarios, design, review)
     # are harmless where they do not run: no text, dropped by handoff.
     phases: [premarket, intraday, close]
-    dependsOn: [universe, frame, gex, overnight, regime, scenarios, design, review]
+    dependsOn:
+      [universe, frame, gex, overnight, regime, scenarios, design, review]
     requires: [long.context, reason.deep]
     prompt: |-
       Write the whole document as one author. You have every step of this run above;
@@ -698,7 +699,20 @@ tasks:
       - `outlook` at most 180 words; it may not restate a level the coverage table
         already printed.
       - `catalysts` at most 60 words, naming only admitted dated events.
-      - `coverage` carries ONE entry per row you were given, in that order. `token`
+      - `coverage` carries ONE entry per row you were given, in that order. THE ROWS
+        ARE THESE 23 AND THE REPLY CARRIES ALL 23: rates.front, rates.long,
+        curve.shape, policy.path, credit, vol, dealer.positioning, flow,
+        commodities, fx, equity.internals, calls.open, sector:Computer/GPU,
+        sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA,
+        sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS,
+        sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy,
+        sector:Devices/Endpoint, theme:el-nino-ag-2026.
+        EVERY ROW WITH A DATUM NEEDS A TOKEN, A `p` AND A `why`. A row whose frame
+        entry carries a `level`, a `move`, a `delta` or a theme block HAS a datum,
+        and `untested` is not an available answer for it; `untested` is only for a
+        row handed to you with no datum at all. The renderer names the omitted ids
+        as a fault. `calls.open` is renderer-filled and needs nothing from you.
+        `token`
         is one of continue, reverse, strengthen, fade, untested; `p` is a number
         between 0.50 and 0.95; `why` and `observable` are at most 10 words each. A
         token with no usable `p` still prints and mints nothing.
@@ -809,7 +823,24 @@ tasks:
       - `catalysts` is at most 150 words and may name only the dated events you were
         handed as admitted.
       - `coverage` carries ONE entry per row you were given, in the order you were
-        given them. `token` is one of continue, reverse, strengthen, fade, untested;
+        given them. THE ROWS ARE THESE 23 AND THE REPLY CARRIES ALL 23:
+        rates.front, rates.long, curve.shape, policy.path, credit, vol,
+        dealer.positioning, flow, commodities, fx, equity.internals, calls.open,
+        sector:Computer/GPU, sector:Semi-Logic/ASIC, sector:Foundry,
+        sector:Semi-Cap/EDA, sector:Memory/Storage, sector:Cybersecurity,
+        sector:Software/SaaS, sector:Cloud/Hyperscaler,
+        sector:Foundation-Model-Proxy, sector:Devices/Endpoint,
+        theme:el-nino-ag-2026.
+        EVERY ROW WITH A DATUM NEEDS A TOKEN, A `p` AND A `why`. A row whose frame
+        entry carries a `level`, a `move`, a `delta` or a theme block HAS a datum,
+        and `untested` is not an available answer for it. `untested` is only for a
+        row the frame handed you with no datum at all. On 2026-09-06 both documents
+        came back with all ten sector rows and the theme row `not called this
+        period` over a frame that had priced every one of them; the renderer now
+        names the omitted ids as a fault, so the omission is measured.
+        `calls.open` is the renderer's own ledger count: send it or omit it, the
+        row prints the same either way.
+        `token` is one of continue, reverse, strengthen, fade, untested;
         `p` is a number between 0.50 and 0.95; `why` and `observable` are at most 15
         words each. A row with a token and no usable `p` still prints and mints
         nothing.

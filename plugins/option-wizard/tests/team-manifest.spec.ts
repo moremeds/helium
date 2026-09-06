@@ -9,9 +9,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseTeamYaml, topologicalOrder } from "@helium/core";
+import { parseTeamYaml, parseTenantYaml, topologicalOrder } from "@helium/core";
 import { VOCABULARY } from "../tools/index.js";
 import flashBudget from "../gates/flash-budget.js";
+import { coverageRowIds, parseReviewConfig } from "../quality/review-config.js";
 
 const TEAM = join(__dirname, "..", "team.yaml");
 const raw = readFileSync(TEAM, "utf8");
@@ -117,9 +118,9 @@ it("every narrative task replies as one sections JSON", () => {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
-  expect(
-    manifest.tasks.find((t) => t.id === "weekly")?.prompt ?? "",
-  ).toContain('"coverage":[{"id","token","p","why","observable"}]');
+  expect(manifest.tasks.find((t) => t.id === "weekly")?.prompt ?? "").toContain(
+    '"coverage":[{"id","token","p","why","observable"}]',
+  );
   // `scenarios` is the second task whose reply is no longer JUST a sections
   // object: it also states the scored `spyForecast`, so its `sections` key
   // opens a larger object. Same check as `regime` below — the load-bearing
@@ -373,7 +374,8 @@ it("asks the EDITOR for the regime-state block, and asks nobody else", () => {
   // fence from every step and a later one overwrites an earlier one, so the
   // block belongs to the last step that knows the three checks the next run
   // scores. Two authors would mean the analyst's record is silently discarded.
-  const prompt = manifest.tasks.find((task) => task.id === "edit")?.prompt ?? "";
+  const prompt =
+    manifest.tasks.find((task) => task.id === "edit")?.prompt ?? "";
   expect(prompt).toContain("regime-state");
   for (const field of [
     "cause",
@@ -633,7 +635,8 @@ describe("the review authors, rewritten", () => {
 
   it("both review authors are bounded on the focus and theme lines", () => {
     for (const id of ["weekly", "edit"]) {
-      const prompt = manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
+      const prompt =
+        manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
       expect(prompt, id).toContain("at most 20 words");
       expect(prompt, id).toContain("never a direction");
       expect(prompt, id).toContain("PROPOSED:");
@@ -644,5 +647,28 @@ describe("the review authors, rewritten", () => {
     const persona = manifest.roles["weekly-analyst"]?.persona ?? "";
     expect(persona).toContain("0.50");
     expect(persona).toContain("0.95");
+  });
+
+  // review-v6: both documents answered 11 of 23 coverage rows. All ten sector
+  // rows and the theme row came back `not called this period` over a frame
+  // that had priced every one of them — the prompt said "one entry per row you
+  // were given" and never said which rows those were. It does now, and the
+  // list is asserted against `extensions.review` rather than a literal, so
+  // adding a sector or a theme fails HERE until the prompt carries it.
+  it("both review prompts name every coverage row id the declaration produces", () => {
+    const tenantPath = join(__dirname, "..", "tenant.yaml");
+    const spec = parseTenantYaml(readFileSync(tenantPath, "utf8"), tenantPath);
+    const ids = coverageRowIds(
+      parseReviewConfig(spec.extensions as Record<string, unknown>),
+    );
+    expect(ids.length).toBe(23);
+    for (const id of ["weekly", "edit"]) {
+      const prompt =
+        manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
+      for (const rowId of ids)
+        expect(prompt, `${id} / ${rowId}`).toContain(rowId);
+      expect(prompt, id).toContain("ALL 23");
+      expect(prompt, id).toContain("EVERY ROW WITH A DATUM NEEDS A TOKEN");
+    }
   });
 });

@@ -1385,7 +1385,9 @@ describe("calls.open is the renderer's row, not the model's", () => {
         outlook: "The 9/16 meeting is the whole week; nothing lands before it.",
       },
     });
-    expect(out.faults).toEqual([]);
+    // This document answers no coverage row at all, so it earns the omission
+    // fault; the one under test is §4's no-restatement rule.
+    expect(out.faults.filter((line) => line.includes("restates"))).toEqual([]);
     expect(body(out.sections, 4)).toContain("9/16");
   });
 
@@ -1453,5 +1455,59 @@ describe("an untested coverage row prints three fields and no more", () => {
         .filter((row) => row.startsWith("- ") && row.includes("UNTESTED"))
         .length,
     ).toBe(ROW_COUNT);
+  });
+
+  // review-v6: 11 of 23 rows carried a verdict, and `coverageGaps` — which
+  // counts an unpriceable row and an unanswered one alike — said nothing
+  // about it. The omission is now named, id by id, so a prompt change can be
+  // measured against it.
+  it("names every priced row the document omitted, as a fault", () => {
+    const out = render({
+      frame: frame({ rows: fullRows() }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: COVERAGE.map((id) => ({
+          id,
+          token: "continue" as const,
+          p: 0.7,
+          why: "same tape",
+          observable: "next close",
+        })),
+      },
+    });
+    const fault = out.faults.find((line) => line.startsWith("coverage omits"))!;
+    expect(fault).toContain(
+      `${String(SECTORS.length + DECLARED.themes.length)} priced rows`,
+    );
+    for (const chain of SECTORS) expect(fault).toContain(`sector:${chain}`);
+    expect(fault).toContain(`theme:${THEME.id}`);
+    for (const id of COVERAGE) expect(fault).not.toContain(`${id},`);
+  });
+
+  it("raises no omission fault when every priced row was answered", () => {
+    const rows = fullRows();
+    const out = render({
+      frame: frame({ rows }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: rows.map((row) => ({
+          id: row.id,
+          token: "continue" as const,
+          p: 0.7,
+          why: "same tape",
+          observable: "next close",
+        })),
+      },
+    });
+    expect(
+      out.faults.filter((line) => line.startsWith("coverage omits")),
+    ).toEqual([]);
+  });
+
+  it("a row with NO datum is not an omission — untested is its honest answer", () => {
+    const out = render({ frame: frame(), doc: DOC_EMPTY });
+    expect(
+      out.faults.filter((line) => line.startsWith("coverage omits")),
+    ).toEqual([]);
   });
 });

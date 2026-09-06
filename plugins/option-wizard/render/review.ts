@@ -539,6 +539,26 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const untested = rows.filter((row) => untestedReason(row) !== undefined);
   const gaps = untested.length;
 
+  // A PRICED ROW THE AUTHOR NEVER ANSWERED IS A FAULT, not merely a gap.
+  // `coverageGaps` counts a row nobody could price and a row nobody bothered
+  // with as the same number, and on review-v6 that hid the whole defect: all
+  // ten sector rows and the theme row came back `not called this period` over
+  // a frame that had priced every one of them, 11 of 23 rows answered, and
+  // nothing in the document said so. Named here so it is measurable — the ids
+  // are what a prompt change has to move.
+  const omittedPriced = rows
+    .filter(
+      (row) =>
+        row.untested === undefined &&
+        row.rendererFilled !== true &&
+        entries.get(row.id) === undefined,
+    )
+    .map((row) => row.id);
+  if (omittedPriced.length > 0)
+    faults.push(
+      `coverage omits ${String(omittedPriced.length)} priced rows: ${omittedPriced.join(", ")}`,
+    );
+
   const scoreLines: string[] = [
     `${String(scored.length)} scored of ${String(scored.length + open.length)} issued · ${String(gaps)} not called · ` +
       (frame.ledger.firstCommitmentDay === undefined

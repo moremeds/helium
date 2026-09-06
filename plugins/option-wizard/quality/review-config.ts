@@ -369,7 +369,11 @@ export function parseReviewConfig(extensions: unknown): ReviewConfig {
   const caps = {
     weekly: CapsSchema.parse(capsRaw.weekly),
     daily: CapsSchema.parse(capsRaw.daily),
-    weeklyModelWords: z.number().int().positive().parse(capsRaw.weeklyModelWords),
+    weeklyModelWords: z
+      .number()
+      .int()
+      .positive()
+      .parse(capsRaw.weeklyModelWords),
     dailyModelWords: z.number().int().positive().parse(capsRaw.dailyModelWords),
   };
 
@@ -415,4 +419,23 @@ export function themeRowIds(themes: readonly ThemeSpec[]): string[] {
  *  nothing else. */
 export function coverageRowCount(cfg: ReviewConfig): number {
   return cfg.coverage.length + cfg.sectors.length + cfg.themes.length;
+}
+
+/**
+ * Every coverage row id, in PRINT ORDER: the declared macro rows, then
+ * `sector:<chain>`, then `theme:<id>`.
+ *
+ * The prompts spell this list out literally, because a model handed a payload
+ * and told "one entry per row you were given" answered 11 of 23 on both
+ * review-v6 documents. `tests/team-manifest.spec.ts` asserts the prompt
+ * carries every id THIS function returns, so adding a sector or a theme to
+ * `tenant.yaml` fails the suite until the prompt is updated with it — which is
+ * the point: the list in the prompt cannot drift from the declaration.
+ */
+export function coverageRowIds(cfg: ReviewConfig): string[] {
+  return [
+    ...cfg.coverage,
+    ...cfg.sectors.map((sector) => `sector:${sector}`),
+    ...themeRowIds(cfg.themes),
+  ];
 }
