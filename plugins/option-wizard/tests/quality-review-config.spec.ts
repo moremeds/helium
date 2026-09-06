@@ -187,3 +187,26 @@ it.skip("admits an index add/remove, rebalance or spin-off — BLOCKED: no sourc
 
 // TODO-verified-shape. Unskip when a live response has been recorded.
 it.skip("admits a lockup expiry or a secondary offering — BLOCKED: no source (§I.2)", () => {});
+
+describe("the daily total-words cap budgets for the coverage table", () => {
+  /**
+   * `dailyModelWords` was 300, written before the coverage table existed, and
+   * the 2026-09-04 close measured 483 against it — of which `.s3`, the model's
+   * per-row clauses, was 241 on its own. Every PER-FIELD cap was respected;
+   * the total simply did not budget for the rows.
+   */
+  const review = parseReviewConfig(shipped);
+  const MEASURED_S3 = 241;
+
+  it("covers the prose caps plus the measured coverage-row share", () => {
+    expect(review.caps.dailyModelWords).toBeGreaterThanOrEqual(
+      review.caps.daily.review + review.caps.daily.outlook + MEASURED_S3,
+    );
+  });
+
+  it("leaves the per-field prose caps and the weekly total alone", () => {
+    expect(review.caps.daily.review).toBe(120);
+    expect(review.caps.daily.outlook).toBe(180);
+    expect(review.caps.weeklyModelWords).toBe(900);
+  });
+});
