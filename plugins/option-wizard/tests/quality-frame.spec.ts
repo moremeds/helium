@@ -415,13 +415,14 @@ describe("attachThresholds — §G.5's scoring bar", () => {
     attachThresholds(frame, {
       rows: [
         // A pre-event expiry cannot cover the event and is skipped.
-        { ticker: "NVDA", expiry: "2026-11-14", dte: 2, implied_move_perc: 3.1 },
-        { ticker: "NVDA", expiry: "2026-11-20", dte: 5, implied_move_perc: 4.6 },
-        { ticker: "NVDA", expiry: "2026-12-19", dte: 34, implied_move_perc: 9.2 },
+        { ticker: "NVDA", expiry: "2026-11-14", dte: 2, implied_move_perc: 0.031 },
+        { ticker: "NVDA", expiry: "2026-11-20", dte: 5, implied_move_perc: 0.046 },
+        { ticker: "NVDA", expiry: "2026-12-19", dte: 34, implied_move_perc: 0.092 },
       ],
     });
     const attached = (frame as unknown as { focus: { weekly: Array<{ threshold?: { pct: number; source: string } }> } })
       .focus.weekly[0]!.threshold;
+    // 0.046 is UW's FRACTION; the threshold is a percent, so 4.6.
     expect(attached?.pct).toBe(4.6);
     expect(attached?.source).toContain("ow_uw_iv_term implied_move_perc");
     expect(attached?.source).toContain("2026-11-20");

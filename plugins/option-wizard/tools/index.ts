@@ -4412,6 +4412,22 @@ export function buildTools(cfg: {
           if (Array.isArray(got)) ivRows.push(...got);
         }
         attachThresholds(frame, { rows: ivRows });
+        // The coverage table was built inside `buildFrame`, before this pass
+        // ran, so it still says the layer was not supplied. Corrected here: a
+        // table that reports a source as skipped while the run read it is
+        // worse than no table.
+        const ivLayer = frame.coverage.find((entry) => entry.layer === "ivTerm");
+        if (ivLayer !== undefined) {
+          if (ivRows.length > 0) {
+            ivLayer.state = "ok";
+            delete ivLayer.reason;
+          } else {
+            ivLayer.reason =
+              calls === 0
+                ? "no focus names to look up"
+                : "no expiry rows returned for the focus names";
+          }
+        }
         // The realized fallback, for the names the term structure could not
         // answer for. Bounded by the same reach as the IV pass, so a wide
         // universe cannot turn one frame into eighty apex round trips.
@@ -4569,6 +4585,13 @@ export function buildTools(cfg: {
       // /api/stock/{ticker}/volatility/term-structure answers
       // { data: [{ date, ticker, expiry, dte, volatility, implied_move,
       // implied_move_perc }] }, every number a STRING.
+      //
+      // `implied_move_perc` is a FRACTION despite the name — re-verified
+      // against the live AVGO response 2026-09-06: the 2026-09-09 expiry read
+      // implied_move "8.45730425844076" and implied_move_perc
+      // "0.02363365728221534" against a spot near 357.9. Whoever reads this
+      // field multiplies by 100 to get a percent; `quality/frame.ts`
+      // `attachThresholds` is the one place that does.
       //
       // The dte 0 row is dropped. On 2026-09-02 NVDA's expiring-today row read
       // volatility 5.31 — 531% — which is the arithmetic of an expiring

@@ -571,6 +571,10 @@ export function toolPayloadStrings(report: RunReport): string[] {
  * Mutates the rows in place, deliberately: `weekly` and `daily` share row
  * objects, and two copies could disagree about one name's bar.
  */
+function round4(value: number): number {
+  return Math.round(value * 1e4) / 1e4;
+}
+
 export function attachThresholds(
   frame: SessionFrame,
   ivTerm: unknown,
@@ -596,8 +600,15 @@ export function attachThresholds(
       .sort((a, b) => Number(a.dte) - Number(b.dte));
     const nearest = candidates[0];
     if (nearest !== undefined) {
+      // `implied_move_perc` is a FRACTION, not a percent. Verified against the
+      // live response on 2026-09-06: AVGO's 2026-09-09 expiry carried
+      // implied_move 8.4573 and implied_move_perc 0.02363365728221534 against a
+      // spot near 357.9 — 8.4573/357.9 = 0.02363. Multiplied here so that both
+      // thresholds, implied and realized, are in the same unit as
+      // `settleFocus`'s movePct; without it every name cleared a 0.02% bar and
+      // focusHitRate would have read 1.00 forever.
       row.threshold = {
-        pct: nearest.implied_move_perc as number,
+        pct: round4((nearest.implied_move_perc as number) * 100),
         source: `ow_uw_iv_term implied_move_perc, expiry ${String(nearest.expiry)}, dte ${String(nearest.dte)}`,
       };
       continue;
