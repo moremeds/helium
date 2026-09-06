@@ -1,0 +1,16 @@
+{
+  "id": "2026-09-06-density-arm-h",
+  "repo": "argon",
+  "hypothesis": "Switching uw_scan.density.forecast.ARM from G (normal innovations) to H (Student-t innovations, otherwise identical) fixes the SPX cone's left-tail underweight: q05 pinball loses to the EWMA baseline (ratio 1.00-1.08) on reconstructed rows while q90/q95 is the model's strength.",
+  "change": "argon src/uw_scan/density/forecast.py: ARM = \"G\" -> \"H\"",
+  "baselineSweepRun": 3,
+  "candidateSweepRun": null,
+  "candidateSweepStrategy": "spx-density-calibration-arm-H",
+  "holdout": { "origin": "prospective", "rows": 80 },
+  "decisionSet": { "origin": "reconstructed", "rows": 320 },
+  "metrics": {
+    "q05PinballRatio": { "improveIfDeltaAtMost": -0.03 },
+    "meanPinball": { "regressIfDeltaAbove": 0.01 }
+  },
+  "rule": "On the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.03 vs run 3 AND mean pinball (model) does not rise by > 0.01; regressed if either q05 ratio rises by > 0.03 or mean pinball rises by > 0.01; otherwise flat. Thresholds fixed at mint time; never edited after."
+}

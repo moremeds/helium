@@ -1,0 +1,35 @@
+manifestVersion: "2"
+name: helium-self
+# One role, one task, no tools. The model step is ceremonial on purpose: what
+# this tenant is FOR is the deterministic renderer (mint) and the deterministic
+# settler (check). A model that could edit either would make the measurement
+# depend on the thing being measured.
+roles:
+  scribe:
+    requires: [structured.output, cheap.bulk]
+    permissions:
+      mutations: forbidden
+      tools: []
+    persona: >-
+      You restate an experiment declaration in plain English. You never
+      compute, estimate or invent a number, and you never predict the outcome.
+tasks:
+  - id: restate
+    role: scribe
+    requires: [structured.output]
+    # The declaration is INLINE, not a file path: this role has no tools, so a
+    # prompt that pointed at `experiments/` would be asking a model to read
+    # something it cannot open — which is exactly what the first run of this
+    # tenant did. `tests/prompt.spec.ts` fails if these two lines stop matching
+    # the experiment file, so the file stays the single source of truth.
+    prompt: |-
+      This is the experiment declaration this run is minting a commitment
+      about. Its hypothesis and its acceptance rule were both fixed before any
+      result existed.
+
+      id: 2026-09-06-density-arm-h
+      hypothesis: Switching uw_scan.density.forecast.ARM from G (normal innovations) to H (Student-t innovations, otherwise identical) fixes the SPX cone's left-tail underweight: q05 pinball loses to the EWMA baseline (ratio 1.00-1.08) on reconstructed rows while q90/q95 is the model's strength.
+      rule: On the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.03 vs run 3 AND mean pinball (model) does not rise by > 0.01; regressed if either q05 ratio rises by > 0.03 or mean pinball rises by > 0.01; otherwise flat. Thresholds fixed at mint time; never edited after.
+
+      Restate the hypothesis and the acceptance rule in at most three
+      sentences of plain English. Do not predict whether the change will work.
