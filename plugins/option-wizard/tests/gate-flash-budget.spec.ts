@@ -80,3 +80,77 @@ describe("flash-budget", () => {
     expect(result.reason).toContain("6 sections of 5");
   });
 });
+
+describe("flash-budget over the one-thing and review shapes", () => {
+  const editor = { runId: "run-1", role: "editor" };
+  const long = (n: number) => Array.from({ length: n }, () => "word").join(" ");
+  const frameOutput = (mode: string) =>
+    JSON.stringify({
+      kind: "session-frame/1",
+      mode,
+      caps: {
+        weekly: {
+          review: 300,
+          outlook: 400,
+          catalysts: 150,
+          rowWords: 15,
+          focusWords: 20,
+          themeWords: 25,
+        },
+        daily: {
+          review: 120,
+          outlook: 180,
+          catalysts: 60,
+          rowWords: 10,
+          focusWords: 20,
+          themeWords: 25,
+        },
+      },
+    });
+
+  it("refuses a 250-word lead item against 180", async () => {
+    const result = await gate.check(
+      { text: JSON.stringify({ oneThing: long(250) }) },
+      { ...editor, toolOutputs: [frameOutput("ratio")] } as never,
+    );
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("oneThing 250 of 180");
+  });
+
+  it("refuses the same paragraph at 90 under the persistence mode", async () => {
+    const result = await gate.check(
+      { text: JSON.stringify({ oneThing: long(250) }) },
+      { ...editor, toolOutputs: [frameOutput("persistence")] } as never,
+    );
+    expect(result.pass).toBe(false);
+    expect(result.reason).toContain("of 90");
+  });
+
+  it("measures a review document against the caps the frame carries", async () => {
+    const doc = JSON.stringify({
+      review: long(200),
+      coverage: [{ id: "rates.long", why: "short", observable: "short" }],
+      themes: [{ id: "t", why: "short" }],
+    });
+    // `themes` present -> the wider table the frame declared.
+    const wide = await gate.check(
+      { text: doc },
+      { ...editor, toolOutputs: [frameOutput("ratio")] } as never,
+    );
+    expect(wide.pass).toBe(true);
+    // No frame at all -> the STRICTER table, because a gate that guesses the
+    // looser limit guards nothing.
+    const strict = await gate.check({ text: doc }, editor as never);
+    expect(strict.pass).toBe(false);
+    expect(strict.reason).toContain("review 200 of 120");
+  });
+
+  it("passes a document with none of the three shapes", async () => {
+    const result = await gate.check(
+      { text: JSON.stringify({ tape: [] }) },
+      editor as never,
+    );
+    expect(result.pass).toBe(true);
+    expect(result.reason).toBe("no sections to measure");
+  });
+});

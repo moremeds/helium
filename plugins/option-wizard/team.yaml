@@ -168,13 +168,6 @@ roles:
       conclusion and puts the evidence after it; setup first is how the
       conclusion gets trimmed off.
       You do not propose trades.
-      AFTER the JSON, end your reply with one fenced block whose info string is
-      regime-state, containing one JSON object and nothing else:
-      {"cause":"<the cause you named, under twelve words>","ust2y":<2Y level>,
-      "ust10y":<10Y level>,"s2s10":<the 2s10s figure you were given>,
-      "tide":"up"|"down"|"flat","thesis":"<one sentence>"}. Every number is
-      COPIED from ow_macro_rates; omit a key you have no tool number for. It is
-      state for the next run, never prose the reader sees.
 
   scenario-analyst:
     requires: [reason.deep, long.context]
@@ -770,6 +763,24 @@ tasks:
       run; "as we noted" / "it is worth remembering" / "in summary"; a
       restatement of a level already in the tape strip or the schedule; a
       hedge that survives every outcome; any number the author computed.
+
+      THE RECORD FOR TOMORROW. After the JSON, end your reply with one fenced
+      block whose info string is regime-state, containing one JSON object and
+      nothing else:
+      {"cause":"<the cause named today, under twelve words>","ust2y":<2Y level>,
+      "ust10y":<10Y level>,"s2s10":<the 2s10s figure you were given>,
+      "tide":"up"|"down"|"flat","thesis":"<one sentence>",
+      "checks":[{"series":"<the series name>","level":"<today's level, as a
+      string, character-for-character>","text":"<what you expect, under twenty
+      words>"} x3],
+      "invalidation":{"series":"<series>","threshold":"<e.g. >4.85>",
+      "horizon":"<e.g. 5 sessions>"}}.
+      Every number is COPIED from a step you were handed; omit a key you have
+      no tool number for. `checks` is EXACTLY three or it is omitted: the next
+      run scores three, and two is a record it cannot read. You write this
+      block and no other step does — you are the last step that knows the
+      checks, and a later fence overwrites an earlier one. It is state for the
+      next run, never prose the reader sees.
 
   - id: weekly
     role: weekly-analyst

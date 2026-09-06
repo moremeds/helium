@@ -12,7 +12,19 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
-import { FLASH_BUDGET, trim } from "./budget.js";
+import { FLASH_BUDGET, ONE_THING_BUDGET, PERSISTENCE_BUDGET, trim, words } from "./budget.js";
+import {
+  ONE_THING_TITLE,
+  channelMetrics,
+  leadFields,
+  parseOneThingDoc,
+  type ChangeMyMind,
+  type LeadFrame,
+  type OneThingCheck,
+  type OneThingDoc,
+} from "./one-thing.js";
+import { frameFrom } from "../quality/frame.js";
+import { MOVE_METRIC } from "../quality/history.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
@@ -209,7 +221,7 @@ export function forecastFrom(report: RunReport): ForecastBlock | undefined {
  * something was dropped. With a version it says "I was written for version N,
  * this is N+1" and the fix is a deploy rather than an investigation.
  */
-export const BRIEF_VIEW_SCHEMA_VERSION = 2;
+export const BRIEF_VIEW_SCHEMA_VERSION = 3;
 
 export interface BriefView {
   /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
@@ -297,6 +309,23 @@ export interface BriefView {
   /** argon's public origin, from `ARGON_APP_BASE`. Unset on a machine that has
    *  no Flash page to link to, and then no link is printed at all. */
   appBase?: string;
+  /** The lead item, after trim. Absent in `no-data` mode: a day nothing could
+   *  be ranked has no one thing, and the footer says so. */
+  oneThing?: { title: string; body: string; why: string; checksLine: string };
+  /** The price that would kill the view, and by when. Dropped WHOLE when the
+   *  triple is incomplete — never padded — and one `faults` line says so. */
+  changeMyMind?: ChangeMyMind;
+  /** The three the NEXT run scores. Written by the editor, carried to disk by
+   *  the runner's `liftState`, never written from here. */
+  checks?: OneThingCheck[];
+  everythingElse?: string[];
+  /** Renderer-owned, outside the prose budget and outside the model's reach:
+   *  coverage by layer, every source's own as-of copied verbatim, and the
+   *  frame's own notes. */
+  footer?: { coverage: string[]; asOf: string[]; notes: string[] };
+  /** One line per renderer-detected authoring fault. NOT `degradation`:
+   *  nothing failed. */
+  faults?: string[];
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -1151,6 +1180,10 @@ interface EditorDoc {
   riskList?: Array<{ ticker: string; reason: string }>;
   /** id -> rationale. Prose only; every other key on the entry is ignored. */
   rationales?: Map<string, string>;
+  /** The One Thing half of the same document, when the editor wrote one. */
+  oneThing?: OneThingDoc;
+  /** One string per authoring fault `parseOneThingDoc` found. */
+  problems?: string[];
 }
 
 function sectionList(raw: unknown): Section[] {
@@ -1224,8 +1257,19 @@ function editorDocFrom(report: RunReport): EditorDoc | undefined {
     }
   }
 
+  // The One Thing half of the SAME document. A run whose editor still writes
+  // the `sections` shape has no `oneThing` key, `parseOneThingDoc` reports it
+  // as a problem, and the fallback path renders exactly as it did before.
+  const lead = parseOneThingDoc(parsed);
+  const wroteLead =
+    typeof (parsed as Record<string, unknown>).oneThing === "string";
+
   return {
     ...(headline === undefined ? {} : { headline }),
+    ...(wroteLead && lead.doc !== null ? { oneThing: lead.doc } : {}),
+    ...(wroteLead && lead.problems.length > 0
+      ? { problems: lead.problems }
+      : {}),
     ...(tape.length === 0 ? {} : { tape }),
     ...(schedule.length === 0 ? {} : { schedule }),
     ...(overnight.length === 0 ? {} : { overnight }),
@@ -1251,6 +1295,28 @@ function applyEditor(view: BriefView, doc: EditorDoc | undefined): BriefView {
     ...(doc.coverage === undefined ? {} : { coverage: doc.coverage }),
     ...(doc.decision === undefined ? {} : { decision: doc.decision }),
     ...(doc.riskList === undefined ? {} : { riskList: doc.riskList }),
+    // The lead item's body arrives untrimmed and with placeholder metadata:
+    // `why` and `checksLine` are the FRAME's, filled in below once the budget
+    // has been enforced, so the model never supplies either.
+    ...(doc.oneThing === undefined
+      ? {}
+      : {
+          oneThing: {
+            title: ONE_THING_TITLE,
+            body: doc.oneThing.oneThing,
+            why: "",
+            checksLine: "",
+          },
+          ...(doc.oneThing.changeMyMind === undefined
+            ? {}
+            : { changeMyMind: doc.oneThing.changeMyMind }),
+          ...(doc.oneThing.checks.length === 0
+            ? {}
+            : { checks: doc.oneThing.checks }),
+          ...(doc.oneThing.everythingElse.length === 0
+            ? {}
+            : { everythingElse: doc.oneThing.everythingElse }),
+        }),
     candidates:
       doc.rationales === undefined
         ? view.candidates
@@ -1484,11 +1550,60 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  *  the `as-of-verbatim` gate protects, and a trim there would delete
  *  evidence to save words. Runs after `applyEditor` so the editor's prose is
  *  what gets measured, and before charts, which it cannot touch. */
-function enforceBudget(view: BriefView): BriefView {
+/** `mode` is the SELECTION MODE the frame reported, not a run label: nothing
+ *  here learns which run produced the document, and a sixth run label would
+ *  cost no edit. `persistence` means nothing stood out, so the lead item gets
+ *  half the room and two fewer else-lines. */
+function enforceBudget(view: BriefView, mode?: string): BriefView {
   const cut = (text: string, max: number): string => trim(text, max).text;
+  const quiet = mode === "persistence";
   return {
     ...view,
-    headline: cut(view.headline, FLASH_BUDGET.headlineWords),
+    ...(view.oneThing === undefined
+      ? {}
+      : {
+          oneThing: {
+            ...view.oneThing,
+            body: cut(
+              view.oneThing.body,
+              quiet
+                ? PERSISTENCE_BUDGET.oneThingWords
+                : ONE_THING_BUDGET.oneThingWords,
+            ),
+          },
+        }),
+    ...(view.everythingElse === undefined
+      ? {}
+      : {
+          everythingElse: view.everythingElse
+            .slice(
+              0,
+              quiet ? PERSISTENCE_BUDGET.elseLines : ONE_THING_BUDGET.elseLines,
+            )
+            .map((line) => cut(line, ONE_THING_BUDGET.elseLineWords)),
+        }),
+    ...(view.changeMyMind === undefined
+      ? {}
+      : {
+          changeMyMind: {
+            ...view.changeMyMind,
+            text: cut(view.changeMyMind.text, ONE_THING_BUDGET.changeMyMindWords),
+          },
+        }),
+    ...(view.checks === undefined
+      ? {}
+      : {
+          checks: view.checks.map((check) => ({
+            ...check,
+            text: cut(check.text, ONE_THING_BUDGET.checkWords),
+          })),
+        }),
+    headline: cut(
+      view.headline,
+      view.oneThing === undefined
+        ? FLASH_BUDGET.headlineWords
+        : ONE_THING_BUDGET.headlineWords,
+    ),
     sections: view.sections.slice(0, FLASH_BUDGET.sectionCount).map((s) => ({
       ...s,
       body: cut(s.body, FLASH_BUDGET.sectionBodyWords),
@@ -1524,11 +1639,24 @@ function withPolicyAsOf(view: BriefView, report: RunReport): BriefView {
   };
 }
 
+/** Every word the reader gets from the model, after the trim. The denominator
+ *  of `brief.proseWords`. */
+function proseWordsOf(view: BriefView): number {
+  return (
+    words(view.headline) +
+    words(view.oneThing?.body ?? "") +
+    words(view.changeMyMind?.text ?? "") +
+    (view.checks ?? []).reduce((total, row) => total + words(row.text), 0) +
+    (view.everythingElse ?? []).reduce((total, line) => total + words(line), 0) +
+    view.candidates.reduce((total, row) => total + words(row.rationale), 0)
+  );
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+  const doc = editorDocFrom(report);
+  const frame = frameFrom(report);
   const view = withPolicyAsOf(
-    enforceBudget(
-      applyEditor(assembleView(report, cfg), editorDocFrom(report)),
-    ),
+    enforceBudget(applyEditor(assembleView(report, cfg), doc), frame?.mode),
     report,
   );
   // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
@@ -1538,7 +1666,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   // Flash page, and the mail simply carries no link.
   const appBase = (process.env.ARGON_APP_BASE ?? "").trim();
   const runLabel = report.phase;
-  return {
+  const base: BriefView = {
     ...view,
     ...(runLabel === undefined ? {} : { runLabel }),
     ...(appBase === "" ? {} : { appBase }),
@@ -1547,6 +1675,22 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       view.candidates.map((candidate) => candidate.ticker),
     ),
   };
+  // No frame, no lead item: the fallback path renders exactly as it did before
+  // this design existed, which is what a run with no deterministic step gets.
+  if (frame === null) return base;
+  const lead = leadFields({
+    frame: frame as unknown as LeadFrame,
+    body: base.oneThing?.body ?? "",
+    problems: doc?.problems ?? [],
+  });
+  return {
+    ...base,
+    ...(lead.oneThing === undefined
+      ? { oneThing: undefined }
+      : { oneThing: lead.oneThing }),
+    footer: lead.footer,
+    ...(lead.faults === undefined ? {} : { faults: lead.faults }),
+  };
 }
 
 export default function renderReport(
@@ -1554,6 +1698,7 @@ export default function renderReport(
   cfg: TenantSpec,
 ): RenderedReport {
   const view = buildView(report, cfg);
+  const frame = frameFrom(report);
   // What this run promised, handed to the runner to stamp and write to the
   // ledger BEFORE any delivery is attempted. The renderer mints the ids and
   // the payloads; it never stamps the run context, because the runner already
@@ -1574,7 +1719,20 @@ export default function renderReport(
     data: view as unknown as Record<string, unknown>,
     // Measured over the document the READER gets, after the budget trim. The
     // runner writes these to the audit table and prints one header line.
-    metrics: qualityMetrics({ view, report }),
+    metrics: [
+      ...qualityMetrics({ view, report }),
+      // The channel rows, from the frame the deterministic step computed. An
+      // absent frame writes none of them rather than a screen of nulls.
+      ...(frame === null
+        ? []
+        : channelMetrics({
+            frame: frame as unknown as LeadFrame,
+            moveMetric: MOVE_METRIC,
+            order: frame.ranked.map((row) => row.id),
+            proseWords: proseWordsOf(view),
+            invalidationComplete: view.changeMyMind !== undefined,
+          })),
+    ],
     ...(commitments.length === 0 ? {} : { commitments }),
     baselines,
   };

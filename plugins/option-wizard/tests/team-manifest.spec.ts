@@ -347,11 +347,27 @@ it("flash-budget guards only roles that still exist", () => {
     expect(Object.keys(manifest.roles), role).toContain(role);
 });
 
-it("asks the regime analyst for a regime-state block with the six schema fields", () => {
-  const persona = manifest.roles["regime-analyst"]?.persona ?? "";
-  expect(persona).toContain("regime-state");
-  for (const field of ["cause", "ust2y", "ust10y", "s2s10", "tide", "thesis"])
-    expect(persona, field).toContain(field);
+it("asks the EDITOR for the regime-state block, and asks nobody else", () => {
+  // The record moved off the regime analyst on 2026-09-06: the runner lifts a
+  // fence from every step and a later one overwrites an earlier one, so the
+  // block belongs to the last step that knows the three checks the next run
+  // scores. Two authors would mean the analyst's record is silently discarded.
+  const prompt = manifest.tasks.find((task) => task.id === "edit")?.prompt ?? "";
+  expect(prompt).toContain("regime-state");
+  for (const field of [
+    "cause",
+    "ust2y",
+    "ust10y",
+    "s2s10",
+    "tide",
+    "thesis",
+    "checks",
+    "invalidation",
+  ])
+    expect(prompt, field).toContain(field);
+  expect(manifest.roles["regime-analyst"]?.persona ?? "").not.toContain(
+    "regime-state",
+  );
 });
 
 it("keeps every persona inside the 4000-character cap core enforces", () => {

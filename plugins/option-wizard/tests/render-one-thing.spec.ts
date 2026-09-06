@@ -13,9 +13,13 @@ import {
   measureOneThing,
   measureReview,
   trim,
+  words,
 } from "../render/budget.js";
-import { parseOneThingDoc } from "../render/one-thing.js";
+import { channelMetrics, parseOneThingDoc } from "../render/one-thing.js";
 import { parseReviewDoc } from "../render/review.js";
+import { buildView } from "../render/index.js";
+import { MOVE_METRIC } from "../quality/history.js";
+import { SPEC, report } from "./fixture-report.js";
 
 const doc = (over: Record<string, unknown> = {}) => ({
   headline: "Duration led the tape into the meeting",
@@ -202,5 +206,222 @@ describe("measureReview", () => {
     expect(what.some((row) => row.startsWith("rowWords"))).toBe(true);
     expect(what.some((row) => row.startsWith("focusWords"))).toBe(true);
     expect(what.some((row) => row.startsWith("themeWords"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// the rendering half
+// ---------------------------------------------------------------------------
+
+describe("buildView over a frame and an edit step", () => {
+  const frame = (over: Record<string, unknown> = {}) => ({
+    kind: "session-frame/1",
+    day: "2026-09-02",
+    mode: "ratio",
+    why: "largest normalised move of the session, 3.3x its 20-session median",
+    ranked: [
+      {
+        id: "rates",
+        series: "DGS10",
+        level: "4.772",
+        prior: "4.78",
+        move: "-0.8 bp",
+        delta: -0.8,
+        score: 3.3,
+        medianSource: 1,
+        asOf: "2026-09-03T20:15:31Z",
+      },
+      {
+        id: "vol",
+        series: "VIXCLS",
+        score: null,
+        medianSource: null,
+        excluded: "VIXCLS not ingested",
+      },
+    ],
+    rows: [],
+    focus: {
+      weekly: [],
+      daily: [],
+      churn: 0,
+      carried: [],
+      dropped: [],
+      notes: [],
+      weightsNote: "weights: declared prior 2026-09-06",
+    },
+    checks: {
+      line: "Yesterday: 2 hit, 1 not observed.",
+      scored: [
+        { series: "DGS10", level: "4.78", text: "a", verdict: "hit" },
+        { series: "DGS2", level: "4.34", text: "b", verdict: "hit" },
+        { series: "X", level: "1", text: "c", verdict: "not-observed" },
+      ],
+    },
+    ledger: { settledToday: [], open: [], totalCommitments: 0 },
+    caps: { weekly: REVIEW_BUDGET.weekly, daily: REVIEW_BUDGET.daily },
+    declared: { coverage: [], sectors: [], themes: [] },
+    coverage: [
+      {
+        layer: "macro",
+        source: "ow_macro_rates",
+        asOf: "2026-09-03T20:15:31Z",
+        state: "ok",
+      },
+      {
+        layer: "gex",
+        source: "ow_uw_gex",
+        state: "skipped",
+        reason: "the Unusual Whales exposure endpoints as used here has no history",
+      },
+    ],
+    ...over,
+  });
+
+  const run = (args: { frame?: Record<string, unknown>; doc?: Record<string, unknown> }) =>
+    buildView(
+      report({
+        steps: [
+          {
+            task: "frame",
+            role: "frame-clerk",
+            mode: "deterministic",
+            text: "",
+            toolOutputs: [JSON.stringify(args.frame ?? frame())],
+          },
+          {
+            task: "edit",
+            role: "editor",
+            mode: "model",
+            text: JSON.stringify(args.doc ?? doc()),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+
+  it("trims the lead item and copies the frame's why character for character", () => {
+    const long = Array.from({ length: 260 }, () => "word").join(" ");
+    const view = run({ doc: doc({ oneThing: `${long}.` }) });
+    expect(view.oneThing?.title).toBe("The one thing");
+    expect(words(view.oneThing!.body)).toBeLessThanOrEqual(
+      ONE_THING_BUDGET.oneThingWords,
+    );
+    expect(view.oneThing?.why).toBe(frame().why);
+    expect(view.oneThing?.checksLine).toBe(frame().checks.line);
+  });
+
+  it("drops an incomplete invalidation and flags it", () => {
+    const view = run({
+      doc: doc({
+        changeMyMind: {
+          text: "a 10Y above 4.85 kills it",
+          series: "DGS10",
+          horizon: "5 sessions",
+        },
+      }),
+    });
+    expect(view.changeMyMind).toBeUndefined();
+    expect(view.faults?.join(" ")).toContain("invalidation incomplete");
+  });
+
+  it("halves the lead item and the else list under the persistence mode", () => {
+    const long = Array.from({ length: 200 }, () => "word").join(" ");
+    const view = run({
+      frame: frame({ mode: "persistence", streak: 4 }),
+      doc: doc({
+        oneThing: `${long}.`,
+        everythingElse: Array.from({ length: 6 }, (_, i) => `line ${String(i)}`),
+      }),
+    });
+    expect(words(view.oneThing!.body)).toBeLessThanOrEqual(
+      PERSISTENCE_BUDGET.oneThingWords,
+    );
+    expect(view.everythingElse?.length).toBe(PERSISTENCE_BUDGET.elseLines);
+  });
+
+  it("has no lead item on a day nothing could be ranked, and says why", () => {
+    const view = run({ frame: frame({ mode: "no-data" }) });
+    expect(view.oneThing).toBeUndefined();
+    expect(view.footer?.notes.join(" ")).toContain("ow_uw_gex");
+  });
+
+  it("copies each source's own as-of verbatim into the footer", () => {
+    const view = run({});
+    expect(view.footer?.asOf).toContain(
+      "ow_macro_rates — 2026-09-03T20:15:31Z",
+    );
+    expect(view.footer?.coverage.some((row) => row.startsWith("gex —"))).toBe(
+      true,
+    );
+  });
+
+  it("renders exactly as before when there is no frame", () => {
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "edit",
+            role: "editor",
+            mode: "model",
+            text: JSON.stringify(doc()),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(view.footer).toBeUndefined();
+    expect(view.oneThing?.why).toBe("");
+  });
+});
+
+describe("channel metric rows", () => {
+  it("writes one row per channel, null for the excluded ones", () => {
+    const rows = channelMetrics({
+      frame: {
+        mode: "ratio",
+        why: "",
+        ranked: [
+          {
+            id: "rates",
+            series: "DGS10",
+            delta: -0.8,
+            score: 3.3,
+            medianSource: 1,
+          },
+          {
+            id: "vol",
+            series: "VIXCLS",
+            score: null,
+            medianSource: null,
+            excluded: "VIXCLS not ingested",
+          },
+        ],
+        checks: {
+          line: "",
+          scored: [{ verdict: "hit" }, { verdict: "miss" }],
+        },
+        coverage: [],
+      },
+      moveMetric: MOVE_METRIC,
+      order: ["rates", "vol"],
+      proseWords: 123,
+      invalidationComplete: true,
+    });
+    const by = new Map(rows.map((row) => [row.name, row.value]));
+    // The MOVE row names ARE quality/history.ts's, because those are the names
+    // channelHistory reads back as next session's denominator.
+    expect(by.get(MOVE_METRIC.rates)).toBe(-0.8);
+    expect(by.get(MOVE_METRIC.vol)).toBeNull();
+    expect(by.get("channel.rates.score")).toBe(3.3);
+    expect(by.get("channel.vol.medianSource")).toBeNull();
+    expect(by.get("select.top.score")).toBe(3.3);
+    expect(by.get("select.mode")).toBe(0);
+    expect(by.get("select.streak.sessions")).toBeNull();
+    expect(by.get("checks.scored")).toBe(2);
+    expect(by.get("checks.hit")).toBe(1);
+    expect(by.get("checks.miss")).toBe(1);
+    expect(by.get("checks.notObserved")).toBe(0);
+    expect(by.get("brief.proseWords")).toBe(123);
+    expect(by.get("brief.invalidationComplete")).toBe(1);
   });
 });

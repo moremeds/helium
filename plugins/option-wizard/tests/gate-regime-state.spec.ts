@@ -7,17 +7,20 @@
 import { describe, expect, it } from "vitest";
 import gate from "../gates/regime-state.js";
 
-const ctx = { runId: "run-1", role: "regime-analyst" } as never;
+const ctx = { runId: "run-1", role: "editor" } as never;
 const BLOCK =
   '```regime-state\n{"cause":"August payrolls printed 162k","ust2y":4.02,' +
   '"ust10y":4.79,"s2s10":77,"tide":"up","thesis":"No cut to give."}\n```';
 
 describe("regime-state gate", () => {
-  it("is advisory, output-phase, and guards one role", () => {
+  it("is advisory, output-phase, and guards the one step that writes it", () => {
     expect(gate.id).toBe("regime-state");
     expect(gate.phase).toBe("output");
     expect(gate.advisory).toBe(true);
-    expect(gate.appliesTo).toEqual(["regime-analyst"]);
+    // The EDITOR now writes the record: `liftState` runs on every step and a
+    // later fence overwrites an earlier one, so exactly one step may emit the
+    // block and it must be the last one that knows the three checks.
+    expect(gate.appliesTo).toEqual(["editor"]);
   });
 
   it("passes a step that ends with a valid block", async () => {

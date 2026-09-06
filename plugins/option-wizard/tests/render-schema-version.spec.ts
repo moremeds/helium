@@ -56,13 +56,13 @@ describe("the brief view carries a schema version", () => {
     expect(buildView(report(), SPEC).schemaVersion).toBe(
       BRIEF_VIEW_SCHEMA_VERSION,
     );
-    expect(BRIEF_VIEW_SCHEMA_VERSION).toBe(2);
+    expect(BRIEF_VIEW_SCHEMA_VERSION).toBe(3);
   });
 
   it("hands the structured document to the channels beside the prose", () => {
     const rendered = renderReport(report(), SPEC);
     expect(rendered.data?.date).toBe("2026-09-03");
-    expect(rendered.data?.schemaVersion).toBe(2);
+    expect(rendered.data?.schemaVersion).toBe(3);
     // The slot is ADDITIVE: mail still gets exactly what it got before.
     expect(typeof rendered.text).toBe("string");
     expect(typeof rendered.html).toBe("string");

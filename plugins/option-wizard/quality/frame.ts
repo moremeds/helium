@@ -72,6 +72,11 @@ export interface FrameRanked {
   level?: string;
   prior?: string;
   move?: string;
+  /** The SIGNED move, in the channel's own metric unit. This is the value the
+   *  metric row carries, and `quality/history.ts` reads its absolute value back
+   *  as next session's denominator — so it is on the payload rather than
+   *  recomputed by whoever writes the row. */
+  delta?: number;
   score: number | null;
   medianSource: 0 | 1 | null;
   asOf?: string;
@@ -307,6 +312,7 @@ export function buildFrame(args: {
       ...(row.channel.level === undefined ? {} : { level: row.channel.level }),
       ...(row.channel.prior === undefined ? {} : { prior: row.channel.prior }),
       ...(row.channel.move === undefined ? {} : { move: row.channel.move }),
+      ...(row.channel.delta === undefined ? {} : { delta: row.channel.delta }),
       score: row.score,
       medianSource: row.medianSource,
       ...(row.channel.asOf === undefined ? {} : { asOf: row.channel.asOf }),
@@ -321,6 +327,7 @@ export function buildFrame(args: {
         ...(channel.level === undefined ? {} : { level: channel.level }),
         ...(channel.prior === undefined ? {} : { prior: channel.prior }),
         ...(channel.move === undefined ? {} : { move: channel.move }),
+        ...(channel.delta === undefined ? {} : { delta: channel.delta }),
         score: null,
         medianSource: null,
         ...(channel.asOf === undefined ? {} : { asOf: channel.asOf }),
