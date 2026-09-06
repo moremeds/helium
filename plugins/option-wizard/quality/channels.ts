@@ -93,6 +93,33 @@ export interface CoverageRow {
   rendererFilled?: true;
 }
 
+/**
+ * The figures section 3 will print as LEVELS — the ones §4 may not restate.
+ *
+ * One definition, two readers: `render/review.ts` faults a §4 paragraph that
+ * contains one of these strings, and `buildFrame` puts the same list on the
+ * frame as `noRestate` so the author is handed the exact numbers rather than
+ * a rule to apply. Told only the rule, the review-v6 weekly restated `55.7`
+ * and lost the whole paragraph.
+ *
+ * Two exclusions, both load-bearing. A one-character level is a digit that
+ * appears in every date and every ratio — `calls.open`'s `0` matched the
+ * "9/16" in §4 on the v6 close. And a renderer-filled row's level is the
+ * renderer's own count, not a datum the author is quoting back.
+ */
+export function printedLevels(
+  rows: readonly CoverageRow[],
+): Array<{ id: string; level: string }> {
+  return rows
+    .filter(
+      (row) =>
+        row.level !== undefined &&
+        row.level.length > 1 &&
+        row.rendererFilled !== true,
+    )
+    .map((row) => ({ id: row.id, level: row.level! }));
+}
+
 export interface ChannelInputs {
   macro?: unknown; // ow_macro_rates
   policy?: unknown; // ow_argon_policy_path
@@ -812,7 +839,11 @@ function callsOpenRow(inputs: ChannelInputs, order: number): CoverageRow {
   // COUNT is the whole datum this row carries.
   const count = inputs.openCalls;
   if (count === undefined || !Number.isFinite(count)) {
-    return { ...base, rendererFilled: true, untested: "no ledger read for this run" };
+    return {
+      ...base,
+      rendererFilled: true,
+      untested: "no ledger read for this run",
+    };
   }
   return { ...base, rendererFilled: true, level: String(count), delta: count };
 }

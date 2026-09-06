@@ -32,6 +32,7 @@ import {
 import {
   coverageRows,
   extractChannels,
+  printedLevels,
   type ChannelId,
   type ChannelInputs,
   type CoverageRow,
@@ -250,6 +251,16 @@ export interface SessionFrame {
   /** §5's dated rows, from the calendar and the policy path. Carried on the
    *  frame because those two sibling payloads never reach the renderer. */
   calendar: CalendarRow[];
+  /**
+   * The figures section 3 will print as levels — the exact list §4 may not
+   * restate, ids and numbers, from `printedLevels`.
+   *
+   * Handed over rather than described. The persona has said NEVER RESTATE A
+   * LEVEL SECTION 3 PRINTED since review-v5, and the v6 weekly restated
+   * `55.7` anyway and lost the paragraph: a rule the author has to apply to a
+   * payload is a rule it can misapply.
+   */
+  noRestate: Array<{ id: string; level: string }>;
   notes?: string[];
 }
 
@@ -631,6 +642,7 @@ export function buildFrame(args: {
     declared,
     coverage,
     calendar: calendarRowsOf(inputs),
+    noRestate: printedLevels(rows),
     ...(notes.length === 0 ? {} : { notes }),
   };
 }

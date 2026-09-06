@@ -671,4 +671,17 @@ describe("the review authors, rewritten", () => {
       expect(prompt, id).toContain("EVERY ROW WITH A DATUM NEEDS A TOKEN");
     }
   });
+
+  // §4 restated `2.65` on v5 and `55.7` on v6, both times over a persona that
+  // already said NEVER RESTATE A LEVEL SECTION 3 PRINTED. The author is now
+  // handed the figures themselves, on the frame, as `noRestate`.
+  it("both review prompts hand §4 the printed levels rather than the rule", () => {
+    for (const id of ["weekly", "edit"]) {
+      const prompt =
+        manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
+      expect(prompt, id).toContain("`noRestate`");
+      expect(prompt, id).toContain("{id, level}");
+      expect(prompt, id).toMatch(/DO\s+NOT\s+REPEAT\s+THESE\s+FIGURES/u);
+    }
+  });
 });

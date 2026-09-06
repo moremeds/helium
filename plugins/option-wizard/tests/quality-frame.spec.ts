@@ -26,6 +26,7 @@ import {
   buildFrame,
   frameFrom,
 } from "../quality/frame.js";
+import { printedLevels } from "../quality/channels.js";
 import type { ChannelInputs } from "../quality/channels.js";
 import type { FocusInputs } from "../quality/focus.js";
 
@@ -398,6 +399,42 @@ describe("frameFrom reads both places the runner puts a tool result", () => {
       ],
     } as never;
     expect(frameFrom(report)).toBe(null);
+  });
+});
+
+// §4 restated `2.65` on v5 and `55.7` on v6, over a persona that already
+// carried the rule in prose. The frame now hands the author the figures.
+describe("printedLevels — the exact figures §4 may not restate", () => {
+  it("carries one {id, level} per quotable level, and nothing else", () => {
+    const rows = [
+      { id: "policy.path", order: 0, series: "p", level: "55.7" },
+      { id: "vol", order: 1, series: "v", level: "17.2", delta: 0.3 },
+      // No level at all: an untested row has nothing to restate.
+      { id: "credit", order: 2, series: "c", untested: "tool absent" },
+      // One character: a digit that appears in every date and every ratio.
+      { id: "one.char", order: 3, series: "o", level: "7" },
+      // The renderer's own ledger count, not a datum being quoted back.
+      {
+        id: "calls.open",
+        order: 4,
+        series: "l",
+        level: "10",
+        rendererFilled: true as const,
+      },
+    ];
+    expect(printedLevels(rows)).toEqual([
+      { id: "policy.path", level: "55.7" },
+      { id: "vol", level: "17.2" },
+    ]);
+  });
+
+  it("is on the frame the author is handed", () => {
+    const { stateRoot, env } = scratch();
+    const frame = frameOf({ stateRoot, env });
+    expect(Array.isArray(frame.noRestate)).toBe(true);
+    expect(frame.noRestate).toEqual(printedLevels(frame.rows));
+    for (const row of frame.noRestate)
+      expect(row.level.length).toBeGreaterThan(1);
   });
 });
 

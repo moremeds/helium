@@ -696,8 +696,10 @@ tasks:
       THE DAILY REVIEW. `review`, `outlook`, `catalysts`, `coverage`, `focus` and
       `themes` are the same seven sections as the weekly at one third the size.
       - `review` at most 120 words; it may discuss only ids the scorecard printed.
-      - `outlook` at most 180 words; it may not restate a level the coverage table
-        already printed.
+      - `outlook` at most 180 words. The frame's `noRestate` array is the EXACT
+        list of figures the coverage table prints — one `{id, level}` per row. DO
+        NOT REPEAT THESE FIGURES: a paragraph carrying one is dropped whole. Name
+        the row id instead.
       - `catalysts` at most 60 words, naming only admitted dated events.
       - `coverage` carries ONE entry per row you were given, in that order. THE ROWS
         ARE THESE 23 AND THE REPLY CARRIES ALL 23: rates.front, rates.long,
@@ -818,8 +820,13 @@ tasks:
         taken from section 1. A paragraph naming an id section 1 did not print is
         dropped whole.
       - `outlook` is 下周展望, at most 400 words: the WHY behind each verdict that is
-        not `continue`, one observable each. A paragraph that restates a level
-        section 3 already printed is a fault.
+        not `continue`, one observable each. The frame's `noRestate` array is the
+        EXACT list of figures section 3 prints — one `{id, level}` per row. DO NOT
+        REPEAT THESE FIGURES: a paragraph carrying any one of those numbers is
+        dropped whole. Name the row id and say what it did; the number is already
+        on the page two sections up. On 2026-09-06 this rule was in the persona as
+        prose and the weekly restated `55.7` anyway, which is why you are now
+        handed the numbers instead of the rule.
       - `catalysts` is at most 150 words and may name only the dated events you were
         handed as admitted.
       - `coverage` carries ONE entry per row you were given, in the order you were

@@ -25,7 +25,7 @@
 import type { CommitmentDraft, RunMetric } from "@helium/core";
 import { VERDICT_BANDS } from "../eval/verdict.js";
 import { FOCUS_BANNED_PATTERNS } from "../quality/focus.js";
-import type { CoverageRow } from "../quality/channels.js";
+import { printedLevels, type CoverageRow } from "../quality/channels.js";
 import type {
   CalendarRow,
   OpenRow,
@@ -624,25 +624,17 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     return date.toISOString().slice(0, 10);
   })();
   const stale: CoverageRow[] = [];
-  const levels: string[] = [];
+  // The SAME list `buildFrame` hands the author as `noRestate`, from the same
+  // function — so the figures §4 is faulted for and the figures the author was
+  // told to avoid can never be two different lists.
+  const levels = printedLevels(rows).map((row) => row.level);
   const rowLine = (row: CoverageRow): string => {
     const entry = entries.get(row.id);
-    // Staleness and the printed levels are properties of the DATUM, not of
-    // whether the model gave the row a token: §2 must not quote a stale figure
-    // even on a row nobody called.
+    // Staleness is a property of the DATUM, not of whether the model gave the
+    // row a token: §2 must not quote a stale figure even on a row nobody
+    // called.
     if (row.asOf !== undefined && row.asOf.slice(0, 10) < staleBefore)
       stale.push(row);
-    // A QUOTABLE level only. `calls.open`'s is the renderer's own ledger
-    // count, and a one-character one is a digit that appears in every date and
-    // every ratio: on the review-v6 close, `calls.open` was `0` and §4 was
-    // dropped for "restating the level 0" because the paragraph contained
-    // "9/16".
-    if (
-      row.level !== undefined &&
-      row.level.length > 1 &&
-      row.rendererFilled !== true
-    )
-      levels.push(row.level);
     // §J. The ledger's own count, printed by the renderer that holds it. No
     // verdict token, no probability, no model words — and it still occupies
     // its declared slot, so the row count does not move.
