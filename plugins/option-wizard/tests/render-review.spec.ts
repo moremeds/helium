@@ -1374,6 +1374,21 @@ describe("calls.open is the renderer's row, not the model's", () => {
     expect(out.gaps).toBe(ROW_COUNT - 1);
   });
 
+  // Its level is `0`, and `String.includes("0")` is true of "9/16", "2026" and
+  // every ratio — so §4 was dropped for "restating the level 0" on the
+  // review-v6 close.
+  it("never triggers the section 4 no-restatement fault", () => {
+    const out = render({
+      frame: withOpen(open),
+      doc: {
+        ...DOC_EMPTY,
+        outlook: "The 9/16 meeting is the whole week; nothing lands before it.",
+      },
+    });
+    expect(out.faults).toEqual([]);
+    expect(body(out.sections, 4)).toContain("9/16");
+  });
+
   it("mints no commitment even when the model answers it anyway", () => {
     const drafts = verdictCommitments({
       frame: withOpen(open),

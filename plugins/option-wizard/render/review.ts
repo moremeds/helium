@@ -606,7 +606,17 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // even on a row nobody called.
     if (row.asOf !== undefined && row.asOf.slice(0, 10) < staleBefore)
       stale.push(row);
-    if (row.level !== undefined) levels.push(row.level);
+    // A QUOTABLE level only. `calls.open`'s is the renderer's own ledger
+    // count, and a one-character one is a digit that appears in every date and
+    // every ratio: on the review-v6 close, `calls.open` was `0` and §4 was
+    // dropped for "restating the level 0" because the paragraph contained
+    // "9/16".
+    if (
+      row.level !== undefined &&
+      row.level.length > 1 &&
+      row.rendererFilled !== true
+    )
+      levels.push(row.level);
     // §J. The ledger's own count, printed by the renderer that holds it. No
     // verdict token, no probability, no model words — and it still occupies
     // its declared slot, so the row count does not move.
