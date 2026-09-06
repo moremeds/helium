@@ -36,6 +36,7 @@ import type { RotationRow } from "../quality/themes.js";
 import { REVIEW_PERIODS, type ReviewPeriod } from "../quality/review-config.js";
 import type { Section } from "./index.js";
 import { trim, words, type ReviewCaps } from "./budget.js";
+import { fmt, fmtSigned, unitFromToken, type Unit } from "../quality/units.js";
 
 /** Aliases so no quoted cadence name appears in this directory. See
  *  `REVIEW_PERIODS`. */
@@ -258,12 +259,21 @@ const STALE_DAYS = { [WEEKLY]: 7, [DAILY]: 3 } as const;
 const CALIBRATION_MIN = 10;
 const CALIBRATION_BAND = 0.15;
 
-function round4(value: number): number {
-  return Math.round(value * 1e4) / 1e4;
+/** A RATE — a hit rate, a Brier mean, a calibration probability. Not a market
+ *  unit, so it carries no `quality/units.ts` entry; two decimals is what a
+ *  probability between 0 and 1 is readable at. */
+function num(value: number | null | undefined): string {
+  return value === null || value === undefined ? "—" : value.toFixed(2);
 }
 
-function num(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : String(round4(value));
+/** A number in a named unit, or an em dash. Every printed figure in the review
+ *  sections goes through this or through `fmtSigned`. */
+function show(value: number | null | undefined, unit: Unit): string {
+  return value === null || value === undefined ? "—" : fmt(value, unit);
+}
+
+function showSigned(value: number | null | undefined, unit: Unit): string {
+  return value === null || value === undefined ? "—" : fmtSigned(value, unit);
 }
 
 /** The unit a move string carries, so a band prints in the row's own unit.
@@ -325,7 +335,11 @@ export function citationLine(row: SettledRow): string {
   if (payload.kind === "spy-direction") {
     const reference = (payload.referenceClose ?? {}) as { value?: unknown };
     parts.push(
-      `t${String(payload.horizonBars ?? "?")} vs ${String(reference.value ?? "?")}`,
+      `t${String(payload.horizonBars ?? "?")} vs ${
+        typeof reference.value === "number"
+          ? fmt(reference.value, "price")
+          : String(reference.value ?? "?")
+      }`,
     );
   } else if (typeof payload.p === "number") {
     parts.push(`said p=${String(payload.p)}`);
@@ -366,17 +380,18 @@ function outcomeOf(row: SettledRow): "hit" | "miss" | null {
 /** Addendum A5. The band a token claims, in the row's own unit, from the same
  *  constant `eval/verdict.ts` scores against. */
 function bandText(token: string, delta: number, unit: string): string {
+  const named = unitFromToken(unit);
   const size = Math.abs(delta);
-  const low = round4(size * VERDICT_BANDS.continueLow);
-  const high = round4(size * VERDICT_BANDS.continueHigh);
-  const mag = round4(size);
+  const low = fmt(size * VERDICT_BANDS.continueLow, named);
+  const high = fmt(size * VERDICT_BANDS.continueHigh, named);
+  const mag = fmt(size, named);
   switch (token) {
     case "strengthen":
-      return `(>${String(high)}${unit} = ${String(VERDICT_BANDS.continueHigh)}x prior |Δ| ${String(mag)}${unit})`;
+      return `(>${high}${unit} = ${String(VERDICT_BANDS.continueHigh)}x prior |Δ| ${mag}${unit})`;
     case "continue":
-      return `(${String(low)}${unit}..${String(high)}${unit})`;
+      return `(${low}${unit}..${high}${unit})`;
     case "fade":
-      return `(<${String(low)}${unit})`;
+      return `(<${low}${unit})`;
     case "reverse":
       return "(sign flip)";
     default:
@@ -387,8 +402,7 @@ function bandText(token: string, delta: number, unit: string): string {
 /** An excess is a DIFFERENCE, so it always carries its sign: "+1.7%" and
  *  "-1.7%" are the two answers, and "1.7%" is neither. */
 function signed(value: number): string {
-  const rounded = round4(value);
-  return `${rounded >= 0 ? "+" : ""}${String(rounded)}`;
+  return fmtSigned(value, "pct");
 }
 
 function themeTriple(row: CoverageRow): { week: string; since: string } {
@@ -648,12 +662,12 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       for (const row of args.rotation.rows)
         coverageLines.push(
           row.untested === undefined
-            ? `  ${row.symbol} · 1w ${num(row.w1)}% · 4w ${num(row.w4)}% · 12w ${num(row.w12)}% · excess 1w ${num(row.excess1w)}%`
+            ? `  ${row.symbol} · 1w ${showSigned(row.w1, "pct")}% · 4w ${showSigned(row.w4, "pct")}% · 12w ${showSigned(row.w12, "pct")}% · excess 1w ${showSigned(row.excess1w, "pct")}%`
             : `  ${row.symbol} · untested — ${row.untested}`,
         );
       const bench = args.rotation.benchmarkReturns;
       coverageLines.push(
-        `  benchmark ${args.rotation.benchmark} · 1w ${num(bench.w1)}% · 4w ${num(bench.w4)}% · 12w ${num(bench.w12)}% · as of ${args.rotation.asOf}`,
+        `  benchmark ${args.rotation.benchmark} · 1w ${showSigned(bench.w1, "pct")}% · 4w ${showSigned(bench.w4, "pct")}% · 12w ${showSigned(bench.w12, "pct")}% · as of ${args.rotation.asOf}`,
       );
     }
   }
@@ -867,8 +881,8 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     const threshold = (source as { threshold?: { pct: number } }).threshold;
     focusLines.push(
       `| ${String(index + 1)} | ${row.ticker} | ${row.event} | ` +
-        `${row.ivRank === undefined ? "—" : String(row.ivRank)} | ` +
-        `${threshold === undefined ? "—" : `${String(threshold.pct)}%`} | ` +
+        `${show(row.ivRank, "ivRank")} | ` +
+        `${threshold === undefined ? "—" : `${fmt(threshold.pct, "pct")}%`} | ` +
         `${row.openCall ?? "—"} | ${row.why === "" ? "—" : row.why} |` +
         (row.sticky === true ? " sticky" : ""),
     );

@@ -44,7 +44,7 @@ describe("extractChannels over the recorded 2026-09-03 close payloads", () => {
     const rates = byId(channels, "rates");
     expect(rates.level).toBe("4.79");
     expect(rates.prior).toBe("4.79");
-    expect(rates.move).toBe("+0.0 bp");
+    expect(rates.move).toBe("+0 bp");
     expect(rates.magnitude).toBe(0);
     expect(rates.excluded).toBeUndefined();
   });
@@ -54,7 +54,7 @@ describe("extractChannels over the recorded 2026-09-03 close payloads", () => {
     expect(credit.series).toBe("BAMLH0A0HYM2");
     expect(credit.level).toBe("2.66");
     expect(credit.prior).toBe("2.65");
-    expect(credit.move).toBe("+1.0 bp");
+    expect(credit.move).toBe("+1 bp");
   });
 
   it("excludes the curve, naming the series argon does not ingest", () => {

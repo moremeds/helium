@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import type { Bar } from "../eval/bars.js";
 import type { ThemeSpec } from "../quality/review-config.js";
 import { coverageRows } from "../quality/channels.js";
+import { roundTo } from "../quality/units.js";
 import { basketExcess, rotationTable, themeRow } from "../quality/themes.js";
 
 const FIX = join(__dirname, "fixtures", "review");
@@ -371,7 +372,9 @@ describe("coverage rows priced from the same bars as the rotation table", () => 
       toDay: BARS_AS_OF,
     })!;
     expect(row.delta).toBe(expected.excessPct);
-    expect(row.level).toBe(String(expected.basketPct));
+    // The DELTA keeps full precision — it is what a verdict is scored against.
+    // The printed LEVEL is a percent, at a percent's precision.
+    expect(row.level).toBe(expected.basketPct.toFixed(1));
   });
 
   it("gives the theme row the same 1w excess the rotation table prints", () => {
@@ -391,7 +394,12 @@ describe("coverage rows priced from the same bars as the rotation table", () => 
     expect(table.asOf).toBe(BARS_AS_OF);
     expect(row.untested).toBeUndefined();
     expect(row.asOf).toBe(BARS_AS_OF);
-    expect(row.theme?.week?.excessPct).toBe(rotationRow.excess1w);
-    expect(row.delta).toBe(rotationRow.excess1w);
+    // The frame keeps the full-precision excess (a verdict is scored against
+    // it); the rotation payload carries the same number at a percent's own
+    // precision, because a model reads that one.
+    expect(roundTo(row.theme!.week!.excessPct, "pct")).toBe(
+      rotationRow.excess1w,
+    );
+    expect(roundTo(row.delta!, "pct")).toBe(rotationRow.excess1w);
   });
 });

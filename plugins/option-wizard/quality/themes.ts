@@ -7,6 +7,7 @@
  */
 import type { Bar } from "../eval/bars.js";
 import type { ThemeSpec } from "./review-config.js";
+import { roundTo } from "./units.js";
 
 export interface BasketExcess {
   basketPct: number;
@@ -233,9 +234,9 @@ export function rotationTable(args: {
     w12: basketExcess({ members: [benchmark], benchmark, bars, fromDay: from.w12, toDay: asOf }),
   };
   const benchmarkReturns = {
-    w1: bench.w1?.benchPct ?? null,
-    w4: bench.w4?.benchPct ?? null,
-    w12: bench.w12?.benchPct ?? null,
+    w1: bench.w1 === null ? null : roundTo(bench.w1.benchPct, "pct"),
+    w4: bench.w4 === null ? null : roundTo(bench.w4.benchPct, "pct"),
+    w12: bench.w12 === null ? null : roundTo(bench.w12.benchPct, "pct"),
   };
 
   const untestedRow = (
@@ -283,15 +284,21 @@ export function rotationTable(args: {
     };
     if (stale.length > 0)
       notes.push(`${symbol}: ${stale.join(", ")} have no bar on ${asOf}`);
+    // ROUNDED TO A PERCENT'S OWN PRECISION, in the payload rather than only in
+    // the renderer. This table is read by a model, and on 2026-09-06 it wrote
+    // "+3.4072 four-week excess" and "a -1.782 one-week wobble" straight out
+    // of these fields. A number the model cannot see cannot be echoed.
+    const pct = (value: number | undefined): number | null =>
+      value === undefined ? null : roundTo(value, "pct");
     return {
       symbol,
       label,
-      w1: triple.w1?.basketPct ?? null,
-      w4: triple.w4?.basketPct ?? null,
-      w12: triple.w12?.basketPct ?? null,
-      excess1w: triple.w1?.excessPct ?? null,
-      excess4w: triple.w4?.excessPct ?? null,
-      excess12w: triple.w12?.excessPct ?? null,
+      w1: pct(triple.w1?.basketPct),
+      w4: pct(triple.w4?.basketPct),
+      w12: pct(triple.w12?.basketPct),
+      excess1w: pct(triple.w1?.excessPct),
+      excess4w: pct(triple.w4?.excessPct),
+      excess12w: pct(triple.w12?.excessPct),
     };
   };
 

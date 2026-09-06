@@ -394,7 +394,10 @@ describe("section 3 — the coverage list never shrinks", () => {
         ],
       },
     });
-    expect(body(out.sections, 3)).toContain(">4.65bp");
+    // 1.5 x |−3.1| = 4.65 bp, printed at a basis point's own precision: a
+    // half-basis-point band is a number nobody quotes.
+    expect(body(out.sections, 3)).toContain(">5bp");
+    expect(body(out.sections, 3)).not.toContain("4.65");
   });
 });
 

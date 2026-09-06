@@ -2879,7 +2879,20 @@ export function buildTools(cfg: {
           let withRegime = 0;
           for (const day of span) {
             const causeTitles: Record<string, string> = {};
-            const quality = measured.rows.get(day) ?? {};
+            // ROUNDED before the model ever sees it. A stored score is a
+            // full-precision double — `channel.vol.score` reached the week
+            // reviewer as 1.3037037037037023 on 2026-09-06 — and a model
+            // handed sixteen decimals will quote sixteen decimals.
+            const quality = Object.fromEntries(
+              Object.entries(measured.rows.get(day) ?? {}).map(
+                ([name, value]) => [
+                  name,
+                  typeof value === "number" && Number.isFinite(value)
+                    ? Math.round(value * 1e4) / 1e4
+                    : value,
+                ],
+              ),
+            );
             const regime: Record<string, unknown> = {};
             for (const entry of byDay.get(day) ?? []) {
               let markdown: string;

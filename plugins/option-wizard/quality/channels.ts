@@ -27,6 +27,7 @@
 import type { Bar } from "../eval/bars.js";
 import type { ThemeSpec } from "./review-config.js";
 import { themeRow, type BasketExcess } from "./themes.js";
+import { fmt, fmtSigned, unitFromToken } from "./units.js";
 
 export type ChannelId =
   "rates" | "curve" | "policy" | "credit" | "vol" | "dealer" | "flow" | "event";
@@ -142,9 +143,11 @@ function round4(value: number): number {
   return Math.round(value * 1e4) / 1e4;
 }
 
-function signed(value: number, digits: number, unit: string): string {
-  const fixed = Math.abs(value).toFixed(digits);
-  return `${value < 0 ? "-" : "+"}${fixed} ${unit}`;
+/** A move, with its unit. The precision is `quality/units.ts`' — never a
+ *  per-call-site number, which is how `index pts` ended up printing four
+ *  decimals of an index quoted to one. */
+function signed(value: number, unit: string): string {
+  return `${fmtSigned(value, unitFromToken(unit.split(" ")[0]))} ${unit}`;
 }
 
 /** The source's own exclusion, recognised by its key rather than by parsing a
@@ -262,7 +265,7 @@ function levelChannel(args: {
       ...base,
       level: String(live.last),
       prior: String(priorValue),
-      move: signed(delta, unit === "bp" ? 1 : 2, unit),
+      move: signed(delta, unit),
       delta,
       magnitude: Math.abs(delta),
       ...(live.fetchedAt === undefined ? {} : { asOf: live.fetchedAt }),
@@ -295,7 +298,7 @@ function levelChannel(args: {
     ...base,
     level: String(level),
     prior: String(priorValue),
-    move: signed(delta, unit === "bp" ? 1 : 2, unit),
+    move: signed(delta, unit),
     delta,
     magnitude: Math.abs(delta),
     ...(asOf === undefined ? {} : { asOf }),
@@ -355,7 +358,7 @@ function policyChannel(inputs: ChannelInputs): Channel {
     series,
     level: String(probability),
     prior: String(prior),
-    move: signed(delta, 1, "pp"),
+    move: signed(delta, "pp"),
     delta,
     magnitude: Math.abs(delta),
     ...(asOf === undefined ? {} : { asOf }),
@@ -383,7 +386,7 @@ function curveChannel(inputs: ChannelInputs): Channel {
       ...base,
       level: String(spread),
       prior: String(prior),
-      move: signed(delta, 1, "bp"),
+      move: signed(delta, "bp"),
       delta,
       magnitude: Math.abs(delta),
     };
@@ -419,7 +422,7 @@ function curveChannel(inputs: ChannelInputs): Channel {
     ...base,
     level: String(now),
     prior: String(before),
-    move: signed(delta, 1, "bp"),
+    move: signed(delta, "bp"),
     delta,
     magnitude: Math.abs(delta),
     asOf: ten[0]!.obs_date,
@@ -472,7 +475,7 @@ function dealerChannel(inputs: ChannelInputs): Channel {
     series: `${ticker} gamma flip`,
     level: String(flip),
     prior: String(spotRow?.rawLast ?? spot),
-    move: signed(delta, 2, "pts"),
+    move: signed(delta, "pts"),
     delta,
     magnitude: Math.abs(delta),
     ...(typeof first.asOf === "string" ? { asOf: first.asOf } : {}),
@@ -522,7 +525,7 @@ function flowChannel(inputs: ChannelInputs): Channel {
     ...base,
     level: String(net),
     prior: String(prior),
-    move: signed(delta, 0, "USD"),
+    move: signed(delta, "USD"),
     delta,
     magnitude: Math.abs(delta),
     ...(asOf === undefined ? {} : { asOf }),
@@ -583,9 +586,15 @@ function spotQuote(spot: unknown, ticker: string): SpotQuote | undefined {
   };
 }
 
-/** The change, copied with its sign restored — never recomputed. */
+/** A PRICE change, copied with its sign restored — never recomputed. */
 function signedString(value: number): string {
-  return `${value < 0 ? "" : "+"}${String(value)}`;
+  return fmtSigned(value, "price");
+}
+
+/** A percent difference, at the tape's own precision. The sector and theme
+ *  excesses printed `+3.4072` and `-1.782` before `quality/units.ts` existed. */
+function signedPct(value: number): string {
+  return fmtSigned(value, "pct");
 }
 
 // ---------------------------------------------------------------------------
@@ -747,16 +756,14 @@ function fxRow(inputs: ChannelInputs, order: number): CoverageRow {
   return {
     ...base,
     series: "DTWEXBGS (Fed broad index, not DXY)",
-    level: String(broad[0]!.value),
+    level: fmt(broad[0]!.value, "indexPts"),
     ...(broad[1] === undefined
       ? {}
       : {
-          prior: String(broad[1].value),
-          move: signed(
-            round4(broad[0]!.value - broad[1].value),
-            4,
-            "index pts",
-          ),
+          prior: fmt(broad[1].value, "indexPts"),
+          // `118.7479 → +0.3896 index pts` was four decimals of an index that
+          // is quoted to one.
+          move: signed(round4(broad[0]!.value - broad[1].value), "index pts"),
         }),
     asOf: broad[0]!.obs_date,
   };
@@ -868,8 +875,8 @@ function sectorRow(
   return {
     ...row,
     asOf: toDay,
-    level: String(excess.week.basketPct),
-    move: `${signedString(excess.week.excessPct)}% vs ${inputs.benchmark ?? "SPY"} (${excess.week.used.length} of ${members.length})`,
+    level: fmt(excess.week.basketPct, "pct"),
+    move: `${signedPct(excess.week.excessPct)}% vs ${inputs.benchmark ?? "SPY"} (${excess.week.used.length} of ${members.length})`,
     delta: excess.week.excessPct,
   };
 }
@@ -914,13 +921,13 @@ function registerRow(
   return {
     ...base,
     asOf: toDay,
-    ...(week === null ? {} : { level: signedString(week.excessPct) }),
-    ...(since === null ? {} : { prior: signedString(since.excessPct) }),
+    ...(week === null ? {} : { level: signedPct(week.excessPct) }),
+    ...(since === null ? {} : { prior: signedPct(since.excessPct) }),
     move: [
-      week === null ? undefined : `${signedString(week.excessPct)}% (1w)`,
+      week === null ? undefined : `${signedPct(week.excessPct)}% (1w)`,
       since === null
         ? undefined
-        : `${signedString(since.excessPct)}% (since ${theme.entered})`,
+        : `${signedPct(since.excessPct)}% (since ${theme.entered})`,
     ]
       .filter((part) => part !== undefined)
       .join(" · "),
