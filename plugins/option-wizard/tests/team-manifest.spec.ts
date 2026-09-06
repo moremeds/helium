@@ -610,6 +610,12 @@ describe("the review authors, rewritten", () => {
     expect(persona).toContain("NOTHING HAS");
     expect(persona).toContain("ONE sentence");
     expect(persona).toContain("There is no largest miss to find");
+    // review-v7: the `0 scored` branch said "and you stop", and the weekly
+    // stopped writing the DOCUMENT — one sentence and five empty fields, 0 of
+    // 23 coverage rows over a frame that had priced twenty of them. The branch
+    // ends one paragraph.
+    expect(persona).toContain("AND THAT PARAGRAPH IS THEN FINISHED");
+    expect(persona).not.toContain("and you stop");
     // §4 restated `2.65`, which §3 had already printed, and the renderer's
     // fault fired. The rule is now in the prompt too.
     expect(persona).toContain("NEVER RESTATE A LEVEL SECTION 3 PRINTED");
