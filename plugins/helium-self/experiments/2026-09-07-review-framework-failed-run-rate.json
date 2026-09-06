@@ -2,7 +2,7 @@
   "id": "2026-09-07-review-framework-failed-run-rate",
   "kind": "helium-run-metric",
   "repo": "helium",
-  "prNumber": null,
+  "prNumber": 100,
   "mergeSha": null,
   "hypothesis": "Landing the review framework (feat/review-framework: three new deterministic steps, four new tools, the seven-section renderer and rewritten personas) does not raise option-wizard's production failed-run rate. Cost per run and p50 wall time are expected to rise with the added steps and are deliberately not the metric.",
   "change": "helium plugins/option-wizard: review framework PR",
