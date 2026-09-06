@@ -52,7 +52,9 @@ export interface Experiment {
  *  order. A file that is not JSON, or whose `id` does not match its name, is a
  *  declaration nobody can settle — it throws, and a renderer that throws is a
  *  recorded skip rather than a silent half-mint. */
-export function loadExperiments(dir = join(TENANT_DIR, "experiments")): Experiment[] {
+export function loadExperiments(
+  dir = join(TENANT_DIR, "experiments"),
+): Experiment[] {
   return readdirSync(dir)
     .filter((name) => name.endsWith(".json"))
     .sort((a, b) => a.localeCompare(b, "en"))
@@ -66,7 +68,9 @@ export function loadExperiments(dir = join(TENANT_DIR, "experiments")): Experime
         throw new Error(`experiments/${name}: no string id`);
       const experiment = parsed as Experiment;
       if (`${experiment.id}.json` !== name)
-        throw new Error(`experiments/${name}: id ${experiment.id} != file name`);
+        throw new Error(
+          `experiments/${name}: id ${experiment.id} != file name`,
+        );
       return experiment;
     });
 }
@@ -88,7 +92,12 @@ export function commitmentDrafts(
     .filter((experiment) => !minted.has(experiment.id))
     .map((experiment) => ({
       id: experiment.id,
-      payload: { ...experiment, kind: EXPERIMENT_KIND },
+      // The FILE's own `kind` wins; `EXPERIMENT_KIND` is only the default for
+      // a declaration that names none. A file declaring a kind no settler here
+      // knows (`helium-run-metric`) mints and stays outstanding, which is the
+      // honest state — stamping it `argon-sweep-compare` would hand it to a
+      // settler that would fail on it once per run for ever.
+      payload: { kind: EXPERIMENT_KIND, ...experiment },
     }));
 }
 
