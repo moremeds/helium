@@ -101,6 +101,14 @@ export interface ChannelInputs {
    *  the audit table rather than in their own payload. */
   priorMetrics?: Record<string, number | null>;
   day: string;
+  /** The newest day the BARS actually reach, at or before `day`. The local
+   *  apex series lags — on 2026-09-06 it stopped at 2026-08-28 — and
+   *  `closeAt` answers with the newest close at or before whatever day it is
+   *  given, so measuring a "week" to `day` would silently report a perfectly
+   *  calm 0.00 %. `rotationTable` already takes the benchmark's newest bar as
+   *  its as-of for exactly this reason; the coverage rows take the same one.
+   *  Absent means the bars reach `day`. */
+  barsAsOf?: string;
   /** The first day of the coverage period, for the theme week window. */
   weekFrom?: string;
   /** The benchmark the theme baskets are measured against; declared at
@@ -825,6 +833,10 @@ function sectorRow(
   if (bars === undefined || inputs.weekFrom === undefined) {
     return { ...row, untested: "no weekly bars for the chain members" };
   }
+  // Measured TO the day the bars reach, and dated by it. The watchlist's own
+  // scan stamp says when the MEMBERSHIP was read; it is not when the prices
+  // were, and printing it beside a weekly % would date the number wrong.
+  const toDay = inputs.barsAsOf ?? inputs.day;
   const excess = themeRow(
     {
       id: "sector",
@@ -836,7 +848,7 @@ function sectorRow(
       kill: "",
     },
     bars,
-    inputs.day,
+    toDay,
     inputs.weekFrom,
     inputs.benchmark ?? "SPY",
   );
@@ -845,6 +857,7 @@ function sectorRow(
   }
   return {
     ...row,
+    asOf: toDay,
     level: String(excess.week.basketPct),
     move: `${signedString(excess.week.excessPct)}% vs ${inputs.benchmark ?? "SPY"} (${excess.week.used.length} of ${members.length})`,
     delta: excess.week.excessPct,
@@ -858,10 +871,11 @@ function registerRow(
 ): CoverageRow {
   const benchmark = inputs.benchmark ?? "SPY";
   const bars = inputs.themeBars ?? new Map<string, readonly Bar[]>();
+  const toDay = inputs.barsAsOf ?? inputs.day;
   const computed = themeRow(
     theme,
     bars,
-    inputs.day,
+    toDay,
     inputs.weekFrom ?? theme.entered,
     benchmark,
   );
@@ -889,6 +903,7 @@ function registerRow(
   const since = computed.sinceEntered;
   return {
     ...base,
+    asOf: toDay,
     ...(week === null ? {} : { level: signedString(week.excessPct) }),
     ...(since === null ? {} : { prior: signedString(since.excessPct) }),
     move: [

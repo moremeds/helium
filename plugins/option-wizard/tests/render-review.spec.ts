@@ -1194,3 +1194,47 @@ describe("the section list a review document delivers", () => {
     expect(titles).not.toContain("Section 5 — Dated Catalysts");
   });
 });
+
+describe("the theme view block", () => {
+  // On 2026-09-06 it printed `token: "untested"` and `excess1w: "—"` while the
+  // rotation step had priced that same basket at +3.4072 four-week excess. The
+  // token is the MODEL's, joined by row id; the excess is the frame's basket,
+  // which is the same computation the rotation table runs.
+  const doc: ReviewDoc = {
+    ...DOC_EMPTY,
+    coverage: [
+      {
+        id: `theme:${THEME.id}`,
+        token: "continue",
+        p: 0.6,
+        why: "ag basket still ahead of SPY",
+        observable: "excess vs SPY next week",
+        scorable: true,
+      },
+    ],
+    themes: [
+      { id: THEME.id, leadership: "confirms", why: "ag inputs still lead" },
+    ],
+  };
+
+  it("takes the token from the model's own coverage entry for theme:<id>", () => {
+    const out = render({ frame: frame({ rows: fullRows() }), doc });
+    const row = out.view.themes!.find((entry) => entry.id === THEME.id)!;
+    expect(row.token).toBe("continue");
+    expect(row.leadership).toBe("confirms");
+    // fullRows() gives the theme a computed basket: +1.7 % on the week,
+    // +3.2 % since it was entered.
+    expect(row.excess1w).toBe("+1.7%");
+    expect(row.excessSinceEntered).toBe("+3.2%");
+  });
+
+  it("says untested only when the model gave that row no entry", () => {
+    const out = render({
+      frame: frame({ rows: fullRows() }),
+      doc: { ...doc, coverage: [] },
+    });
+    const row = out.view.themes!.find((entry) => entry.id === THEME.id)!;
+    expect(row.token).toBe("untested");
+    expect(row.excess1w).toBe("+1.7%");
+  });
+});

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Bar } from "../eval/bars.js";
 import type { ThemeSpec } from "../quality/review-config.js";
+import { coverageRows } from "../quality/channels.js";
 import { basketExcess, rotationTable, themeRow } from "../quality/themes.js";
 
 const FIX = join(__dirname, "fixtures", "review");
@@ -272,5 +273,125 @@ describe("rotationTable", () => {
     // so subtracting the two rounded columns can differ in the last digit.
     const xlk = out.rows.find((row) => row.symbol === "XLK")!;
     expect(xlk.excess1w).toBeCloseTo(xlk.w1! - out.benchmarkReturns.w1!, 3);
+  });
+});
+
+/**
+ * The coverage rows and the rotation table price the same baskets, so they
+ * must agree to the last digit — otherwise §3b/§3c and §3d of one document
+ * disagree about one week.
+ *
+ * THE 2026-09-06 DEFECT. `ow_session_frame` never supplied `themeBars` or
+ * `weekFrom`, so all ten sector rows read "no weekly bars for the chain
+ * members" and the theme row "no bars for 4 of 4 instruments" — while
+ * ow_rotation, in the same run, priced that theme at +3.4072 four-week excess
+ * off bars it fetched itself.
+ */
+describe("coverage rows priced from the same bars as the rotation table", () => {
+  const rotationCloses = (
+    JSON.parse(
+      readFileSync(join(FIX, "rotation-closes-2026-08-28.json"), "utf8"),
+    ) as { closes: Record<string, Record<string, number>> }
+  ).closes;
+  const barsBySymbol = (): Map<string, Bar[]> => {
+    const map = new Map<string, Bar[]>();
+    for (const [symbol, series] of Object.entries(rotationCloses))
+      map.set(
+        symbol,
+        Object.entries(series)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([time, close]) => ({
+            time,
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 0,
+          })),
+      );
+    return map;
+  };
+  const back = (from: string, n: number): string => {
+    const cursor = new Date(`${from}T00:00:00Z`);
+    let left = n;
+    while (left > 0) {
+      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      const dow = cursor.getUTCDay();
+      if (dow !== 0 && dow !== 6) left -= 1;
+    }
+    return cursor.toISOString().slice(0, 10);
+  };
+  const THEME: ThemeSpec = {
+    id: "el-nino-ag-2026",
+    thesis: "ag inputs",
+    horizon: "6m",
+    entered: "2026-05-01",
+    instruments: ["DBA", "MOS", "NTR", "DE"],
+    evidence: [{ text: "ONI" }],
+    kill: "underperforms SPY by 10% over 60 sessions",
+  };
+  // The lake stops on 2026-08-28; the run is 2026-09-06. Measuring the week to
+  // the RUN day would silently report a perfectly calm 0.00 %.
+  const RUN_DAY = "2026-09-06";
+  const BARS_AS_OF = "2026-08-28";
+  const WEEK_FROM = back(BARS_AS_OF, 6);
+
+  const rows = () =>
+    coverageRows(
+      {
+        day: RUN_DAY,
+        barsAsOf: BARS_AS_OF,
+        weekFrom: WEEK_FROM,
+        benchmark: "SPY",
+        themeBars: barsBySymbol(),
+        watchlist: {
+          chains: [
+            {
+              chain: "Bench",
+              members: ["XLK", "XLF"],
+              asOf: "2026-09-05T03:10:57.319519+08:00",
+            },
+          ],
+        },
+      },
+      { coverage: [], sectors: ["Bench"], themes: [THEME] },
+    );
+
+  it("gives a sector row a weekly percent, dated by the bars and not by the scan", () => {
+    const row = rows().find((entry) => entry.id === "sector:Bench")!;
+    expect(row.untested).toBeUndefined();
+    expect(row.members).toEqual(["XLK", "XLF"]);
+    expect(row.asOf).toBe(BARS_AS_OF);
+    expect(row.move).toContain("% vs SPY (2 of 2)");
+    const expected = basketExcess({
+      members: ["XLK", "XLF"],
+      benchmark: "SPY",
+      bars: barsBySymbol(),
+      fromDay: WEEK_FROM,
+      toDay: BARS_AS_OF,
+    })!;
+    expect(row.delta).toBe(expected.excessPct);
+    expect(row.level).toBe(String(expected.basketPct));
+  });
+
+  it("gives the theme row the same 1w excess the rotation table prints", () => {
+    const row = rows().find((entry) => entry.id === `theme:${THEME.id}`)!;
+    const table = rotationTable({
+      sectorEtfs: [],
+      themes: [THEME],
+      benchmark: "SPY",
+      lookbacks: { w1: 5, w4: 20, w12: 60 },
+      bars: barsBySymbol(),
+      day: RUN_DAY,
+      openDaysBack: (from, n) => back(from, n + 1),
+    });
+    const rotationRow = table.rows.find(
+      (entry) => entry.symbol === `theme:${THEME.id}`,
+    )!;
+    expect(table.asOf).toBe(BARS_AS_OF);
+    expect(row.untested).toBeUndefined();
+    expect(row.asOf).toBe(BARS_AS_OF);
+    expect(row.theme?.week?.excessPct).toBe(rotationRow.excess1w);
+    expect(row.delta).toBe(rotationRow.excess1w);
   });
 });

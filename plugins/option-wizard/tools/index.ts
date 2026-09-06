@@ -1728,6 +1728,93 @@ export function buildTools(cfg: {
           asOf,
         );
   const dateCut = (column: string): string => dateCutSql(column, asOfDay);
+
+  /**
+   * Daily bars for a set of symbols, one `ow_apex_bars` round trip each.
+   *
+   * Shared by `ow_rotation` (11 sector ETFs + each theme's instruments) and by
+   * `ow_session_frame` (every watchlist chain's members + the same theme
+   * instruments), because a table and a coverage row that priced the same
+   * basket from two different reads could disagree about one week.
+   *
+   * One symbol's failure is that symbol's absence and a note — never the
+   * caller's failure.
+   */
+  async function dailyBars(
+    symbols: readonly string[],
+    lookbackDays: number,
+    ctx?: ToolRunContext,
+  ): Promise<{ bars: Map<string, Bar[]>; notes: string[] }> {
+    const bars = new Map<string, Bar[]>();
+    const notes: string[] = [];
+    const barsTool = built.find((entry) => entry.name === "ow_apex_bars");
+    const answered = await Promise.allSettled(
+      symbols.map(async (symbol) => ({
+        symbol,
+        body:
+          barsTool === undefined
+            ? undefined
+            : (JSON.parse(
+                await barsTool.run(
+                  { symbol, timeframe: "1d", lookbackDays },
+                  ctx,
+                ),
+              ) as { bars?: unknown[] }),
+      })),
+    );
+    answered.forEach((result, index) => {
+      const symbol = symbols[index]!;
+      if (result.status === "rejected") {
+        const why: unknown = result.reason;
+        notes.push(
+          `${symbol}: ${why instanceof Error ? why.message : String(why)}`,
+        );
+        return;
+      }
+      const rows = result.value.body?.bars;
+      if (!Array.isArray(rows)) {
+        notes.push(`${symbol}: ow_apex_bars is not built`);
+        return;
+      }
+      bars.set(
+        symbol,
+        rows.flatMap((raw) => {
+          const bar = raw as Record<string, unknown>;
+          const close = numeric(bar.close);
+          if (typeof bar.time !== "string" || close === undefined) return [];
+          return [
+            {
+              time: bar.time,
+              open: numeric(bar.open) ?? close,
+              high: numeric(bar.high) ?? close,
+              low: numeric(bar.low) ?? close,
+              close,
+              volume: numeric(bar.volume) ?? 0,
+            },
+          ];
+        }),
+      );
+    });
+    return { bars, notes };
+  }
+
+  /** The newest bar day a symbol reaches at or before `day`. The local apex
+   *  series lags — 2026-08-28 on 2026-09-06 — and a basket measured to a day
+   *  it has no bar for reports a perfectly calm 0.00 % week. */
+  function newestBarDay(
+    bars: ReadonlyMap<string, readonly Bar[]>,
+    symbol: string,
+    day: string,
+  ): string | undefined {
+    let best: string | undefined;
+    for (const bar of bars.get(symbol) ?? []) {
+      const stamp = bar.time.slice(0, 10);
+      if (stamp > day) continue;
+      if (best === undefined || stamp > best) best = stamp;
+    }
+    return best;
+  }
+
   const built = [
     {
       // opencli's TradingView adapter is read-only and drives the LOCAL app over
@@ -4380,7 +4467,57 @@ export function buildTools(cfg: {
           to: plusCalendarDays(day, 21),
         });
 
+        // ---- the bars every basket row is priced from ----------------------
+        // THE 2026-09-06 DEFECT. `themeBars` and `weekFrom` were never
+        // supplied, so all ten sector rows read "no weekly bars for the chain
+        // members" and the theme row "no bars for 4 of 4 instruments" — while
+        // ow_rotation, in the very same run, priced that same theme basket at
+        // +3.4072 four-week excess off bars it fetched itself.
+        //
+        // Cost: one ow_apex_bars round trip per distinct symbol, against the
+        // LOCAL lake. The set is bounded by the tenant's own declaration —
+        // the members of the declared chains plus the declared themes'
+        // instruments plus the benchmark — so it cannot grow behind anyone's
+        // back.
+        const benchmark = review?.rotation?.benchmark ?? "SPY";
+        const basketSymbols = [
+          ...new Set([
+            benchmark,
+            ...chains.flatMap((chain) =>
+              (Array.isArray(chain.members) ? chain.members : []).filter(
+                (member): member is string => typeof member === "string",
+              ),
+            ),
+            ...(review?.themes ?? []).flatMap((theme) => theme.instruments),
+          ]),
+        ];
+        const basket = await dailyBars(basketSymbols, 150, ctx);
+        focusNotes.push(
+          `bars: ${String(basket.bars.size)} of ${String(basketSymbols.length)} basket symbols answered`,
+        );
+        for (const note of basket.notes.slice(0, 3)) focusNotes.push(note);
+        // The as-of is the BENCHMARK's newest bar, exactly as `rotationTable`
+        // takes it, and the week is measured back from that rather than from
+        // today.
+        const barsAsOf = newestBarDay(basket.bars, benchmark, day);
+        const weekFrom =
+          barsAsOf === undefined
+            ? undefined
+            : openDaysBack(
+                barsAsOf,
+                (review?.rotation?.lookbacks.w1 ?? 5) + 1,
+                cfg.calendar,
+              )[0];
+        if (barsAsOf !== undefined && barsAsOf !== day)
+          focusNotes.push(
+            `bars: ${benchmark}'s newest bar is ${barsAsOf}, so every basket row is as of ${barsAsOf} rather than ${day}`,
+          );
+
         const inputs: ChannelInputs = {
+          ...(basket.bars.size === 0 ? {} : { themeBars: basket.bars }),
+          ...(barsAsOf === undefined ? {} : { barsAsOf }),
+          ...(weekFrom === undefined ? {} : { weekFrom }),
+          benchmark,
           ...(macro === undefined ? {} : { macro }),
           ...(policy === undefined ? {} : { policy }),
           ...(gex === undefined ? {} : { gex }),
@@ -4390,9 +4527,6 @@ export function buildTools(cfg: {
           ...(commodities === undefined ? {} : { commodities }),
           ...(watchlist === undefined ? {} : { watchlist }),
           day,
-          ...(review?.rotation === undefined
-            ? {}
-            : { benchmark: review.rotation.benchmark }),
         };
         const focusInputs: FocusInputs = {
           day,
@@ -4549,66 +4683,11 @@ export function buildTools(cfg: {
             ...themes.flatMap((theme) => theme.instruments),
           ]),
         ];
-        const bars = new Map<string, Bar[]>();
-        const notes: string[] = [];
-        const barsTool = built.find((entry) => entry.name === "ow_apex_bars");
         // 12+N symbols, one round trip each. One failure is that symbol's
         // `untested` row and nothing else — the table still prints in full.
-        const answered = await Promise.allSettled(
-          symbols.map(async (symbol) => ({
-            symbol,
-            body:
-              barsTool === undefined
-                ? undefined
-                : (JSON.parse(
-                    await barsTool.run(
-                      {
-                        symbol,
-                        timeframe: "1d",
-                        // 60 OPEN sessions is roughly 90 calendar days; 150
-                        // gives the w12 window room for a holiday run and for
-                        // a lake that is a few sessions behind.
-                        lookbackDays: 150,
-                      },
-                      ctx,
-                    ),
-                  ) as { bars?: unknown[] }),
-          })),
-        );
-        answered.forEach((result, index) => {
-          const symbol = symbols[index]!;
-          if (result.status === "rejected") {
-            const why: unknown = result.reason;
-            notes.push(
-              `${symbol}: ${why instanceof Error ? why.message : String(why)}`,
-            );
-            return;
-          }
-          const rows = result.value.body?.bars;
-          if (!Array.isArray(rows)) {
-            notes.push(`${symbol}: ow_apex_bars is not built`);
-            return;
-          }
-          bars.set(
-            symbol,
-            rows.flatMap((raw) => {
-              const bar = raw as Record<string, unknown>;
-              const close = numeric(bar.close);
-              if (typeof bar.time !== "string" || close === undefined)
-                return [];
-              return [
-                {
-                  time: bar.time,
-                  open: numeric(bar.open) ?? close,
-                  high: numeric(bar.high) ?? close,
-                  low: numeric(bar.low) ?? close,
-                  close,
-                  volume: numeric(bar.volume) ?? 0,
-                },
-              ];
-            }),
-          );
-        });
+        // 60 OPEN sessions is roughly 90 calendar days; 150 gives the w12
+        // window room for a holiday run and for a lake a few sessions behind.
+        const { bars, notes } = await dailyBars(symbols, 150, ctx);
         const table = rotationTable({
           sectorEtfs: rotation.sectorEtfs,
           themes,
