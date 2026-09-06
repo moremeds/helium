@@ -38,6 +38,12 @@ env:
   - OW_IB_API_KEY
   - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
+  # massive.com (ex-Polygon), for ow_massive_actions — dated splits and
+  # ex-dividends. argon already talks to the same provider under the SAME
+  # names (uw_scan/config.py), so the operator holds one key and two consumers.
+  - MASSIVE_API_KEY
+  # Optional; defaults to https://api.massive.com, the same default argon uses.
+  - MASSIVE_BASE_URL
   # argon's ingest for structured runs. Separate from OW_ARGON_API_BASE, which
   # is a TOOL's read endpoint: this one is a WRITE and it is authenticated.
   # Reusing one key for both is how a laptop ends up publishing to the mini.

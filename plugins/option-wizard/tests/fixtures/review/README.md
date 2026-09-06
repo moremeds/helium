@@ -88,6 +88,35 @@ than passed off:
 tool's header comment is written from the observed response, not from this
 file.
 
+## Transcribed from vendor documentation, NOT a recorded live response
+
+`massive-splits-docs.json` and `massive-dividends-docs.json` are the
+**verbatim sample responses** from the massive.com Stocks API documentation,
+fetched 2026-09-06 from `https://massive.com/docs/rest/stocks/corporate-actions/splits`
+and `…/dividends` (both `polygon.io/docs/rest/…` URLs 301 to that host).
+
+They are **not** recorded live responses and no live call has been made:
+`MASSIVE_API_KEY` is unset on this laptop. The `it.skip` in
+`tests/tools-massive-actions.spec.ts` names exactly that debt, and the tool's
+header comment is rewritten from the first real response.
+
+Two facts worth keeping straight, both observed rather than assumed:
+
+- The documented sample rows are **AAPL**, dated **2005-02-28** (split) and
+  **2025-08-11** ex-dividend. The plan asserted the dividend sample carried a
+  FUTURE ex-date; it does not. So whether forward-dated rows are served is
+  **open**, not settled, and the skipped test says so.
+- The split sample carries **no `status` field**, so `status` is mapped
+  through only when present.
+
+argon reaches the same provider through the older Polygon-shaped paths
+`/v3/reference/splits` and `/v3/reference/dividends`
+(`/Users/chenxi/projects/argon/src/uw_scan/sources/massive_fundamentals.py`),
+with the same `results` envelope and the same
+`Authorization: Bearer <MASSIVE_API_KEY>` header. The header form here is
+copied from that working client rather than invented; the paths are the ones
+the current documentation names.
+
 ## Derived facts these fixtures support
 
 - SPY 2026-09-03 → 2026-09-04: 773.17 → 770.19, **−0.3854 %** — the benchmark

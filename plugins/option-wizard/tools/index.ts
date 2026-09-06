@@ -57,6 +57,12 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // rail is a live read of the operator's own watchlist, and a machine without
   // argon reports the gap rather than inventing a universe.
   ["ow_argon_watchlist", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
+  // Unconfigured on the laptop, and as of 2026-09-06 not in
+  // ~/.config/helium/helium.env on the mini either — the deploy step that adds
+  // it is still outstanding, and `requiresEnv` is what makes that gap say its
+  // own name at the top of the run report rather than looking like a quiet
+  // corporate-action calendar.
+  ["ow_massive_actions", { mutating: false, requiresEnv: "MASSIVE_API_KEY" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -595,6 +601,39 @@ async function uwGet(
     headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     // ponytail: a bare fetch has no timeout at all, so one hung UW connection
     // held a whole phase open until launchd gave up on it.
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+    );
+  }
+  return response.json();
+}
+
+/**
+ * One massive.com REST call.
+ *
+ * The bearer header is copied from argon's own working client for the same
+ * provider (`src/uw_scan/sources/massive_fundamentals.py`:
+ * `headers={"Authorization": f"Bearer {api_key}"}`) rather than invented, and
+ * the default base is the same `https://api.massive.com` argon defaults to.
+ */
+async function massiveGet(
+  env: Env,
+  tool: string,
+  path: string,
+  query: Record<string, string>,
+  ctx?: ToolRunContext,
+): Promise<unknown> {
+  const key = need(env, "MASSIVE_API_KEY", tool);
+  const base = env.MASSIVE_BASE_URL?.trim() || "https://api.massive.com";
+  const url = new URL(path, base);
+  for (const [name, value] of Object.entries(query))
+    url.searchParams.set(name, value);
+  const doFetch = ctx?.fetchImpl ?? fetch;
+  const response = await doFetch(url, {
+    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) {
@@ -1265,6 +1304,11 @@ const ArgonLevelsParams = z.object({
  *  `extensions.review.sectors` list the tenant declared. */
 const ArgonWatchlistParams = z.object({
   chains: z.array(z.string().min(1).max(64)).max(40).optional(),
+});
+const MassiveActionsParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).max(200).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
 });
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
@@ -3695,6 +3739,180 @@ export function buildTools(cfg: {
           unknown: unknownNames,
           ofInterest,
           ivRank,
+        });
+      },
+    },
+    {
+      // 2026-09-06. Shape TRANSCRIBED FROM THE MASSIVE DOCUMENTATION, NOT YET
+      // OBSERVED LIVE — this comment is rewritten from the first real
+      // response (repo convention: a tool's comment records the shape it was
+      // VERIFIED against, with the date and the excluded fields). The it.skip
+      // in tests/tools-massive-actions.spec.ts names exactly that debt.
+      // Documentation read 2026-09-06 at
+      // https://massive.com/docs/rest/stocks/corporate-actions/{splits,dividends}
+      // (the polygon.io/docs URLs 301 there).
+      //
+      //   GET {MASSIVE_BASE_URL}/stocks/v1/splits
+      //       ?execution_date.gte=<yyyy-mm-dd>&execution_date.lte=<yyyy-mm-dd>
+      //       [&ticker=<sym>]
+      //   -> { request_id, status, results: [{ ticker, execution_date,
+      //        split_from, split_to, adjustment_type,
+      //        historical_adjustment_factor, id }] }
+      //   GET {MASSIVE_BASE_URL}/stocks/v1/dividends
+      //       ?ex_dividend_date.gte=<yyyy-mm-dd>&ex_dividend_date.lte=<yyyy-mm-dd>
+      //       [&ticker=<sym>]
+      //   -> { request_id, status, results: [{ ticker, declaration_date,
+      //        ex_dividend_date, pay_date, record_date, cash_amount, currency,
+      //        frequency, distribution_type, split_adjusted_cash_amount,
+      //        historical_adjustment_factor, id }] }
+      // Both are "included in all Stocks plans" and update daily. The envelope
+      // key is `results`, the same one argon's client reads on this provider's
+      // older Polygon-shaped paths (/v3/reference/{splits,dividends}).
+      //
+      // EXCLUDED as noise: request_id, status, id,
+      // historical_adjustment_factor, split_adjusted_cash_amount, currency,
+      // frequency and distribution_type. `pay_date` and `record_date` are kept
+      // ONLY because assignment risk is a date question. This tool answers ONE
+      // question — which dated corporate actions fall inside this window — and
+      // never a price.
+      //
+      // TWO THINGS ARE UNCONFIRMED, and they bound what the `corporate` weight
+      // may do:
+      //   1. the docs do not state whether an ANNOUNCED-but-unexecuted split
+      //      is returned ahead of its execution_date;
+      //   2. whether FORWARD-dated ex-dividend rows are served at all — the
+      //      documented dividend sample's ex-date (2025-08-11) is in the PAST,
+      //      so nothing here establishes it.
+      // Until a live call settles both, the `corporate` weight fires on
+      // execution_date and nothing earlier.
+      name: "ow_massive_actions",
+      description:
+        "Dated corporate actions from massive.com: stock splits by execution date and dividends by ex-dividend date, for a ticker set and a date window. Read the dates; this tool carries no price, no direction and no opinion.",
+      paramsSchema: MassiveActionsParams,
+      mutating: false,
+      dshParams: {
+        tickers: {
+          type: "array",
+          description:
+            'Tickers, e.g. ["NVDA"]. Omit for the whole window across the universe the caller passes.',
+        },
+        from: { type: "string", required: true, description: "yyyy-mm-dd, inclusive." },
+        to: { type: "string", required: true, description: "yyyy-mm-dd, inclusive." },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const { tickers, from, to } = MassiveActionsParams.parse(args);
+        const tool = "ow_massive_actions";
+        const wanted =
+          tickers === undefined
+            ? undefined
+            : new Set(tickers.map((t) => symbolLiteral(t, tool)));
+        // The endpoint's `ticker` filter is SINGULAR, so it is only passed
+        // when exactly one name was asked for; otherwise the window is fetched
+        // once and filtered in code. Either way this is TWO calls per run, not
+        // one per ticker.
+        const one =
+          wanted !== undefined && wanted.size === 1
+            ? [...wanted][0]!
+            : undefined;
+        const notes: string[] = [];
+        const fetchRows = async (
+          path: string,
+          gte: string,
+          lte: string,
+        ): Promise<Array<Record<string, unknown>>> => {
+          try {
+            const body = (await massiveGet(
+              env,
+              tool,
+              path,
+              {
+                [gte]: from,
+                [lte]: to,
+                ...(one === undefined ? {} : { ticker: one }),
+              },
+              ctx,
+            )) as { results?: unknown };
+            return Array.isArray(body.results)
+              ? (body.results as Array<Record<string, unknown>>)
+              : [];
+          } catch (error: unknown) {
+            // One endpoint down must not blank the other: assignment risk and
+            // split risk are separate questions and a partial answer beats no
+            // answer, as long as the gap is named.
+            if (
+              error instanceof Error &&
+              error.message.includes("MASSIVE_API_KEY is unset")
+            )
+              throw error;
+            notes.push(
+              `${path}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            return [];
+          }
+        };
+        const [splitRows, dividendRows] = await Promise.all([
+          fetchRows("/stocks/v1/splits", "execution_date.gte", "execution_date.lte"),
+          fetchRows(
+            "/stocks/v1/dividends",
+            "ex_dividend_date.gte",
+            "ex_dividend_date.lte",
+          ),
+        ]);
+        const inWindow = (day: unknown): day is string =>
+          typeof day === "string" && day >= from && day <= to;
+        const admitted = (ticker: unknown): ticker is string =>
+          typeof ticker === "string" &&
+          (wanted === undefined || wanted.has(ticker));
+        const splits = splitRows.flatMap((row) => {
+          if (!admitted(row.ticker) || !inWindow(row.execution_date)) return [];
+          const fromRatio = numeric(row.split_from);
+          const toRatio = numeric(row.split_to);
+          if (fromRatio === undefined || toRatio === undefined) return [];
+          return [
+            {
+              ticker: row.ticker,
+              executionDate: row.execution_date,
+              from: fromRatio,
+              to: toRatio,
+              ...(typeof row.adjustment_type === "string"
+                ? { type: row.adjustment_type }
+                : {}),
+              ...(typeof row.status === "string" ? { status: row.status } : {}),
+            },
+          ];
+        });
+        const dividends = dividendRows.flatMap((row) => {
+          if (!admitted(row.ticker) || !inWindow(row.ex_dividend_date))
+            return [];
+          const amount = numeric(row.cash_amount);
+          if (amount === undefined) return [];
+          return [
+            {
+              ticker: row.ticker,
+              exDate: row.ex_dividend_date,
+              ...(typeof row.declaration_date === "string"
+                ? { declared: row.declaration_date }
+                : {}),
+              ...(typeof row.pay_date === "string"
+                ? { payDate: row.pay_date }
+                : {}),
+              ...(typeof row.record_date === "string"
+                ? { recordDate: row.record_date }
+                : {}),
+              amount,
+              ...(typeof row.status === "string" ? { status: row.status } : {}),
+            },
+          ];
+        });
+        return JSON.stringify({
+          source: "massive",
+          window: { from, to },
+          splits,
+          dividends,
+          notes,
         });
       },
     },
