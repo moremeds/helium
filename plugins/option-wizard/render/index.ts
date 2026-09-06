@@ -1846,7 +1846,15 @@ function reviewOf(
     doc,
     caps: period === REVIEW_PERIODS[0] ? frame.caps.weekly : frame.caps.daily,
     period,
-    calendarRows: calendarRowsFrom(report),
+    // The FRAME's rows first. `ow_uw_calendar` and `ow_argon_policy_path` are
+    // siblings of `ow_session_frame`; their payloads never reach
+    // `report.toolOutputs`, so the shape-matched lookup below found nothing on
+    // 2026-09-06 and §5 was written entirely by the model. It stays as the
+    // fallback for a run whose calendar came from a step of its own.
+    calendarRows:
+      frame.calendar !== undefined && frame.calendar.length > 0
+        ? frame.calendar
+        : calendarRowsFrom(report),
   });
   return {
     ...out,

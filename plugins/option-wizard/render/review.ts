@@ -26,12 +26,14 @@ import type { CommitmentDraft, RunMetric } from "@helium/core";
 import { VERDICT_BANDS } from "../eval/verdict.js";
 import { FOCUS_BANNED_PATTERNS } from "../quality/focus.js";
 import type { CoverageRow } from "../quality/channels.js";
-import type { OpenRow, SessionFrame, SettledRow } from "../quality/frame.js";
+import type {
+  CalendarRow,
+  OpenRow,
+  SessionFrame,
+  SettledRow,
+} from "../quality/frame.js";
 import type { RotationRow } from "../quality/themes.js";
-import {
-  REVIEW_PERIODS,
-  type ReviewPeriod,
-} from "../quality/review-config.js";
+import { REVIEW_PERIODS, type ReviewPeriod } from "../quality/review-config.js";
 import type { Section } from "./index.js";
 import { trim, words, type ReviewCaps } from "./budget.js";
 
@@ -207,19 +209,16 @@ export const REVIEW_TITLES = [
   "7 · Open calls",
 ] as const;
 
-export interface CalendarRow {
-  time: string;
-  type: string;
-  event: string;
-  forecast?: string;
-  prev?: string;
-  session?: "pre" | "post";
-}
+export type { CalendarRow } from "../quality/frame.js";
 
 export interface RotationResult {
   asOf: string;
   benchmark: string;
-  benchmarkReturns: { w1: number | null; w4: number | null; w12: number | null };
+  benchmarkReturns: {
+    w1: number | null;
+    w4: number | null;
+    w12: number | null;
+  };
   rows: RotationRow[];
   notes?: string[];
 }
@@ -318,7 +317,11 @@ function scoreOf(row: SettledRow): { key: string; value: number } | undefined {
 export function citationLine(row: SettledRow): string {
   const payload = payloadOf(row);
   const detail = detailOf(row);
-  const parts = [row.id, `issued ${row.issuedDay} ${row.issuedPhase}`, row.status];
+  const parts = [
+    row.id,
+    `issued ${row.issuedDay} ${row.issuedPhase}`,
+    row.status,
+  ];
   if (payload.kind === "spy-direction") {
     const reference = (payload.referenceClose ?? {}) as { value?: unknown };
     parts.push(
@@ -449,7 +452,11 @@ export function proposedThemes(
   for (const line of outlook.split("\n")) {
     const match = PROPOSED.exec(line.trim());
     if (match === null) continue;
-    out.push({ id: match[1]!, thesis: match[2]!.trim(), evidence: match[3]!.trim() });
+    out.push({
+      id: match[1]!,
+      thesis: match[2]!.trim(),
+      evidence: match[3]!.trim(),
+    });
   }
   return out;
 }
@@ -458,9 +465,12 @@ export function proposedThemes(
  *  to check that §2 discusses ids that section 1 actually printed. */
 const COMMITMENT_ID = /\b\d{4}-\d{2}-\d{2}-[a-z]+-[A-Za-z0-9.:_-]+\b/gu;
 
-export function reviewSections(
-  args: ReviewSectionsArgs,
-): ReviewSectionsResult {
+/** What counts as NAMING an event in §5: a three-or-more-capital acronym
+ *  (FOMC, CPI, NFP, PCE) or an ISO day. Two capitals are left alone on
+ *  purpose — "ET", "US" and "PM" are units and places, not events. */
+const EVENT_NAME = /\b(?:[A-Z]{3,8}|\d{4}-\d{2}-\d{2})\b/gu;
+
+export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const { frame, doc, caps, period } = args;
   const faults: string[] = [];
   const sections: Section[] = [];
@@ -581,15 +591,16 @@ export function reviewSections(
     if (row.level !== undefined) levels.push(row.level);
     if (untestedReason(row) !== undefined || entry === undefined)
       return `- ${row.id} — untested — UNTESTED — ${NO_DATUM} — settles: ${NO_DATUM}`;
-    const shown =
-      row.id.startsWith("theme:")
-        ? (() => {
-            const triple = themeTriple(row);
-            return `${triple.week} (1w) · ${triple.since} (since ${row.theme === undefined ? "?" : (frame.declared.themes.find((t) => `theme:${t.id}` === row.id)?.entered ?? "?")})`;
-          })()
-        : `${row.level ?? "—"} → ${row.move ?? row.prior ?? "—"}`;
+    const shown = row.id.startsWith("theme:")
+      ? (() => {
+          const triple = themeTriple(row);
+          return `${triple.week} (1w) · ${triple.since} (since ${row.theme === undefined ? "?" : (frame.declared.themes.find((t) => `theme:${t.id}` === row.id)?.entered ?? "?")})`;
+        })()
+      : `${row.level ?? "—"} → ${row.move ?? row.prior ?? "—"}`;
     const band =
-      row.delta === undefined ? "" : ` ${bandText(entry.token, row.delta, unitOf(row.move))}`;
+      row.delta === undefined
+        ? ""
+        : ` ${bandText(entry.token, row.delta, unitOf(row.move))}`;
     const members =
       row.members === undefined ? "" : ` — members: ${row.members.join(", ")}`;
     return `- ${row.id} — ${shown} — ${entry.token.toUpperCase()}${band} — ${entry.why || "—"} — settles: ${entry.observable || "—"}${members}`;
@@ -653,9 +664,10 @@ export function reviewSections(
   review = review === "" ? "" : trim(review, caps.review).text;
   let staleRowsQuoted = 0;
   const quotesRow = (text: string, row: CoverageRow): boolean =>
-    new RegExp(`\\b${row.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`, "iu").test(
-      text,
-    ) ||
+    new RegExp(
+      `\\b${row.id.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`,
+      "iu",
+    ).test(text) ||
     (row.level !== undefined && text.includes(row.level));
   const reviewLines: string[] = [];
   if (review !== "") reviewLines.push(review);
@@ -665,7 +677,8 @@ export function reviewSections(
     );
   for (const row of stale)
     for (const sentence of review.split(/(?<=[.。!?])\s+/u))
-      if (sentence.trim() !== "" && quotesRow(sentence, row)) staleRowsQuoted += 1;
+      if (sentence.trim() !== "" && quotesRow(sentence, row))
+        staleRowsQuoted += 1;
   const reviewBody = reviewLines.join("\n");
 
   // ---------------- section 4: the model's, no restatement -----------------
@@ -694,7 +707,8 @@ export function reviewSections(
   outlook = outlook === "" ? "" : trim(outlook, caps.outlook).text;
   for (const row of stale)
     for (const sentence of outlook.split(/(?<=[.。!?])\s+/u))
-      if (sentence.trim() !== "" && quotesRow(sentence, row)) staleRowsQuoted += 1;
+      if (sentence.trim() !== "" && quotesRow(sentence, row))
+        staleRowsQuoted += 1;
   const outlookLines: string[] = [];
   if (outlook !== "") outlookLines.push(outlook);
   for (const entry of doc?.themes ?? [])
@@ -736,6 +750,8 @@ export function reviewSections(
     );
   }
   for (const line of notAdmitted) catalystLines.push(`not admitted: ${line}`);
+  if (admitted.length === 0)
+    catalystLines.push("no dated event was admitted this period");
   let catalysts = doc?.catalysts ?? "";
   if (catalysts !== "") {
     const named = notAdmitted
@@ -744,6 +760,31 @@ export function reviewSections(
     if (named.length > 0) {
       faults.push(
         `dated catalysts names ${named.join(", ")}, which no dated source admitted — the paragraph is dropped`,
+      );
+      catalysts = "";
+    }
+  }
+  // THE RULE THE PROMPT ALREADY CARRIES, NOW ENFORCED. On 2026-09-06 zero rows
+  // were admitted and §5 still printed "FOMC decision 2026-09-16 … 50.7%
+  // hold" — a whole paragraph about an event no dated source handed the run.
+  // An event NAME is an acronym of three or more capitals or an ISO day; every
+  // one of them must appear in what the admitted rows actually say.
+  if (catalysts !== "") {
+    const haystack = args.calendarRows
+      .filter((row) => admitted.includes(row.event))
+      .map((row) => `${row.time} ${row.type} ${row.event}`)
+      .join(" ")
+      .toLowerCase();
+    const unsourced = [
+      ...new Set(
+        (catalysts.match(EVENT_NAME) ?? []).filter(
+          (token) => !haystack.includes(token.toLowerCase()),
+        ),
+      ),
+    ];
+    if (unsourced.length > 0) {
+      faults.push(
+        `dated catalysts names ${unsourced.join(", ")}, which the admitted rows do not carry — the paragraph is dropped`,
       );
       catalysts = "";
     }
@@ -850,13 +891,16 @@ export function reviewSections(
     const row = rows.find((entry) => entry.id === `theme:${theme.id}`);
     const entry = entries.get(`theme:${theme.id}`);
     const model = (doc?.themes ?? []).find((item) => item.id === theme.id);
-    const triple = row === undefined ? { week: "—", since: "—" } : themeTriple(row);
+    const triple =
+      row === undefined ? { week: "—", since: "—" } : themeTriple(row);
     return {
       id: theme.id,
       token: entry?.token ?? "untested",
       excess1w: triple.week,
       excessSinceEntered: triple.since,
-      ...(model === undefined ? {} : { leadership: model.leadership, why: model.why }),
+      ...(model === undefined
+        ? {}
+        : { leadership: model.leadership, why: model.why }),
       kill: row?.theme?.kill.armed ?? theme.kill,
       killMet: row?.theme?.kill.met ?? false,
     };
@@ -1004,7 +1048,9 @@ export function verdictCommitments(args: {
         admittedFor: {
           kind: nearest.kind,
           day: nearest.day,
-          ...(nearest.session === undefined ? {} : { session: nearest.session }),
+          ...(nearest.session === undefined
+            ? {}
+            : { session: nearest.session }),
           source: nearest.source,
           label: nearest.label,
         },
@@ -1054,7 +1100,8 @@ export function reviewMetrics(args: {
       value:
         outcomes.length === 0
           ? null
-          : outcomes.filter((value) => value === "hit").length / outcomes.length,
+          : outcomes.filter((value) => value === "hit").length /
+            outcomes.length,
     },
     {
       name: "verdictBrier",
@@ -1093,9 +1140,7 @@ export function reviewMetrics(args: {
 /** The model's share of section 3: one `why` clause and one `observable` per
  *  row. The renderer's own line furniture is NOT the model's words, so it does
  *  not count against `reviewModelWords`. */
-function modelWordsInCoverage(args: {
-  sections: Section[];
-}): number {
+function modelWordsInCoverage(args: { sections: Section[] }): number {
   const body = args.sections[2]?.body ?? "";
   let total = 0;
   for (const line of body.split("\n")) {

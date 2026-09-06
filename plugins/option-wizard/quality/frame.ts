@@ -103,6 +103,90 @@ export interface OpenRow {
   deadlineBars?: number;
 }
 
+/**
+ * One dated event §5 may print.
+ *
+ * Lives here rather than in the renderer because the frame is what reads the
+ * dated sources: `ow_uw_calendar` and `ow_argon_policy_path` are siblings of
+ * `ow_session_frame`, their payloads never reach `report.toolOutputs` on their
+ * own, and on the 2026-09-06 acceptance run the renderer's shape-matched
+ * lookup therefore found nothing — zero rows admitted, while the weekly
+ * analyst's own paragraph named the 09-16 FOMC anyway.
+ */
+export interface CalendarRow {
+  time: string;
+  type: string;
+  event: string;
+  forecast?: string;
+  prev?: string;
+  session?: "pre" | "post";
+}
+
+/** A source that spells "no value" as `null` must not reach the admission gate
+ *  as a value: the gate tests for `undefined`, and `forecast: null` would have
+ *  printed `forecast null` on every row. */
+function textOrAbsent(value: unknown): string | undefined {
+  if (typeof value === "string") return value.trim() === "" ? undefined : value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+/**
+ * The dated rows, from BOTH dated sources the frame already reads.
+ *
+ * `ow_uw_calendar` answers a 7-open-session horizon; the 09-16 FOMC is ten
+ * calendar days out and is therefore not on it. The policy path is the only
+ * source that carries that meeting, and it carries a probability and a target
+ * range — a forecast and a prior — so it is admissible under exactly the same
+ * gate rather than under an exception.
+ */
+export function calendarRowsOf(inputs: ChannelInputs): CalendarRow[] {
+  const out: CalendarRow[] = [];
+  const calendar = (inputs.calendar as { rows?: unknown } | undefined)?.rows;
+  for (const entry of Array.isArray(calendar) ? calendar : []) {
+    const row = (entry ?? {}) as Record<string, unknown>;
+    const time = textOrAbsent(row.time);
+    const event = textOrAbsent(row.event);
+    if (time === undefined || event === undefined) continue;
+    const forecast = textOrAbsent(row.forecast);
+    const prev = textOrAbsent(row.prev);
+    const session =
+      row.session === "pre" || row.session === "post" ? row.session : undefined;
+    out.push({
+      time,
+      type: textOrAbsent(row.type) ?? "macro",
+      event,
+      ...(forecast === undefined ? {} : { forecast }),
+      ...(prev === undefined ? {} : { prev }),
+      ...(session === undefined ? {} : { session }),
+    });
+  }
+  const meetings = (inputs.policy as { meetings?: unknown } | undefined)
+    ?.meetings;
+  for (const entry of Array.isArray(meetings) ? meetings : []) {
+    const row = (entry ?? {}) as Record<string, unknown>;
+    const day = textOrAbsent(row.meeting_date);
+    if (day === undefined) continue;
+    const payload = (row.payload ?? {}) as Record<string, unknown>;
+    const label = textOrAbsent(payload.label) ?? day;
+    const stance = textOrAbsent(payload.stance);
+    const probability = textOrAbsent(payload.probability);
+    const forecast =
+      probability === undefined
+        ? undefined
+        : `${stance ?? "priced"} ${probability}%`;
+    const prev = textOrAbsent(payload.target_range);
+    out.push({
+      time: day,
+      type: "policy path",
+      event: `FOMC ${label}`,
+      ...(forecast === undefined ? {} : { forecast }),
+      ...(prev === undefined ? {} : { prev }),
+    });
+  }
+  return out.sort((a, b) => a.time.localeCompare(b.time));
+}
+
 export interface SessionFrame {
   kind: typeof SESSION_FRAME_KIND;
   day: string;
@@ -163,6 +247,9 @@ export interface SessionFrame {
     state: "ok" | "skipped";
     reason?: string;
   }>;
+  /** §5's dated rows, from the calendar and the policy path. Carried on the
+   *  frame because those two sibling payloads never reach the renderer. */
+  calendar: CalendarRow[];
   notes?: string[];
 }
 
@@ -523,6 +610,7 @@ export function buildFrame(args: {
     caps: { weekly: review.caps.weekly, daily: review.caps.daily },
     declared,
     coverage,
+    calendar: calendarRowsOf(inputs),
     ...(notes.length === 0 ? {} : { notes }),
   };
 }

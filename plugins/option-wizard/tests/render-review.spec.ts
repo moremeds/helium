@@ -301,7 +301,9 @@ describe("section 3 — the coverage list never shrinks", () => {
     const printed = section
       .split("\n")
       .filter((line) => line.startsWith("- ") && line.includes("UNTESTED"));
-    const left = section.split("\n").filter((line) => line.startsWith("left out:"));
+    const left = section
+      .split("\n")
+      .filter((line) => line.startsWith("left out:"));
     expect(printed.length).toBe(ROW_COUNT);
     expect(left.length).toBe(ROW_COUNT);
     expect(out.gaps).toBe(ROW_COUNT);
@@ -606,6 +608,40 @@ describe("section 5 — dated catalysts", () => {
     expect(section).toContain("not admitted: FOMC decision");
     expect(section).not.toContain("FOMC decision is the whole week.");
     expect(out.faults.join("\n")).toContain("FOMC decision");
+  });
+
+  // THE 2026-09-06 DEFECT. Zero rows were admitted — the calendar and the
+  // policy path are frame siblings, so neither payload reached the renderer —
+  // and §5 still printed "FOMC decision 2026-09-16: the market prices 50.7%
+  // hold versus 49.29% hike".
+  it("drops a paragraph naming an event the admitted rows do not carry", () => {
+    const out = render({
+      calendarRows: [],
+      doc: {
+        ...DOC_EMPTY,
+        catalysts:
+          "FOMC decision 2026-09-16: the market prices 50.7% hold versus 49.29% hike.",
+      },
+    });
+    const section = body(out.sections, 5);
+    expect(out.admitted).toEqual([]);
+    expect(section).toContain("no dated event was admitted this period");
+    expect(section).not.toContain("50.7% hold");
+    expect(out.faults.join("\n")).toContain("FOMC");
+    expect(out.faults.join("\n")).toContain("2026-09-16");
+  });
+
+  it("keeps a paragraph whose every named event an admitted row carries", () => {
+    const out = render({
+      calendarRows: [admitted],
+      doc: {
+        ...DOC_EMPTY,
+        catalysts:
+          "CPI on 2026-09-10 is the only print that can move the week.",
+      },
+    });
+    expect(body(out.sections, 5)).toContain("is the only print");
+    expect(out.faults).toEqual([]);
   });
 
   it("C3: a post-close row dated 2026-09-02 settles the next open session", () => {
@@ -1123,8 +1159,14 @@ describe("the section list a review document delivers", () => {
             text: JSON.stringify({
               sections: [
                 { title: "5 sessions, 2026-08-31 to 2026-09-04", body: "one." },
-                { title: "10 sessions, 2026-08-24 to 2026-09-04", body: "two." },
-                { title: "21 sessions, 2026-08-07 to 2026-09-04", body: "three." },
+                {
+                  title: "10 sessions, 2026-08-24 to 2026-09-04",
+                  body: "two.",
+                },
+                {
+                  title: "21 sessions, 2026-08-07 to 2026-09-04",
+                  body: "three.",
+                },
               ],
             }),
           },

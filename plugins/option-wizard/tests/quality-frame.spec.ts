@@ -446,3 +446,58 @@ describe("attachThresholds — §G.5's scoring bar", () => {
     ).toBeUndefined();
   });
 });
+
+describe("the frame's dated calendar", () => {
+  // THE 2026-09-06 DEFECT. `ow_uw_calendar` and `ow_argon_policy_path` are
+  // siblings of `ow_session_frame`, so neither payload ever reached
+  // `report.toolOutputs` and the renderer admitted ZERO rows — while §5
+  // printed the 09-16 FOMC anyway, out of the model's own head.
+  it("carries the policy path's dated meetings, forecast and prior range", () => {
+    const { stateRoot, env } = scratch();
+    const frame = frameOf({ stateRoot, env });
+    const fomc = frame.calendar.find((row) => row.event === "FOMC 9/16")!;
+    expect(fomc).toBeDefined();
+    expect(fomc.time).toBe("2026-09-16");
+    expect(fomc.type).toBe("policy path");
+    // Copied, never computed: the stance and the probability the payload
+    // carries, and the target range as the prior.
+    expect(fomc.forecast).toBe("HIKE 60%");
+    expect(fomc.prev).toBe("3.75-4.00%");
+    expect(frame.calendar.map((row) => row.time)).toEqual([
+      "2026-09-16",
+      "2026-10-28",
+      "2026-12-09",
+    ]);
+  });
+
+  it("reads a null forecast as absent, never as the value `null`", () => {
+    const { stateRoot, env } = scratch();
+    const frame = frameOf({
+      stateRoot,
+      env,
+      inputs: inputs({
+        policy: undefined,
+        calendar: {
+          asOf: "2026-09-03T20:15:00.000Z",
+          rows: [
+            {
+              time: "2026-09-10T12:30:00Z",
+              type: "CPI",
+              event: "CPI YoY",
+              forecast: null,
+              prev: "3.0%",
+            },
+          ],
+        },
+      }),
+    });
+    expect(frame.calendar).toEqual([
+      {
+        time: "2026-09-10T12:30:00Z",
+        type: "CPI",
+        event: "CPI YoY",
+        prev: "3.0%",
+      },
+    ]);
+  });
+});
