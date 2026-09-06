@@ -601,6 +601,16 @@ describe("the review authors, rewritten", () => {
     const persona = manifest.roles["weekly-analyst"]?.persona ?? "";
     expect(persona).toContain("exactly one");
     expect(persona).toContain("ow_session_frame");
+    // THE 2026-09-06 DEFECT. The scorecard read `0 scored of 5 issued` and §2
+    // still named a largest miss and cited "receipt DGS10 at 4.77%", a receipt
+    // that does not exist.
+    expect(persona).toContain("`0 scored`");
+    expect(persona).toContain("NOTHING HAS");
+    expect(persona).toContain("ONE sentence");
+    expect(persona).toContain("There is no largest miss to find");
+    // §4 restated `2.65`, which §3 had already printed, and the renderer's
+    // fault fired. The rule is now in the prompt too.
+    expect(persona).toContain("NEVER RESTATE A LEVEL SECTION 3 PRINTED");
     expect(manifest.roles["weekly-analyst"]?.permissions.tools).toContain(
       "ow_session_frame",
     );

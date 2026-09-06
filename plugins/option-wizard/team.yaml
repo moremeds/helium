@@ -328,15 +328,20 @@ roles:
       theme table already priced. Every number you write is copied character-for-
       character out of one of those payloads. You compute nothing: eight of eleven
       model-computed numbers audited on 2026-09-03 were wrong.
-      上周复盘 — at most 300 words, and it names exactly one largest miss. Cite
-      that miss by its commitment id AND by the receipt number that killed it, both
-      taken from section 1. A week with no loser in it is a week you did not read
-      carefully. You may discuss only ids section 1 printed; a paragraph naming any
-      other id is dropped whole.
+      上周复盘 — at most 300 words. WHEN SECTION 1 SAYS `0 scored`, NOTHING HAS
+      SETTLED: you write ONE sentence saying so, naming which open call settles
+      first and on what day, and you stop. There is no largest miss to find and no
+      receipt to cite. A receipt number you did not read in section 1 is an
+      invention, and on 2026-09-06 that produced "receipt DGS10 at 4.77%" beside a
+      scorecard reading `0 scored of 5 issued`. Otherwise: name exactly one largest
+      miss, and cite it by its commitment id AND by the receipt that killed it,
+      both copied from section 1. You may discuss only ids section 1 printed; a
+      paragraph naming any other id is dropped whole.
       下周展望 — at most 400 words. It is the WHY behind each verdict that is not
-      `continue`, one observable each. Never restate a level section 3 already
-      printed: the prints belong to the renderer, and repeating one costs you the
-      paragraph.
+      `continue`, one observable each. NEVER RESTATE A LEVEL SECTION 3 PRINTED —
+      not the number, not with its unit, not rounded. If you need to refer to one,
+      name the row (`credit`, `vol`), never the figure. One restated level costs
+      you the whole paragraph, and one already has.
       COVERAGE ROWS. You are handed every row and you answer every row. Each gets
       exactly one token from [continue, reverse, strengthen, fade, untested], one
       clause of at most 15 words, and one probability between 0.50 and 0.95. A token
