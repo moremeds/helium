@@ -53,6 +53,10 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_spot", { mutating: false }],
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_argon_levels", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
+  // Unconfigured on the laptop by design, exactly like ow_argon_levels: the
+  // rail is a live read of the operator's own watchlist, and a machine without
+  // argon reports the gap rather than inventing a universe.
+  ["ow_argon_watchlist", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -1257,6 +1261,11 @@ const GexParams = z.object({
 const ArgonLevelsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
 });
+/** Optional on purpose: a deterministic step calls this with `{}` and gets the
+ *  `extensions.review.sectors` list the tenant declared. */
+const ArgonWatchlistParams = z.object({
+  chains: z.array(z.string().min(1).max(64)).max(40).optional(),
+});
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
   lookbackDays: z.number().int().positive().max(3650).optional(),
@@ -1389,6 +1398,11 @@ const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
   ["ow_spot", "the live quote route"],
   ["ow_strike_check", "the live quote route"],
   ["ow_argon_levels", "argon's live regime API"],
+  // The rail is CURRENT membership. argon keeps no dated snapshot of which
+  // tickers were in a chain on a past day, so a replay gets the honest
+  // "unavailable" and the sector rows print `untested` rather than today's
+  // membership under a past date.
+  ["ow_argon_watchlist", "argon's live watchlist rail"],
   ["ow_ib_positions", "xenon's live account API"],
   ["ow_uw_chain", "the Unusual Whales chain endpoint as used here"],
   ["ow_uw_ticker_metrics", "the Unusual Whales ticker-metrics endpoint"],
@@ -3543,6 +3557,145 @@ export function buildTools(cfg: {
           );
         }
         return JSON.stringify({ source: "argon", levels: results });
+      },
+    },
+    {
+      // 2026-09-06. Shape READ FROM ARGON'S OWN SOURCE, NOT YET FROM A LIVE
+      // RESPONSE — argon was not running on this laptop and OW_ARGON_API_BASE
+      // is unset here, so no live call could be made. The source read,
+      // read-only and never edited:
+      //   src/uw_scan/api/server.py            — both routes mount under /api
+      //   src/uw_scan/api/routers/watchlist.py — the two handlers
+      //   src/uw_scan/api/models/watchlist.py  — the field list
+      //   src/uw_scan/watchlist_taxonomy.py    — the chain names and members
+      //
+      //   GET /api/watchlist/chains -> { chains: [{ layer, layer_name, focus,
+      //     chain, count }] } — DECLARED TAXONOMY ORDER, not alphabetical, and
+      //     the rail leads with Index & Macro on purpose (the handler's own
+      //     docstring says so); this tool preserves whatever order argon
+      //     returns. `count` is LIVE db membership, which can differ from the
+      //     taxonomy tuple length.
+      //   GET /api/watchlist?chain=<name> -> { scanned_at_min, scanned_at_max,
+      //     scheduler_lag_seconds, queue{…}, hot_count, hot_max,
+      //     tickers: [{ ticker, sector, chains[], pinned, hot, sort_rank, spot,
+      //     spot_quoted_at, spot_source, scanned_at, iv_atm, iv_rank,
+      //     market_cap, aum, setup{}, aggression_pct, returns{}, gamma{},
+      //     skew{}, positioning{}, queue }] }.
+      //
+      // KEPT beyond the members: `pinned` (it IS the tickers-of-interest list)
+      // and `iv_rank` (the §G.4 column and the flowAnomaly input).
+      // EXCLUDED as noise: setup, aggression_pct, returns, gamma, skew,
+      // positioning, queue, market_cap, aum, iv_atm, spot. This tool answers
+      // ONE question — which tickers are in this chain — and the weekly % comes
+      // from the bars tool, never from a card field whose vintage is the
+      // scan's, not the week's. `scanned_at_max` is copied through as `asOf`,
+      // verbatim.
+      name: "ow_argon_watchlist",
+      description:
+        "The argon watchlist rail: every chain with its layer and live member count, the members of each requested chain, and the operator's tickers of interest (the pinned rows). A chain name is matched EXACTLY as argon spells it; a name argon does not serve comes back in `unknown` and is reported as untested rather than guessed at.",
+      paramsSchema: ArgonWatchlistParams,
+      mutating: false,
+      dshParams: {
+        chains: {
+          type: "array",
+          description:
+            'Chain names, e.g. ["Computer/GPU"]. Omit for the declared `extensions.review.sectors` list.',
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const parsed = ArgonWatchlistParams.parse(args);
+        const tool = "ow_argon_watchlist";
+        const base = need(env, "OW_ARGON_API_BASE", tool);
+        const wanted = parsed.chains ?? review?.sectors ?? [];
+        const rail = (await argonGet(
+          tool,
+          base,
+          "/api/watchlist/chains",
+          ctx,
+        )) as { chains?: Array<Record<string, unknown>> };
+        const known = new Map<string, Record<string, unknown>>();
+        for (const row of rail.chains ?? []) {
+          if (typeof row.chain === "string") known.set(row.chain, row);
+        }
+        const unknownNames: string[] = [];
+        const served: string[] = [];
+        for (const name of wanted) {
+          if (known.has(name)) served.push(name);
+          else unknownNames.push(name);
+        }
+        // One failing chain must not cost the others their members — the
+        // ow_argon_levels discipline. A 500 lands in `unknown` WITH its reason,
+        // so a partial answer never reads as a complete one.
+        const settled = await Promise.allSettled(
+          served.map(async (name) => {
+            const body = (await argonGet(
+              tool,
+              base,
+              `/api/watchlist?chain=${encodeURIComponent(name)}`,
+              ctx,
+            )) as {
+              scanned_at_max?: unknown;
+              tickers?: Array<Record<string, unknown>>;
+            };
+            return { name, body };
+          }),
+        );
+        const chains: Array<Record<string, unknown>> = [];
+        const ofInterest: string[] = [];
+        const ivRank: Record<string, number> = {};
+        let newest: string | undefined;
+        settled.forEach((result, index) => {
+          const name = served[index]!;
+          if (result.status === "rejected") {
+            const why: unknown = result.reason;
+            unknownNames.push(
+              `${name} (${why instanceof Error ? why.message : String(why)})`,
+            );
+            return;
+          }
+          const { body } = result.value;
+          const rows = Array.isArray(body.tickers) ? body.tickers : [];
+          const members: string[] = [];
+          for (const row of rows) {
+            const ticker = row.ticker;
+            if (typeof ticker !== "string") continue;
+            members.push(ticker);
+            // The operator's TICKERS OF INTEREST. This is what replaces the
+            // positions read: a name is covered because someone put it here by
+            // hand, and the public page only ever sees "of interest".
+            if (row.pinned === true && !ofInterest.includes(ticker))
+              ofInterest.push(ticker);
+            // argon's own iv_rank, COPIED. Never computed here.
+            const rank = Number(row.iv_rank);
+            if (row.iv_rank !== null && Number.isFinite(rank))
+              ivRank[ticker] = rank;
+          }
+          const info = known.get(name)!;
+          const asOf =
+            typeof body.scanned_at_max === "string"
+              ? body.scanned_at_max
+              : undefined;
+          if (asOf !== undefined && (newest === undefined || asOf > newest))
+            newest = asOf;
+          chains.push({
+            chain: name,
+            ...(typeof info.layer === "string" ? { layer: info.layer } : {}),
+            ...(typeof info.count === "number" ? { count: info.count } : {}),
+            members,
+            ...(asOf === undefined ? {} : { asOf }),
+          });
+        });
+        return JSON.stringify({
+          source: "argon",
+          ...(newest === undefined ? {} : { asOf: newest }),
+          chains,
+          unknown: unknownNames,
+          ofInterest,
+          ivRank,
+        });
       },
     },
     {

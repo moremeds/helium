@@ -1,0 +1,247 @@
+{
+ "scanned_at_min": null,
+ "scanned_at_max": null,
+ "scheduler_lag_seconds": null,
+ "queue": {
+  "total": 0,
+  "queued": 0
+ },
+ "hot_count": 0,
+ "hot_max": 0,
+ "tickers": [
+  {
+   "ticker": "CRWD",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": true,
+   "hot": false,
+   "sort_rank": 0,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "PANW",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 1,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "NET",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 2,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "ZS",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 3,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "S",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 4,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "FTNT",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 5,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "OKTA",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 6,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "CYBR",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 7,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "TENB",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 8,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "QLYS",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 9,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "RPD",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 10,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "VRNS",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 11,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "CHKP",
+   "sector": "Technology",
+   "chains": [
+    "Cybersecurity"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 12,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  }
+ ]
+}

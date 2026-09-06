@@ -410,3 +410,53 @@ describe("the weekly review", () => {
     expect(task?.prompt ?? "").toContain("never compute");
   });
 });
+
+describe("the flash page is public — no role reads the book", () => {
+  it("no role can read positions", () => {
+    // The argon /flash page is public (user, 2026-09-06). team.yaml already
+    // forbids quantity, size and account value in prose, but a HELD TICKER NAME
+    // is itself private and a prompt is never a permission boundary
+    // (AGENTS.md, Safety model). The tool is removed from every role rather
+    // than gated at render time: a gate would require the renderer to hold the
+    // positions list, one step closer to `data: view`, which argon persists.
+    for (const [name, role] of Object.entries(manifest.roles))
+      expect(role.permissions.tools ?? [], name).not.toContain(
+        "ow_ib_positions",
+      );
+  });
+
+  it("no prompt still asks a role to merge in open positions", () => {
+    const text = manifest.tasks.map((t) => t.prompt ?? "").join("\n");
+    expect(text).not.toContain("open IB positions");
+    expect(text).not.toContain("carries an open position");
+  });
+
+  it("the universe is built from the watchlists and the tickers of interest", () => {
+    expect(manifest.roles["universe-builder"]?.permissions.tools).toEqual([
+      "ow_tv_watchlist",
+      "ow_argon_watchlist",
+      "ow_spot",
+    ]);
+    const universe =
+      manifest.tasks.find((t) => t.id === "universe")?.prompt ?? "";
+    expect(universe).toContain("tickers of interest");
+  });
+
+  it("no persona or prompt speaks of positions or holdings outside a ban clause", () => {
+    // `position`, `held` and `holding` may appear ONLY inside an explicit
+    // "Never …" / "never a …" ban sentence — that is the one place the words
+    // have to appear in order to forbid themselves.
+    const lines = [
+      ...Object.values(manifest.roles).flatMap((r) =>
+        (r.persona ?? "").split("\n"),
+      ),
+      ...manifest.tasks.flatMap((t) => (t.prompt ?? "").split("\n")),
+    ];
+    for (const line of lines) {
+      if (/never/iu.test(line)) continue;
+      expect(line.toLowerCase(), line).not.toMatch(
+        /\b(position|held|holding)\b/u,
+      );
+    }
+  });
+});

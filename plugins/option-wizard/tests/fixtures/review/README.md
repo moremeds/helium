@@ -39,6 +39,55 @@ rebuilt in the tool's own shape so the extractor can be tested against it.
 Both reports are the tenant's own as-of-dated output, kept at
 `$SCRATCH/pit/weekend-2026-09-06/reports/`.
 
+## Recorded from the router source, NOT from a live response
+
+argon was **not running** on this laptop on 2026-09-06 (`OW_ARGON_API_BASE` is
+not set in any `~/.config/helium/*.env`, and nothing answers on the usual
+ports), so the four `watchlist-*.json` files below were transcribed from
+argon's own source — read-only, never edited — rather than from a `GET`:
+
+- `/Users/chenxi/projects/argon/src/uw_scan/api/models/watchlist.py`
+  (`WatchlistChainInfo`, `WatchlistChainsResponse`, `WatchlistCard`,
+  `WatchlistResponse` — the field list and its nullability)
+- `/Users/chenxi/projects/argon/src/uw_scan/api/routers/watchlist.py`
+  (`GET /watchlist/chains` preserves the taxonomy's declared order, not
+  alphabetical; `GET /watchlist?chain=<name>` selects on many-to-many chain
+  membership)
+- `/Users/chenxi/projects/argon/src/uw_scan/watchlist_taxonomy.py` (the chain
+  names and their members)
+- `/Users/chenxi/projects/argon/src/uw_scan/api/server.py` — both routes are
+  mounted under **`/api`**, so the live paths are `/api/watchlist/chains` and
+  `/api/watchlist?chain=<name>`.
+
+| file                             | holds                                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `watchlist-chains.json`          | the ten chains `tenant.yaml` declares plus `Beta`, in taxonomy order                            |
+| `watchlist-Computer-GPU.json`    | the seven real members NVDA, AMD, ARM, SMCI, DELL, HPE, HPQ                                     |
+| `watchlist-Cybersecurity.json`   | the thirteen real members CRWD … CHKP                                                            |
+| `watchlist-Beta.json`            | SPY, QQQ, IWM, DIA                                                                              |
+
+What in them is **not** from a source of truth, and is labelled here rather
+than passed off:
+
+- `count` is the taxonomy tuple length. The live endpoint returns **DB
+  membership**, which can differ.
+- `pinned` is operator state that exists only in argon's database. The flags
+  here (NVDA, AMD, CRWD, SPY) are **test values**, not the operator's real
+  tickers-of-interest list. `pinned` is a UI flag, not market data.
+- `spot` and `iv_rank` are `null` everywhere **except** in
+  `watchlist-Beta.json`, where SPY 765.16 / 8.0306, QQQ 709.24 / 20.6943 and
+  IWM 294.01 / 7.1784 are the real `close` and `iv_rank_1y` recorded by
+  `ow_argon_metrics` for market date **2026-09-02** in the same
+  `run-a6c307ef` replay. No price or IV rank anywhere in this directory is
+  invented.
+- `scanned_at_min` / `scanned_at_max` / `spot_quoted_at` are `null`: no scan
+  timestamp was recorded, and a plausible-looking one would be a fabricated
+  as-of.
+
+**Backfill these from a real `GET` the first time argon is running** — the
+tool's header comment is written from the observed response, not from this
+file.
+
 ## Derived facts these fixtures support
 
 - SPY 2026-09-03 → 2026-09-04: 773.17 → 770.19, **−0.3854 %** — the benchmark

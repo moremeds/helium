@@ -1,0 +1,141 @@
+{
+ "scanned_at_min": null,
+ "scanned_at_max": null,
+ "scheduler_lag_seconds": null,
+ "queue": {
+  "total": 0,
+  "queued": 0
+ },
+ "hot_count": 0,
+ "hot_max": 0,
+ "tickers": [
+  {
+   "ticker": "NVDA",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": true,
+   "hot": false,
+   "sort_rank": 0,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "AMD",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": true,
+   "hot": false,
+   "sort_rank": 1,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "ARM",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU",
+    "Semi-Logic/ASIC",
+    "Semi-Cap/EDA"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 2,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "SMCI",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 3,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "DELL",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 4,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "HPE",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 5,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "HPQ",
+   "sector": "Technology",
+   "chains": [
+    "Computer/GPU"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 6,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  }
+ ]
+}

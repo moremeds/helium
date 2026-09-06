@@ -17,7 +17,7 @@ roles:
     requires: []
     permissions:
       mutations: forbidden
-      tools: [ow_tv_watchlist, ow_spot, ow_ib_positions]
+      tools: [ow_tv_watchlist, ow_argon_watchlist, ow_spot]
 
   gex-reporter:
     requires: [structured.output, tool.use]
@@ -256,7 +256,7 @@ roles:
       structure does if the print gaps the underlying through the short
       strike>"}. You declare the earnings you are trading through; you do not
       silently avoid it. A proposal whose expiry falls BEFORE the date carries
-      no earnings key at all: declaring a gap the position cannot live to see
+      no earnings key at all: declaring a gap the structure cannot live to see
       is as false as denying one it can.
       You never assert a non-earnings window the tool did not give you — that
       ban covers the `rationale` free text as much as any field: no phrase like
@@ -273,7 +273,6 @@ roles:
           ow_strike_check,
           ow_price_structure,
           ow_argon_metrics,
-          ow_ib_positions,
           ow_uw_earnings,
         ]
     persona: >-
@@ -436,7 +435,7 @@ tasks:
     role: universe-builder
     phases: [premarket, intraday, close]
     requires: []
-    prompt: Merge the TradingView flag lists and the open IB positions into one deduplicated ticker set.
+    prompt: Merge the TradingView flag lists and the argon tickers of interest into one deduplicated ticker set.
 
   - id: gex
     role: gex-reporter
@@ -444,8 +443,8 @@ tasks:
     dependsOn: [universe]
     requires: [structured.output, tool.use]
     prompt: >-
-      Fill the GEX table for SPY, QQQ and any ticker in the universe you were
-      handed that carries an open position. Levels only, no direction, every
+      Fill the GEX table for SPY, QQQ and any ticker of interest in the
+      universe you were handed. Levels only, no direction, every
       number and every as-of copied from the tool verbatim.
 
   - id: overnight
@@ -708,7 +707,7 @@ tasks:
         cut. Ranked by cash-flow duration, the damage runs in this order.
         First, the longest-duration, profitless story equity, where value is
         almost entirely terminal. Second, big-cap secular growth, where the
-        multiple is the position. Third, rate-sensitive REITs and utilities.
+        multiple is the whole thesis. Third, rate-sensitive REITs and utilities.
         Short-duration cash-flow compounders are hurt least."
         "The most anomalous divergence is gold. Gold is $4,427.62, up 0.90%,
         in the same tape as a 10Y real yield of 2.44% that has itself climbed
@@ -776,7 +775,7 @@ tasks:
       scoreboard when there is one.
       One section per window, in the order the tool returned them, titled with
       the window's own dates ("5 sessions, 2026-08-31 to 2026-09-04"). In each:
-      which causes held, which did not, and the one change to make next week.
+      which causes proved out, which did not, and the one change to make next week.
       Copy every number and every date from the tool; never compute one, and
       never estimate a figure the tool did not give you. Where a window's
       `coverage` names something unavailable, say it in ONE clause at the end
