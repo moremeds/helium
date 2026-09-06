@@ -1,0 +1,25 @@
+{
+  "name": "dsh-plugin-tenant-helium-self",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "./lib/tools/index.js",
+  "exports": {
+    ".": "./lib/tools/index.js",
+    "./tools": "./lib/tools/index.js",
+    "./render": "./lib/render/index.js"
+  },
+  "files": ["lib", "tools", "render", "experiments", "tenant.yaml", "team.yaml"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@helium/core": "file:../../packages/core"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

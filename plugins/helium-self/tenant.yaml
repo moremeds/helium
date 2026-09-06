@@ -1,0 +1,29 @@
+# The third tenant, and the one whose subject matter is Helium itself
+# (doctrine 1): it mints a commitment about a proposed change to another
+# repo's model, and a later run settles that commitment from that repo's own
+# ground truth. No email, no cron, no network at mint time — the whole point is
+# the promise-then-check loop, not the delivery.
+#
+# `enabled: true` is safe for the same reason it is safe in fake-tenant: no
+# trigger, so nothing runs it but a human naming it.
+tenant: helium-self
+enabled: true
+team: team.yaml
+sandbox: none
+budget:
+  usd: 0.05
+  tokens: 20000
+triggers: []
+# The settler reads argon's Postgres, read-only. The NAME only; the value never
+# enters the repo. Reused rather than renamed because it is the same database
+# option-wizard already reads with the same read-only role.
+env:
+  - OW_ARGON_PG_URL
+  - OW_PSQL_BIN
+# markdown, like fake-tenant: `external = false`, so the ledger's
+# write-before-side-effect ordering still has a delivery to be ordered against
+# without needing the operator brake or a credential.
+delivery:
+  - channel: markdown
+    config:
+      dir: reports
