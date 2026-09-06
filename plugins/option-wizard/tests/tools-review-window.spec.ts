@@ -100,6 +100,41 @@ describe("openDaysBack", () => {
   });
 });
 
+/**
+ * A `review:` block the loader accepts. `buildTools` parses the whole
+ * declaration now (`quality/review-config.ts`), so a block carrying only
+ * `windows` is refused — the same refusal that skips a tenant whose theme has
+ * no kill condition. This is the smallest valid one; the windows are what this
+ * file is about.
+ */
+const REVIEW_EXTENSIONS = {
+  review: {
+    windows: [5, 10, 21],
+    coverage: ["rates.front"],
+    verdicts: ["continue", "reverse", "strengthen", "fade", "untested"],
+    caps: {
+      weeklyModelWords: 900,
+      dailyModelWords: 300,
+      weekly: {
+        review: 300,
+        outlook: 400,
+        catalysts: 150,
+        rowWords: 15,
+        focusWords: 20,
+        themeWords: 25,
+      },
+      daily: {
+        review: 120,
+        outlook: 180,
+        catalysts: 60,
+        rowWords: 10,
+        focusWords: 20,
+        themeWords: 25,
+      },
+    },
+  },
+};
+
 describe("ow_review_window", () => {
   function tool(stateRoot: string, dbPath = auditDb()) {
     return buildTools({
@@ -107,7 +142,7 @@ describe("ow_review_window", () => {
       env: { HELIUM_AUDIT_DB: dbPath },
       variant: "live",
       calendar: CALENDAR,
-      extensions: { review: { windows: [5, 10, 21] } },
+      extensions: REVIEW_EXTENSIONS,
     }).find((entry) => entry.name === "ow_review_window")!;
   }
 

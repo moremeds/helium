@@ -29,6 +29,7 @@ import {
   tenantThresholds,
 } from "../gates/ib-preflight.js";
 import { parseRegimeState } from "../state/regime.js";
+import { parseReviewConfig } from "../quality/review-config.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1554,6 +1555,18 @@ export function buildTools(cfg: {
   extensions?: Record<string, unknown>;
 }) {
   const { env } = cfg;
+  // The tenant's own `extensions.review` declaration, parsed ONCE, here.
+  // Parsing at the top of the factory is what makes a malformed declaration
+  // skip exactly this tenant with a recorded reason: `buildTools` throwing IS
+  // the tenant-skip seam (AGENTS.md, Architecture), so the review framework
+  // needs no validation gate of its own. A tenant that declares no `review:`
+  // block at all — a test harness, a future tenant — gets `undefined` and the
+  // review tools report `not declared`; a tenant that declares a BROKEN one
+  // never loads.
+  const review =
+    (cfg.extensions as { review?: unknown } | undefined)?.review === undefined
+      ? undefined
+      : parseReviewConfig(cfg.extensions);
   const asOf = cfg.asOf;
   const asOfIso = asOf?.toISOString();
   // The as-of DAY in the zone this tenant files its reports in. Every dated
@@ -2592,15 +2605,11 @@ export function buildTools(cfg: {
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
-        const declared = (
-          cfg.extensions as { review?: { windows?: unknown } } | undefined
-        )?.review?.windows;
-        const windows = (
-          Array.isArray(declared) &&
-          declared.every((n) => typeof n === "number" && n > 0 && n <= 60)
-            ? declared
-            : [5, 10, 21]
-        ) as number[];
+        // `review` is the parsed declaration; `parseReviewConfig` has already
+        // refused a window that is not a positive integer <= 60, so there is
+        // nothing left to re-check here. A tenant with no `review:` block at
+        // all falls back to the framework's own 5/10/21.
+        const windows: number[] = review?.windows ?? [5, 10, 21];
         const dir = join(cfg.stateRoot, "reports");
         let names: string[] = [];
         try {
