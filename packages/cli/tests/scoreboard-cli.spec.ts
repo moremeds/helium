@@ -17,6 +17,7 @@ function ledgerAt(): string {
         issuedAt: "2026-09-04T00:00:00Z",
         deployment: "production",
         variant: "live",
+        codeSha: "abc1234",
         payload: {},
       },
     },
@@ -68,8 +69,28 @@ describe("helium scoreboard", () => {
     spy.mockRestore();
     store.close();
     const text = lines.join("\n");
+    expect(text).toContain("live@abc1234:");
     expect(text).toContain("mean 0.0900");
     expect(text).not.toContain("0.8100");
+  });
+
+  it("--code-sha keeps only the runs that sha issued", () => {
+    const dir = ledgerAt();
+    const store = AuditStore.open({ HELIUM_AUDIT_DB: join(dir, "audit.db") });
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((line: unknown) => {
+      lines.push(String(line));
+    });
+    expect(
+      printScoreboard(store, dir, [
+        "option-wizard",
+        "--code-sha",
+        "def5678",
+      ]),
+    ).toBe(0);
+    spy.mockRestore();
+    store.close();
+    expect(lines.join("\n")).toContain("no receipts match");
   });
 
   it("returns 2 and says so when the tenant is missing", () => {

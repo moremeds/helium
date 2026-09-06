@@ -9,10 +9,10 @@
  * number computed in two places is a number that will disagree with itself.
  * @module @helium/cli/scoreboard
  */
-import type { LedgerRead } from "@helium/core";
+import type { Commitment, LedgerRead } from "@helium/core";
 
-export interface VariantSummary {
-  /** Receipts in this variant, pending included. */
+export interface GroupSummary {
+  /** Receipts in this group, pending included. */
   n: number;
   pending: number;
   /** Mean per score key over NON-pending receipts. */
@@ -22,15 +22,27 @@ export interface VariantSummary {
 }
 
 export interface Scoreboard {
-  byVariant: Record<string, VariantSummary>;
+  /** Keyed `${variant}@${codeSha}` — see `groupKey`. */
+  byGroup: Record<string, GroupSummary>;
+}
+
+/**
+ * A deploy is a baseline reset: the run that issued a commitment is the only
+ * thing that decides whether its score describes the current behaviour, so the
+ * sha is part of the group key rather than a column beside it. A commitment
+ * written before the field existed groups under `unknown` instead of silently
+ * joining whatever sha happens to be current.
+ */
+export function groupKey(commitment: Commitment): string {
+  return `${commitment.variant}@${commitment.codeSha ?? "unknown"}`;
 }
 
 export function summarise(
   records: LedgerRead,
-  opts: { deployment?: string; variant?: string } = {},
+  opts: { deployment?: string; variant?: string; codeSha?: string } = {},
 ): Scoreboard {
   const byId = new Map(records.commitments.map((entry) => [entry.id, entry]));
-  const byVariant: Record<string, VariantSummary> = {};
+  const byGroup: Record<string, GroupSummary> = {};
   const values = new Map<string, Map<string, number[]>>();
   for (const receipt of records.receipts) {
     const commitment = byId.get(receipt.commitmentId);
@@ -43,11 +55,16 @@ export function summarise(
       continue;
     if (opts.variant !== undefined && commitment.variant !== opts.variant)
       continue;
-    const key = commitment.variant;
-    let row = byVariant[key];
+    if (
+      opts.codeSha !== undefined &&
+      (commitment.codeSha ?? "unknown") !== opts.codeSha
+    )
+      continue;
+    const key = groupKey(commitment);
+    let row = byGroup[key];
     if (row === undefined) {
       row = { n: 0, pending: 0, means: {}, ranges: {} };
-      byVariant[key] = row;
+      byGroup[key] = row;
     }
     row.n += 1;
     if (receipt.status === "pending") {
@@ -67,7 +84,7 @@ export function summarise(
     }
   }
   for (const [key, keys] of values) {
-    const row = byVariant[key]!;
+    const row = byGroup[key]!;
     for (const [name, list] of keys) {
       row.means[name] =
         list.reduce((total, value) => total + value, 0) / list.length;
@@ -78,32 +95,41 @@ export function summarise(
       };
     }
   }
-  return { byVariant };
+  return { byGroup };
 }
 
 export function parseScoreboardArgs(
   argv: string[],
 ):
-  | { tenant?: string; since?: string; deployment: string; variant?: string }
+  | {
+      tenant?: string;
+      since?: string;
+      deployment: string;
+      variant?: string;
+      codeSha?: string;
+    }
   | { error: string } {
   const out: {
     tenant?: string;
     since?: string;
     deployment: string;
     variant?: string;
+    codeSha?: string;
   } = { deployment: "production" };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
     if (
       token === "--since" ||
       token === "--deployment" ||
-      token === "--variant"
+      token === "--variant" ||
+      token === "--code-sha"
     ) {
       const value = argv[index + 1];
       if (value === undefined) return { error: `${token} needs a value` };
       if (token === "--since") out.since = value;
       if (token === "--deployment") out.deployment = value;
       if (token === "--variant") out.variant = value;
+      if (token === "--code-sha") out.codeSha = value;
       index += 1;
       continue;
     }
@@ -115,17 +141,17 @@ export function parseScoreboardArgs(
 
 export function renderScoreboard(
   board: Scoreboard,
-  costByVariant: Record<string, number>,
+  costByGroup: Record<string, number>,
 ): string[] {
   const lines: string[] = [
     "the same idea re-issued on consecutive days is several correlated samples;",
     "V0 does not de-duplicate them.",
     "",
   ];
-  for (const [variant, row] of Object.entries(board.byVariant).sort()) {
-    const cost = costByVariant[variant];
+  for (const [group, row] of Object.entries(board.byGroup).sort()) {
+    const cost = costByGroup[group];
     lines.push(
-      `${variant}: ${String(row.n)} receipts, ${String(row.pending)} pending` +
+      `${group}: ${String(row.n)} receipts, ${String(row.pending)} pending` +
         (cost === undefined ? "" : `, ${cost.toFixed(6)} USD`),
     );
     for (const [name, mean] of Object.entries(row.means).sort()) {
@@ -138,7 +164,7 @@ export function renderScoreboard(
       lines.push("  no settled score yet");
     lines.push("");
   }
-  if (Object.keys(board.byVariant).length === 0)
+  if (Object.keys(board.byGroup).length === 0)
     lines.push(
       "no receipts match; the ledger may hold only outstanding commitments",
     );

@@ -25,6 +25,7 @@ import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
 import { registerProviders, runTenant, type RunReport } from "./runner.js";
 import {
+  groupKey,
   parseScoreboardArgs,
   renderScoreboard,
   summarise,
@@ -164,7 +165,7 @@ function printAudit(store: AuditStore, runId: string): number {
   return 0;
 }
 
-/** `helium scoreboard <tenant> [--since] [--deployment] [--variant]`. */
+/** `helium scoreboard <tenant> [--since] [--deployment] [--variant] [--code-sha]`. */
 export function printScoreboard(
   store: AuditStore,
   root: string,
@@ -177,7 +178,7 @@ export function printScoreboard(
   }
   if (parsed.tenant === undefined) {
     console.error(
-      "usage: helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>]",
+      "usage: helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>] [--code-sha <sha>]",
     );
     return 2;
   }
@@ -189,24 +190,27 @@ export function printScoreboard(
   const board = summarise(records, {
     deployment: parsed.deployment,
     ...(parsed.variant === undefined ? {} : { variant: parsed.variant }),
+    ...(parsed.codeSha === undefined ? {} : { codeSha: parsed.codeSha }),
   });
   // Cost is JOINED, never recomputed: the audit table is the one place that
   // knows what a run cost, and a second arithmetic here would eventually
-  // disagree with `helium audit`.
-  const runsByVariant = new Map<string, Set<string>>();
+  // disagree with `helium audit`. Keyed by the SAME group the board uses, so
+  // the USD figure on a row is the cost of the runs in that row.
+  const runsByGroup = new Map<string, Set<string>>();
   for (const commitment of records.commitments) {
-    const set = runsByVariant.get(commitment.variant) ?? new Set<string>();
+    const key = groupKey(commitment);
+    const set = runsByGroup.get(key) ?? new Set<string>();
     set.add(commitment.runId);
-    runsByVariant.set(commitment.variant, set);
+    runsByGroup.set(key, set);
   }
-  const costByVariant: Record<string, number> = {};
-  for (const [variant, runIds] of runsByVariant) {
+  const costByGroup: Record<string, number> = {};
+  for (const [group, runIds] of runsByGroup) {
     let usd = 0;
     for (const runId of runIds)
       for (const row of store.runCost(runId)) usd += row.usd;
-    costByVariant[variant] = usd;
+    costByGroup[group] = usd;
   }
-  for (const line of renderScoreboard(board, costByVariant)) console.log(line);
+  for (const line of renderScoreboard(board, costByGroup)) console.log(line);
   return 0;
 }
 
@@ -315,9 +319,11 @@ async function main(argv: string[]): Promise<number> {
       "      earlier run instead of refusing it. Recordings live under",
       "      <stateRoot>/runs/<runId>/tool-io and are pruned after 30 days.",
       "  helium audit <run-id>   per-step cost and token rows for a run",
-      "  helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>]",
+      "  helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>] [--code-sha <sha>]",
       "      what the outcome ledger says: mean and observed range per score key,",
-      "      grouped by variant, pending counted separately. Production only unless told otherwise.",
+      "      grouped by variant@codeSha so a deploy resets the baseline instead of",
+      "      averaging old behaviour into new, pending counted separately.",
+      "      Production only unless told otherwise.",
       "",
       `audit db: ${auditDbPath(env)} (override with HELIUM_AUDIT_DB)`,
       `tenants:  ${tenantsDir(env)} (override with HELIUM_TENANTS_DIR)`,

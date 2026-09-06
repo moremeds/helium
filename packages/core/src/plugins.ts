@@ -189,6 +189,12 @@ export interface Commitment {
   deployment: "production" | "backtest" | "test";
   /** The run's flavour label; `live` for a scheduled run. */
   variant: string;
+  /** The commit that issued this promise — the same sha `helium audit` prints
+   *  (`codeVersion()` in `@helium/cli/code-version`). The scoreboard groups on
+   *  it so a prompt rewrite resets the baseline instead of averaging the old
+   *  behaviour into the new one. Optional because the ledger predates the
+   *  field: a record without one groups under `unknown`. */
+  codeSha?: string;
   /** The replayed instant, when the run replayed one. Absent means live. */
   asOf?: string;
   /** Opaque to core. */

@@ -1543,6 +1543,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     issuedAt: stamp,
     deployment,
     variant: options.variant ?? "live",
+    codeSha: codeVersion(),
     ...(options.asOf === undefined ? {} : { asOf: options.asOf.toISOString() }),
   };
   appendLedger(options.stateRoot, spec.tenant, [
