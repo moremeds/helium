@@ -281,6 +281,33 @@ describe("section 3 — the coverage list never shrinks", () => {
     ).toBe(ROW_COUNT);
   });
 
+  it("a row the author called untested is a gap, and the counts agree", () => {
+    const out = render({
+      frame: frame({ rows: fullRows() }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "rates.front",
+            token: "untested",
+            why: "DGS2 not ingested",
+            observable: "",
+            scorable: false,
+          },
+        ],
+      },
+    });
+    const section = body(out.sections, 3);
+    const printed = section
+      .split("\n")
+      .filter((line) => line.startsWith("- ") && line.includes("UNTESTED"));
+    const left = section.split("\n").filter((line) => line.startsWith("left out:"));
+    expect(printed.length).toBe(ROW_COUNT);
+    expect(left.length).toBe(ROW_COUNT);
+    expect(out.gaps).toBe(ROW_COUNT);
+    expect(section).toContain("left out: rates.front — DGS2 not ingested");
+  });
+
   it("a sector row prints its members and a theme row its excess triple", () => {
     const out = render({
       frame: frame({ rows: fullRows() }),

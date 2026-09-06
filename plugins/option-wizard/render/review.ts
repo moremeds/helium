@@ -495,9 +495,20 @@ export function reviewSections(
   const entries = new Map(
     (doc?.coverage ?? []).map((entry) => [entry.id, entry]),
   );
-  const untested = rows.filter(
-    (row) => row.untested !== undefined || entries.get(row.id) === undefined,
-  );
+  // A row is UNCALLED when it has no datum, when the model gave it no entry at
+  // all, or when the entry's own token is `untested` — the model declining is
+  // still a row nobody called, and counting it any other way made the document
+  // disagree with itself: the 2026-09-06 acceptance run printed 19 `UNTESTED`
+  // rows over a `coverageGaps` of 16.
+  const untestedReason = (row: CoverageRow): string | undefined => {
+    if (row.untested !== undefined) return row.untested;
+    const entry = entries.get(row.id);
+    if (entry === undefined) return "no verdict token for this row";
+    if (entry.token === "untested")
+      return entry.why === "" ? "the author called it untested" : entry.why;
+    return undefined;
+  };
+  const untested = rows.filter((row) => untestedReason(row) !== undefined);
   const gaps = untested.length;
 
   const scoreLines: string[] = [
@@ -568,7 +579,7 @@ export function reviewSections(
     if (row.asOf !== undefined && row.asOf.slice(0, 10) < staleBefore)
       stale.push(row);
     if (row.level !== undefined) levels.push(row.level);
-    if (row.untested !== undefined || entry === undefined)
+    if (untestedReason(row) !== undefined || entry === undefined)
       return `- ${row.id} — untested — UNTESTED — ${NO_DATUM} — settles: ${NO_DATUM}`;
     const shown =
       row.id.startsWith("theme:")
@@ -622,9 +633,7 @@ export function reviewSections(
     }
   }
   for (const row of untested)
-    coverageLines.push(
-      `left out: ${row.id} — ${row.untested ?? "no verdict token for this row"}`,
-    );
+    coverageLines.push(`left out: ${row.id} — ${untestedReason(row) ?? "?"}`);
   const coverageBody = coverageLines.join("\n");
 
   // ---------------- section 2: the model's, checked against §1 -------------
