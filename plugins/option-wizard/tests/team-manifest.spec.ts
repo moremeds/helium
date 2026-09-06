@@ -203,6 +203,7 @@ describe("the editor is one author over seven fragments", () => {
     // produces no text, and handoff drops dependencies with no text.
     expect(task?.dependsOn ?? []).toEqual([
       "universe",
+      "frame",
       "gex",
       "overnight",
       "regime",
@@ -440,6 +441,24 @@ describe("the flash page is public — no role reads the book", () => {
     const universe =
       manifest.tasks.find((t) => t.id === "universe")?.prompt ?? "";
     expect(universe).toContain("tickers of interest");
+  });
+
+  it("frames the session in a deterministic step, not in a model", () => {
+    // Eight of eleven model-computed numbers audited on 2026-09-03 were wrong.
+    // `requires: []` is the manifest saying, in core's own vocabulary, that no
+    // model is routed for this step.
+    expect(manifest.tasks.find((e) => e.id === "frame")?.requires).toEqual([]);
+    expect(manifest.roles["frame-clerk"]?.requires).toEqual([]);
+    expect(manifest.roles["frame-clerk"]?.permissions.tools).toContain(
+      "ow_session_frame",
+    );
+  });
+
+  it("every author of a review section sees the same frame", () => {
+    for (const id of ["regime", "edit", "weekly", "week-review"])
+      expect(manifest.tasks.find((e) => e.id === id)?.dependsOn, id).toContain(
+        "frame",
+      );
   });
 
   it("no persona or prompt speaks of positions or holdings outside a ban clause", () => {

@@ -19,6 +19,17 @@ roles:
       mutations: forbidden
       tools: [ow_tv_watchlist, ow_argon_watchlist, ow_spot]
 
+  frame-clerk:
+    # DETERMINISTIC — not an agent. Ranking rows by numeric fields, scoring an
+    # event calendar and reading an append-only ledger is reproducible
+    # arithmetic; a model here costs tokens and adds variance for nothing
+    # (packages/core/src/team.ts, CapabilityList: "a step that requires no
+    # capability is a DETERMINISTIC step").
+    requires: []
+    permissions:
+      mutations: forbidden
+      tools: [ow_session_frame]
+
   gex-reporter:
     requires: [structured.output, tool.use]
     permissions:
@@ -437,6 +448,13 @@ tasks:
     requires: []
     prompt: Merge the TradingView flag lists and the argon tickers of interest into one deduplicated ticker set.
 
+  - id: frame
+    role: frame-clerk
+    phases: [premarket, intraday, close, weekly]
+    dependsOn: [universe]
+    requires: []
+    prompt: Call ow_session_frame once with no arguments and return its payload unchanged.
+
   - id: gex
     role: gex-reporter
     phases: [premarket, intraday, close]
@@ -466,7 +484,7 @@ tasks:
   - id: regime
     role: regime-analyst
     phases: [premarket, intraday, close]
-    dependsOn: [universe]
+    dependsOn: [universe, frame]
     requires: [reason.deep]
     prompt: >-
       State today's regime in the fixed order — rates first, then the single
@@ -610,7 +628,7 @@ tasks:
     # but cannot choose. Phase-scoped dependencies (scenarios, design, review)
     # are harmless where they do not run: no text, dropped by handoff.
     phases: [premarket, intraday, close]
-    dependsOn: [universe, gex, overnight, regime, scenarios, design, review]
+    dependsOn: [universe, frame, gex, overnight, regime, scenarios, design, review]
     requires: [long.context, reason.deep]
     prompt: |-
       Write the whole brief as one document. You have every step of this run
@@ -749,6 +767,7 @@ tasks:
   - id: weekly
     role: weekly-analyst
     phases: [weekly]
+    dependsOn: [frame]
     requires: [tool.use, long.context]
     prompt: >-
       Call ow_reports with days:7 phase:close steps:["edit"] and
@@ -765,6 +784,7 @@ tasks:
   - id: week-review
     role: week-reviewer
     phases: [weekly]
+    dependsOn: [frame]
     requires: [reason.deep, long.context]
     prompt: >-
       Call ow_review_window once, with no arguments, and write one page from

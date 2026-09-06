@@ -30,8 +30,32 @@ import {
 } from "../gates/ib-preflight.js";
 import { parseRegimeState } from "../state/regime.js";
 import { parseReviewConfig } from "../quality/review-config.js";
+import type { ChannelInputs } from "../quality/channels.js";
+import type { FocusInputs } from "../quality/focus.js";
+import { MIN_HISTORY } from "../quality/history.js";
+import { buildFrame } from "../quality/frame.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Every tool `ow_session_frame` may call. It is a LIST, not a comment: the
+ * frame refuses a name that is not on it, so adding a source is a visible edit
+ * here rather than a line buried in one `await`. `ow_ib_positions` is absent
+ * and must stay absent — the /flash page this frame feeds is public.
+ */
+export const SESSION_FRAME_SIBLINGS: readonly string[] = [
+  "ow_macro_rates",
+  "ow_argon_policy_path",
+  "ow_uw_gex",
+  "ow_spot",
+  "ow_uw_market_state",
+  "ow_uw_calendar",
+  "ow_tv_commodities",
+  "ow_argon_watchlist",
+  "ow_tv_watchlist",
+  "ow_uw_earnings",
+  "ow_massive_actions",
+];
 
 /**
  * The US equity venues TradingView tags an optionable listing with. Everything
@@ -63,6 +87,14 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // own name at the top of the run report rather than looking like a quiet
   // corporate-action calendar.
   ["ow_massive_actions", { mutating: false, requiresEnv: "MASSIVE_API_KEY" }],
+  // The frame's primary source is argon's macro store: without it there is no
+  // rates, curve, credit or vol level to rank or to cover, and a frame built
+  // from the remaining three siblings would be a ranking of whatever answered
+  // rather than of the session. It never throws — an unrankable day comes back
+  // as `mode: "no-data"` with a full set of `untested` rows — so this entry is
+  // about saying the gap's name at the top of the run report, not about
+  // stopping the run.
+  ["ow_session_frame", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -1582,6 +1614,38 @@ export function openDaysBack(
     out.push(day);
   }
   return out.reverse();
+}
+
+/**
+ * OPEN sessions from `from` to `to`; negative when `to` is behind `from`.
+ *
+ * Walked back from the later date with `priorOpenDay` rather than subtracted:
+ * the same reason `openDaysBack` gives — a subtraction guesses which holidays
+ * fall inside. Bounded so a malformed pair cannot spin.
+ */
+export function openDaysBetween(
+  from: string,
+  to: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): number {
+  if (to === from) return 0;
+  const forward = to > from;
+  const stop = forward ? from : to;
+  let cursor = forward ? to : from;
+  let count = 0;
+  while (cursor > stop && count < 400) {
+    cursor = priorOpenDay(cursor, calendar);
+    count += 1;
+  }
+  return forward ? count : -count;
+}
+
+/** A CALENDAR-day bound for a feed whose endpoint takes a date range. The open
+ *  -session arithmetic is the decay's, never this. */
+function plusCalendarDays(day: string, count: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + count * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 const AS_OF_BLIND_SENTENCE =
@@ -3796,8 +3860,16 @@ export function buildTools(cfg: {
           description:
             'Tickers, e.g. ["NVDA"]. Omit for the whole window across the universe the caller passes.',
         },
-        from: { type: "string", required: true, description: "yyyy-mm-dd, inclusive." },
-        to: { type: "string", required: true, description: "yyyy-mm-dd, inclusive." },
+        from: {
+          type: "string",
+          required: true,
+          description: "yyyy-mm-dd, inclusive.",
+        },
+        to: {
+          type: "string",
+          required: true,
+          description: "yyyy-mm-dd, inclusive.",
+        },
       },
       async run(
         args: Record<string, unknown>,
@@ -3854,7 +3926,11 @@ export function buildTools(cfg: {
           }
         };
         const [splitRows, dividendRows] = await Promise.all([
-          fetchRows("/stocks/v1/splits", "execution_date.gte", "execution_date.lte"),
+          fetchRows(
+            "/stocks/v1/splits",
+            "execution_date.gte",
+            "execution_date.lte",
+          ),
           fetchRows(
             "/stocks/v1/dividends",
             "ex_dividend_date.gte",
@@ -3914,6 +3990,218 @@ export function buildTools(cfg: {
           dividends,
           notes,
         });
+      },
+    },
+    {
+      // 2026-09-06. The ranking, the coverage rows, the focus list and the
+      // ledger citation rows are arithmetic and bookkeeping, so they are
+      // computed ONCE, here, and read three times: the editor / weekly analyst
+      // through the deterministic step's handoff, the renderer out of
+      // report.toolOutputs, and the flash-budget gate out of GateCtx. Two
+      // computations of one ranking is how a prompt and an audit table end up
+      // disagreeing about what moved.
+      //
+      // It re-calls its sibling tools rather than reading their outputs, because
+      // a deterministic step's tool can only be handed `{}` (packages/cli/src/
+      // runner.ts `toolArgs`: a schema that accepts {} is called with {}). That
+      // is inside the existing envelope — the 2026-09-03 close replay already
+      // called ow_macro_rates three times and ow_argon_policy_path twice in one
+      // run — and it buys the property that the number in the prompt and the
+      // number in the audit table are the same number.
+      //
+      // CALL BUDGET (doctrine 4 — cost is part of the design): ow_uw_earnings
+      // is ONE round trip PER TICKER, capped at focus.maxEarningsLookups,
+      // pinned first then alphabetical so WHICH 60 is deterministic;
+      // ow_massive_actions is TWO calls for the whole window whatever the
+      // universe size (both endpoints take a date range); every other sibling is
+      // one call. ow_uw_iv_term is NOT called: nothing scores from it today
+      // (quality/focus.ts says why — §G.2's volume-ratio half has no verified
+      // feed), and paying focus.maxIvTermCalls round trips for a column no
+      // reader prints yet is cost with no consumer. Its coverage row says that
+      // out loud rather than going quiet. Every truncation is a focus note.
+      //
+      // The LEDGER read is `readLedger` from @helium/core. It is called AFTER
+      // the settler has run (the runner settles before the DAG), so
+      // `settledToday` is this morning's verdicts already scored.
+      //
+      // ow_ib_positions is NOT a sibling and never will be: the /flash page is
+      // public. SESSION_FRAME_SIBLINGS is asserted against in the tests.
+      name: "ow_session_frame",
+      description:
+        "This session's frame, computed not narrated: the ranked channels with each one's named series, today's level and the prior one copied verbatim and the move against that channel's own 20-session median; the FIXED coverage list in its declared order with a level, a move and an as-of per row (or `untested`); the weekly-15 and daily-5 focus lists with the dated event that admitted each name; yesterday's three checks already scored; and the ledger rows — what the settler closed today, and what is still open. Write about rank 1, the rows you were given and the names you were given; you may not re-rank, you may not add or drop a row or a name, and every number you quote is copied from this payload.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const skipped: Record<string, string> = {
+          ivTerm:
+            "not called: no reader yet — §G.5's implied-move column lands with the review renderer",
+        };
+        // One failing sibling must not cost the frame: it becomes a `skipped`
+        // coverage row with its own reason, and every channel, coverage row or
+        // focus feed it fed prints `untested`.
+        const answer = async (
+          layer: string,
+          name: string,
+          args: Record<string, unknown> = {},
+        ): Promise<unknown> => {
+          if (!SESSION_FRAME_SIBLINGS.includes(name)) {
+            skipped[layer] = `${name}: not a declared sibling`;
+            return undefined;
+          }
+          const tool = built.find((entry) => entry.name === name);
+          if (tool === undefined) {
+            skipped[layer] = `${name}: not built`;
+            return undefined;
+          }
+          try {
+            return JSON.parse(await tool.run(args, ctx)) as unknown;
+          } catch (error: unknown) {
+            skipped[layer] =
+              `${name}: ${error instanceof Error ? error.message : String(error)}`;
+            return undefined;
+          }
+        };
+
+        const [macro, policy, gex, spot, tide, calendar, commodities] =
+          await Promise.all([
+            answer("macro", "ow_macro_rates"),
+            answer("policy", "ow_argon_policy_path"),
+            answer("gex", "ow_uw_gex", { tickers: ["SPY", "QQQ"] }),
+            answer("spot", "ow_spot", {
+              tickers: ["SPY", "QQQ", "IWM", "VIX", "DXY"],
+            }),
+            answer("tide", "ow_uw_market_state", {
+              sector: "Technology",
+              etf: "SPY",
+            }),
+            answer("calendar", "ow_uw_calendar"),
+            answer("commodities", "ow_tv_commodities"),
+          ]);
+
+        const watchlist = await answer("watchlist", "ow_argon_watchlist");
+        const tv = await answer("tvWatchlist", "ow_tv_watchlist");
+        delete skipped.tvWatchlist; // not a declared coverage layer
+
+        const chains = Array.isArray(
+          (watchlist as { chains?: unknown } | undefined)?.chains,
+        )
+          ? ((watchlist as { chains: Array<{ members?: unknown }> }).chains ??
+            [])
+          : [];
+        const universe = new Set<string>();
+        for (const chain of chains)
+          for (const member of Array.isArray(chain.members)
+            ? chain.members
+            : [])
+            if (typeof member === "string") universe.add(member);
+        const ofInterest = Array.isArray(
+          (watchlist as { ofInterest?: unknown } | undefined)?.ofInterest,
+        )
+          ? ((watchlist as { ofInterest: string[] }).ofInterest ?? [])
+          : [];
+        for (const ticker of ofInterest) universe.add(ticker);
+        for (const ticker of Array.isArray(
+          (tv as { tickers?: unknown } | undefined)?.tickers,
+        )
+          ? ((tv as { tickers: string[] }).tickers ?? [])
+          : [])
+          universe.add(ticker);
+        const ivRank = ((watchlist as { ivRank?: unknown } | undefined)
+          ?.ivRank ?? {}) as Record<string, number>;
+
+        const focusNotes: string[] = [];
+        // Pinned first, then alphabetical, so WHICH names get the round trips
+        // is deterministic and the truncation says its own size.
+        const ordered = [
+          ...ofInterest.filter((ticker) => universe.has(ticker)),
+          ...[...universe]
+            .filter((ticker) => !ofInterest.includes(ticker))
+            .sort((a, b) => a.localeCompare(b, "en")),
+        ];
+        const cap = review?.focus?.maxEarningsLookups ?? ordered.length;
+        const asked = ordered.slice(0, cap);
+        if (asked.length < ordered.length)
+          focusNotes.push(
+            `earnings: ${String(asked.length)} of ${String(ordered.length)} universe members looked up (maxEarningsLookups)`,
+          );
+        const earnings =
+          asked.length === 0
+            ? undefined
+            : await answer("earnings", "ow_uw_earnings", { tickers: asked });
+
+        // Both Massive endpoints take a date range, so the whole window is two
+        // calls whatever the universe size. The bound is calendar days wide
+        // enough to hold the longest declared OPEN-session window; the decay
+        // does the session arithmetic.
+        const actions = await answer("actions", "ow_massive_actions", {
+          from: day,
+          to: plusCalendarDays(day, 21),
+        });
+
+        const inputs: ChannelInputs = {
+          ...(macro === undefined ? {} : { macro }),
+          ...(policy === undefined ? {} : { policy }),
+          ...(gex === undefined ? {} : { gex }),
+          ...(spot === undefined ? {} : { spot }),
+          ...(tide === undefined ? {} : { tide }),
+          ...(calendar === undefined ? {} : { calendar }),
+          ...(commodities === undefined ? {} : { commodities }),
+          ...(watchlist === undefined ? {} : { watchlist }),
+          day,
+          ...(review?.rotation === undefined
+            ? {}
+            : { benchmark: review.rotation.benchmark }),
+        };
+        const focusInputs: FocusInputs = {
+          day,
+          universe: [...universe],
+          pinned: ofInterest,
+          ivRank,
+          ...(earnings === undefined ? {} : { earnings }),
+          ...(calendar === undefined ? {} : { calendar }),
+          ...(policy === undefined ? {} : { policy }),
+          ...(actions === undefined ? {} : { actions }),
+          themes: review?.themes ?? [],
+          pins: review?.focus?.calendarPins ?? [],
+          openDaysBetween: (from: string, to: string) =>
+            openDaysBetween(from, to, cfg.calendar),
+          notes: focusNotes,
+        };
+        if (review === undefined) {
+          // A tenant with no `review:` block has no coverage list, no caps and
+          // no focus weights; there is nothing to frame and saying so beats
+          // returning an empty shape that looks like a framed session.
+          return JSON.stringify({
+            unavailable: "not declared",
+            reason:
+              "ow_session_frame: extensions.review is not declared for this tenant",
+          });
+        }
+        return JSON.stringify(
+          buildFrame({
+            inputs,
+            focusInputs,
+            days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
+            stateRoot: cfg.stateRoot,
+            // buildTools is not given the run's phase, so the newest record
+            // strictly before ANY known label on `day` is what the frame wants:
+            // `variant` is not a phase label and therefore ranks last, which
+            // reads as "the newest record written before this run".
+            label: cfg.variant ?? "live",
+            review,
+            skipped,
+            env,
+          }),
+        );
       },
     },
     {
