@@ -557,6 +557,61 @@ export function toolPayloadStrings(report: RunReport): string[] {
   return out;
 }
 
+/**
+ * §G.5's scoring bar, attached to the focus rows after the frame is built.
+ *
+ * The implied move first, from `ow_uw_iv_term`'s `implied_move_perc` — the
+ * nearest listed expiry at or after the name's own event day. When that tool
+ * answered nothing for a name (a skipped sibling, a name with no listed
+ * options, or the three-tickers-per-call cap), the realized fallback takes
+ * over: the median |2-session return| over the prior 60 sessions, computed by
+ * `realizedThreshold` from real daily bars. A name with neither is left alone
+ * — it still prints, and it mints no commitment, and the renderer says so.
+ *
+ * Mutates the rows in place, deliberately: `weekly` and `daily` share row
+ * objects, and two copies could disagree about one name's bar.
+ */
+export function attachThresholds(
+  frame: SessionFrame,
+  ivTerm: unknown,
+  realized?: ReadonlyMap<string, number>,
+): void {
+  const rows = [...frame.focus.weekly, ...frame.focus.daily];
+  const listed = Array.isArray((ivTerm as { rows?: unknown } | undefined)?.rows)
+    ? ((ivTerm as { rows: Array<Record<string, unknown>> }).rows ?? [])
+    : [];
+  for (const row of rows) {
+    if (row.threshold !== undefined) continue;
+    const eventDay = row.nearest?.day;
+    const candidates = listed
+      .filter(
+        (entry) =>
+          entry.ticker === row.ticker &&
+          typeof entry.implied_move_perc === "number" &&
+          Number.isFinite(entry.implied_move_perc) &&
+          (entry.implied_move_perc as number) > 0 &&
+          (eventDay === undefined ||
+            (typeof entry.expiry === "string" && entry.expiry >= eventDay)),
+      )
+      .sort((a, b) => Number(a.dte) - Number(b.dte));
+    const nearest = candidates[0];
+    if (nearest !== undefined) {
+      row.threshold = {
+        pct: nearest.implied_move_perc as number,
+        source: `ow_uw_iv_term implied_move_perc, expiry ${String(nearest.expiry)}, dte ${String(nearest.dte)}`,
+      };
+      continue;
+    }
+    const fallback = realized?.get(row.ticker);
+    if (fallback !== undefined && fallback > 0)
+      row.threshold = {
+        pct: fallback,
+        source:
+          "fallback: median |2-session return| over the prior 60 sessions, ow_apex_bars",
+      };
+  }
+}
+
 /** The same payload back out of a finished run. Null when the step did not run.
  *  Found BY SHAPE, the way `argonBaseline` already finds argon's. */
 export function frameFrom(report: RunReport): SessionFrame | null {

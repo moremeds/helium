@@ -75,6 +75,13 @@ export interface FocusRow {
   themes: string[];
   /** True when this name was carried in from an open focus-admit commitment. */
   sticky?: boolean;
+  /** §G.5's scoring bar, in PERCENT: the claim a focus-admit commitment makes
+   *  is |realized move| >= this over the event window. Filled by
+   *  `attachThresholds` AFTER scoring — the scorer never sees it, because a
+   *  threshold that fed the score would make the list rank itself on the
+   *  number it is later judged against. Absent = the name still prints and
+   *  mints nothing. */
+  threshold?: { pct: number; source: string };
 }
 
 export interface FocusInputs {

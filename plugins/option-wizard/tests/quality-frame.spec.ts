@@ -19,7 +19,12 @@ import {
 } from "@helium/core";
 import { MIN_HISTORY, MOVE_METRIC } from "../quality/history.js";
 import { parseReviewConfig } from "../quality/review-config.js";
-import { SESSION_FRAME_KIND, buildFrame, frameFrom } from "../quality/frame.js";
+import {
+  SESSION_FRAME_KIND,
+  attachThresholds,
+  buildFrame,
+  frameFrom,
+} from "../quality/frame.js";
 import type { ChannelInputs } from "../quality/channels.js";
 import type { FocusInputs } from "../quality/focus.js";
 
@@ -376,5 +381,67 @@ describe("frameFrom reads both places the runner puts a tool result", () => {
       ],
     } as never;
     expect(frameFrom(report)).toBe(null);
+  });
+});
+
+describe("attachThresholds — §G.5's scoring bar", () => {
+  const row = (ticker: string, day?: string) =>
+    ({
+      ticker,
+      score: 1,
+      parts: [],
+      daysToNearestEvent: 1,
+      ...(day === undefined
+        ? {}
+        : {
+            nearest: {
+              ticker,
+              kind: "earnings" as const,
+              day,
+              sessionsAway: 1,
+              source: "ow_uw_earnings",
+              label: "earnings",
+            },
+          }),
+      openCallIds: [],
+      themes: [],
+    }) as never;
+
+  const frameWith = (rows: unknown[]) =>
+    ({ focus: { weekly: rows, daily: [] } }) as never;
+
+  it("takes the nearest listed expiry at or after the event day", () => {
+    const frame = frameWith([row("NVDA", "2026-11-18")]);
+    attachThresholds(frame, {
+      rows: [
+        // A pre-event expiry cannot cover the event and is skipped.
+        { ticker: "NVDA", expiry: "2026-11-14", dte: 2, implied_move_perc: 3.1 },
+        { ticker: "NVDA", expiry: "2026-11-20", dte: 5, implied_move_perc: 4.6 },
+        { ticker: "NVDA", expiry: "2026-12-19", dte: 34, implied_move_perc: 9.2 },
+      ],
+    });
+    const attached = (frame as unknown as { focus: { weekly: Array<{ threshold?: { pct: number; source: string } }> } })
+      .focus.weekly[0]!.threshold;
+    expect(attached?.pct).toBe(4.6);
+    expect(attached?.source).toContain("ow_uw_iv_term implied_move_perc");
+    expect(attached?.source).toContain("2026-11-20");
+  });
+
+  it("falls back to the realized median and names the substitution", () => {
+    const frame = frameWith([row("AVGO", "2026-11-18")]);
+    attachThresholds(frame, { rows: [] }, new Map([["AVGO", 2.4]]));
+    const attached = (frame as unknown as { focus: { weekly: Array<{ threshold?: { pct: number; source: string } }> } })
+      .focus.weekly[0]!.threshold;
+    expect(attached?.pct).toBe(2.4);
+    expect(attached?.source).toContain("ow_apex_bars");
+  });
+
+  it("leaves a name with neither source alone — it prints and mints nothing", () => {
+    const frame = frameWith([row("XYZW", "2026-11-18")]);
+    attachThresholds(frame, { rows: [] });
+    expect(
+      (frame as unknown as { focus: { weekly: Array<{ threshold?: unknown }> } })
+        .focus.weekly[0]!.threshold,
+    ).toBeUndefined();
   });
 });

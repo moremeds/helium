@@ -33,7 +33,8 @@ import { parseReviewConfig } from "../quality/review-config.js";
 import type { ChannelInputs } from "../quality/channels.js";
 import type { FocusInputs } from "../quality/focus.js";
 import { MIN_HISTORY } from "../quality/history.js";
-import { buildFrame } from "../quality/frame.js";
+import { attachThresholds, buildFrame } from "../quality/frame.js";
+import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
 import type { Bar } from "../eval/bars.js";
 
@@ -57,6 +58,11 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   "ow_tv_watchlist",
   "ow_uw_earnings",
   "ow_massive_actions",
+  // §G.5's implied move. It answers only AFTER the focus list exists — the
+  // frame is built, its names are read, and the term structure is asked for
+  // those names — so it is a second pass, not one of the parallel reads above.
+  "ow_uw_iv_term",
+  "ow_apex_bars",
 ];
 
 /**
@@ -4227,10 +4233,7 @@ export function buildTools(cfg: {
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
-        const skipped: Record<string, string> = {
-          ivTerm:
-            "not called: no reader yet — §G.5's implied-move column lands with the review renderer",
-        };
+        const skipped: Record<string, string> = {};
         // One failing sibling must not cost the frame: it becomes a `skipped`
         // coverage row with its own reason, and every channel, coverage row or
         // focus feed it fed prints `untested`.
@@ -4372,22 +4375,69 @@ export function buildTools(cfg: {
               "ow_session_frame: extensions.review is not declared for this tenant",
           });
         }
-        return JSON.stringify(
-          buildFrame({
-            inputs,
-            focusInputs,
-            days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
-            stateRoot: cfg.stateRoot,
-            // buildTools is not given the run's phase, so the newest record
-            // strictly before ANY known label on `day` is what the frame wants:
-            // `variant` is not a phase label and therefore ranks last, which
-            // reads as "the newest record written before this run".
-            label: cfg.variant ?? "live",
-            review,
-            skipped,
-            env,
-          }),
+        const frame = buildFrame({
+          inputs,
+          focusInputs,
+          days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
+          stateRoot: cfg.stateRoot,
+          // buildTools is not given the run's phase, so the newest record
+          // strictly before ANY known label on `day` is what the frame wants:
+          // `variant` is not a phase label and therefore ranks last, which
+          // reads as "the newest record written before this run".
+          label: cfg.variant ?? "live",
+          review,
+          skipped,
+          env,
+        });
+
+        // ---- §G.5's scoring bar, a SECOND pass over the names just chosen ----
+        // It has to be second: the implied move is asked for the focus list,
+        // and the focus list does not exist until the frame is built. It is
+        // also kept OUT of the score — a threshold that fed the ranking would
+        // make the list rank itself on the number it is judged against.
+        const names = frame.focus.weekly.map((row) => row.ticker);
+        const perCall = 3; // ow_uw_iv_term's own cap
+        const calls = Math.min(
+          review.focus?.maxIvTermCalls ?? 0,
+          Math.ceil(names.length / perCall),
         );
+        const ivRows: unknown[] = [];
+        for (let index = 0; index < calls; index += 1) {
+          const batch = names.slice(index * perCall, (index + 1) * perCall);
+          if (batch.length === 0) break;
+          const reply = await answer("ivTerm", "ow_uw_iv_term", {
+            tickers: batch,
+          });
+          const got = (reply as { rows?: unknown } | undefined)?.rows;
+          if (Array.isArray(got)) ivRows.push(...got);
+        }
+        attachThresholds(frame, { rows: ivRows });
+        // The realized fallback, for the names the term structure could not
+        // answer for. Bounded by the same reach as the IV pass, so a wide
+        // universe cannot turn one frame into eighty apex round trips.
+        const missing = frame.focus.weekly
+          .filter((row) => row.threshold === undefined)
+          .map((row) => row.ticker)
+          .slice(0, calls * perCall);
+        if (missing.length > 0) {
+          const realized = new Map<string, number>();
+          await Promise.all(
+            missing.map(async (ticker) => {
+              const bars = await answer("bars", "ow_apex_bars", {
+                symbol: ticker,
+                timeframe: "1d",
+                lookbackDays: 120,
+              });
+              const rows = (bars as { bars?: unknown } | undefined)?.bars;
+              if (!Array.isArray(rows)) return;
+              const value = realizedThreshold(rows as never, 2);
+              if (value !== null && value > 0) realized.set(ticker, value);
+            }),
+          );
+          delete skipped.bars;
+          attachThresholds(frame, { rows: [] }, realized);
+        }
+        return JSON.stringify(frame);
       },
     },
     {
