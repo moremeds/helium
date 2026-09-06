@@ -1,0 +1,16 @@
+{
+  "id": "2026-09-07-density-arm-skewt",
+  "repo": "argon",
+  "hypothesis": "The cone's defect is asymmetric: the left tail is underweight (q05 pinball ratio 1.048 vs EWMA on reconstructed rows) while the right tail is the model's strength. A symmetric Student-t (arms H/F, runs 4 and 6) thickened both tails and overshot the left on the 320-row set. An innovation distribution with a separate left-tail shape (skewed t, or a two-piece t with its own lower-tail degrees of freedom) should lower the q05 ratio on both sets without giving back the q90/q95 gain.",
+  "change": "argon: add one new arm to uw_scan.density.fit.ARMS with an asymmetric innovation family, otherwise identical to G (multi_start, retry, carry); production ARM untouched; scored via the same replay script as runs 4-6",
+  "baselineSweepRun": 3,
+  "candidateSweepRun": null,
+  "candidateSweepStrategy": "spx-density-calibration-arm-skewt",
+  "holdout": { "origin": "prospective", "rows": 80 },
+  "decisionSet": { "origin": "reconstructed", "rows": 320 },
+  "metrics": {
+    "q05PinballRatio": { "improveIfDeltaAtMost": -0.01 },
+    "meanPinball": { "regressIfDeltaAbove": 0.01 }
+  },
+  "rule": "On the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.01 vs run 3 (about 7x the 0.0015 Monte-Carlo noise floor measured by run 5) AND mean pinball (model) does not rise by > 0.01; regressed if either q05 ratio rises by > 0.01 or mean pinball rises by > 0.01; otherwise flat. Second guard for any PR: the decision set (origin=reconstructed) q05 ratio must not exceed run 3's 1.0476 by more than 0.005 (about 3x noise). Thresholds fixed at mint time; never edited after."
+}
