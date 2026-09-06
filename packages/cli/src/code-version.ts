@@ -61,8 +61,16 @@ export function dshVersion(): string {
   try {
     const manifest = JSON.parse(
       readFileSync(join(repoRoot, "package.json"), "utf8"),
-    ) as { dependencies?: Record<string, string> };
-    cachedDsh = manifest.dependencies?.["@deepseek-ai/dsh"] ?? "unknown";
+    ) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    // Both halves: dsh is a devDependency of the root manifest, and reading
+    // only `dependencies` is why a deployed evidence header said "unknown".
+    cachedDsh =
+      manifest.dependencies?.["@deepseek-ai/dsh"] ??
+      manifest.devDependencies?.["@deepseek-ai/dsh"] ??
+      "unknown";
   } catch {
     cachedDsh = "unknown";
   }

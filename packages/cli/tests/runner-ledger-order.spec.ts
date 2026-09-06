@@ -35,10 +35,15 @@ describe("ledger write ordering", () => {
         issuedAt: expect.any(String),
         deployment: "test",
         variant: "live",
+        codeSha: expect.any(String),
         payload: { t1Down: 0.4 },
       },
     ]);
     expect(read.baselines.map((b) => b.id)).toEqual(["d-premarket-baseline"]);
+    // The sha travels on the baseline too: both sides of a comparison have to
+    // name the code that produced them or the comparison means nothing.
+    expect(read.baselines[0]!.codeSha).toBe(read.commitments[0]!.codeSha);
+    expect(read.commitments[0]!.codeSha).not.toBe("");
     audit.close();
   });
 
