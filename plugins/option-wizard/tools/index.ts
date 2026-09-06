@@ -1347,6 +1347,10 @@ const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 const EarningsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
 });
+/** `EarningsParams`' own cap, named so the frame's batching and the schema can
+ *  never drift apart. The tool makes one round trip per ticker either way — the
+ *  cap is what keeps a MODEL from asking about a hundred names in one line. */
+export const EARNINGS_PER_CALL = 12;
 
 const GexParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(12).optional(),
@@ -2859,8 +2863,11 @@ export function buildTools(cfg: {
             scores: Record<string, number>;
             detail?: unknown;
           }> = [];
-          let commitments: Array<{ id: string; issuedAt: string; payload: unknown }> =
-            [];
+          let commitments: Array<{
+            id: string;
+            issuedAt: string;
+            payload: unknown;
+          }> = [];
           try {
             const read = readLedger(cfg.stateRoot, "option-wizard", {
               since: sessions[0]?.day ?? cutoff,
@@ -2969,8 +2976,7 @@ export function buildTools(cfg: {
           const hit = decided.filter((row) => {
             if (row.status === "hit") return true;
             const detail = row.detail as
-              | { said?: unknown; got?: unknown }
-              | undefined;
+              { said?: unknown; got?: unknown } | undefined;
             return (
               typeof detail?.said === "string" &&
               typeof detail.got === "string" &&
@@ -3017,9 +3023,8 @@ export function buildTools(cfg: {
             },
             calls: {
               scored: decided.length,
-              outstanding: commitments.filter(
-                (row) => !settledIds.has(row.id),
-              ).length,
+              outstanding: commitments.filter((row) => !settledIds.has(row.id))
+                .length,
               hitRate: decided.length === 0 ? null : hit / decided.length,
             },
             // P/L lands ONLY on the longest window: process review and outcome
@@ -4322,10 +4327,49 @@ export function buildTools(cfg: {
           focusNotes.push(
             `earnings: ${String(asked.length)} of ${String(ordered.length)} universe members looked up (maxEarningsLookups)`,
           );
-        const earnings =
-          asked.length === 0
-            ? undefined
-            : await answer("earnings", "ow_uw_earnings", { tickers: asked });
+        // CHUNKED. `EarningsParams` caps `tickers` at 12 — a MODEL-facing
+        // guard, not a provider limit: the tool already makes one round trip
+        // per ticker. The 2026-09-06 acceptance run handed it the whole
+        // 45-name universe in one call and zod refused with
+        // `Too big: expected array to have <=12 items`, so the earnings layer
+        // was skipped, no focus row carried a dated event, and not one
+        // `focus-admit` commitment could mint. Batched here, the same way the
+        // iv-term pass batches at that tool's own cap of three.
+        const earningsRows: unknown[] = [];
+        const earningsMissing: unknown[] = [];
+        let earningsAnswered = false;
+        for (let index = 0; index < asked.length; index += EARNINGS_PER_CALL) {
+          const batch = asked.slice(index, index + EARNINGS_PER_CALL);
+          const reply = await answer("earnings", "ow_uw_earnings", {
+            tickers: batch,
+          });
+          if (reply === undefined) {
+            // The reason is not lost when a later batch answers: it rides in
+            // `missing`, beside the per-ticker failures the tool itself
+            // reports, naming the batch it cost.
+            earningsMissing.push({
+              ticker: batch.join(","),
+              reason: skipped.earnings ?? "ow_uw_earnings: no reason recorded",
+            });
+            continue;
+          }
+          earningsAnswered = true;
+          const body = reply as { rows?: unknown; missing?: unknown };
+          if (Array.isArray(body.rows)) earningsRows.push(...body.rows);
+          if (Array.isArray(body.missing))
+            earningsMissing.push(...body.missing);
+        }
+        // One failing batch must not cost the layer the batches that answered:
+        // the skip is cleared and the failures ride in `missing`, which is
+        // what the tool's own per-ticker failures already do.
+        if (earningsAnswered) delete skipped.earnings;
+        const earnings = earningsAnswered
+          ? {
+              asOf: new Date().toISOString(),
+              rows: earningsRows,
+              missing: earningsMissing,
+            }
+          : undefined;
 
         // Both Massive endpoints take a date range, so the whole window is two
         // calls whatever the universe size. The bound is calendar days wide
@@ -4416,7 +4460,9 @@ export function buildTools(cfg: {
         // ran, so it still says the layer was not supplied. Corrected here: a
         // table that reports a source as skipped while the run read it is
         // worse than no table.
-        const ivLayer = frame.coverage.find((entry) => entry.layer === "ivTerm");
+        const ivLayer = frame.coverage.find(
+          (entry) => entry.layer === "ivTerm",
+        );
         if (ivLayer !== undefined) {
           if (ivRows.length > 0) {
             ivLayer.state = "ok";
