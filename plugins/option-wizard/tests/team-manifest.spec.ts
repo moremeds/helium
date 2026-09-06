@@ -110,10 +110,20 @@ it("every narrative task replies as one sections JSON", () => {
   // prose contributes nothing to the mail — which is exactly how a premarket
   // run that had written four regime sections and four scenario paths
   // delivered a brief with one paragraph in it.
-  for (const id of ["scenarios", "weekly", "frank"]) {
+  for (const id of ["weekly", "frank"]) {
     const prompt = manifest.tasks.find((t) => t.id === id)?.prompt ?? "";
     expect(prompt, id).toContain('{"sections":[{"title","body"}]}');
   }
+  // `scenarios` is the second task whose reply is no longer JUST a sections
+  // object: it also states the scored `spyForecast`, so its `sections` key
+  // opens a larger object. Same check as `regime` below — the load-bearing
+  // part is the array of `{title, body}`, not the brace that used to close
+  // the object immediately after it.
+  const scenariosPrompt =
+    manifest.tasks.find((t) => t.id === "scenarios")?.prompt ?? "";
+  expect(scenariosPrompt).toContain('{"sections":[{"title","body"}],');
+  expect(scenariosPrompt).toContain('"spyForecast"');
+  expect(scenariosPrompt).toContain('"referenceClose"');
   // regime's reply is no longer JUST a sections object: the 2026-09-03
   // newsletter redesign has it also emit `headline`, `tape` and `schedule` —
   // the fields the masthead, tape strip and today's-schedule section render

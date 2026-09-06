@@ -535,9 +535,20 @@ tasks:
       then the explicit base case and the reason for it, then the
       confirmation/falsification combination for each catalyst, then reverse
       risk as its own paragraph.
-      Reply as ONE JSON object and nothing else: {"sections":[{"title","body"}]}
-      — one entry per section you were asked for, in that order, no prose
-      outside the JSON. Your working notes are not a section.
+      Reply as ONE JSON object and nothing else:
+       {"sections":[{"title","body"}],
+        "spyForecast":{"referenceClose":{"date":"<yyyy-mm-dd>","value":<number>},
+                       "t1Down":<0..1>,"t5Down":<0..1>}}
+      — one `sections` entry per section you were asked for, in that order, no
+      prose outside the JSON. Your working notes are not a section.
+      `spyForecast` is your own directional call, and it is scored: `t1Down` is
+      the probability that SPY's close ONE trading day after `referenceClose.date`
+      is BELOW `referenceClose.value`, `t5Down` the same five trading days out.
+      `referenceClose` is the last COMPLETED SPY close you were given by a tool —
+      copy its date and its number character-for-character from the tool's own
+      reply; a number you converted, rounded or remembered is refused by a gate.
+      Do not hedge to 0.5 out of caution: a forecast that is always 0.5 scores
+      exactly as well as no forecast at all, which is the point of scoring it.
 
   - id: design
     role: structure-designer

@@ -102,3 +102,87 @@ it("refuses a converted zone that shares the wall-clock minute", async () => {
     ),
   ).resolves.toMatchObject({ pass: false });
 });
+
+describe("referenceClose", () => {
+  const tape = JSON.stringify({
+    symbol: "SPY",
+    bars: [{ time: "2026-09-03T20:00:00Z", close: 770.19 }],
+  });
+
+  it("passes a referenceClose value that appears verbatim in this step's tool output", async () => {
+    const verdict = await gate.check(
+      {
+        text: JSON.stringify({
+          spyForecast: {
+            referenceClose: { date: "2026-09-03", value: 770.19 },
+            t1Down: 0.4,
+            t5Down: 0.5,
+          },
+        }),
+      },
+      {
+        runId: "r",
+        role: "scenario-analyst",
+        toolOutputs: [tape],
+        stepToolOutputs: [tape],
+      },
+    );
+    expect(verdict.pass).toBe(true);
+  });
+
+  it("refuses a referenceClose value no tool in this step returned", async () => {
+    const verdict = await gate.check(
+      {
+        text: JSON.stringify({
+          spyForecast: {
+            referenceClose: { date: "2026-09-03", value: 770.2 },
+            t1Down: 0.4,
+            t5Down: 0.5,
+          },
+        }),
+      },
+      {
+        runId: "r",
+        role: "scenario-analyst",
+        toolOutputs: [tape],
+        stepToolOutputs: [tape],
+      },
+    );
+    expect(verdict.pass).toBe(false);
+    expect(verdict.reason).toContain("770.2");
+  });
+
+  it("refuses when the step called no tool at all", async () => {
+    const verdict = await gate.check(
+      {
+        text: JSON.stringify({
+          spyForecast: {
+            referenceClose: { date: "2026-09-03", value: 770.19 },
+            t1Down: 0.4,
+            t5Down: 0.5,
+          },
+        }),
+      },
+      {
+        runId: "r",
+        role: "scenario-analyst",
+        toolOutputs: [tape],
+        stepToolOutputs: [],
+      },
+    );
+    expect(verdict.pass).toBe(false);
+  });
+
+  it("says nothing about a step that wrote no referenceClose", async () => {
+    const verdict = await gate.check(
+      { text: "prose with no forecast" },
+      {
+        runId: "r",
+        role: "scenario-analyst",
+        toolOutputs: [tape],
+        stepToolOutputs: [tape],
+      },
+    );
+    expect(verdict.pass).toBe(true);
+  });
+});

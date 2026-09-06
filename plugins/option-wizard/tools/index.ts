@@ -4036,3 +4036,8 @@ export function buildTools(cfg: {
     };
   });
 }
+
+/** The tenant's settler factory, re-exported where the harness looks for it
+ *  (beside `VOCABULARY` and `buildTools`). The implementation lives under
+ *  `eval/` because settling is not a tool: no agent may call it. */
+export { buildSettler } from "../eval/settle.js";

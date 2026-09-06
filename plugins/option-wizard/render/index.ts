@@ -18,6 +18,7 @@ import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
 import { qualityMetrics } from "../quality/index.js";
+import { baselineDraft, forecastCommitments } from "./ledger.js";
 
 export { extractJson } from "./json.js";
 
@@ -65,14 +66,23 @@ export interface CandidateView {
   pricing: Pricing;
   /** Widest strike span, per share; 0 when single-strike. */
   width: number;
-  /** Where the thesis is trying to get to, in the model's own words. Prose,
-   *  deliberately: 反转 triggers a 平仓建议 and so must be mechanical, while
-   *  加强 / 不变 are judgement and read better as the sentence the designer
-   *  actually wrote. */
-  target: string;
-  /** The declared entry trigger, when the designer wrote one as a level. Prose
-   *  is dropped rather than parsed: the gate below compares it to a strike. */
-  entry?: Invalidation;
+  /** Where the thesis is trying to get to, as a level and the side price has
+   *  to reach it from. A NUMBER, not the model's prose: argon's card renders
+   *  it through the same helper as `invalidation`, and it was showing
+   *  `TARGET —` for every candidate because a sentence has no level to draw.
+   *  The sentence still ships — as `thesis`. */
+  target?: Invalidation;
+  /** The old prose `target`: what the designer said it was going to do, in its
+   *  own words. Display only; nothing settles against it. */
+  thesis: string;
+  /** The declared entry trigger with the window it has to fire in, counted in
+   *  1d bars after the reference close. RENDERER-OWNED: an agent that picks its
+   *  own deadline inflates `pTrigger` by giving the level forever to be
+   *  reached, so the default is five and the model may only shorten it. */
+  entry?: Invalidation & { deadlineBars: number };
+  /** The expiry, restated as the date after which nothing can resolve. The one
+   *  date the contract itself fixes, so it is not a policy choice. */
+  resolutionDeadline: string;
   /** What the arithmetic gate could NOT check on this candidate, and why. A
    *  silent pass and a real pass look identical to a reader, and the run that
    *  shipped a QQQ 420/410 spread with QQQ at 707 looked like a pass. */
@@ -126,6 +136,70 @@ export interface ScheduleRow {
 }
 
 /**
+ * The run's own directional forecast on SPY, frozen as `evaluator-v0`.
+ *
+ * `t1Down` is P(close one trading day after `referenceClose.date` is BELOW
+ * `referenceClose.value`); `t5Down` is the same five bars out. `referenceClose`
+ * is the last completed close known at issue time — the prior session on a
+ * premarket run, that session on a close run — and its value must be a verbatim
+ * tool output, which `gates/as-of-verbatim.ts` checks.
+ */
+export interface SpyForecast {
+  referenceClose: { date: string; value: number };
+  t1Down: number;
+  t5Down: number;
+}
+
+/**
+ * A forecast and whether it can be scored, with the reason when it cannot.
+ *
+ * Issue #78: a missing field must never erase a section. A malformed forecast
+ * is rendered exactly as it arrived and marked unscorable — dropping the
+ * section would hide the fault from the only person who can fix it, and
+ * normalising it with a model would invent the number being measured.
+ */
+export interface ForecastBlock {
+  forecast?: SpyForecast;
+  scorable: boolean;
+  reason?: string;
+}
+
+function probability(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+}
+
+export function forecastFrom(report: RunReport): ForecastBlock | undefined {
+  const step = report.steps.find((entry) => entry.task === "scenarios");
+  if (step === undefined) return undefined;
+  const parsed = extractJson(step.text);
+  const raw = parsed?.spyForecast;
+  if (raw === undefined || raw === null || typeof raw !== "object")
+    return { scorable: false, reason: "the scenarios step wrote no spyForecast object" };
+  const row = raw as Record<string, unknown>;
+  const reference = row.referenceClose as Record<string, unknown> | undefined;
+  if (
+    reference === undefined ||
+    reference === null ||
+    typeof reference !== "object" ||
+    typeof reference.date !== "string" ||
+    typeof reference.value !== "number" ||
+    !Number.isFinite(reference.value)
+  )
+    return { scorable: false, reason: "referenceClose is not a {date, value} pair" };
+  const bad = ["t1Down", "t5Down"].filter((key) => !probability(row[key]));
+  if (bad.length > 0)
+    return { scorable: false, reason: `${bad.join(", ")} outside [0,1] or not a number` };
+  return {
+    scorable: true,
+    forecast: {
+      referenceClose: { date: reference.date, value: reference.value },
+      t1Down: row.t1Down as number,
+      t5Down: row.t5Down as number,
+    },
+  };
+}
+
+/**
  * Bumped ONLY on a breaking change to `BriefView` — a removed field, a renamed
  * field, or a changed meaning. Adding an optional field is not breaking.
  *
@@ -135,7 +209,7 @@ export interface ScheduleRow {
  * something was dropped. With a version it says "I was written for version N,
  * this is N+1" and the fix is a deploy rather than an investigation.
  */
-export const BRIEF_VIEW_SCHEMA_VERSION = 1;
+export const BRIEF_VIEW_SCHEMA_VERSION = 2;
 
 export interface BriefView {
   /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
@@ -175,6 +249,9 @@ export interface BriefView {
    *  task order produced it. */
   coverage?: Section;
   regime: RegimeView;
+  /** The run's directional call on SPY, and whether it can be scored. Present
+   *  whenever the scenarios step ran, malformed or not. */
+  spyForecast?: ForecastBlock;
   candidates: CandidateView[];
   riskList: Array<{ ticker: string; reason: string }>;
   /** The reviewer's decision block, in the order it wrote it: every key it
@@ -908,6 +985,21 @@ function arithmeticFaults(
   return { faults, unchecked };
 }
 
+/**
+ * The entry window, in 1d bars after `referenceClose.date`.
+ *
+ * A COUNT of bars, never a calendar date: helium has no exchange calendar and
+ * must not grow one. The lake's daily bars ARE the calendar, and a bar that
+ * does not exist yet simply leaves the commitment pending.
+ */
+export const DEFAULT_DEADLINE_BARS = 5;
+
+function deadlineBars(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw)) return DEFAULT_DEADLINE_BARS;
+  if (raw < 1 || raw > DEFAULT_DEADLINE_BARS) return DEFAULT_DEADLINE_BARS;
+  return raw;
+}
+
 export function candidatesFrom(
   reviewText: string,
   dateEtDay: string,
@@ -973,11 +1065,29 @@ export function candidatesFrom(
       // the strikes instead of inventing a price to measure from.
       pricing: priceStructure(legs, spot),
       width: width(legs),
-      target: typeof proposal.target === "string" ? proposal.target : "",
+      // A typed target settles; a sentence does not. Both are kept, in the two
+      // fields that mean those two different things.
+      ...(toInvalidation(proposal.target)?.length === 1
+        ? { target: toInvalidation(proposal.target)![0]! }
+        : {}),
+      thesis:
+        typeof proposal.thesis === "string"
+          ? proposal.thesis
+          : typeof proposal.target === "string"
+            ? proposal.target
+            : "",
+      resolutionDeadline: expiry,
       // Reuses the invalidation parser: an entry trigger is the same shape —
       // one level and the side price has to reach it from.
       ...(toInvalidation(proposal.entry)?.length === 1
-        ? { entry: toInvalidation(proposal.entry)![0]! }
+        ? {
+            entry: {
+              ...toInvalidation(proposal.entry)![0]!,
+              deadlineBars: deadlineBars(
+                (proposal.entry as Record<string, unknown> | null)?.deadlineBars,
+              ),
+            },
+          }
         : {}),
       rationale:
         typeof proposal.rationale === "string" ? proposal.rationale : "",
@@ -1228,6 +1338,9 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
     // Filled by `buildView`, which knows which tickers reached a card.
     charts: { gex: [] },
     ...(degradation === undefined ? {} : { degradation }),
+    ...(forecastFrom(report) === undefined
+      ? {}
+      : { spyForecast: forecastFrom(report)! }),
   };
 
   if (report.outcome === "failed") {
@@ -1441,6 +1554,13 @@ export default function renderReport(
   cfg: TenantSpec,
 ): RenderedReport {
   const view = buildView(report, cfg);
+  // What this run promised, handed to the runner to stamp and write to the
+  // ledger BEFORE any delivery is attempted. The renderer mints the ids and
+  // the payloads; it never stamps the run context, because the runner already
+  // holds it.
+  const label = report.phase;
+  const commitments = forecastCommitments(view, label);
+  const baselines = [baselineDraft(view, report, label)];
   // NO SUBJECT. The renderer does not know the phase — render.spec.ts forbids
   // it naming one — so every subject it could mint reads `option-wizard
   // 2026-09-03`, and the day's five mails arrive indistinguishable. The runner
@@ -1455,5 +1575,7 @@ export default function renderReport(
     // Measured over the document the READER gets, after the budget trim. The
     // runner writes these to the audit table and prints one header line.
     metrics: qualityMetrics({ view, report }),
+    ...(commitments.length === 0 ? {} : { commitments }),
+    baselines,
   };
 }
