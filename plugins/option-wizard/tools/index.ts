@@ -34,7 +34,11 @@ import { parseReviewConfig } from "../quality/review-config.js";
 import type { ChannelInputs } from "../quality/channels.js";
 import type { FocusInputs } from "../quality/focus.js";
 import { MIN_HISTORY } from "../quality/history.js";
-import { attachThresholds, buildFrame } from "../quality/frame.js";
+import {
+  attachFocusCalendar,
+  attachThresholds,
+  buildFrame,
+} from "../quality/frame.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
 import type { Bar } from "../eval/bars.js";
@@ -4641,6 +4645,10 @@ export function buildTools(cfg: {
           delete skipped.bars;
           attachThresholds(frame, { rows: [] }, realized);
         }
+        // §5's admitted set gets the focus list's own dated events. Last,
+        // because the forecast on each one is the threshold the two passes
+        // above just filled in.
+        attachFocusCalendar(frame);
         return JSON.stringify(frame);
       },
     },

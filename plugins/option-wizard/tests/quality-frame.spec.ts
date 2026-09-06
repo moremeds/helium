@@ -21,6 +21,7 @@ import { LEVEL_METRIC, MIN_HISTORY, MOVE_METRIC } from "../quality/history.js";
 import { parseReviewConfig } from "../quality/review-config.js";
 import {
   SESSION_FRAME_KIND,
+  attachFocusCalendar,
   attachThresholds,
   buildFrame,
   frameFrom,
@@ -351,11 +352,22 @@ describe("frameFrom reads both places the runner puts a tool result", () => {
   // `step.text`, one `<toolName> -> <json>` line per call. The frame step ran,
   // ow_session_frame answered, and the renderer saw nothing — so the weekly
   // reached argon with no review sections and an empty masthead.
-  const payload = JSON.stringify({ kind: SESSION_FRAME_KIND, day: "2026-09-06" });
+  const payload = JSON.stringify({
+    kind: SESSION_FRAME_KIND,
+    day: "2026-09-06",
+  });
 
   it("finds the payload in a model step's toolOutputs", () => {
     const report = {
-      steps: [{ task: "frame", role: "frame-clerk", mode: "model", text: "", toolOutputs: [payload] }],
+      steps: [
+        {
+          task: "frame",
+          role: "frame-clerk",
+          mode: "model",
+          text: "",
+          toolOutputs: [payload],
+        },
+      ],
     } as never;
     expect(frameFrom(report)?.day).toBe("2026-09-06");
   });
@@ -377,7 +389,12 @@ describe("frameFrom reads both places the runner puts a tool result", () => {
   it("ignores a line that is prose with an arrow in it", () => {
     const report = {
       steps: [
-        { task: "x", role: "r", mode: "deterministic", text: "the 10Y -> 4.79 today" },
+        {
+          task: "x",
+          role: "r",
+          mode: "deterministic",
+          text: "the 10Y -> 4.79 today",
+        },
       ],
     } as never;
     expect(frameFrom(report)).toBe(null);
@@ -415,13 +432,33 @@ describe("attachThresholds — §G.5's scoring bar", () => {
     attachThresholds(frame, {
       rows: [
         // A pre-event expiry cannot cover the event and is skipped.
-        { ticker: "NVDA", expiry: "2026-11-14", dte: 2, implied_move_perc: 0.031 },
-        { ticker: "NVDA", expiry: "2026-11-20", dte: 5, implied_move_perc: 0.046 },
-        { ticker: "NVDA", expiry: "2026-12-19", dte: 34, implied_move_perc: 0.092 },
+        {
+          ticker: "NVDA",
+          expiry: "2026-11-14",
+          dte: 2,
+          implied_move_perc: 0.031,
+        },
+        {
+          ticker: "NVDA",
+          expiry: "2026-11-20",
+          dte: 5,
+          implied_move_perc: 0.046,
+        },
+        {
+          ticker: "NVDA",
+          expiry: "2026-12-19",
+          dte: 34,
+          implied_move_perc: 0.092,
+        },
       ],
     });
-    const attached = (frame as unknown as { focus: { weekly: Array<{ threshold?: { pct: number; source: string } }> } })
-      .focus.weekly[0]!.threshold;
+    const attached = (
+      frame as unknown as {
+        focus: {
+          weekly: Array<{ threshold?: { pct: number; source: string } }>;
+        };
+      }
+    ).focus.weekly[0]!.threshold;
     // 0.046 is UW's FRACTION; the threshold is a percent, so 4.6.
     expect(attached?.pct).toBe(4.6);
     expect(attached?.source).toContain("ow_uw_iv_term implied_move_perc");
@@ -431,8 +468,13 @@ describe("attachThresholds — §G.5's scoring bar", () => {
   it("falls back to the realized median and names the substitution", () => {
     const frame = frameWith([row("AVGO", "2026-11-18")]);
     attachThresholds(frame, { rows: [] }, new Map([["AVGO", 2.4]]));
-    const attached = (frame as unknown as { focus: { weekly: Array<{ threshold?: { pct: number; source: string } }> } })
-      .focus.weekly[0]!.threshold;
+    const attached = (
+      frame as unknown as {
+        focus: {
+          weekly: Array<{ threshold?: { pct: number; source: string } }>;
+        };
+      }
+    ).focus.weekly[0]!.threshold;
     expect(attached?.pct).toBe(2.4);
     expect(attached?.source).toContain("ow_apex_bars");
   });
@@ -441,8 +483,11 @@ describe("attachThresholds — §G.5's scoring bar", () => {
     const frame = frameWith([row("XYZW", "2026-11-18")]);
     attachThresholds(frame, { rows: [] });
     expect(
-      (frame as unknown as { focus: { weekly: Array<{ threshold?: unknown }> } })
-        .focus.weekly[0]!.threshold,
+      (
+        frame as unknown as {
+          focus: { weekly: Array<{ threshold?: unknown }> };
+        }
+      ).focus.weekly[0]!.threshold,
     ).toBeUndefined();
   });
 });
@@ -499,6 +544,115 @@ describe("the frame's dated calendar", () => {
         prev: "3.0%",
       },
     ]);
+  });
+});
+
+// The v6 weekly wrote §5 about the focus names' own earnings — ADBE
+// 2026-09-10, ORCL — and the renderer dropped the paragraph whole, because
+// the admitted set held only the macro tape and the policy path. Those dates
+// come from `ow_uw_earnings`: dated and pollable, so they clear the same
+// admission gate rather than an exception to it.
+describe("attachFocusCalendar — the focus list's own dated events", () => {
+  const focusRow = (
+    ticker: string,
+    over: Record<string, unknown> = {},
+    event: Record<string, unknown> = {},
+  ) =>
+    ({
+      ticker,
+      score: 10,
+      parts: [],
+      daysToNearestEvent: 3,
+      nearest: {
+        ticker,
+        kind: "earnings",
+        day: "2026-09-10",
+        sessionsAway: 3,
+        session: "post",
+        source: "ow_uw_earnings",
+        label: "earnings (post)",
+        ...event,
+      },
+      openCallIds: [],
+      themes: [],
+      threshold: { pct: 4.6, source: "ow_uw_iv_term implied_move_perc" },
+      ...over,
+    }) as never;
+
+  const frameWith = (rows: unknown[], calendar: unknown[] = []) =>
+    ({
+      focus: { weekly: rows, daily: [] },
+      calendar,
+    }) as never;
+
+  it("admits an earnings date with its session and its implied move", () => {
+    const frame = frameWith([focusRow("ADBE")]);
+    attachFocusCalendar(frame);
+    expect((frame as unknown as { calendar: unknown[] }).calendar).toEqual([
+      {
+        time: "2026-09-10",
+        type: "earnings",
+        event: "ADBE earnings (post)",
+        forecast: "implied move 4.6%",
+        session: "post",
+      },
+    ]);
+  });
+
+  it("admits a corporate action on its execution date", () => {
+    const frame = frameWith([
+      focusRow(
+        "MOS",
+        {},
+        {
+          kind: "corporate",
+          day: "2026-09-14",
+          session: undefined,
+          source: "ow_massive_actions",
+          label: "split 2-for-1",
+        },
+      ),
+    ]);
+    attachFocusCalendar(frame);
+    const row = (
+      frame as unknown as { calendar: Array<Record<string, unknown>> }
+    ).calendar[0]!;
+    expect(row.type).toBe("corporate");
+    expect(row.time).toBe("2026-09-14");
+    expect(row.event).toBe("MOS split 2-for-1");
+    expect(row.session).toBeUndefined();
+  });
+
+  it("carries no forecast for a name whose threshold could not be filled", () => {
+    const frame = frameWith([focusRow("ADBE", { threshold: undefined })]);
+    attachFocusCalendar(frame);
+    const row = (
+      frame as unknown as { calendar: Array<Record<string, unknown>> }
+    ).calendar[0]!;
+    expect(row.forecast).toBeUndefined();
+  });
+
+  it("ignores an undated event and a kind that is not earnings or corporate", () => {
+    const frame = frameWith([
+      focusRow("NVDA", {}, { day: undefined, sessionsAway: null }),
+      focusRow("DBA", {}, { kind: "theme", label: "theme el-nino-ag-2026" }),
+      focusRow("SPY", {}, { kind: "macroNamed", label: "CPI" }),
+    ]);
+    attachFocusCalendar(frame);
+    expect((frame as unknown as { calendar: unknown[] }).calendar).toEqual([]);
+  });
+
+  it("keeps the macro rows, sorted, and never duplicates one", () => {
+    const frame = frameWith(
+      [focusRow("ADBE"), focusRow("ADBE")],
+      [{ time: "2026-09-16", type: "policy path", event: "FOMC 9/16" }],
+    );
+    attachFocusCalendar(frame);
+    expect(
+      (frame as unknown as { calendar: Array<{ event: string }> }).calendar.map(
+        (row) => row.event,
+      ),
+    ).toEqual(["ADBE earnings (post)", "FOMC 9/16"]);
   });
 });
 

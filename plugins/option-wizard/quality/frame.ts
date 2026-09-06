@@ -731,6 +731,48 @@ export function attachThresholds(
   }
 }
 
+/**
+ * §5's admitted set, extended with the focus list's OWN dated events.
+ *
+ * The v6 weekly wrote its dated-catalysts paragraph about the focus names'
+ * earnings — ADBE on 2026-09-10, ORCL — and the renderer dropped the whole
+ * paragraph, because the admitted set held only `ow_uw_calendar`'s macro tape
+ * and `ow_argon_policy_path`'s meetings. Those earnings dates come from
+ * `ow_uw_earnings`: dated, pollable, from a source `focus.ts` already admits.
+ * They satisfy the same admission gate every other row does, so they belong on
+ * the calendar rather than in an exception.
+ *
+ * The forecast is the row's own §G.5 threshold — the implied move it is
+ * scored against — which is why this runs AFTER `attachThresholds`. A name
+ * whose threshold could not be filled has no forecast and no prior, so it
+ * lands in `not admitted` and §5 still may not name it. That is the gate
+ * working, not a gap.
+ *
+ * Only `nearest` is read: it is the one event a focus row carries, and a
+ * second dated event behind it is not what the row was selected for.
+ */
+export function attachFocusCalendar(frame: SessionFrame): void {
+  const seen = new Set(frame.calendar.map((row) => `${row.time}|${row.event}`));
+  for (const row of frame.focus.weekly) {
+    const event = row.nearest;
+    if (event === undefined || event.day === undefined) continue;
+    if (event.kind !== "earnings" && event.kind !== "corporate") continue;
+    const key = `${event.day}|${row.ticker} ${event.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    frame.calendar.push({
+      time: event.day,
+      type: event.kind,
+      event: `${row.ticker} ${event.label}`,
+      ...(row.threshold === undefined
+        ? {}
+        : { forecast: `implied move ${String(row.threshold.pct)}%` }),
+      ...(event.session === undefined ? {} : { session: event.session }),
+    });
+  }
+  frame.calendar.sort((a, b) => a.time.localeCompare(b.time));
+}
+
 /** The same payload back out of a finished run. Null when the step did not run.
  *  Found BY SHAPE, the way `argonBaseline` already finds argon's. */
 export function frameFrom(report: RunReport): SessionFrame | null {
