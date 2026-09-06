@@ -14,6 +14,27 @@
  */
 import { z } from "zod";
 
+/**
+ * One thing the next session can look up and score. The level is carried
+ * VERBATIM as a string, with no unit conversion: a `z.number()` here would
+ * accept a retyped figure, and a retyped number is exactly the one worth
+ * refusing (the note on `RegimeState` below is the same argument).
+ */
+export const Check = z.strictObject({
+  series: z.string().min(1).max(64),
+  level: z.string().min(1).max(32),
+  text: z.string().min(1).max(160),
+});
+export type Check = z.infer<typeof Check>;
+
+/** The price that would kill the view, and by when. */
+export const Invalidation = z.strictObject({
+  series: z.string().min(1).max(64),
+  threshold: z.string().min(1).max(32),
+  horizon: z.string().min(1).max(64),
+});
+export type Invalidation = z.infer<typeof Invalidation>;
+
 export const RegimeState = z.strictObject({
   /** The one input that moved the tape, in the analyst's own words. */
   cause: z.string().min(1).max(200),
@@ -25,6 +46,11 @@ export const RegimeState = z.strictObject({
   s2s10: z.number().optional(),
   tide: z.enum(["up", "down", "flat"]),
   thesis: z.string().min(1).max(400),
+  /** Exactly three, or absent. OPTIONAL because a run whose editor was gated
+   *  must still be able to write a valid record — losing the checks must not
+   *  cost the next run its whole regime read. */
+  checks: z.array(Check).length(3).optional(),
+  invalidation: Invalidation.optional(),
 });
 
 export type RegimeState = z.infer<typeof RegimeState>;

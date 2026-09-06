@@ -64,3 +64,43 @@ describe("findStateBlock", () => {
     );
   });
 });
+
+describe("the checks and the invalidation ride the same fence", () => {
+  // Resolution 3 of the One Thing design (2026-09-06, binding): the checks
+  // live inside the EXISTING regime-state record. No second state file, no
+  // plural stateBlocks in core, no filesystem write in the renderer — so
+  // findStateBlock and the fence name must both be untouched by that decision.
+  const GOOD_RECORD = {
+    cause: "the front end came in ahead of payrolls",
+    tide: "up",
+    thesis: "call-heavy tape into a coin-flip-plus hike",
+  };
+  const THREE = [
+    { series: "VIXCLS", level: "15.2", text: "VIX holds under 16" },
+    { series: "DGS10", level: "4.79", text: "10Y holds 4.77" },
+    { series: "BAMLH0A0HYM2", level: "2.66", text: "HY OAS stays inside 2.70" },
+  ];
+
+  it("leaves findStateBlock exactly as it was", () => {
+    expect(
+      findStateBlock(
+        '{"sections":[]}\n\n```regime-state\n{"cause":"x","checks":[]}\n```',
+      ),
+    ).toBe('{"cause":"x","checks":[]}');
+  });
+
+  it("round-trips both keys through parseRegimeState", () => {
+    const value = {
+      ...GOOD_RECORD,
+      checks: THREE,
+      invalidation: {
+        series: "BAMLH0A0HYM2",
+        threshold: ">2.80",
+        horizon: "5 sessions",
+      },
+    };
+    const parsed = parseRegimeState(value);
+    expect(parsed).not.toBe(null);
+    expect(JSON.parse(JSON.stringify(parsed))).toEqual(value);
+  });
+});
