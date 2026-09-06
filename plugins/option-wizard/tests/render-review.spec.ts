@@ -1198,6 +1198,48 @@ describe("the section list a review document delivers", () => {
     const titles = built().sections.map((section) => section.title);
     expect(titles).not.toContain("Section 5 — Dated Catalysts");
   });
+
+  // The first fix keyed on title PLUS body, and `enforceBudget` word-trims a
+  // body after `sectionsFrom` has run — so the key never matched the delivered
+  // section and the block came straight back on the review-v6 rerun. A body
+  // long enough to be trimmed is the case that caught it.
+  it("drops it even when the budget trimmed the body it was keyed on", () => {
+    const long = Array.from(
+      { length: 400 },
+      (_, index) => `word${String(index)}`,
+    ).join(" ");
+    const view = buildView(
+      report({
+        steps: [
+          {
+            task: "frame",
+            role: "frame-clerk",
+            mode: "deterministic",
+            text: "",
+            toolOutputs: [JSON.stringify(frame({ rows: fullRows() }))],
+          },
+          {
+            task: "scenarios",
+            role: "scenario-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              sections: [{ title: "Section 5 — Dated Catalysts", body: long }],
+            }),
+          },
+          {
+            task: REVIEW_PERIODS[0],
+            role: "weekly-analyst",
+            mode: "model",
+            text: JSON.stringify({ ...DOC_EMPTY, review: "a." }),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(view.sections.map((section) => section.title)).toEqual([
+      ...REVIEW_TITLES,
+    ]);
+  });
 });
 
 describe("the theme view block", () => {

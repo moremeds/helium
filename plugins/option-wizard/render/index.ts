@@ -688,26 +688,25 @@ function sectionsOfStep(step: RunReport["steps"][number]): Section[] {
   return out;
 }
 
-/** Identity of a rendered section, for set membership. Title AND body: two
- *  steps may legitimately use one title, and only the pair names the block. */
-function sectionKey(section: Section): string {
-  return `${section.title} ${section.body}`;
-}
-
 /**
- * The sections the SCENARIO step wrote.
+ * The TITLES the scenario step wrote.
  *
  * §5 already carries the dated catalysts, computed from the admitted calendar
  * rows, so the scenario step's own "Section 5 — …" is the same content written
  * twice — and on the 2026-09-06 acceptance run it was written FIRST, ahead of
  * the seven-section document. The renderer already names this task id (see
  * `spyForecastFrom`), so keying on it is not a new coupling.
+ *
+ * The TITLE and not the body, which was the first fix's own defect: a body is
+ * word-trimmed by `enforceBudget` AFTER `sectionsFrom` has run, so a
+ * title-plus-body key never matched the delivered section and the block came
+ * straight back on the review-v6 rerun.
  */
-export function scenarioSectionKeys(report: RunReport): Set<string> {
+export function scenarioSectionTitles(report: RunReport): Set<string> {
   const out = new Set<string>();
   for (const step of report.steps)
     if (step.task === "scenarios")
-      for (const section of sectionsOfStep(step)) out.add(sectionKey(section));
+      for (const section of sectionsOfStep(step)) out.add(section.title);
   return out;
 }
 
@@ -1897,7 +1896,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   });
   const review = reviewOf(report, frame);
   const faults = [...(lead.faults ?? []), ...(review?.faults ?? [])];
-  const fromScenarios = scenarioSectionKeys(report);
+  const fromScenarios = scenarioSectionTitles(report);
   return {
     ...base,
     ...(lead.oneThing === undefined
@@ -1921,7 +1920,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
           sections: [
             ...review.sections,
             ...base.sections.filter(
-              (section) => !fromScenarios.has(sectionKey(section)),
+              (section) => !fromScenarios.has(section.title),
             ),
           ],
           // A review run has no `regime` step, so nothing upstream fills the
