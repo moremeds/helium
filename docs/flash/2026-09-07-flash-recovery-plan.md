@@ -50,7 +50,18 @@ history is a partial replay. Each sample carries a `MISSING.md` naming what
 was not recorded. The hold-out is never shown to the author or the reviewer
 during tuning.
 
-Exit: a fresh session can reproduce every A/B/C run from the repo alone.
+Done 2026-09-07 on `feat/flash-step0` (`docs/evidence/flash-samples/`,
+`scripts/pit-replay.sh`). Two limits every later step must respect:
+
+- An as-of replay only sees the tools that have point-in-time history
+  (13–14 of 29); the other 10–11 recordings are the refusal the model was
+  shown, not data. A/B/C in Step 1 compare authors on those thin inputs.
+  The production run sees all 29, so a draft that reads well on a frozen
+  sample is not yet proven on production inputs; Step 4 is where that is
+  judged. The 2026-09-03/04 production runs predate the recorder, so their
+  full inputs cannot be recovered.
+- The weekly runs with no as-of and cannot be `--replay-from`ed; its six
+  recordings are read directly.
 
 ## Step 1 — candidate drafts from the frozen inputs (1–2 days)
 
