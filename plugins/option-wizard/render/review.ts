@@ -25,8 +25,7 @@
 import type { CommitmentDraft, RunMetric } from "@helium/core";
 import { isOpen, VERDICT_BANDS } from "../eval/verdict.js";
 import type { TenantCalendar } from "../eval/bars.js";
-import { FOCUS_BANNED_PATTERNS } from "../quality/focus.js";
-import { printedLevels, type CoverageRow } from "../quality/channels.js";
+import type { CoverageRow } from "../quality/channels.js";
 import type {
   CalendarRow,
   OpenRow,
@@ -209,6 +208,15 @@ export const REVIEW_TITLES = [
   "5 · Dated catalysts",
   "6 · Focus",
   "7 · Open calls",
+] as const;
+
+/** A Flash page is a market report. Scorecards and call registers remain in
+ * `otherSections` for the harness, but are not reader prose. */
+export const MARKET_REPORT_TITLES = [
+  "Market review",
+  "Outlook",
+  "Dated catalysts",
+  "Supporting coverage",
 ] as const;
 
 export type { CalendarRow } from "../quality/frame.js";
@@ -556,6 +564,8 @@ export interface ReviewSectionsArgs {
 
 export interface ReviewSectionsResult {
   sections: Section[];
+  /** Renderer-owned records kept out of the public weekly report. */
+  internalSections?: Section[];
   faults: string[];
   gaps: number;
   citations: number;
@@ -676,26 +686,6 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const untested = rows.filter((row) => untestedReason(row) !== undefined);
   const gaps = untested.length;
 
-  // A PRICED ROW THE AUTHOR NEVER ANSWERED IS A FAULT, not merely a gap.
-  // `coverageGaps` counts a row nobody could price and a row nobody bothered
-  // with as the same number, and on review-v6 that hid the whole defect: all
-  // ten sector rows and the theme row came back `not called this period` over
-  // a frame that had priced every one of them, 11 of 23 rows answered, and
-  // nothing in the document said so. Named here so it is measurable — the ids
-  // are what a prompt change has to move.
-  const omittedPriced = rows
-    .filter(
-      (row) =>
-        row.untested === undefined &&
-        row.rendererFilled !== true &&
-        entries.get(row.id) === undefined,
-    )
-    .map((row) => row.id);
-  if (omittedPriced.length > 0)
-    faults.push(
-      `coverage omits ${String(omittedPriced.length)} priced rows: ${omittedPriced.join(", ")}`,
-    );
-
   // FOUR LINES, AND A READER CAN HOLD ALL FOUR. What stood here on 2026-09-06
   // was two metric-name lines, then one line per commitment — 24 ids, each
   // repeating its issue day and run label — then a focus line, a calibration
@@ -750,8 +740,8 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const scorecard = scoreLines.join("\n");
 
   // ---------------- section 3: the fixed coverage list ---------------------
-  // Built before section 2 because §2's "not to quote" lines and §4's
-  // no-restatement check both read what section 3 printed.
+  // Built before the prose sections because it supplies the renderer-owned
+  // coverage detail those sections accompany.
   const staleBefore = (() => {
     const date = new Date(`${frame.day}T00:00:00Z`);
     date.setUTCDate(date.getUTCDate() - STALE_DAYS[period]);
@@ -761,7 +751,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   // The SAME list `buildFrame` hands the author as `noRestate`, from the same
   // function — so the figures §4 is faulted for and the figures the author was
   // told to avoid can never be two different lists.
-  const levels = printedLevels(rows).map((row) => row.level);
+  const publicRows = rows.filter((row) => row.id !== "calls.open");
   // FOUR FIELDS, ONE BULLET, AND NOTHING A READER SKIPS. The 2026-09-06 row
   // carried six: the band the token claims, the settling observable, the
   // chain's members and "printed from the ledger" all rode along, and 23 rows
@@ -825,11 +815,14 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     return `- ${row.id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
   };
 
-  const macroRows = rows.filter(
+  const macroRows = publicRows.filter(
     (row) => !row.id.startsWith("sector:") && !row.id.startsWith("theme:"),
   );
-  const sectorRows = rows.filter((row) => row.id.startsWith("sector:"));
-  const themeRows = rows.filter((row) => row.id.startsWith("theme:"));
+  const sectorRows = publicRows.filter((row) => row.id.startsWith("sector:"));
+  const themeRows = publicRows.filter((row) => row.id.startsWith("theme:"));
+  const publicUntested = publicRows.filter(
+    (row) => untestedReason(row) !== undefined,
+  );
   const coverageLines: string[] = ["3a macro", ...macroRows.map(rowLine)];
   coverageLines.push("3b sectors", ...sectorRows.map(rowLine));
   coverageLines.push("3c themes");
@@ -865,9 +858,9 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   // ONE LINE, NOT EIGHTEEN. The per-row reason is still recorded — it is on
   // `coverageDetail[].leftOut` — but eighteen copies of "no verdict token for
   // this row" under the table taught the reader nothing the count does not.
-  if (untested.length > 0)
+  if (publicUntested.length > 0)
     coverageLines.push(
-      `left out: ${String(untested.length)} rows — ${untested.map((row) => row.id).join(", ")}`,
+      `left out: ${String(publicUntested.length)} rows — ${publicUntested.map((row) => row.id).join(", ")}`,
     );
   const coverageBody = coverageLines.join("\n");
   const reasons = new Map(
@@ -884,14 +877,15 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     ...open.map((row) => row.id),
   ]);
   let review = doc?.review ?? "";
-  for (const match of review.matchAll(COMMITMENT_ID))
-    if (!printedIds.has(match[0])) {
-      faults.push(
-        `复盘 names ${match[0]}, which the ledger does not carry — the paragraph is dropped`,
-      );
-      review = "";
-      break;
-    }
+  for (const match of review.matchAll(COMMITMENT_ID)) {
+    faults.push(
+      printedIds.has(match[0])
+        ? `复盘 names ${match[0]}, a ledger commitment id that belongs in internal records — the paragraph is dropped`
+        : `复盘 names ${match[0]}, which the ledger does not carry — the paragraph is dropped`,
+    );
+    review = "";
+    break;
+  }
   review = review === "" ? "" : trim(review, caps.review).text;
   let staleRowsQuoted = 0;
   const quotesRow = (text: string, row: CoverageRow): boolean =>
@@ -902,10 +896,6 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     (row.level !== undefined && text.includes(row.level));
   const reviewLines: string[] = [];
   if (review !== "") reviewLines.push(review);
-  for (const row of stale)
-    reviewLines.push(
-      `not to quote: ${row.id} — datum as of ${row.asOf ?? "?"} is older than this period`,
-    );
   for (const row of stale)
     for (const sentence of review.split(/(?<=[.。!?])\s+/u))
       if (sentence.trim() !== "" && quotesRow(sentence, row))
@@ -923,13 +913,6 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     return true;
   });
   let outlook = doc?.outlook ?? "";
-  for (const level of levels)
-    if (level !== "" && outlook.includes(level)) {
-      faults.push(
-        `下周展望 restates the level ${level}, which section 3 already printed`,
-      );
-      break;
-    }
   outlook = outlook
     .split("\n")
     .filter((line) => PROPOSED.exec(line.trim()) === null)
@@ -942,9 +925,8 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         staleRowsQuoted += 1;
   const outlookLines: string[] = [];
   if (outlook !== "") outlookLines.push(outlook);
-  for (const entry of doc?.themes ?? [])
-    if (frame.declared.themes.some((theme) => theme.id === entry.id))
-      outlookLines.push(`${entry.id}: ${entry.leadership} — ${entry.why}`);
+  // Themes have their own structured view block. Repeating their verdicts in
+  // public outlook prose turns one subject into two competing sections.
   if (proposed.length > 0) {
     outlookLines.push("proposed (not scored)");
     for (const entry of proposed)
@@ -1050,25 +1032,11 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       : frame.declared.focus?.daily) ?? list.length;
   const whyByTicker = new Map<string, string>();
   const tickers = new Set(list.map((row) => row.ticker));
-  let focusWhyRejected = 0;
-  // A dropped line is REJECTED, never also MISSING: the model wrote one, and
-  // counting it twice would make the two metrics disagree about one row.
-  const rejected = new Set<string>();
+  const focusWhyRejected = 0;
   for (const entry of doc?.focus ?? []) {
     if (!tickers.has(entry.ticker)) {
       faults.push(
         `focus ${entry.ticker}: not on the computed list — the line is discarded`,
-      );
-      continue;
-    }
-    const hit = FOCUS_BANNED_PATTERNS.find((pattern) =>
-      new RegExp(pattern, "iu").test(entry.why),
-    );
-    if (hit !== undefined) {
-      focusWhyRejected += 1;
-      rejected.add(entry.ticker);
-      faults.push(
-        `focus ${entry.ticker}: /${hit}/ in "${entry.why}" — the line is dropped`,
       );
       continue;
     }
@@ -1102,9 +1070,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       ...(row.sticky === true ? { sticky: true } : {}),
     };
   });
-  const focusWhyMissing = focusRows.filter(
-    (row) => row.why === "" && !rejected.has(row.ticker),
-  ).length;
+  const focusWhyMissing = focusRows.filter((row) => row.why === "").length;
   const focusLines: string[] = [
     "rank · ticker · event · IV rank · implied move · open call · why",
   ];
@@ -1141,16 +1107,12 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
           .join("\n");
 
   // Assembled LAST, in §J.1's order, because the bodies are computed in
-  // dependency order and not in print order: §2's "not to quote" lines and
-  // §4's no-restatement check both read what §3 printed.
+  // dependency order and not in print order.
   sections.push(
-    { title: REVIEW_TITLES[0], body: scorecard },
-    { title: REVIEW_TITLES[1], body: reviewBody },
-    { title: REVIEW_TITLES[2], body: coverageBody },
-    { title: REVIEW_TITLES[3], body: outlookBody },
-    { title: REVIEW_TITLES[4], body: catalystBody },
-    { title: REVIEW_TITLES[5], body: focusBody },
-    { title: REVIEW_TITLES[6], body: openBody },
+    { title: MARKET_REPORT_TITLES[0], body: reviewBody },
+    { title: MARKET_REPORT_TITLES[1], body: outlookBody },
+    { title: MARKET_REPORT_TITLES[2], body: catalystBody },
+    { title: MARKET_REPORT_TITLES[3], body: coverageBody },
   );
 
   // ---------------- the structured view blocks -----------------------------
@@ -1175,6 +1137,11 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
 
   return {
     sections,
+    internalSections: [
+      { title: REVIEW_TITLES[0], body: scorecard },
+      { title: REVIEW_TITLES[5], body: focusBody },
+      { title: REVIEW_TITLES[6], body: openBody },
+    ],
     faults,
     gaps,
     citations: citationLines.length,
@@ -1212,25 +1179,27 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
  * NEVER empty. A weekly run has no `regime` step at all, so the 2026-09-06 W36
  * document reached argon with `headline: ""` and the page had nothing to head
  * itself with. This is renderer-computed from what the run already printed —
- * the scorecard's own header for a weekly, the lead item or yesterday's checks
- * for a daily — so it is not a model sentence and cannot be a model invention.
+ * the market-review lead or a deterministic market label, so it is never an
+ * old scorecard or yesterday-checks headline.
  */
 export function reviewHeadline(args: {
   period: ReviewPeriod;
-  /** Section 1's body, whose FIRST line is the scored/issued header. */
+  /** Kept for callers that retain the internal scorecard. */
   scorecard: string;
+  review?: string;
   oneThing?: string;
   checksLine?: string;
 }): string {
-  const header = (args.scorecard.split("\n")[0] ?? "").trim();
-  if (args.period === WEEKLY) return header;
+  const review = (args.review ?? "").trim();
+  const firstLine = review.split(/\r?\n/u)[0]?.trim() ?? "";
+  if (firstLine !== "") return firstLine;
+  if (args.period === WEEKLY) return "Weekly market review";
   const lead = (args.oneThing ?? "").trim();
   if (lead !== "") {
     const first = /^[^.。!?]{1,160}[.。!?]?/u.exec(lead)?.[0]?.trim() ?? "";
     if (first !== "") return first;
   }
-  const checks = (args.checksLine ?? "").trim();
-  return checks !== "" ? checks : header;
+  return "Market review";
 }
 
 // --- what a review mints ----------------------------------------------------

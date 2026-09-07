@@ -264,7 +264,7 @@ describe("the editor is one author over seven fragments", () => {
     // rates prose on days rates did nothing, and it produced "Rates are the
     // story" three sessions running. The ranked list decides instead.
     expect(persona).not.toContain("MANDATORY datapoint");
-    expect(persona).toContain("You may not re-rank it");
+    expect(persona).toContain("including material news and earnings");
     // The renderer's trim has to be stated, or the model writes past it — but
     // the flat 60-word cap is gone with it; the per-field caps live in the
     // prompt and in render/budget.ts.
@@ -599,32 +599,35 @@ describe("the review authors, rewritten", () => {
     expect(authors).toEqual(["editor"]);
   });
 
-  it("the review author is bound to the ledger and to one largest miss", () => {
-    const persona = manifest.roles["weekly-analyst"]?.persona ?? "";
-    expect(persona).toContain("exactly one");
-    expect(persona).toContain("ow_session_frame");
-    // THE 2026-09-06 DEFECT. The scorecard read `0 scored of 5 issued` and §2
-    // still named a largest miss and cited "receipt DGS10 at 4.77%", a receipt
-    // that does not exist.
-    expect(persona).toContain("`0 scored`");
-    expect(persona).toContain("NOTHING HAS");
-    expect(persona).toContain("ONE sentence");
-    expect(persona).toContain("There is no largest miss to find");
-    // review-v7: the `0 scored` branch said "and you stop", and the weekly
-    // stopped writing the DOCUMENT — one sentence and five empty fields, 0 of
-    // 23 coverage rows over a frame that had priced twenty of them. The branch
-    // ends one paragraph.
-    expect(persona).toContain("AND THAT PARAGRAPH IS THEN FINISHED");
-    expect(persona).not.toContain("and you stop");
-    // §4 restated `2.65`, which §3 had already printed, and the renderer's
-    // fault fired. The rule is now in the prompt too.
-    expect(persona).toContain("NEVER RESTATE A LEVEL SECTION 3 PRINTED");
-    expect(manifest.roles["weekly-analyst"]?.permissions.tools).toContain(
-      "ow_session_frame",
-    );
-    expect(manifest.roles["weekly-analyst"]?.permissions.tools).toContain(
-      "ow_rotation",
-    );
+  it.each(["team.yaml", "team.C.yaml", "team.C-nonews.yaml"])(
+    "%s keeps the public market weekly separate from internal evaluation",
+    (name) => {
+      const variant = parseTeamYaml(readFileSync(join(__dirname, "..", name), "utf8"));
+      const weekly = variant.tasks.find((task) => task.id === "weekly")!;
+      expect(weekly.requires).toContain("reason.deep");
+      expect(weekly.prompt).toContain("MARKET WEEK");
+      expect(weekly.prompt).toContain("no own-performance section");
+      expect(weekly.prompt).toContain("omit `p` and `observable`");
+      expect(weekly.prompt).not.toContain("noRestate");
+      expect(weekly.prompt).toContain("shortlist of 15 names stable");
+      const tools = variant.roles["weekly-analyst"]!.permissions.tools;
+      expect(tools).toEqual(name === "team.C-nonews.yaml"
+        ? ["ow_reports", "ow_session_frame", "ow_rotation"]
+        : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings"]);
+      const internal = variant.tasks.find((task) => task.id === "week-review");
+      expect(internal?.phases).toEqual(["weekly"]);
+      expect(internal?.prompt).toContain("ow_review_window");
+      expect(internal?.prompt).toContain("sample too small to score edge");
+    },
+  );
+
+  it("the daily editor makes increments without imposing weekly proportions", () => {
+    const persona = manifest.roles.editor?.persona ?? "";
+    expect(persona).toContain("Premarket is the main newsletter");
+    expect(persona).toContain("Intraday is an increment");
+    expect(persona).toContain("Close explains how the day");
+    expect(persona).toContain("shortlist of 5 names stable");
+    expect(persona).not.toContain("one third");
   });
 
   it("the scenario analyst is bounded to section 5", () => {
@@ -643,7 +646,7 @@ describe("the review authors, rewritten", () => {
     for (const id of ["weekly", "edit"]) {
       const prompt =
         manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
-      expect(prompt, id).toContain("at most 40 words");
+      expect(prompt, id).toMatch(/at\s+most 40 words/u);
       // The rule is no longer "never a direction" — a focus line is the
       // analyst's judgment of the setup, and "no view yet" is a stance. What
       // stays forbidden is deriving one mechanically from the IV column.
@@ -665,33 +668,49 @@ describe("the review authors, rewritten", () => {
   // were given" and never said which rows those were. It does now, and the
   // list is asserted against `extensions.review` rather than a literal, so
   // adding a sector or a theme fails HERE until the prompt carries it.
-  it("both review prompts name every coverage row id the declaration produces", () => {
+  it("the daily review prompt names every coverage row id the declaration produces", () => {
     const tenantPath = join(__dirname, "..", "tenant.yaml");
     const spec = parseTenantYaml(readFileSync(tenantPath, "utf8"), tenantPath);
     const ids = coverageRowIds(
       parseReviewConfig(spec.extensions as Record<string, unknown>),
     );
     expect(ids.length).toBe(23);
-    for (const id of ["weekly", "edit"]) {
+    for (const id of ["edit"]) {
       const prompt =
         manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
       for (const rowId of ids)
         expect(prompt, `${id} / ${rowId}`).toContain(rowId);
       expect(prompt, id).toContain("ALL 23");
-      expect(prompt, id).toContain("EVERY ROW WITH A DATUM NEEDS A TOKEN");
+      expect(prompt, id).toContain("not a prediction quota");
     }
   });
 
-  // §4 restated `2.65` on v5 and `55.7` on v6, both times over a persona that
-  // already said NEVER RESTATE A LEVEL SECTION 3 PRINTED. The author is now
-  // handed the figures themselves, on the frame, as `noRestate`.
-  it("both review prompts hand §4 the printed levels rather than the rule", () => {
-    for (const id of ["weekly", "edit"]) {
-      const prompt =
-        manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
-      expect(prompt, id).toContain("`noRestate`");
-      expect(prompt, id).toContain("{id, level}");
-      expect(prompt, id).toMatch(/DO\s+NOT\s+REPEAT\s+THESE\s+FIGURES/u);
+  it("daily and weekly prose can cite supporting numbers without compulsory forecasts", () => {
+    for (const name of ["team.yaml", "team.C.yaml", "team.C-nonews.yaml"]) {
+      const variant = parseTeamYaml(readFileSync(join(__dirname, "..", name), "utf8"));
+      for (const id of ["edit", "weekly"]) {
+        const prompt = variant.tasks.find((task) => task.id === id)?.prompt ?? "";
+        expect(prompt, `${name}/${id}`).not.toContain("noRestate");
+        expect(prompt, `${name}/${id}`).toContain("Essential sourced numbers may");
+        expect(prompt, `${name}/${id}`).toContain("omit `p` and `observable`");
+      }
     }
   });
+  it.each(["team.yaml", "team.C.yaml", "team.C-nonews.yaml"])(
+    "%s writes market prose and no empty-calendar scenarios",
+    (name) => {
+      const variant = parseTeamYaml(readFileSync(join(__dirname, "..", name), "utf8"));
+      const edit = variant.tasks.find((task) => task.id === "edit")!.prompt;
+      expect(edit).toContain("market developments relevant to this phase");
+      expect(edit).not.toContain("only ids the scorecard printed");
+      expect(edit).not.toContain("ROW 1");
+      expect(edit).not.toContain("Every paragraph carries a number");
+      expect(variant.roles.editor!.persona).not.toContain("ROW 1");
+      const scenarios = variant.tasks.find((task) => task.id === "scenarios")!.prompt;
+      expect(scenarios).toContain('return {"sections":[]} and stop; omit spyForecast');
+      expect(scenarios).not.toContain("Write A/B/C/D");
+      expect(variant.roles["scenario-analyst"]!.persona).toContain('return {"sections":[]} and stop');
+    },
+  );
+
 });

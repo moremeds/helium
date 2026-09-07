@@ -230,9 +230,9 @@ export function leadFields(args: {
       : problem,
   );
   return {
-    // A day nothing could be ranked has no lead item, and saying so is the
-    // footer's job. Inventing one would be the harness's opinion.
-    ...(frame.mode === NO_DATA || args.body.trim() === ""
+    // Selection only decides the deterministic ranking. It must not suppress
+    // an editor's sourced market lead on a day the ranking has no datum.
+    ...(args.body.trim() === ""
       ? {}
       : {
           oneThing: {

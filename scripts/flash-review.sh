@@ -63,6 +63,13 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
+run_evidence="$(find "$state_root/evidence" -type f -name "*-${run_id}.json" -print -quit 2>/dev/null)"
+if [ -z "$run_evidence" ]; then
+  echo "flash-review: no saved run evidence for ${run_id:-UNKNOWN}" >&2
+  exit 1
+fi
+node "$REPO_ROOT/scripts/flash-review-validate.mjs" "$page" "$run_evidence"
+
 out="$(cd "$(dirname "$page")" && pwd)/review"
 mkdir -p "$out"
 # The delivered verdict, named for the page rather than for the run: a page

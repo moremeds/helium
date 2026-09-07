@@ -21,6 +21,8 @@ import {
   pendingLine,
   proposedThemes,
   REVIEW_TITLES,
+  MARKET_REPORT_TITLES,
+  reviewHeadline,
   reviewMetrics,
   reviewSections,
   verdictCommitments,
@@ -67,6 +69,7 @@ const DECLARED = {
 };
 const ROW_COUNT =
   DECLARED.coverage.length + DECLARED.sectors.length + DECLARED.themes.length;
+const PUBLIC_ROW_COUNT = ROW_COUNT - 1;
 
 function untestedRows(): CoverageRow[] {
   return [
@@ -226,7 +229,9 @@ function render(over: {
   calendar?: Parameters<typeof reviewSections>[0]["calendar"];
 }) {
   const f = over.frame ?? frame();
-  const period = over.period ?? "weekly";
+  // Most section-level assertions exercise the unchanged daily contract. Tests
+  // for the weekly public document opt in explicitly below.
+  const period = over.period ?? "daily";
   return reviewSections({
     frame: f,
     rotation: over.rotation ?? null,
@@ -242,15 +247,33 @@ function body(sections: Array<{ title: string; body: string }>, n: number) {
   return sections[n - 1]?.body ?? "";
 }
 
-describe("the seven fixed sections", () => {
-  it("returns exactly seven, in order, on an empty frame", () => {
+/** The full renderer register is retained as internal metadata. This helper
+ * lets behavior tests address the legacy content by its stable slot while the
+ * production `sections` array remains the four-section public market report. */
+function legacySections(out: ReturnType<typeof reviewSections>) {
+  const internal = new Map(
+    (out.internalSections ?? []).map((section) => [section.title, section]),
+  );
+  return [
+    internal.get(REVIEW_TITLES[0])!,
+    out.sections[0]!,
+    out.sections[3]!,
+    out.sections[1]!,
+    out.sections[2]!,
+    internal.get(REVIEW_TITLES[5])!,
+    internal.get(REVIEW_TITLES[6])!,
+  ];
+}
+
+describe("review section contracts", () => {
+  it("uses the market-report titles on an empty daily frame", () => {
     const out = render({});
     expect(out.sections.map((section) => section.title)).toEqual([
-      ...REVIEW_TITLES,
+      ...MARKET_REPORT_TITLES,
     ]);
   });
 
-  it("returns exactly seven with a fully populated frame and a document", () => {
+  it("uses the market-report titles with a fully populated daily frame", () => {
     const out = render({
       frame: frame({ rows: fullRows() }),
       doc: {
@@ -260,8 +283,39 @@ describe("the seven fixed sections", () => {
       },
     });
     expect(out.sections.map((section) => section.title)).toEqual([
-      ...REVIEW_TITLES,
+      ...MARKET_REPORT_TITLES,
     ]);
+  });
+
+  it("renders a weekly market document and retains scorecard records internally", () => {
+    const out = render({ period: "weekly" });
+    expect(out.sections.map((section) => section.title)).toEqual([
+      ...MARKET_REPORT_TITLES,
+    ]);
+    expect(out.internalSections?.map((section) => section.title)).toEqual([
+      REVIEW_TITLES[0],
+      REVIEW_TITLES[5],
+      REVIEW_TITLES[6],
+    ]);
+  });
+
+  it("keeps weekly themes in the structured view instead of repeating them in outlook", () => {
+    const out = render({
+      period: "weekly",
+      doc: {
+        ...DOC_EMPTY,
+        outlook: "Breadth remains constructive.",
+        themes: [
+          { id: THEME.id, leadership: "confirms", why: "inputs still lead" },
+        ],
+      },
+    });
+    expect(out.sections[1]?.body).toBe("Breadth remains constructive.");
+    expect(out.view.themes?.[0]).toMatchObject({
+      id: THEME.id,
+      leadership: "confirms",
+      why: "inputs still lead",
+    });
   });
 });
 
@@ -270,16 +324,16 @@ describe("section 3 — the coverage list never shrinks", () => {
     const full = render({ frame: frame({ rows: fullRows() }) });
     const empty = render({});
     const count = (out: ReturnType<typeof render>) =>
-      body(out.sections, 3)
+      body(legacySections(out), 3)
         .split("\n")
         .filter((line) => line.startsWith("- ")).length;
-    expect(count(full)).toBe(ROW_COUNT);
-    expect(count(empty)).toBe(ROW_COUNT);
+    expect(count(full)).toBe(PUBLIC_ROW_COUNT);
+    expect(count(empty)).toBe(PUBLIC_ROW_COUNT);
   });
 
   it("an empty frame reads untested on every row, counts every gap and sums them in one line", () => {
     const out = render({});
-    const section = body(out.sections, 3);
+    const section = body(legacySections(out), 3);
     for (const line of section.split("\n").filter((l) => l.startsWith("- ")))
       expect(line).toBe(
         `- ${line.split(" · ")[0]!.slice(2)} · no datum this period · UNTESTED`,
@@ -289,11 +343,11 @@ describe("section 3 — the coverage list never shrinks", () => {
     // reader was skipping. The per-row reason moved to `view.coverageDetail`.
     const left = section.split("\n").filter((l) => l.startsWith("left out:"));
     expect(left.length).toBe(1);
-    expect(left[0]).toContain(`left out: ${String(ROW_COUNT)} rows — `);
+    expect(left[0]).toContain(`left out: ${String(PUBLIC_ROW_COUNT)} rows — `);
     expect(
       (out.view.coverageDetail ?? []).filter((row) => row.leftOut !== undefined)
         .length,
-    ).toBe(ROW_COUNT);
+    ).toBe(PUBLIC_ROW_COUNT);
   });
 
   it("a row the author called untested is a gap, and the counts agree", () => {
@@ -312,14 +366,14 @@ describe("section 3 — the coverage list never shrinks", () => {
         ],
       },
     });
-    const section = body(out.sections, 3);
+    const section = body(legacySections(out), 3);
     const printed = section
       .split("\n")
       .filter((line) => line.startsWith("- ") && line.includes("UNTESTED"));
     const left = section
       .split("\n")
       .filter((line) => line.startsWith("left out:"));
-    expect(printed.length).toBe(ROW_COUNT);
+    expect(printed.length).toBe(PUBLIC_ROW_COUNT);
     expect(left.length).toBe(1);
     expect(out.gaps).toBe(ROW_COUNT);
     expect(left[0]).toContain("rates.front");
@@ -354,7 +408,7 @@ describe("section 3 — the coverage list never shrinks", () => {
         ],
       },
     });
-    const section = body(out.sections, 3);
+    const section = body(legacySections(out), 3);
     // The member list is DATA now, not a tail on the printed bullet.
     expect(section).not.toContain("members: NVDA, AMD");
     expect(
@@ -388,16 +442,16 @@ describe("section 3 — the coverage list never shrinks", () => {
       notes: [],
     };
     const weekly = render({ rotation, period: "weekly" });
-    expect(body(weekly.sections, 3)).toContain("3d rotation");
-    expect(body(weekly.sections, 3)).toContain("XLK");
-    expect(body(weekly.sections, 3)).toContain("benchmark SPY");
+    expect(weekly.sections[3]?.body).toContain("3d rotation");
+    expect(weekly.sections[3]?.body).toContain("XLK");
+    expect(weekly.sections[3]?.body).toContain("benchmark SPY");
     const daily = render({ rotation, period: "daily" });
-    expect(body(daily.sections, 3)).not.toContain("3d rotation");
+    expect(body(legacySections(daily), 3)).not.toContain("3d rotation");
   });
 
   it("prints the rotation block as not priced when the weekly has no payload", () => {
     const weekly = render({ period: "weekly" });
-    expect(body(weekly.sections, 3)).toContain("rotation: not priced this run");
+    expect(weekly.sections[3]?.body).toContain("rotation: not priced this run");
   });
 
   it("A5: prior -3.1bp with token strengthen prints the band beside it", () => {
@@ -426,7 +480,7 @@ describe("section 3 — the coverage list never shrinks", () => {
     )?.band;
     expect(band).toContain(">5bp");
     expect(band).not.toContain("4.65");
-    expect(body(out.sections, 3)).not.toContain(">5bp");
+    expect(body(legacySections(out), 3)).not.toContain(">5bp");
   });
 
   // review-v6 close: `flow — 39758465 → +0 USD — CONTINUE (0USD..0USD)`. A
@@ -453,7 +507,7 @@ describe("section 3 — the coverage list never shrinks", () => {
         ],
       },
     });
-    const line = body(out.sections, 3)
+    const line = body(legacySections(out), 3)
       .split("\n")
       .find((row) => row.startsWith("- flow"))!;
     expect(line).toContain("· CONTINUE ·");
@@ -485,8 +539,8 @@ describe("what argon's section renderer can actually show", () => {
         ],
       },
     });
-    expect(body(out.sections, 3)).toContain("· CONTINUE");
-    expect(body(out.sections, 3)).toContain("· UNTESTED");
+    expect(body(legacySections(out), 3)).toContain("· CONTINUE");
+    expect(body(legacySections(out), 3)).toContain("· UNTESTED");
     for (const section of out.sections)
       expect(section.body, section.title).not.toMatch(/\*\*|__|(?<!`)`(?!`)/u);
   });
@@ -589,7 +643,7 @@ describe("section 1 — the scorecard", () => {
         },
       }),
     });
-    const section = body(out.sections, 1);
+    const section = body(legacySections(out), 1);
     // 4 settled, 3 of them two-sided hits: the denominator is the SCORED, never
     // the issued. The whole section is four lines and carries no commitment id.
     expect(section).toContain("4 settled · hit 3/4");
@@ -614,19 +668,21 @@ describe("section 1 — the scorecard", () => {
       ),
     );
     const out = render({
+      period: "weekly",
       frame: frame({
         ledger: { settledToday: many, open: [], totalCommitments: 12 },
       }),
     });
-    expect(body(out.sections, 1)).toContain("over-confident");
+    expect(out.internalSections?.[0]?.body).toContain("over-confident");
 
     const few = many.slice(0, 4);
     const small = render({
+      period: "weekly",
       frame: frame({
         ledger: { settledToday: few, open: [], totalCommitments: 4 },
       }),
     });
-    expect(body(small.sections, 1)).toContain("n=4, not yet scorable");
+    expect(small.internalSections?.[0]?.body).toContain("n=4, not yet scorable");
   });
 
   it("the calibration sentence is weekly only", () => {
@@ -644,11 +700,11 @@ describe("section 1 — the scorecard", () => {
         ledger: { settledToday: many, open: [], totalCommitments: 12 },
       }),
     });
-    expect(body(daily.sections, 1)).not.toContain("calibration");
+    expect(body(legacySections(daily), 1)).not.toContain("calibration");
   });
 
   it("an empty ledger says nothing settled, never an error", () => {
-    expect(body(render({}).sections, 1)).toContain(
+    expect(body(legacySections(render({})), 1)).toContain(
       "Nothing settled yet — no call has come due",
     );
   });
@@ -682,7 +738,7 @@ describe("section 1 — the scorecard", () => {
     // Five OPEN days from 2026-09-04 is 2026-09-14 (09-07 is Labor Day); the
     // focus window closes 2026-09-11 and is the earlier of the two. Either way
     // the reader is told a date, not an id.
-    expect(body(out.sections, 1)).toContain(
+    expect(body(legacySections(out), 1)).toContain(
       "Nothing settled yet — first settles 2026-09-11",
     );
   });
@@ -702,7 +758,7 @@ describe("section 5 — dated catalysts", () => {
   // beside it says less than either number alone: the row's whole timestamp,
   // its session, its forecast AND its prior all reach the page.
   it("prints the release time, the session, the forecast and the prior", () => {
-    const line = body(render({ calendarRows: [admitted] }).sections, 5)
+    const line = body(legacySections(render({ calendarRows: [admitted] })), 5)
       .split("\n")
       .find((row) => row.startsWith("- "))!;
     expect(line).toBe(
@@ -720,7 +776,7 @@ describe("section 5 — dated catalysts", () => {
       calendarRows: [admitted, undated],
       doc: { ...DOC_EMPTY, catalysts: "FOMC decision is the whole week." },
     });
-    const section = body(out.sections, 5);
+    const section = body(legacySections(out), 5);
     expect(out.admitted).toEqual(["CPI YoY"]);
     expect(out.notAdmitted[0]).toContain("FOMC decision");
     expect(section).toContain("not admitted: FOMC decision");
@@ -741,7 +797,7 @@ describe("section 5 — dated catalysts", () => {
           "FOMC decision 2026-09-16: the market prices 50.7% hold versus 49.29% hike.",
       },
     });
-    const section = body(out.sections, 5);
+    const section = body(legacySections(out), 5);
     expect(out.admitted).toEqual([]);
     expect(section).toContain("no dated event was admitted this period");
     expect(section).not.toContain("50.7% hold");
@@ -778,7 +834,7 @@ describe("section 5 — dated catalysts", () => {
           "The 2026-09-16 FOMC is a coin flip between HOLD and a HIKE at 50.7%.",
       },
     });
-    expect(body(out.sections, 5)).toContain("coin flip");
+    expect(body(legacySections(out), 5)).toContain("coin flip");
     expect(out.faults).toEqual([]);
   });
 
@@ -791,7 +847,7 @@ describe("section 5 — dated catalysts", () => {
           "CPI on 2026-09-10 is the only print that can move the week.",
       },
     });
-    expect(body(out.sections, 5)).toContain("is the only print");
+    expect(body(legacySections(out), 5)).toContain("is the only print");
     expect(out.faults).toEqual([]);
   });
 
@@ -812,7 +868,7 @@ describe("section 5 — dated catalysts", () => {
         },
       ],
     });
-    const line = body(out.sections, 5)
+    const line = body(legacySections(out), 5)
       .split("\n")
       .find((row) => row.startsWith("- "))!;
     // The event text already says `(post)`, so the session is not repeated.
@@ -833,10 +889,10 @@ describe("section 5 — dated catalysts", () => {
         },
       ],
     });
-    expect(body(out.sections, 5)).toContain(
+    expect(body(legacySections(out), 5)).toContain(
       "- 2026-09-02T20:30:00Z · AVGO Q3 · post · prev 1.24",
     );
-    expect(body(out.sections, 5)).not.toContain("settles:");
+    expect(body(legacySections(out), 5)).not.toContain("settles:");
   });
 });
 
@@ -859,14 +915,12 @@ describe("section 6 — the focus list", () => {
     });
     const weekly = render({ frame: f, period: "weekly" });
     expect(weekly.view.focus?.rows.length).toBe(15);
-    expect(
-      body(weekly.sections, 6)
-        .split("\n")
-        .filter((line) => line.startsWith("| ")).length,
-    ).toBe(15);
+    expect(weekly.sections.map((section) => section.body).join("\n")).not.toContain(
+      "weights: declared prior 2026-09-06",
+    );
     const daily = render({ frame: f, period: "daily" });
     expect(daily.view.focus?.rows.length).toBe(5);
-    expect(body(daily.sections, 6)).toContain(
+    expect(body(legacySections(daily), 6)).toContain(
       "weights: declared prior 2026-09-06",
     );
   });
@@ -885,10 +939,10 @@ describe("section 6 — the focus list", () => {
     });
     const out = render({ frame: f, period: "daily" });
     expect(out.view.focus?.shortfall).toBe("3 of 5 — universe holds 3 names");
-    expect(body(out.sections, 6)).toContain("3 of 5");
+    expect(body(legacySections(out), 6)).toContain("3 of 5");
   });
 
-  it("drops a banned why, names it, counts it, and counts a missing one", () => {
+  it("keeps useful focus reasoning even when it uses a directional word", () => {
     const f = frame({
       focus: {
         weekly: [focusRow("NVDA"), focusRow("AMD")] as never,
@@ -907,10 +961,10 @@ describe("section 6 — the focus list", () => {
         focus: [{ ticker: "NVDA", why: "bullish into the print" }],
       },
     });
-    expect(out.focusWhyRejected).toBe(1);
+    expect(out.focusWhyRejected).toBe(0);
     expect(out.focusWhyMissing).toBe(1);
-    expect(out.faults.join("\n")).toContain("NVDA");
-    expect(out.view.focus?.rows[0]?.why).toBe("");
+    expect(out.faults.join("\n")).not.toContain("NVDA");
+    expect(out.view.focus?.rows[0]?.why).toBe("bullish into the print");
   });
 
   // The 2026-09-06 weekly wrote this for all five admitted names:
@@ -979,9 +1033,9 @@ describe("section 6 — the focus list", () => {
         weightsNote: "weights: declared prior 2026-09-06",
       },
     });
-    const out = render({ frame: f });
+    const out = render({ frame: f, period: "weekly" });
     expect(out.view.focus?.rows[0]?.openCall).toBe("open");
-    expect(body(out.sections, 6)).not.toContain("2026-09-04-close-focus-ADBE");
+    expect(body(legacySections(out), 6)).not.toContain("2026-09-04-close-focus-ADBE");
   });
 
   it("discards a focus entry for a ticker that is not on the list", () => {
@@ -1044,7 +1098,7 @@ describe("section 7 — open calls", () => {
         ledger: { settledToday: [], open, totalCommitments: 2 },
       }),
     });
-    const section = body(out.sections, 7);
+    const section = body(legacySections(out), 7);
     // Sorted by settle day. rates.long was issued Friday 2026-09-04 and settles
     // after ONE OPEN day: the Monday is Labor Day, so it comes due 2026-09-08,
     // not 2026-09-07 — the same day the settler counts to. ADBE 2026-09-11.
@@ -1061,12 +1115,12 @@ describe("section 7 — open calls", () => {
   it("skips a tenant holiday, and prints it when the day is open", () => {
     const settles = (calendar: { weekdaysOnly: boolean; closed: string[] }) =>
       body(
-        render({
+        legacySections(render({
           calendar,
           frame: frame({
             ledger: { settledToday: [], open, totalCommitments: 2 },
           }),
-        }).sections,
+        })),
         7,
       ).split("\n")[0];
     expect(settles({ weekdaysOnly: true, closed: [] })).toContain(
@@ -1096,7 +1150,7 @@ describe("section 7 — open calls", () => {
         },
       }),
     });
-    expect(body(out.sections, 7)).toBe(
+    expect(body(legacySections(out), 7)).toBe(
       "SPY · DOWN p=0.55 · settles after 5 bars",
     );
   });
@@ -1125,13 +1179,13 @@ describe("sections 2 and 4 — the model's, checked", () => {
           "Our largest miss was 2026-08-24-weekly-verdict-vol, which settled at 4.4.",
       },
     });
-    expect(body(out.sections, 2)).not.toContain(
+    expect(body(legacySections(out), 2)).not.toContain(
       "2026-08-24-weekly-verdict-vol",
     );
     expect(out.faults.join("\n")).toContain("2026-08-24-weekly-verdict-vol");
   });
 
-  it("C2: a stale row earns a not-to-quote line and quoting it counts", () => {
+  it("C2: stale-row quoting remains measurable without reader diagnostics", () => {
     const rows = fullRows().map((row) =>
       row.id === "credit" ? { ...row, asOf: "2026-06-01" } : row,
     );
@@ -1139,7 +1193,7 @@ describe("sections 2 and 4 — the model's, checked", () => {
       frame: frame({ rows }),
       doc: { ...DOC_EMPTY, review: "Credit was the quiet story this week." },
     });
-    expect(body(out.sections, 2)).toContain("not to quote: credit");
+    expect(body(legacySections(out), 2)).not.toContain("not to quote: credit");
     expect(
       reviewMetrics({
         frame: frame({ rows }),
@@ -1154,7 +1208,24 @@ describe("sections 2 and 4 — the model's, checked", () => {
     ).toBe(1);
   });
 
-  it("C1: a section 4 paragraph restating a printed level is a fault", () => {
+  it("keeps a known ledger commitment id out of the weekly market review", () => {
+    const id = "2026-08-30-weekly-verdict-rates.front";
+    const out = render({
+      period: "weekly",
+      frame: frame({
+        ledger: {
+          settledToday: [verdictReceipt(id, "continue", "continue", 0.09)],
+          open: [],
+          totalCommitments: 1,
+        },
+      }),
+      doc: { ...DOC_EMPTY, review: `The prior call ${id} settled.` },
+    });
+    expect(out.sections[0]?.body).not.toContain(id);
+    expect(out.faults.join("\n")).toContain("internal records");
+  });
+
+  it("C1: outlook may use a printed level when it supplies market context", () => {
     const out = render({
       frame: frame({ rows: fullRows() }),
       doc: {
@@ -1162,7 +1233,8 @@ describe("sections 2 and 4 — the model's, checked", () => {
         outlook: "The front end at 4.34 is what we are watching.",
       },
     });
-    expect(out.faults.join("\n")).toContain("4.34");
+    expect(body(legacySections(out), 4)).toContain("4.34");
+    expect(out.faults.join("\n")).not.toContain("restates the level");
   });
 });
 
@@ -1449,18 +1521,36 @@ describe("the masthead a review document carries", () => {
     }
   });
 
-  it("the weekly masthead is the scorecard header the renderer printed", () => {
+  it("the weekly masthead is the market review lead", () => {
     const built = view(REVIEW_PERIODS[0]);
-    expect(built.headline).toContain("Nothing settled yet");
+    expect(built.headline).toBe("We read the front end wrong.");
+  });
+
+  it("keeps decimal figures intact in a weekly market-review headline", () => {
+    expect(
+      reviewHeadline({
+        period: REVIEW_PERIODS[0],
+        scorecard: "Nothing settled yet",
+        review: "10Y ended 4.77% after the payroll release.\nOutlook follows.",
+      }),
+    ).toBe("10Y ended 4.77% after the payroll release.");
+  });
+
+  it("does not fall back to yesterday's checks when a daily review has no lead", () => {
+    expect(
+      reviewHeadline({
+        period: REVIEW_PERIODS[1],
+        scorecard: "Nothing settled yet",
+        checksLine: "Yesterday: 2 of 3 checks held.",
+      }),
+    ).toBe("Market review");
   });
 });
 
 describe("the section list a review document delivers", () => {
-  // THE 2026-09-06 DEFECT. The delivered weekly opened with the scenario
-  // step's own "Section 5 — Dated Catalysts" and the week-reviewer's three
-  // window sections, and reached "1 · Scorecard" fifth. The seven ARE the
-  // document.
-  const built = () =>
+  // Scenario and retrospective material stays available as metadata, while the
+  // weekly page itself is a market review.
+  const built = (task = REVIEW_PERIODS[0]) =>
     buildView(
       report({
         steps: [
@@ -1485,7 +1575,7 @@ describe("the section list a review document delivers", () => {
             }),
           },
           {
-            task: REVIEW_PERIODS[0],
+            task,
             role: "weekly-analyst",
             mode: "model",
             text: JSON.stringify({
@@ -1520,24 +1610,97 @@ describe("the section list a review document delivers", () => {
       SPEC,
     );
 
-  it("opens with the seven fixed titles, in order", () => {
+  it("opens with the four weekly market titles, in order", () => {
     const titles = built().sections.map((section) => section.title);
-    expect(titles.slice(0, REVIEW_TITLES.length)).toEqual([...REVIEW_TITLES]);
+    expect(titles).toEqual([...MARKET_REPORT_TITLES]);
   });
 
-  // The seven are the WHOLE document. The three window essays repeat §1's
-  // counters back at the reader in prose and were the last thing on the page;
-  // they are still carried, so nothing that reads them loses them.
-  it("renders the seven and nothing else, carrying the windows unrendered", () => {
+  it("uses the same public market layout for the daily review", () => {
+    const daily = built("edit");
+    expect(daily.sections.map((section) => section.title)).toEqual([
+      ...MARKET_REPORT_TITLES,
+    ]);
+    const publicText = JSON.stringify(daily.sections).toLowerCase();
+    expect(publicText).not.toContain("scorecard");
+    expect(publicText).not.toContain("open calls");
+    expect(publicText).not.toContain("calls.open");
+    expect((daily.otherSections ?? []).map((section) => section.title)).toEqual(
+      [
+        "5 sessions, 2026-08-31 to 2026-09-04",
+        "10 sessions, 2026-08-24 to 2026-09-04",
+        "21 sessions, 2026-08-07 to 2026-09-04",
+        REVIEW_TITLES[0],
+        REVIEW_TITLES[5],
+        REVIEW_TITLES[6],
+      ],
+    );
+  });
+
+  it("keeps the final formal review when a recorded run has no frame", () => {
+    const built = buildView(
+      report({
+        steps: [
+          {
+            task: "regime",
+            role: "regime-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              sections: [
+                { title: "Upstream transcript", body: "internal regime prose" },
+              ],
+            }),
+          },
+          { task: REVIEW_PERIODS[0], role: "weekly-analyst", mode: "model", text: "" },
+          {
+            task: REVIEW_PERIODS[0],
+            role: "weekly-analyst",
+            mode: "model",
+            text: JSON.stringify({
+              review: "Rates repricing remains the market story.",
+              outlook: "Watch whether credit confirms the move.",
+              catalysts: "No sourced calendar row was retained in the recording.",
+              coverage: [],
+              focus: [],
+              themes: [],
+            }),
+          },
+        ],
+      } as never),
+      SPEC,
+    );
+    expect(built.sections.map((section) => section.title)).toEqual([
+      ...MARKET_REPORT_TITLES,
+    ]);
+    expect(built.sections[0]?.body).toBe(
+      "Rates repricing remains the market story.",
+    );
+    expect(built.sections[2]?.body).not.toContain("no dated event was admitted");
+    expect(JSON.stringify(built.sections)).not.toContain("Upstream transcript");
+    expect(built.otherSections?.map((section) => section.title)).toEqual([
+      "Upstream transcript",
+    ]);
+    expect(built.footer?.notes).toContain(
+      "Incomplete provenance: this recorded run has no deterministic session frame.",
+    );
+  });
+
+  it("keeps scorecards and retrospective windows outside the public document", () => {
     const view = built();
     expect(view.sections.map((section) => section.title)).toEqual([
-      ...REVIEW_TITLES,
+      ...MARKET_REPORT_TITLES,
     ]);
     expect((view.otherSections ?? []).map((section) => section.title)).toEqual([
       "5 sessions, 2026-08-31 to 2026-09-04",
       "10 sessions, 2026-08-24 to 2026-09-04",
       "21 sessions, 2026-08-07 to 2026-09-04",
+      REVIEW_TITLES[0],
+      REVIEW_TITLES[5],
+      REVIEW_TITLES[6],
     ]);
+    const publicText = JSON.stringify(view.sections).toLowerCase();
+    expect(publicText).not.toContain("scorecard");
+    expect(publicText).not.toContain("open calls");
+    expect(publicText).not.toContain("calls.open");
   });
 
   it("drops the scenario step's own section — §5 is that content", () => {
@@ -1583,7 +1746,7 @@ describe("the section list a review document delivers", () => {
       SPEC,
     );
     expect(view.sections.map((section) => section.title)).toEqual([
-      ...REVIEW_TITLES,
+      ...MARKET_REPORT_TITLES,
     ]);
   });
 });
@@ -1666,22 +1829,21 @@ describe("calls.open is the renderer's row, not the model's", () => {
     },
   ];
 
-  it("prints the ledger's open count and no verdict token", () => {
+  it("keeps the ledger's open count out of public coverage", () => {
     const out = render({ frame: withOpen(open) });
-    const line = body(out.sections, 3)
-      .split("\n")
-      .find((row) => row.startsWith("- calls.open"))!;
-    expect(line).toBe("- calls.open · 2");
-    expect(line).not.toContain("UNTESTED");
+    expect(body(legacySections(out), 3)).not.toContain("calls.open");
+    expect(out.view.coverageDetail?.some((row) => row.id === "calls.open")).toBe(
+      false,
+    );
   });
 
   it("keeps the declared row count and is never a coverage gap", () => {
     const out = render({ frame: withOpen(open) });
-    const lines = body(out.sections, 3)
+    const lines = body(legacySections(out), 3)
       .split("\n")
       .filter((row) => row.startsWith("- "));
-    expect(lines.length).toBe(ROW_COUNT);
-    expect(body(out.sections, 3)).not.toContain("left out: calls.open");
+    expect(lines.length).toBe(PUBLIC_ROW_COUNT);
+    expect(body(legacySections(out), 3)).not.toContain("left out: calls.open");
     // Every OTHER row is a gap here (this document answers none of them);
     // `calls.open` is not one of them.
     expect(out.gaps).toBe(ROW_COUNT - 1);
@@ -1701,7 +1863,7 @@ describe("calls.open is the renderer's row, not the model's", () => {
     // This document answers no coverage row at all, so it earns the omission
     // fault; the one under test is §4's no-restatement rule.
     expect(out.faults.filter((line) => line.includes("restates"))).toEqual([]);
-    expect(body(out.sections, 4)).toContain("9/16");
+    expect(body(legacySections(out), 4)).toContain("9/16");
   });
 
   it("mints no commitment even when the model answers it anyway", () => {
@@ -1733,7 +1895,7 @@ describe("an untested coverage row prints three fields and no more", () => {
   // four of them saying the same nothing.
   it("names the row, says there was no datum, and stops", () => {
     const out = render({});
-    const line = body(out.sections, 3)
+    const line = body(legacySections(out), 3)
       .split("\n")
       .find((row) => row.startsWith("- rates.front"))!;
     expect(line).toBe("- rates.front · no datum this period · UNTESTED");
@@ -1746,7 +1908,7 @@ describe("an untested coverage row prints three fields and no more", () => {
       (out.view.coverageDetail ?? []).find((row) => row.id === "rates.front")
         ?.leftOut,
     ).toBe("tool absent");
-    expect(body(out.sections, 3)).toContain("left out: ");
+    expect(body(legacySections(out), 3)).toContain("left out: ");
   });
 
   // On the review-v6 rerun the author answered the macro rows and stopped, and
@@ -1754,7 +1916,7 @@ describe("an untested coverage row prints three fields and no more", () => {
   // just priced every one of them.
   it("a priced row nobody called prints its number, not `no datum`", () => {
     const out = render({ frame: frame({ rows: fullRows() }), doc: DOC_EMPTY });
-    const line = body(out.sections, 3)
+    const line = body(legacySections(out), 3)
       .split("\n")
       .find((row) => row.startsWith("- sector:Computer/GPU"))!;
     expect(line).toContain("4.34 → -3.1 bp");
@@ -1765,18 +1927,14 @@ describe("an untested coverage row prints three fields and no more", () => {
     // is measured against.
     expect(out.gaps).toBe(ROW_COUNT);
     expect(
-      body(out.sections, 3)
+      body(legacySections(out), 3)
         .split("\n")
         .filter((row) => row.startsWith("- ") && row.includes("UNTESTED"))
         .length,
-    ).toBe(ROW_COUNT);
+    ).toBe(PUBLIC_ROW_COUNT);
   });
 
-  // review-v6: 11 of 23 rows carried a verdict, and `coverageGaps` — which
-  // counts an unpriceable row and an unanswered one alike — said nothing
-  // about it. The omission is now named, id by id, so a prompt change can be
-  // measured against it.
-  it("names every priced row the document omitted, as a fault", () => {
+  it("allows an analyst to leave priced rows uncalled", () => {
     const out = render({
       frame: frame({ rows: fullRows() }),
       doc: {
@@ -1790,13 +1948,9 @@ describe("an untested coverage row prints three fields and no more", () => {
         })),
       },
     });
-    const fault = out.faults.find((line) => line.startsWith("coverage omits"))!;
-    expect(fault).toContain(
-      `${String(SECTORS.length + DECLARED.themes.length)} priced rows`,
-    );
-    for (const chain of SECTORS) expect(fault).toContain(`sector:${chain}`);
-    expect(fault).toContain(`theme:${THEME.id}`);
-    for (const id of COVERAGE) expect(fault).not.toContain(`${id},`);
+    expect(
+      out.faults.filter((line) => line.startsWith("coverage omits")),
+    ).toEqual([]);
   });
 
   it("raises no omission fault when every priced row was answered", () => {

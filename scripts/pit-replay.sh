@@ -4,13 +4,12 @@
 #   pit-replay.sh record <YYYY-MM-DD> <premarket|intraday|close|weekly> <state-root>
 #   pit-replay.sh replay <sample-dir> <state-root>
 #
-# `record` is a live run pinned to the phase's as-of instant (weekly runs live,
-# with no --as-of, because its tools are all as-of aware). Every tool call is
+# `record` is a run pinned to the phase's as-of instant. Every tool call is
 # written to <state-root>/runs/<runId>/tool-io/ by the runner itself.
 #
 # `replay` seeds a fresh state root from a frozen sample under
 # docs/evidence/flash-samples/<sample>/ and re-runs it with --replay-from, so a
-# live-only tool answers from the recording instead of the network.
+# tool answers from the recording instead of the network. Missing calls refuse.
 #
 # Secrets are never echoed: HELIUM_ENV_FILE is referenced by path only.
 set -euo pipefail
@@ -39,7 +38,7 @@ phase_instant() {
     premarket) echo "12:45:00Z" ;;
     intraday)  echo "17:00:00Z" ;;
     close)     echo "20:15:00Z" ;;
-    weekly)    echo "" ;;
+    weekly)    echo "12:00:00Z" ;;
     *) echo "pit-replay: unknown phase: $1" >&2; exit 2 ;;
   esac
 }
@@ -64,7 +63,8 @@ load_env() {
   fi
   set +a
   export OW_ARGON_API_BASE="${OW_ARGON_API_BASE:-${ARGON_BASE_URL:-}}"
-  export HELIUM_TENANT_DELIVERY=1
+  # A replay is a local artifact, never an email or production publication.
+  export HELIUM_TENANT_DELIVERY=0
 }
 
 # $1 state root, $2 log path, then the run's own flags.
@@ -110,12 +110,17 @@ case "$mode" in
     day="$(jq -r '.date' "$sample/run.json")"
     phase="$(jq -r '.phase' "$sample/run.json")"
     as_of="$(jq -r '.asOf // empty' "$sample/run.json")"
+    if [ -z "$as_of" ] && [ -f "$sample/steps.json" ]; then
+      as_of="$(jq -r '.run.startedAt // empty' "$sample/steps.json")"
+    fi
+    [ -n "$as_of" ] || { echo "pit-replay: sample has no recorded clock; refusing a live-clock replay" >&2; exit 2; }
+    [ -d "$sample/tool-io" ] || { echo "pit-replay: sample has no tool-io" >&2; exit 2; }
     load_env
     # The runner looks for recordings at <stateRoot>/runs/<runId>/tool-io, so
     # the sample is copied there and nowhere else. Fresh mtimes on purpose:
     # the runner prunes run directories older than 30 days before it reads one.
     mkdir -p "$state_root/runs/$run_id"
-    rm -rf "$state_root/runs/$run_id/tool-io"
+    [ ! -e "$state_root/runs/$run_id/tool-io" ] || { echo "pit-replay: recorded input already exists; use a fresh state root" >&2; exit 2; }
     cp -R "$sample/tool-io" "$state_root/runs/$run_id/tool-io"
     log="$state_root/logs/$day-$phase-replay.log"
     args=(--phase "$phase" --variant "$(basename "$state_root")" --replay-from "$run_id")

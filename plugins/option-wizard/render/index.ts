@@ -39,6 +39,7 @@ import { qualityMetrics } from "../quality/index.js";
 import { baselineDraft, forecastCommitments } from "./ledger.js";
 import {
   parseReviewDoc,
+  MARKET_REPORT_TITLES,
   reviewHeadline,
   reviewMetrics,
   reviewSections,
@@ -65,6 +66,17 @@ export type {
   PolicyPathChart,
   YieldCurveChart,
 } from "./charts.js";
+
+/** A retried task leaves its earlier empty attempt in the report. Consumers
+ * that need one task's authored output must take the last nonempty result,
+ * never the first placeholder. Multi-part tasks still iterate their entries. */
+function latestNonemptyTask(report: RunReport, task: string) {
+  for (let index = report.steps.length - 1; index >= 0; index -= 1) {
+    const step = report.steps[index]!;
+    if (step.task === task && step.text.trim() !== "") return step;
+  }
+  return undefined;
+}
 
 /**
  * One price that ends a thesis, and which way it has to go to do it.
@@ -208,7 +220,7 @@ function probability(value: unknown): boolean {
 }
 
 export function forecastFrom(report: RunReport): ForecastBlock | undefined {
-  const step = report.steps.find((entry) => entry.task === "scenarios");
+  const step = latestNonemptyTask(report, "scenarios");
   if (step === undefined) return undefined;
   const parsed = extractJson(step.text);
   const raw = parsed?.spyForecast;
@@ -593,7 +605,7 @@ function scheduleFrom(raw: unknown): ScheduleRow[] {
  *  all `overnightSection`/`overnightLines` render — a struct with nowhere
  *  downstream to read its fields would be a boundary drawn for no reader. */
 function overnightFrom(report: RunReport): string[] {
-  const step = report.steps.find((entry) => entry.task === "overnight");
+  const step = latestNonemptyTask(report, "overnight");
   if (step === undefined) return [];
   const parsed = extractJson(step.text);
   const raw = parsed === null ? null : parsed.overnight;
@@ -1302,7 +1314,7 @@ function sectionList(raw: unknown): Section[] {
 }
 
 function editorDocFrom(report: RunReport): EditorDoc | undefined {
-  const step = report.steps.find((entry) => entry.task === "edit");
+  const step = latestNonemptyTask(report, "edit");
   if (step === undefined) return undefined;
   // A failed step is not prose the harness can print. `flash-budget` is
   // advisory (its refusal never sets `failure`), so an over-budget document
@@ -1456,7 +1468,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
   // that finished, and the regime paragraph is the prose fallback for a step
   // that answered outside JSON. The regime step's own JSON is also where the
   // masthead headline, the tape strip and the day's schedule come from.
-  const regimeStep = report.steps.find((step) => step.task === "regime");
+  const regimeStep = latestNonemptyTask(report, "regime");
   const regime =
     regimeStep === undefined ? { paragraph: "" } : regimeFrom(regimeStep.text);
   const regimeJson =
@@ -1535,7 +1547,7 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
     };
   }
 
-  const review = report.steps.find((step) => step.task === "review");
+  const review = latestNonemptyTask(report, "review");
   const parsed = review === undefined ? null : extractJson(review.text);
   // Resolved before every early return below. The block matters MOST on the
   // day nothing survived: "no candidates today" alone does not tell the
@@ -1808,19 +1820,65 @@ function calendarRowsFrom(report: RunReport): CalendarRow[] {
 }
 
 /**
- * The seven review sections, when a step that writes them ran.
+ * The public market-report sections, when a review step ran.
  *
- * Which cadence is decided by the emitting TASK id — `weekly` writes the full
- * document, `edit` writes the same seven sections at a third the size. That is
+ * Which cadence is decided by the emitting TASK id — `weekly` and `edit` both
+ * write the same public structure at their own budgets. That is
  * a manifest fact, not a clock fact: the renderer still does not know what a
  * run label is.
  */
+function reviewDocument(report: RunReport): {
+  doc: ReviewDoc;
+  period: ReviewPeriod;
+} | null {
+  const weeklyTask = REVIEW_PERIODS[0];
+  for (const [task, period] of [
+    [weeklyTask, REVIEW_PERIODS[0]],
+    ["edit", REVIEW_PERIODS[1]],
+  ] as const) {
+    for (let index = report.steps.length - 1; index >= 0; index -= 1) {
+      const step = report.steps[index]!;
+      if (step.task !== task || step.text.trim() === "" || step.failure !== undefined)
+        continue;
+      const parsed = extractJson(step.text);
+      if (parsed === null) continue;
+      const formal = [
+        "review",
+        "outlook",
+        "catalysts",
+        "focus",
+        "themes",
+      ].some((key) => key in parsed);
+      if (!formal) continue;
+      const doc = parseReviewDoc(parsed).doc;
+      if (doc !== null) return { doc, period };
+    }
+  }
+  return null;
+}
+
+/** The only review content that can safely render without a deterministic
+ * frame. No scorecard, coverage table, calendar admission, focus list, or
+ * source-derived figure is reconstructed from model prose. */
+function authoredReviewSections(doc: ReviewDoc): Section[] {
+  return [
+    { title: MARKET_REPORT_TITLES[0], body: doc.review },
+    { title: MARKET_REPORT_TITLES[1], body: doc.outlook },
+    { title: MARKET_REPORT_TITLES[2], body: doc.catalysts },
+    {
+      title: MARKET_REPORT_TITLES[3],
+      body: "Coverage detail is unavailable because this recorded run has no deterministic session frame.",
+    },
+  ];
+}
+
 function reviewOf(
   report: RunReport,
   frame: SessionFrame | null,
   calendar?: TenantSpec["calendar"],
 ): {
   sections: Section[];
+  internalSections?: Section[];
   faults: string[];
   gaps: number;
   citations: number;
@@ -1839,15 +1897,9 @@ function reviewOf(
   rotationRows: number | null;
 } | null {
   if (frame === null) return null;
-  const weeklyTask = REVIEW_PERIODS[0];
-  const step =
-    report.steps.find((entry) => entry.task === weeklyTask) ??
-    report.steps.find((entry) => entry.task === "edit");
-  if (step === undefined) return null;
-  const period: ReviewPeriod =
-    step.task === weeklyTask ? REVIEW_PERIODS[0] : REVIEW_PERIODS[1];
-  const parsed = extractJson(step.text);
-  const doc = parsed === null ? null : parseReviewDoc(parsed).doc;
+  const selected = reviewDocument(report);
+  if (selected === null) return null;
+  const { doc, period } = selected;
   const rotation = period === REVIEW_PERIODS[0] ? rotationFrom(report) : null;
   const out = reviewSections({
     frame,
@@ -1897,9 +1949,35 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       view.candidates.map((candidate) => candidate.ticker),
     ),
   };
-  // No frame, no lead item: the fallback path renders exactly as it did before
-  // this design existed, which is what a run with no deterministic step gets.
-  if (frame === null) return base;
+  // A recording can retain the editor's formal review while the frame payload
+  // is absent. Preserve that authored narrative, explicitly mark the missing
+  // provenance, and do not fabricate the renderer-owned sections.
+  if (frame === null) {
+    const selected = reviewDocument(report);
+    if (selected === null) return base;
+    const inherited = [...(base.otherSections ?? []), ...base.sections];
+    return {
+      ...base,
+      sections: authoredReviewSections(selected.doc),
+      ...(inherited.length === 0 ? {} : { otherSections: inherited }),
+      headline:
+        base.headline.trim() === ""
+          ? reviewHeadline({
+              period: selected.period,
+              scorecard: "",
+              review: selected.doc.review,
+            })
+          : base.headline,
+      footer: {
+        coverage: base.footer?.coverage ?? [],
+        asOf: base.footer?.asOf ?? [],
+        notes: [
+          ...(base.footer?.notes ?? []),
+          "Incomplete provenance: this recorded run has no deterministic session frame.",
+        ],
+      },
+    };
+  }
   const lead = leadFields({
     frame: frame as unknown as LeadFrame,
     body: base.oneThing?.body ?? "",
@@ -1915,26 +1993,21 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       : { oneThing: lead.oneThing }),
     footer: lead.footer,
     ...(faults.length === 0 ? {} : { faults }),
-    // Appended AFTER the budget trim on purpose: sections 1/3/5/6/7 are the
-    // renderer's own prints, and a word cap on the model's prose must not eat
-    // a coverage row.
+    // Appended after the budget trim on purpose: the market-report sections
+    // are renderer-owned, and a prose word cap must not eat a coverage row.
     ...(review === null
       ? {}
       : {
-          // THE SEVEN ARE THE DOCUMENT, AND THEY ARE THE WHOLE DOCUMENT. On
-          // 2026-09-06 the delivered weekly opened with the scenario step's own
-          // "Section 5 — Dated Catalysts" and the week-reviewer's three window
-          // sections, and only then reached "1 · Scorecard". Putting the seven
-          // first fixed the order and not the length: the page still ended in
-          // three regime essays ("5 sessions…", "10 sessions…", "21 sessions…")
-          // that repeat §1's counters back at the reader in prose. They are
-          // still computed and still carried — on `otherSections`, below — so
-          // nothing that reads them loses them; they simply do not render.
+          // Scenario windows and internal registers remain available through
+          // `otherSections`; the page itself is the four-section market report.
           sections: review.sections,
           ...(() => {
-            const rest = base.sections.filter(
+            const rest = [
+              ...base.sections.filter(
               (section) => !fromScenarios.has(section.title),
-            );
+              ),
+              ...(review.internalSections ?? []),
+            ];
             return rest.length === 0 ? {} : { otherSections: rest };
           })(),
           // A review run has no `regime` step, so nothing upstream fills the
@@ -1945,6 +2018,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
               ? reviewHeadline({
                   period: review.period,
                   scorecard: review.sections[0]?.body ?? "",
+                  review: review.doc?.review,
                   ...(lead.oneThing === undefined
                     ? {}
                     : { oneThing: lead.oneThing.body }),

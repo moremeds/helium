@@ -339,9 +339,9 @@ describe("buildView over a frame and an edit step", () => {
     expect(view.everythingElse?.length).toBe(PERSISTENCE_BUDGET.elseLines);
   });
 
-  it("has no lead item on a day nothing could be ranked, and says why", () => {
+  it("keeps an editor lead on a day nothing could be ranked", () => {
     const view = run({ frame: frame({ mode: "no-data" }) });
-    expect(view.oneThing).toBeUndefined();
+    expect(view.oneThing?.body).toContain("10Y fell");
     expect(view.footer?.notes.join(" ")).toContain("ow_uw_gex");
   });
 

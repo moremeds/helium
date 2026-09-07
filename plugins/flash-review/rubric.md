@@ -9,12 +9,11 @@ Two rules that override every check below.
 - **Quote or drop it.** A finding you cannot support with a sentence copied
   character for character from the page is not a finding. If the wording you
   remember is not in the page, you misread it.
-- **Labelled inference is allowed.** A sentence that says it is a reading, a
-  judgement, a scenario, an if/then or an expectation — "this reads as", "the
-  likely mechanism is", "if X holds then Y", "I expect" — is doing the job the
-  page exists for. Never report one as a failure. Put the ones you checked and
-  accepted in `kept_inference`. Penalising labelled inference is itself a
-  defect in the review.
+- **Labelled inference is allowed, factual premises still need evidence.** A
+  reading, scenario or expectation may express uncertainty. Check its numbers,
+  dates and asserted observations against the evidence; an inference label does
+  not excuse invented facts, contradictory premises or a mechanism presented as
+  proven. Keep supported, clearly labelled judgements in `kept_inference`.
 
 ## How to read the evidence
 
@@ -75,14 +74,17 @@ dropped. Enumeration is mechanical, so it is now done in code.
 
 The procedure, and it is mandatory:
 
-1. Call `fr_dated_events`. Narrow it with `from`/`to` around the page's own
-   date range if the list is long; the reply says how many it held back.
+1. Call `fr_dated_events` with `from`/`to` covering the report period and its
+   stated outlook horizon. If `nextOffset` is returned, keep the SAME window
+   and fetch that offset until the list is complete. Do not narrow the window
+   to make an omitted event disappear. Unreadable evidence is inconclusive.
 2. Walk **every** returned item. Read its `snippet` to see what the date is
    attached to.
-3. For each, search the page for the item's `date` AND its `token` — the
-   recording may write `2026-09-16` where the page writes `9/16`, and either
-   spelling anywhere on the page, appendix rows included, counts as present.
-4. Record each item in `events_checked` with `in_page` true or false.
+3. Match the EVENT identified by its snippet (name/type and date), not merely
+   the date. Either date spelling is acceptable, but an expiry on 9/16 does
+   not cover an omitted FOMC on 9/16. A matching event in an appendix counts.
+4. Record each occurrence in `events_checked` with `in_page` true or false.
+   Distinct same-day events from one recording require separate checks.
 5. Raise a `missing-major-event` finding for every `in_page: false` item whose
    snippet shows it is **scheduled or macro**: a policy meeting (FOMC), a
    scheduled print (CPI, NFP, PCE, claims), a central-bank speaker, or the
@@ -112,8 +114,8 @@ inference. The test is two-part and both halves must hold:
 - no recording carries the link or the quantity the link turns on.
 
 A correlation the evidence does carry, described as a correlation, is fine. A
-mechanism explicitly flagged as the author's reading belongs in
-`kept_inference`, not in `findings`.
+mechanism explicitly flagged as the author's reading may be kept when its
+factual premises are supported; labelling alone does not make it sound.
 
 Severity `major`.
 
@@ -161,19 +163,14 @@ Severity `major` when most rows are like this, `minor` for one or two.
 A page that trips none of the eight can still fail these. Same finding shape;
 the signature id is the requirement's id.
 
-### `weekly-is-our-review`
+### `weekly-is-market-week`
 
-If the page is a weekly, its review section is a review of **our own calls**,
-not a recap of the market's week. Each tracked call must get a
-continue / reverse / strengthen decision **and a reason for that decision**. A
-weekly whose review section only restates what the market did — or restates
-rows the daily pages already carried — fails this.
-
-A call reported as correct, confirmed or as having behaved as expected, when
-the page's own numbers or the recordings show it was not triggered, is the
-worst case of this signature: a review that grades itself generously is worse
-than no review. Check every claimed hit against the level the evidence carries
-and against the page's own hit/miss counts.
+A weekly synthesises the market's week: the important changes, dated evidence,
+cross-asset confirmation or counterevidence, themes, and implications for next
+week. It must not substitute our own call review, scorecard, hit rates or process
+statistics for that market account. Own-performance analysis belongs in internal
+run outputs, not a public subsection. Missing historical inputs must limit the
+claims; recent headlines alone do not establish the whole week's events.
 
 Severity `blocking` on a weekly. Not applicable to a daily page.
 
@@ -188,7 +185,10 @@ Severity `major`.
 
 ### `terse-but-complete`
 
-Terse wording is right; dropped coverage is not. If the page is short because a
+Judge completeness against the phase's job: premarket prepares the day,
+intraday reports changes, close resolves the day, weekly synthesises the week.
+Do not demand the full premarket section set in every increment. Terse wording
+is right; dropped required coverage is not. If the page is short because a
 section, a tracked item or a required part of the phase's job was omitted
 rather than compressed, that is this signature — quote the shortest sentence
 that stands where the missing content should be. Never report a page for being

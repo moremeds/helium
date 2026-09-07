@@ -1683,7 +1683,7 @@ const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
 
 const AS_OF_REPLAYED_SENTENCE =
-  "In this as-of replay the answer comes from a recording of an earlier live run of this tenant, not from the source. Treat it exactly as a live answer; the report's own header says which tools were served this way.";
+  "This replay returns the saved response for these exact arguments. Preserve its original observation timestamps; a missing recording is unavailable, never a live fallback.";
 
 export function buildTools(cfg: {
   stateRoot: string;
@@ -5187,6 +5187,22 @@ export function buildTools(cfg: {
       },
     },
   ];
+  // Replay the WHOLE input surface, including the frame and historical tools.
+  // Re-fetching historical data beside saved quotes changes the experiment.
+  if (cfg.recordings !== undefined) {
+    const recordings = cfg.recordings;
+    return built.map((tool) => ({
+      ...tool,
+      description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
+      run: async (args: Record<string, unknown>): Promise<string> => {
+        const recorded = recordings.lookup(tool.name, args);
+        if (recorded !== undefined) return recorded;
+        const reason = "no recording for these arguments; live fallback disabled";
+        cfg.pit?.markUnavailable(tool.name, reason);
+        return JSON.stringify({ unavailable: "as-of", asOf: asOfIso, reason });
+      },
+    }));
+  }
   if (asOf === undefined) return built;
   // One place, not thirteen edits: a live-only tool in a replay is replaced by
   // its refusal wholesale, so there is no path through its body that could
@@ -5201,25 +5217,6 @@ export function buildTools(cfg: {
       asOf: asOfIso,
       reason,
     });
-    // A recording of one of our own earlier runs IS history for this tool.
-    // Marked unavailable LAZILY on this branch: a tool that never got called,
-    // or that got called with arguments the recording covers, is not a gap.
-    if (cfg.recordings?.has(tool.name) === true) {
-      const recordings = cfg.recordings;
-      return {
-        ...tool,
-        description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
-        run: async (args: Record<string, unknown>): Promise<string> => {
-          const recorded = recordings.lookup(tool.name, args);
-          if (recorded !== undefined) return recorded;
-          cfg.pit?.markUnavailable(
-            tool.name,
-            `${reason}, and no recording for these arguments`,
-          );
-          return payload;
-        },
-      };
-    }
     cfg.pit?.markUnavailable(tool.name, reason);
     return {
       ...tool,

@@ -4,8 +4,7 @@
 #   flash-abc.sh <sample> <A|B|C|C-nonews> <state-root>
 #
 # <sample> is a directory name under docs/evidence/flash-samples/. A daily
-# sample is replayed from its frozen tool-io; the weekly cannot be replayed
-# (it runs with no --as-of, so --replay-from is inert) and is run LIVE.
+# sample is replayed from its frozen tool-io and recorded clock, including weekly.
 #
 # The swap is the only way to select a team file: tenant.yaml pins `team:` and
 # there is no per-run manifest flag. team.yaml on disk IS variant A, so A runs
@@ -18,7 +17,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEAM="$REPO_ROOT/plugins/option-wizard/team.yaml"
 SAMPLES="$REPO_ROOT/docs/evidence/flash-samples"
-DRAFTS="$REPO_ROOT/docs/evidence/flash-drafts"
+DRAFTS="${FLASH_DRAFTS_DIR:-$REPO_ROOT/docs/evidence/flash-drafts}"
 
 usage() {
   echo "usage: flash-abc.sh <sample> <A|B|C|C-nonews> <state-root>" >&2
@@ -41,6 +40,7 @@ if [ -n "$swap_from" ] && [ ! -f "$swap_from" ]; then
 fi
 
 out="$DRAFTS/$sample/$variant"
+[ ! -e "$out" ] || { echo "flash-abc: draft exists; set FLASH_DRAFTS_DIR to a new directory" >&2; exit 2; }
 mkdir -p "$out" "$state_root/logs"
 
 # ---- the swap, and its undo ------------------------------------------------
@@ -50,10 +50,6 @@ restore() {
     cp "$backup" "$TEAM"
     rm -f "$backup"
     backup=""
-  fi
-  if ! git -C "$REPO_ROOT" diff --quiet -- plugins/option-wizard/team.yaml; then
-    echo "flash-abc: FAILED TO RESTORE team.yaml — the tree is dirty" >&2
-    exit 3
   fi
 }
 trap restore EXIT INT TERM
@@ -69,16 +65,9 @@ phase="$(jq -r '.phase' "$sample_dir/run.json")"
 
 started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 status=0
-if [ "$phase" = "weekly" ]; then
-  # LIVE. No as-of, no replay: see the sample's MISSING.md.
-  "$REPO_ROOT/scripts/pit-replay.sh" record "$day" weekly "$state_root" \
-    >"$out/pit-replay.out" 2>&1 || status=$?
-  runlog="$state_root/logs/$day-$phase.log"
-else
-  "$REPO_ROOT/scripts/pit-replay.sh" replay "$sample_dir" "$state_root" \
-    >"$out/pit-replay.out" 2>&1 || status=$?
-  runlog="$state_root/logs/$day-$phase-replay.log"
-fi
+"$REPO_ROOT/scripts/pit-replay.sh" replay "$sample_dir" "$state_root" \
+  >"$out/pit-replay.out" 2>&1 || status=$?
+runlog="$state_root/logs/$day-$phase-replay.log"
 finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 run_id="$(sed -n 's/^runId: \(run-[0-9a-f-]*\).*/\1/p' "$out/pit-replay.out" | head -1)"
@@ -104,6 +93,8 @@ cp "$state_root/render-dump/option-wizard-$report_day-$phase.html" "$out/render.
 author_task=$([ "$phase" = weekly ] && echo weekly || echo edit)
 if [ -n "$evidence" ] && [ -f "$evidence" ]; then
   cp "$evidence" "$out/steps.json"
+  recorded="$state_root/runs/$run_id/tool-io"
+  [ ! -d "$recorded" ] || cp -R "$recorded" "$out/tool-io"
   jq -r --arg t "$author_task" '.steps[] | select(.task==$t) | .assembledPrompt // ""' \
     "$evidence" >"$out/author.prompt.txt"
   jq -r --arg t "$author_task" '.steps[] | select(.task==$t) | .output // ""' \
