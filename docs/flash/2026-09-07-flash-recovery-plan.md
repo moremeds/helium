@@ -22,26 +22,33 @@ Codex's two-part review is agreed with two corrections:
 
 ## Step 0 — freeze the inputs (half a day)
 
-What exists today is NOT a frozen input set, and most of it lives in a
-session-scoped scratchpad that a fresh session cannot see. Inventory as of
-2026-09-07 (paths relative to the repo unless absolute):
+Correction (2026-09-07, after checking the disk): the runner already records
+every tool call of every run, verbatim, under
+`<stateRoot>/runs/<runId>/tool-io/` (`packages/cli/src/tool-io.ts`), and
+`helium run --replay-from <runId>` serves a run from them. The earlier
+version of this table said the tool outputs were missing; they are not.
+What is missing is that the recordings live in a session-scoped scratchpad a
+fresh session cannot see. Inventory as of 2026-09-07:
 
-| sample                                  | what is on disk                                                                                                                    | where                                                                                                           | what is missing                                                                                             |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 2026-09-03 intraday, close              | rendered pages and markdown of the runs the user critiqued                                                                         | `docs/evidence/pit-replays/2026-09-05/pit-v3/` (close); intraday only in the 04ed705b session scratchpad        | every tool output; no news items; premarket page not kept                                                   |
-| 2026-09-04 premarket → intraday → close | rendered page + markdown of premarket (pit-v3) and close (review-v1, v7); per-step `assembledPrompt` + `output` JSON for the close | `docs/evidence/pit-replays/2026-09-05/pit-v3/`, `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` | intraday page; the model's own tool-call outputs (only `tool_output_bytes` is in `audit.db`); no news items |
-| 2026-09-06 weekly                       | rendered page + markdown; per-step `assembledPrompt` + `output` JSON (frame, ledger, rotation as handed to the model)              | `docs/evidence/pit-replays/2026-09-06/review-v7/`; v8b only in the session scratchpad                           | the model's own `ow_reports` / `ow_rotation` calls; no news items at all (the weekly has no news tool)      |
+| sample                                  | recorded runs (raw tool outputs) in the scratchpad | rendered page / step JSON in the repo                                              | not recorded anywhere                    |
+| --------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------- |
+| 2026-09-03 premarket, intraday          | `item4` (2 runs)                                   | none                                                                               | —                                        |
+| 2026-09-03 close                        | `fix-v1`, `argon-local`                            | `docs/evidence/pit-replays/2026-09-05/pit-v3/`                                     | —                                        |
+| 2026-09-04 premarket, intraday          | none                                               | premarket page in `pit-v3/`                                                        | both runs (recorder landed after pit-v3) |
+| 2026-09-04 close                        | `review-v1` … `review-v8b`                         | `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` (with step JSON)   | —                                        |
+| 2026-09-06 weekly                       | `review-v1` … `review-v7`, `weekend-2026-09-06`    | `review-v7/` (with step JSON)                                                      | news (the weekly has no news tool)       |
+| 2026-09-02 close (hold-out)             | none                                               | none                                                                               | the whole run                            |
 
-`run-pit-review.sh` is a scratchpad script, not in the repo. Step 0 moves it
-to `scripts/pit-replay.sh`, adds a recording mode that writes every tool
-call's full output to `docs/evidence/flash-samples/<sample>/tools/`, and
-re-runs the three samples with their original as-of dates. News for the
-daily samples comes from the existing `ow_uw_headlines` / `ow_uw_earnings`
-tools with the as-of cutoff; the weekly gets the union of that week's daily
-news outputs. Anything that cannot be re-fetched point-in-time is listed in
-`<sample>/MISSING.md` and the sample is labelled a partial replay. The
-hold-out sample (2026-09-02 close, never shown to the author or the
-reviewer during tuning) is fixed here, before any tuning starts.
+Step 0 therefore: move `run-pit-review.sh` into the repo as
+`scripts/pit-replay.sh` with a `record` mode (live run, as-of, named state
+root) and a `replay` mode (seed a fresh state root from a frozen sample and
+run `--replay-from`); copy the chosen recording of each sample, plus its log,
+rendered page and step JSON, to `docs/evidence/flash-samples/<sample>/`; fetch
+the two missing 2026-09-04 phases and the 2026-09-02 hold-out live with their
+original as-of instants, accepting that any tool without point-in-time
+history is a partial replay. Each sample carries a `MISSING.md` naming what
+was not recorded. The hold-out is never shown to the author or the reviewer
+during tuning.
 
 Exit: a fresh session can reproduce every A/B/C run from the repo alone.
 
@@ -102,22 +109,6 @@ Exit: rejects every A page and all four mutations, keeps labelled inference,
 and produces a per-sample verdict for B and C. C may fail. Only drafts that
 pass go to the user: one weekly and one daily triple, with the blind scores
 beside them. That is the first human read in the plan.
-
-## Step 2 — an acceptance pass that rejects v8b (1 day)
-
-Eight failure signatures, each a concrete check against page text and the
-frozen evidence: date conflict; stale data presented as today's; missing
-major event; unsourced causal story; duplicated content; ledger before market;
-one forecast per row; empty or mechanical Focus reasons. Plus four mutations
-of the C draft: swapped date, deleted main event, inserted plausible unsourced
-mechanism, "not triggered" rewritten as "correct".
-
-Rules: reviewer model differs from author model; reviewer sees page text,
-evidence and rubric only, never JSON counts or the author's self-report;
-findings cite the sentence and the evidence.
-
-Exit: rejects v8b, passes C, catches all four mutations, keeps labelled
-inference.
 
 ## Step 3 — wire the shape back into the pipeline (2–3 days)
 
