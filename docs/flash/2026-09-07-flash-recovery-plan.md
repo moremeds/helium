@@ -147,6 +147,19 @@ reviewer from Step 2 is stable does it become a helium-self settler.
 Token accounting (cache read/write split in `fold.ts`) is a separate PR and
 does not count as content improvement.
 
+## Step 5 — model comparison under the fixed framework (after Step 4)
+
+Starts only once Step 4 has produced acceptable reports on consecutive days.
+Same frozen samples, same prompts, same renderer, same Step 2 reviewer; the
+only variable is the model behind the author role (and, separately, behind
+the reviewer role). Each candidate is one helium-self experiment: variant =
+model, scoreboard grouped by `variant@codeSha`, blind readability score and
+cost per run reported side by side. The router normally picks the cheapest
+model that satisfies the task's capabilities, so the comparison needs a
+per-run model pin that bypasses that choice without editing `team.yaml`;
+whether the runner already has one is checked at the start of this step.
+Never compare a model on a sample it was tuned on.
+
 ## What changes in how work is accepted
 
 Before anything is shown to the user: the author's output is read as a page,
