@@ -1,0 +1,16 @@
+sample: 2026-09-06-weekly
+variant: C-nonews
+manifest: /Users/chenxi/projects/helium/.worktrees/flash-step0/plugins/option-wizard/team.C-nonews.yaml
+teamYamlSha256: 84c6cb6d43ac0a2d580c692e5db59c7f0e622e43f314398c7d41065f05912bd2
+runId: run-e450fc6d-f8cb-4a5a-8b37-6afd9657ad58
+reportDay: 2026-09-07
+exit: 0
+startedAt: 2026-09-07T12:26:06Z
+finishedAt: 2026-09-07T12:28:41Z
+authorTask: weekly
+authorRole: weekly-analyst
+authorModel: claude-opus-4-8
+inputTokens: 6
+outputTokens: 4881
+cacheReadTokens: 61658
+pit coverage: (none)

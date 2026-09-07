@@ -1,0 +1,46 @@
+The frame indicates the ledger is unavailable ("no ledger at /private/tmp/claude-501..."), meaning 0 scored calls from the prior week. Per the instructions, when Section 1 says `0 scored`, I write ONE sentence for review naming which open call settles first and on what day, then finish 上周复盘 with nothing else. The focus list, themes and outlook sections are still written in full.
+
+Looking at the calendar from the frame: ADBE earnings settles 2026-09-10 (post).
+
+```json
+{
+  "review": "No commitments have settled; the first call to resolve is ADBE earnings (post) on 2026-09-10.",
+  "outlook": "Rates pulled back 2 bp, easing term premiums into the FOMC hike probability of 55.7% on 9/16. That binary — live within a month — sets the regime for all tactical duration. Credit spread tightened 1 bp; vol fell 0.88 pts to 14.32, consistent with the narrow dealer gamma flip. Memory/Storage led broadly, with Foundry rallying 5.3% excess; Cybersecurity and Software/SaaS both faded -7.0% and -4.8% vs SPY respectively. The sector divergence suggests chip-cycle leadership and duration-sensitive software weakness already pricing unequal FOMC sensitivity. El Nino ag instruments jumped 6.5% excess in the first week, meeting the entry evidence threshold. Next week's earnings (ADBE, ORCL both 9/10) will test Software/SaaS resilience ahead of September's policy meeting; the width between hardware strength and application weakness narrows if the tape continues to reward capital-intensity over margin duration.",
+  "catalysts": "FOMC 9/16 at 55.7% hike probability is the dominant macro anchor; ADBE and ORCL earnings post 2026-09-10 frame Software/SaaS event risk; MU earnings 2026-09-30 will test Memory/Storage momentum. October's staggered earnings across chip supply chain (ASML 10-14 pre, TSM 10-15, TXN 10-20, IBM 10-21, INTC 10-22, CDNS 10-26, STX/TER 10-27, TSLA/LRCX 10-28, AAPL 10-29) create rolling volatility around each Semi/Foundry/Device print.",
+  "coverage": [
+    {"id": "rates.front", "token": "untested", "p": null, "why": "DGS2 not ingested", "observable": ""},
+    {"id": "rates.long", "token": "continue", "p": 0.70, "why": "Stable 4.77; policy path and hike odds drive duration", "observable": "Monitor for post-FOMC 9/16 repricing"},
+    {"id": "curve.shape", "token": "untested", "p": null, "why": "2s10s cannot be computed without DGS2", "observable": ""},
+    {"id": "policy.path", "token": "continue", "p": 0.65, "why": "55.7% hike probability embeds base-case path, 1mo horizon", "observable": "Market reprices on minutes 9/16 post-meeting"},
+    {"id": "credit", "token": "continue", "p": 0.72, "why": "Tight 2.65; narrow dealer gamma and vol drop confirm calm", "observable": "Watch for Software/SaaS event risk 9/10"},
+    {"id": "vol", "token": "fade", "p": 0.68, "why": "14.32 is low; earnings season compresses vol further", "observable": "ADBE/ORCL 9/10 will test bid-ask cushion"},
+    {"id": "dealer.positioning", "token": "continue", "p": 0.75, "why": "768.35 gamma flip stable; no major convexity surprise", "observable": "Monitor dealer unwind around FOMC event window"},
+    {"id": "flow", "token": "continue", "p": 0.70, "why": "39758465 net premium; market tide reflects quiet conviction", "observable": "Tail risk hedges remain priced into events"},
+    {"id": "commodities", "token": "untested", "p": null, "why": "no payload", "observable": ""},
+    {"id": "fx", "token": "continue", "p": 0.65, "why": "118.7 broad index stable; dollar firm but range-bound", "observable": "FOMC 9/16 may move DXY on rate surprise"},
+    {"id": "equity.internals", "token": "continue", "p": 0.72, "why": "SPY 769.55 near highs; breadth diverges (chip vs software)", "observable": "Sector leadership test on earnings flow"},
+    {"id": "calls.open", "token": "continue", "p": 0.75, "why": "No open commitments; clean slate for new calls", "observable": "Ready for event-driven positioning"},
+    {"id": "sector:Computer/GPU", "token": "continue", "p": 0.78, "why": "3.4% excess leadership intact; AI capex bid unbroken", "observable": "NVDA, AMD resilience through earnings window"},
+    {"id": "sector:Semi-Logic/ASIC", "token": "continue", "p": 0.70, "why": "1.8% excess modest; QCOM, TXN await Oct earnings", "observable": "Outperformance hinge on design-cycle strength"},
+    {"id": "sector:Foundry", "token": "strengthen", "p": 0.76, "why": "5.4% excess leader; TSM, INTC bid on capex/geopolitics", "observable": "ASML 10-14 pre earnings will test guidance"},
+    {"id": "sector:Semi-Cap/EDA", "token": "fade", "p": 0.68, "why": "-1.5% underperformer; ASML, LRCX heavy event risk", "observable": "October earnings likely to retest support"},
+    {"id": "sector:Memory/Storage", "token": "strengthen", "p": 0.80, "why": "7.6% excess surge; AI demand and cycle inflection", "observable": "MU 9/30 earnings make-or-break for momentum"},
+    {"id": "sector:Cybersecurity", "token": "fade", "p": 0.72, "why": "-6.9% slide; duration and rate-sensitive multiples", "observable": "FOMC 9/16 hike could extend tech duration pressure"},
+    {"id": "sector:Software/SaaS", "token": "fade", "p": 0.70, "why": "-4.8% weakness; ADBE, CRM event risk ahead", "observable": "ADBE 9/10 earnings critical to sector setup"},
+    {"id": "sector:Cloud/Hyperscaler", "token": "continue", "p": 0.68, "why": "-1.3% flat; MSFT, GOOGL stable but cautious", "observable": "Large-cap tech resilience anchors market tone"},
+    {"id": "sector:Foundation-Model-Proxy", "token": "continue", "p": 0.72, "why": "0.9% excess modest; AI narrative still priced in", "observable": "Watch NVDA leadership as marker for sentiment"},
+    {"id": "sector:Devices/Endpoint", "token": "continue", "p": 0.68, "why": "0.8% excess flat; TSLA, AAPL stable ahead of Oct earnings", "observable": "AAPL 10-29 test iPhone cycle durability"},
+    {"id": "theme:el-nino-ag-2026", "token": "strengthen", "p": 0.75, "why": "6.5% excess week 1; NOAA/CBOT evidence holds", "observable": "DBA, MOS, DE outperform on weather bid"}
+  ],
+  "focus": [
+    {"ticker": "ADBE", "why": "Earnings 2026-09-10 post; IV rank 68.84 is elevated for Software, implying market prices material move; 6.93% move threshold suggests balance between upside guidance and margin pressure from AI adoption cycles."},
+    {"ticker": "ORCL", "why": "Earnings 2026-09-10 post; IV rank 62.39 reflects sector-wide duration risk; 9.86% threshold is high; Cloud/Hyperscaler drift and Software/SaaS -4.8% fade suggest caution on margin beat."},
+    {"ticker": "TSLA", "why": "Pinned on watchlist; IV rank 10.91 is extremely depressed, reflecting distance to 10-28 event; no view yet until Semi-Cap/EDA stabilizes and dealer gamma tone clarifies post-FOMC 9/16."},
+    {"ticker": "AVGO", "why": "Pinned watchlist; IV rank 1.31 is near-zero; 12-10 earnings are three months out; nothing actionable until Q3 guidance and semi capex cycle are repriced post-October calls."},
+    {"ticker": "MU", "why": "9-30 post earnings; IV rank 33.01 is neutral; 12.37% move priced moderate volatility; Memory/Storage 7.6% excess lead sets bullish frame, but cycle inflection call depends on forward guidance not comps."}
+  ],
+  "themes": [
+    {"id": "el-nino-ag-2026", "leadership": "Foundry strength, Memory/Storage surge, and ag instruments' 6.5% excess week 1 confirm El Nino supply tightness thesis; no contradiction yet from rotations."}
+  ]
+}
+```
