@@ -142,6 +142,12 @@ continue / reverse / strengthen decision **and a reason for that decision**. A
 weekly whose review section only restates what the market did — or restates
 rows the daily pages already carried — fails this.
 
+A call reported as correct, confirmed or as having behaved as expected, when
+the page's own numbers or the recordings show it was not triggered, is the
+worst case of this signature: a review that grades itself generously is worse
+than no review. Check every claimed hit against the level the evidence carries
+and against the page's own hit/miss counts.
+
 Severity `blocking` on a weekly. Not applicable to a daily page.
 
 ### `outlook-has-more-than-the-calendar`
