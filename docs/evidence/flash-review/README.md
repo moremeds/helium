@@ -19,6 +19,10 @@ HELIUM_ENV_FILE=<provider env file> scripts/flash-review.sh \
 The verdict, the routed model and the token counts land in
 `<page-dir>/review/<label>.md` and `<label>.audit.json`.
 
+The reviewer has four tools: `fr_rubric`, `fr_page`, `fr_evidence` and
+`fr_dated_events`. The last is a deterministic pre-pass added in round 4 — see
+"the missing-event check" below for why a fourth tool earned its place.
+
 ## The calibration set
 
 | directory                       | what it is                                                   | evidence                                            |
@@ -49,8 +53,10 @@ same table, not from the log.
 | `m2-deleted-event`              | r1    | `run-db46b984-0d3b-4b71-801c-e7ffcf18b2de`   | `dsh:claude-opus-4-8`  | 12 / 7928 / 156054  | $0.1983 | 113s | **fail** | stale-as-today; unsourced-causal-story ×2; one-forecast-per-row                             | 2              |
 | `m2-deleted-event`              | r2    | `run-13ab93b8-3ec7-4668-bd34-3256a3726d02`   | `dsh:claude-opus-4-8`  | 12 / 8435 / 150907  | $0.2109 | 121s | **fail** | stale-as-today; unsourced-causal-story; leads-with-the-conclusion                            | 3              |
 | `m2-deleted-event`              | r3    | `run-44ef292d-fecd-4757-a490-6efdd5d3dc97`   | `dsh:claude-opus-4-8`  | 14 / 9793 / 215911  | $0.2449 | 138s | **fail** | one-forecast-per-row; leads-with-the-conclusion                                             | 4              |
+| `m2-deleted-event`              | r4    | `run-d8d3b17b-16cd-487e-8507-664a7fdd76e1`   | `dsh:claude-opus-4-8`  | 14 / 9634 / 250891  | $0.2409 | 126s | **fail** | **missing-major-event** (blocking); date-conflict; one-forecast-per-row                     | 3              |
 | `m3-unsourced-mechanism`        | r1    | `run-c83745d6-8362-4758-a7f5-35b0d1a27481`   | `dsh:claude-opus-4-8`  | 8 / 4683 / 47197    | $0.1171 | 67s  | **fail** | leads-with-the-conclusion; weekly-is-our-review; **unsourced-causal-story**; one-forecast-per-row | 1        |
 | `m4-miss-as-hit`                | r1    | `run-3c6c8caa-fe53-4318-8ad7-6d4505c0f5f8`   | `dsh:claude-opus-4-8`  | 8 / 4158 / 45171    | $0.1040 | 58s  | **fail** | **weekly-is-our-review** (blocking); one-forecast-per-row                                   | 2              |
+| `m4-miss-as-hit`                | r4    | `run-ec4e374f-a826-4402-be99-d0cbfcf29d1b`   | `dsh:claude-opus-4-8`  | 14 / 8145 / 254673  | $0.2037 | 105s | **fail** | **weekly-is-our-review** (blocking); missing-major-event ×2                                  | 3              |
 
 ### Did the finding point at the right sentence?
 
@@ -59,20 +65,20 @@ same table, not from the log.
 | `rejected-2026-09-06-weekly`    | yes — rejected      | yes: `ledger-before-market` cites "Process statistics first."                             |
 | `rejected-2026-09-03-premarket` | yes — rejected      | partly, see below                                                                          |
 | `m1-swapped-date`               | yes — rejected      | **yes**, verbatim: "…the SPY ETF tide underlying at the final 2026-09-02 print: 770.19."   |
-| `m2-deleted-event`              | yes — rejected      | **no**, in all three rounds, see below                                                     |
+| `m2-deleted-event`              | yes — rejected      | **r1-r3 no; r4 yes** once `fr_dated_events` existed — see below                             |
 | `m3-unsourced-mechanism`        | yes — rejected      | **yes**, verbatim: "Dealers rebalanced into the Friday close, and that hedging flow is…"   |
-| `m4-miss-as-hit`                | yes — rejected      | **yes**, verbatim: "…vol behaved as called, extending below 14.25 as expected…"            |
+| `m4-miss-as-hit`                | yes — rejected      | **yes**, verbatim in both r1 and r4: "…vol behaved as called, extending below 14.25 as expected…" |
 
 Labelled inference was kept every time: 1–5 sentences per run in
 `kept_inference`, none of them reported as a finding.
 
-## What still misses, after three rounds
+## The missing-event check: three failed rounds, then a tool
 
-**`m2-deleted-event` — the reviewer never reports the missing event.** It
-rejects the page every round, but for other signatures. The exit criterion for
-this mutation is not met and the plan should not be read as if it were.
+**`m2-deleted-event` is now caught, in round 4, for the right reason.** Three
+prompt rounds could not get there; a fourth prompt round was not tried. What
+changed is that the enumeration moved out of the model and into code.
 
-The three rounds, and what each taught:
+What each round taught:
 
 1. **r1 — the mutation was the defect, not the reviewer.** The first M2 removed
    only the catalysts sentence. The page went on naming "9/16" in three other
@@ -97,12 +103,52 @@ The three rounds, and what each taught:
    those and the reason it did not notice the one entry that should have been
    there.
 
-Read plainly: the reviewer is good at faults **visible on the page** and poor
-at faults **defined by absence**. The next attempt should not be a fourth
-prompt round. It should be a deterministic pre-pass that extracts the dated
-events from the recordings and hands the reviewer the list, so the model
-CHECKS a list instead of BUILDING one. That is a tool change, and it is out of
-this step's scope.
+4. **r4 — the enumeration moved into code and the check passed.**
+   `fr_dated_events` walks every recording, pulls every `YYYY-MM-DD` and every
+   bare `M/D` (resolving the year from the recording's own timestamp, never
+   guessing), returns `{date, token, tool, file, snippet≤160}` deduplicated to
+   one row per date-tool-spelling, ordered by date, capped at
+   `MAX_DATED_EVENTS` with a `truncated` flag and a `from`/`to` window. The
+   rubric's signature 3 became "call it, then mark `in_page` on every row it
+   returned, and raise a finding for every `false` row whose snippet shows a
+   scheduled or macro event". The reviewer now CHECKS a list instead of
+   BUILDING one.
+
+   Result on M2 r4: **`missing-major-event`, blocking**, with
+   `events_checked` carrying 52 rows including
+   `{"event":"FOMC 9/16 (HIKE 55.7%)","date":"2026-09-16","in_page":false}` —
+   the row all three model-built enumerations had omitted. The finding cites the
+   page sentence that should have carried the event ("No calendar rows were
+   admitted to this run — no event arrived carrying a time, a named event and a
+   forecast or prior.") against the recording that contradicts it verbatim.
+
+   One measurement was needed to make it work. Deduplicating on the whole row
+   returned **793 rows for 23 distinct days** — the weekly's session frame
+   writes `9/16` in six different surroundings — the 80-row cap fell on the
+   earliest dates, and every forward event including the FOMC was cut off the
+   end. Deduplicating on `date|tool|token` instead gives **65 rows, no
+   truncation, FOMC present in both spellings**. The wrong dedup granularity
+   would have shipped a tool that looked right and hid the same event.
+
+Read plainly: the reviewer is good at faults **visible on the page** and was
+poor at faults **defined by absence**, and the fix for the second kind is to
+stop asking a model to be exhaustive and give it an exhaustive list.
+
+### Regression check, and a new strictness to watch
+
+`m4-miss-as-hit` was re-run once under the same build (r4). It still returns
+`weekly-is-our-review` **blocking** on the rewritten sentence, verbatim — no
+regression from the new tool.
+
+It also returns two NEW `missing-major-event` findings, for the FOMC meetings
+on 2026-10-28 and 2026-12-09 that the session frame carries and the page never
+names. Those are true by the rubric as written, but they are a warning: the
+pre-pass makes the reviewer materially stricter about forward policy events,
+and a daily page that legitimately scopes to the next week will now trip this
+signature. Whether "scheduled and in the evidence" should mean "must appear on
+every page" is a question for Step 3, not something to quietly soften here. The
+severity it assigned (`major`, not `blocking`) is at least the proportionate
+half of the answer.
 
 **`rejected-2026-09-03-premarket` — the known failure is not checkable from
 its own evidence.** The recovery plan records this sample's fault as "AVGO /
@@ -153,8 +199,9 @@ for p in glob.glob('<state root>/pit/step2-r*/evidence/*.json'):
 PY
 ```
 
-Result over all seven r1/r2 runs: **every assembled prompt is byte-identical,
-3058 characters, with zero hits.** The prompt holds the run clock, the budget
+Result: **every assembled prompt is byte-identical within a build, with zero
+hits** — 3058 characters across the seven r1/r2 runs, and again identical
+across the r4 pair after the `fr_dated_events` instruction was added. The prompt holds the run clock, the budget
 line, the persona and the task instruction — no variant label, no page path, no
 sample name, no model name, no metrics line, no gate refusal, no run id. The
 variant label reaches the audit table and never the model, which is why the
@@ -171,7 +218,10 @@ grep -rniE "claude|gpt-|opus|sonnet|haiku|dsh:|quality: leaks|pit coverage|gate 
 
 ## Cost
 
-Eight runs, $1.26 total, 12.1 minutes of wall time. A review costs about
-$0.09–$0.25 and one to two minutes. Cache reads dominate the token count
-(41k–216k) because the rubric, the page and the recordings are re-read across
-the tool loop; output is 3.5k–9.8k tokens.
+Ten runs, $1.70 total, 16.0 minutes of wall time. A review costs about
+$0.09-$0.25 and one to two minutes. Cache reads dominate the token count
+(41k-255k) because the rubric, the page and the recordings are re-read across
+the tool loop; output is 3.5k-9.8k tokens. The `fr_dated_events` pre-pass adds
+roughly 40k cache-read tokens and no measurable wall time — it is one file walk
+over ~80 KB of gzip, done in-process before the model's first turn on the
+question.

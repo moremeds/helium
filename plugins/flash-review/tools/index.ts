@@ -1,12 +1,16 @@
 /**
- * Three read-only tools, and deliberately no fourth.
+ * Four read-only tools, and every one of them reads only the page, the frozen
+ * evidence or the rubric.
  *
- * The reviewer must see the page, the frozen evidence behind it and the rubric
- * — and nothing else. Everything a fourth tool could reach (the run report, the
- * step JSON, the variant label, the author's own self-report) is exactly what
- * the Step 2 rules forbid it to see, so the smallest catalog that can do the
- * job is also the one that enforces the blindness. There is no settler: this
- * tenant promises nothing measurable about the future.
+ * That boundary, not the count, is the rule. Anything a further tool could
+ * reach — the run report, the step JSON, the variant label, the author's own
+ * self-report — is exactly what the Step 2 rules forbid the reviewer to see,
+ * so the catalog stays inside the three things a blind read is allowed. The
+ * fourth tool, `fr_dated_events`, is a deterministic view OF the evidence
+ * rather than a new source: it was added in calibration round 4 after three
+ * rounds proved a model cannot be prompted into an exhaustive enumeration.
+ * There is no settler: this tenant promises nothing measurable about the
+ * future.
  * @module dsh-plugin-tenant-flash-review/tools
  */
 import { gunzipSync } from "node:zlib";
@@ -34,10 +38,25 @@ export const MAX_RAW_BYTES = 20_000;
  *  context on the first tool call. */
 const MAX_PAGE_BYTES = 400_000;
 
+/**
+ * The ceiling on how many dated items `fr_dated_events` returns.
+ *
+ * The list exists to be CHECKED, item by item, against the page. A list longer
+ * than a reviewer will actually walk is a list it will skim, which is the
+ * failure this tool was built to remove.
+ */
+export const MAX_DATED_EVENTS = 80;
+
+/** Chars of surrounding text kept with each dated token. Enough to tell an
+ *  FOMC meeting from an expiry from a bond auction; not enough to become a
+ *  second copy of the recording. */
+const SNIPPET_CHARS = 160;
+
 export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["fr_rubric", { mutating: false }],
   ["fr_page", { mutating: false, requiresEnv: "FR_PAGE" }],
   ["fr_evidence", { mutating: false, requiresEnv: "FR_EVIDENCE_DIR" }],
+  ["fr_dated_events", { mutating: false, requiresEnv: "FR_EVIDENCE_DIR" }],
 ]);
 
 const RubricParams = z.object({});
@@ -45,6 +64,10 @@ const PageParams = z.object({});
 const EvidenceParams = z.object({
   file: z.string().min(1).max(200).optional(),
   offset: z.number().int().nonnegative().optional(),
+});
+const DatedEventsParams = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
 });
 
 /** One `NNNNN-<tool>.json.gz` under a run's `tool-io/`, as the runner wrote it
@@ -79,6 +102,135 @@ function readRecording(path: string): Recording {
     ? gunzipSync(bytes).toString("utf8")
     : bytes.toString("utf8");
   return JSON.parse(text) as Recording;
+}
+
+/** One dated token found in one recording. `token` is the text as the
+ *  recording wrote it, because the PAGE may write the same day either way —
+ *  `2026-09-16` in a JSON block, `9/16` in prose — and a reviewer searching for
+ *  only one of the two forms finds nothing. */
+export interface DatedEvent {
+  date: string;
+  token: string;
+  tool: string;
+  file: string;
+  snippet: string;
+}
+
+/** `YYYY-MM-DD`, and `M/D` or `M/D/YYYY` with no digit or slash on either side
+ *  (so `9/16` matches and `1/2/3/4`, `39758465` and a price ratio do not). */
+const ISO_DATE = /\d{4}-\d{2}-\d{2}/gu;
+const SLASH_DATE = /(?<![\d/])(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?(?![\d/])/gu;
+
+function snippetAround(raw: string, at: number, length: number): string {
+  const pad = Math.max(0, Math.floor((SNIPPET_CHARS - length) / 2));
+  return raw
+    .slice(Math.max(0, at - pad), at + length + pad)
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, SNIPPET_CHARS);
+}
+
+function valid(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const at = new Date(Date.UTC(year, month - 1, day));
+  return at.getUTCMonth() === month - 1 && at.getUTCDate() === day;
+}
+
+function iso(year: number, month: number, day: number): string {
+  return `${String(year)}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Every dated token one recording carries, deterministically.
+ *
+ * NO MODEL, no judgement about what is material, no idea what an FOMC is: this
+ * hands back tokens and their surroundings and stops. Deciding which of them
+ * had to reach the page is the reviewer's job — the point of the split is that
+ * the reviewer CHECKS a list it did not build, because three calibration
+ * rounds showed a model asked to build the list quietly builds a partial one.
+ *
+ * A bare `M/D` has no year of its own. It takes the year of the recording's
+ * own `at` timestamp, which is the year the run happened in; `yearHint` is
+ * that value, and a token that cannot be given a year is dropped rather than
+ * guessed into a different one.
+ */
+export function datedEventsIn(
+  record: Recording,
+  file: string,
+  yearHint?: number,
+): DatedEvent[] {
+  const raw = record.raw ?? "";
+  const found: DatedEvent[] = [];
+  for (const match of raw.matchAll(ISO_DATE)) {
+    const token = match[0];
+    const [year, month, day] = token.split("-").map(Number);
+    if (!valid(year!, month!, day!)) continue;
+    found.push({
+      date: token,
+      token,
+      tool: record.tool,
+      file,
+      snippet: snippetAround(raw, match.index, token.length),
+    });
+  }
+  const year =
+    yearHint ??
+    (record.at === undefined ? undefined : new Date(record.at).getUTCFullYear());
+  if (year !== undefined && Number.isFinite(year)) {
+    for (const match of raw.matchAll(SLASH_DATE)) {
+      const month = Number(match[1]);
+      const day = Number(match[2]);
+      const explicit = match[3] === undefined ? undefined : Number(match[3]);
+      const resolved = explicit ?? year;
+      if (!valid(resolved, month, day)) continue;
+      found.push({
+        date: iso(resolved, month, day),
+        token: match[0],
+        tool: record.tool,
+        file,
+        snippet: snippetAround(raw, match.index, match[0].length),
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * Deduplicate to ONE row per (date, tool, spelling), then order by date so the
+ * reviewer walks a calendar rather than a directory listing.
+ *
+ * The key deliberately excludes the snippet. Deduping on the snippet too was
+ * the first version and it was useless: the weekly's session frame writes
+ * `9/16` in six different surroundings, so 793 rows came back for 23 distinct
+ * days, the 80-row cap fell on the earliest dates, and every forward event —
+ * including the FOMC this whole pre-pass exists to surface — was cut off the
+ * end. One row per spelling per tool is what a reviewer can actually walk.
+ */
+export function collateDatedEvents(
+  events: readonly DatedEvent[],
+  window: { from?: string; to?: string },
+): { events: DatedEvent[]; total: number; truncated: boolean } {
+  const seen = new Set<string>();
+  const kept: DatedEvent[] = [];
+  for (const event of events) {
+    if (window.from !== undefined && event.date < window.from) continue;
+    if (window.to !== undefined && event.date > window.to) continue;
+    const key = `${event.date}|${event.tool}|${event.token}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    kept.push(event);
+  }
+  kept.sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.tool.localeCompare(b.tool) ||
+      a.snippet.localeCompare(b.snippet),
+  );
+  return {
+    events: kept.slice(0, MAX_DATED_EVENTS),
+    total: kept.length,
+    truncated: kept.length > MAX_DATED_EVENTS,
+  };
 }
 
 function requireEnv(
@@ -180,20 +332,76 @@ export function buildTools(cfg: {
           return JSON.stringify({ dir, count: index.length, recordings: index });
         }
         const record = readRecording(recordingPath(dir, file));
-        const raw = record.raw ?? "";
+        const rawText = record.raw ?? "";
         const start = offset ?? 0;
-        const window = raw.slice(start, start + MAX_RAW_BYTES);
-        const end = start + window.length;
+        const chunk = rawText.slice(start, start + MAX_RAW_BYTES);
+        const end = start + chunk.length;
         return JSON.stringify({
           file,
           tool: record.tool,
           at: record.at,
           args: record.args,
           ...(record.error === undefined ? {} : { error: record.error }),
-          rawBytes: raw.length,
+          rawBytes: rawText.length,
           offset: start,
-          raw: window,
-          ...(end < raw.length ? { nextOffset: end, truncated: true } : {}),
+          raw: chunk,
+          ...(end < rawText.length ? { nextOffset: end, truncated: true } : {}),
+        });
+      },
+    },
+    {
+      // The pre-pass that exists because the reviewer could not be talked into
+      // doing it. Three calibration rounds asked a model to enumerate the
+      // dated events in the evidence and then check the page against them; all
+      // three produced a partial list that happened to omit the one event the
+      // page was missing. Extraction is mechanical, so it moved into code, and
+      // the model is left with the half only it can do: deciding which dated
+      // item a reader had to be told about.
+      name: "fr_dated_events",
+      description:
+        "Every dated token in the frozen recordings, extracted deterministically: date, the token as the recording wrote it (`2026-09-16` or `9/16`), the tool it came from and 160 chars of surrounding text. Narrow with `from`/`to`. This is the list to CHECK the page against; do not build your own.",
+      paramsSchema: DatedEventsParams,
+      mutating: false,
+      dshParams: {
+        from: {
+          type: "string",
+          description:
+            "Earliest date to return, YYYY-MM-DD. Omit for no lower bound.",
+        },
+        to: {
+          type: "string",
+          description:
+            "Latest date to return, YYYY-MM-DD. Omit for no upper bound.",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const window = DatedEventsParams.parse(args);
+        const dir = requireEnv(cfg.env, "FR_EVIDENCE_DIR");
+        const all: DatedEvent[] = [];
+        const unreadable: Array<{ file: string; reason: string }> = [];
+        for (const name of readdirSync(dir)
+          .filter((file) => file.endsWith(".json.gz") || file.endsWith(".json"))
+          .sort()) {
+          try {
+            all.push(...datedEventsIn(readRecording(join(dir, name)), name));
+          } catch (error: unknown) {
+            // Same rule as the index: an unreadable recording is a fact about
+            // the evidence the reviewer needs, not a reason to return a list
+            // that silently covers less than it claims to.
+            unreadable.push({
+              file: name,
+              reason: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+        const collated = collateDatedEvents(all, window);
+        return JSON.stringify({
+          window,
+          total: collated.total,
+          returned: collated.events.length,
+          truncated: collated.truncated,
+          ...(unreadable.length === 0 ? {} : { unreadable }),
+          events: collated.events,
         });
       },
     },

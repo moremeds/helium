@@ -65,32 +65,38 @@ Severity `blocking`.
 An event the evidence carries that a reader of this page had to be told, and
 the page does not name it.
 
-**This one is a procedure, not an impression, and the procedure is mandatory.**
-An omission is invisible to a reader of the page alone — there is nothing on
-the page to notice — so it is only ever found by working the other way round,
-from the evidence to the page. Two calibration rounds were lost to a reviewer
-that read the page attentively and never ran this list.
+**You do not build the list for this one. `fr_dated_events` builds it and you
+check it.** An omission is invisible to a reader of the page alone — there is
+nothing on the page to notice — so it can only be found by working the other
+way round, from the evidence to the page. Three calibration rounds were lost to
+a reviewer that was asked to enumerate the evidence itself and each time
+produced a partial list that happened to leave out the very event the page had
+dropped. Enumeration is mechanical, so it is now done in code.
 
-Before you write any finding:
+The procedure, and it is mandatory:
 
-1. Open every recording whose tool name mentions a calendar, earnings, events,
-   a session frame, a review window or headlines. Read them to the end; use
-   `offset` if one is longer than the byte window.
-2. From their raw text, list every DATED item: a policy meeting, an earnings
-   date, a scheduled print, a named speaker, an event with an implied move or
-   a forecast. Write down the date and the recording it came from.
-3. For each one, search the page text for the event's name AND its date. A
-   mention anywhere on the page counts — an appendix row counts.
-4. Every item on your list that the page never mentions is a finding of this
-   signature, unless the page explicitly says there was nothing of that kind.
+1. Call `fr_dated_events`. Narrow it with `from`/`to` around the page's own
+   date range if the list is long; the reply says how many it held back.
+2. Walk **every** returned item. Read its `snippet` to see what the date is
+   attached to.
+3. For each, search the page for the item's `date` AND its `token` — the
+   recording may write `2026-09-16` where the page writes `9/16`, and either
+   spelling anywhere on the page, appendix rows included, counts as present.
+4. Record each item in `events_checked` with `in_page` true or false.
+5. Raise a `missing-major-event` finding for every `in_page: false` item whose
+   snippet shows it is **scheduled or macro**: a policy meeting (FOMC), a
+   scheduled print (CPI, NFP, PCE, claims), a central-bank speaker, or the
+   earnings date of a name the page or its focus/watchlist tracks. Do not raise
+   one for a settlement date, an expiry, an observation timestamp, a
+   far-dated earnings for a name the page never mentions, or a date the page
+   explicitly says there was nothing of.
 
-Report the whole list in `events_checked`, including the ones the page does
-name. A review that returns an empty or absent `events_checked` has not
-performed this check, whatever else it found.
+For step 5 the `sentence` you cite is the page sentence that SHOULD have
+carried the event — the outlook or catalysts sentence nearest to where it
+belongs — and the `evidence` is the recording and snippet that carries it.
 
-Material means: an earnings report from a name the page or its watchlist
-tracks; a scheduled macro print or a central-bank speaker; an event whose
-implied move or forecast the evidence carries.
+A review that returns an empty or absent `events_checked` has not performed
+this check, whatever else it found.
 
 Severity `blocking` when the page's own subject makes the omission decisive
 (the day's biggest scheduled event, an earnings print in a name the page
