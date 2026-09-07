@@ -82,7 +82,9 @@ function phaseOf(commitment: Commitment): string {
   return head === undefined || head === "" ? commitment.variant : head;
 }
 
-function isOpen(day: string, calendar?: TenantCalendar): boolean {
+/** One definition of "the market was open that day", exported so the renderer's
+ *  §7 settle date and this settler cannot disagree about a holiday. */
+export function isOpen(day: string, calendar?: TenantCalendar): boolean {
   const weekday = new Date(`${day}T00:00:00Z`).getUTCDay();
   if (weekday === 0 || weekday === 6) return false;
   return !(calendar?.closed ?? []).includes(day);

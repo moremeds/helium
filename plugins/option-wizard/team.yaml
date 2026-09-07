@@ -704,8 +704,6 @@ tasks:
         list of figures the coverage table prints — one `{id, level}` per row. DO
         NOT REPEAT THESE FIGURES: a paragraph carrying one is dropped whole. Name
         the row id instead. DO NOT RESTATE ANY NUMBER THAT APPEARS IN SECTION 3.
-        Every sentence names a row and says whether it continues, reverses or
-        strengthens, and one reason.
       - `catalysts` at most 60 words, naming only admitted dated events.
       - `coverage` carries ONE entry per row you were given, in that order. THE ROWS
         ARE THESE 23 AND THE REPLY CARRIES ALL 23: rates.front, rates.long,
@@ -834,9 +832,7 @@ tasks:
         not carry is dropped whole.
       - `outlook` is 下周展望, at most 400 words: the WHY behind each verdict that is
         not `continue`, one observable each. DO NOT RESTATE ANY NUMBER THAT
-        APPEARS IN SECTION 3. Every sentence names a row and says whether it
-        continues, reverses or strengthens, and one reason — a sentence that
-        names no row is a sentence the reader cannot act on. The frame's `noRestate` array is the
+        APPEARS IN SECTION 3. The frame's `noRestate` array is the
         EXACT list of figures section 3 prints — one `{id, level}` per row. DO NOT
         REPEAT THESE FIGURES: a paragraph carrying any one of those numbers is
         dropped whole. Name the row id and say what it did; the number is already

@@ -212,12 +212,18 @@ const DOC_EMPTY: ReviewDoc = {
   themes: [],
 };
 
+/** The tenant's own closed days, as `plugins/option-wizard/tenant.yaml` lists
+ *  them: 2026-09-07 is Labor Day. The renderer is handed this calendar in
+ *  production, so the tests are handed it too. */
+const CALENDAR = { weekdaysOnly: true, closed: ["2026-09-07"] };
+
 function render(over: {
   frame?: SessionFrame;
   doc?: ReviewDoc | null;
   period?: "weekly" | "daily";
   rotation?: Parameters<typeof reviewSections>[0]["rotation"];
   calendarRows?: CalendarRow[];
+  calendar?: Parameters<typeof reviewSections>[0]["calendar"];
 }) {
   const f = over.frame ?? frame();
   const period = over.period ?? "weekly";
@@ -228,6 +234,7 @@ function render(over: {
     caps: period === "weekly" ? f.caps.weekly : f.caps.daily,
     period,
     calendarRows: over.calendarRows ?? [],
+    calendar: over.calendar ?? CALENDAR,
   });
 }
 
@@ -284,9 +291,8 @@ describe("section 3 — the coverage list never shrinks", () => {
     expect(left.length).toBe(1);
     expect(left[0]).toContain(`left out: ${String(ROW_COUNT)} rows — `);
     expect(
-      (out.view.coverageDetail ?? []).filter(
-        (row) => row.leftOut !== undefined,
-      ).length,
+      (out.view.coverageDetail ?? []).filter((row) => row.leftOut !== undefined)
+        .length,
     ).toBe(ROW_COUNT);
   });
 
@@ -673,8 +679,9 @@ describe("section 1 — the scorecard", () => {
         },
       }),
     });
-    // 2026-09-04 + 5 weekdays is 2026-09-11; the focus window closes the same
-    // day. Either way the reader is told a date, not an id.
+    // Five OPEN days from 2026-09-04 is 2026-09-14 (09-07 is Labor Day); the
+    // focus window closes 2026-09-11 and is the earlier of the two. Either way
+    // the reader is told a date, not an id.
     expect(body(out.sections, 1)).toContain(
       "Nothing settled yet — first settles 2026-09-11",
     );
@@ -690,6 +697,18 @@ describe("section 5 — dated catalysts", () => {
     prev: "3.0%",
     session: "pre",
   };
+
+  // 08:30 ET and 16:05 ET are different events, and a forecast with no prior
+  // beside it says less than either number alone: the row's whole timestamp,
+  // its session, its forecast AND its prior all reach the page.
+  it("prints the release time, the session, the forecast and the prior", () => {
+    const line = body(render({ calendarRows: [admitted] }).sections, 5)
+      .split("\n")
+      .find((row) => row.startsWith("- "))!;
+    expect(line).toBe(
+      "- 2026-09-10T12:30:00Z · CPI YoY · pre · fcst 2.9% · prev 3.0%",
+    );
+  });
 
   it("A4: an undated row is not printed, is listed, and a paragraph naming it is dropped", () => {
     const undated = {
@@ -781,7 +800,7 @@ describe("section 5 — dated catalysts", () => {
   //   6.9333% · post — settles: 2026-09-11`: the type is already in the event,
   // the session is printed twice, the settle day is the ledger's business, and
   // the implied move is four decimals of a number quoted to one.
-  it("prints the day, the event and the quoted number, and nothing else", () => {
+  it("drops the type, the second session and the four-decimal percent", () => {
     const out = render({
       calendarRows: [
         {
@@ -796,7 +815,10 @@ describe("section 5 — dated catalysts", () => {
     const line = body(out.sections, 5)
       .split("\n")
       .find((row) => row.startsWith("- "))!;
-    expect(line).toBe("- 2026-09-10 · ADBE earnings (post) · implied move 6.9%");
+    // The event text already says `(post)`, so the session is not repeated.
+    expect(line).toBe(
+      "- 2026-09-10 · ADBE earnings (post) · fcst implied move 6.9%",
+    );
   });
 
   it("falls back to the prior when a row carries no forecast", () => {
@@ -811,7 +833,9 @@ describe("section 5 — dated catalysts", () => {
         },
       ],
     });
-    expect(body(out.sections, 5)).toContain("- 2026-09-02 · AVGO Q3 · prev 1.24");
+    expect(body(out.sections, 5)).toContain(
+      "- 2026-09-02T20:30:00Z · AVGO Q3 · post · prev 1.24",
+    );
     expect(body(out.sections, 5)).not.toContain("settles:");
   });
 });
@@ -911,7 +935,10 @@ describe("section 6 — the focus list", () => {
       doc: {
         ...DOC_EMPTY,
         focus: [
-          { ticker: "TSM", why: "Earnings 2026-10-15; 7.86% IV expects volume recovery." },
+          {
+            ticker: "TSM",
+            why: "Earnings 2026-10-15; 7.86% IV expects volume recovery.",
+          },
         ],
       },
     });
@@ -1018,13 +1045,36 @@ describe("section 7 — open calls", () => {
       }),
     });
     const section = body(out.sections, 7);
-    // Sorted by settle day: rates.long comes due 2026-09-07, ADBE 2026-09-11.
+    // Sorted by settle day. rates.long was issued Friday 2026-09-04 and settles
+    // after ONE OPEN day: the Monday is Labor Day, so it comes due 2026-09-08,
+    // not 2026-09-07 — the same day the settler counts to. ADBE 2026-09-11.
     expect(section.split("\n")).toEqual([
-      "rates.long · CONTINUE p=0.60 · settles 2026-09-07",
+      "rates.long · CONTINUE p=0.60 · settles 2026-09-08",
       "ADBE · MOVES p=0.50 · settles 2026-09-11",
     ]);
     expect(section).not.toMatch(/\b\d{4}-\d{2}-\d{2}-[a-z]+-/u);
     expect(section).not.toContain("issued");
+  });
+
+  // The regression this pins: with no closed day the SAME row prints the
+  // Monday. Labor Day is what moves it, so the calendar is being read.
+  it("skips a tenant holiday, and prints it when the day is open", () => {
+    const settles = (calendar: { weekdaysOnly: boolean; closed: string[] }) =>
+      body(
+        render({
+          calendar,
+          frame: frame({
+            ledger: { settledToday: [], open, totalCommitments: 2 },
+          }),
+        }).sections,
+        7,
+      ).split("\n")[0];
+    expect(settles({ weekdaysOnly: true, closed: [] })).toContain(
+      "settles 2026-09-07",
+    );
+    expect(settles({ weekdaysOnly: true, closed: ["2026-09-07"] })).toContain(
+      "settles 2026-09-08",
+    );
   });
 
   it("a direction leg settles on bars, and says so", () => {

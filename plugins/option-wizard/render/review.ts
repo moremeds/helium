@@ -23,7 +23,8 @@
  */
 
 import type { CommitmentDraft, RunMetric } from "@helium/core";
-import { VERDICT_BANDS } from "../eval/verdict.js";
+import { isOpen, VERDICT_BANDS } from "../eval/verdict.js";
+import type { TenantCalendar } from "../eval/bars.js";
 import { FOCUS_BANNED_PATTERNS } from "../quality/focus.js";
 import { printedLevels, type CoverageRow } from "../quality/channels.js";
 import type {
@@ -299,14 +300,23 @@ function unitOf(move: string | undefined): string {
   return match?.[1] ?? "";
 }
 
-/** Weekday arithmetic only. The renderer holds no calendar (the tenant's is a
- *  tool-side block), so a market holiday is NOT skipped here; the settler,
- *  which does hold the calendar, is what decides when a row is actually due. */
+/** Weekday arithmetic only: a market holiday is NOT skipped here. Use
+ *  `nextOpenDay` for anything a settler will later count. */
 function nextWeekday(day: string): string {
   const date = new Date(`${day}T00:00:00Z`);
   do date.setUTCDate(date.getUTCDate() + 1);
   while (date.getUTCDay() === 0 || date.getUTCDay() === 6);
   return date.toISOString().slice(0, 10);
+}
+
+/** The next day the tenant says the market is OPEN, by the settler's own
+ *  `isOpen`. Bounded because the closed list is tenant data: a malformed run of
+ *  closed days must not spin the renderer. */
+function nextOpenDay(day: string, calendar?: TenantCalendar): string {
+  let out = nextWeekday(day);
+  for (let step = 0; step < 14 && !isOpen(out, calendar); step += 1)
+    out = nextWeekday(out);
+  return out;
 }
 
 function priorWeekday(day: string): string {
@@ -381,11 +391,17 @@ export function pendingLine(row: OpenRow): string {
  * The day a still-open commitment comes due, from its own payload.
  *
  * A `focus-admit` carries the window it settles over; a coverage verdict
- * carries `settleAfterOpenDays` and is counted forward from the issue day by
- * the same weekday arithmetic the rest of this file uses. A direction leg
- * carries neither — it settles on BARS — and gets `undefined`.
+ * carries `settleAfterOpenDays` and is counted forward from the issue day over
+ * the TENANT'S calendar, which is what the settler counts over too
+ * (`eval/verdict.ts`). Weekday arithmetic alone printed "settles 2026-09-07"
+ * for a call issued the Friday before Labor Day — a day the market is shut and
+ * no receipt can ever land. A direction leg carries neither — it settles on
+ * BARS — and gets `undefined`.
  */
-export function settleDay(row: OpenRow): string | undefined {
+export function settleDay(
+  row: OpenRow,
+  calendar?: TenantCalendar,
+): string | undefined {
   const payload = payloadOf(row);
   const window = payload.window;
   if (window !== null && typeof window === "object") {
@@ -395,7 +411,7 @@ export function settleDay(row: OpenRow): string | undefined {
   const after = payload.settleAfterOpenDays;
   if (typeof after !== "number" || !Number.isFinite(after)) return undefined;
   let day = row.issuedDay;
-  for (let step = 0; step < after; step += 1) day = nextWeekday(day);
+  for (let step = 0; step < after; step += 1) day = nextOpenDay(day, calendar);
   return day;
 }
 
@@ -409,7 +425,7 @@ export function settleDay(row: OpenRow): string | undefined {
  * only part a reader can act on; the id stays in the ledger, where it is
  * addressable.
  */
-export function openCallLine(row: OpenRow): string {
+export function openCallLine(row: OpenRow, calendar?: TenantCalendar): string {
   const payload = payloadOf(row);
   const name =
     typeof payload.rowId === "string"
@@ -429,7 +445,7 @@ export function openCallLine(row: OpenRow): string {
           : "OPEN";
   const p = typeof payload.p === "number" ? payload.p : payload.pDown;
   const said = typeof p === "number" ? ` p=${p.toFixed(2)}` : "";
-  const day = settleDay(row);
+  const day = settleDay(row, calendar);
   if (day !== undefined) return `${name} · ${verdict}${said} · settles ${day}`;
   return row.deadlineBars === undefined
     ? `${name} · ${verdict}${said}`
@@ -533,6 +549,9 @@ export interface ReviewSectionsArgs {
   /** From the emitting TASK id, never a phase. */
   period: ReviewPeriod;
   calendarRows: CalendarRow[];
+  /** The tenant's open/closed days, so a printed settle date lands on a day the
+   *  settler can actually settle. Absent means weekdays only. */
+  calendar?: TenantCalendar;
 }
 
 export interface ReviewSectionsResult {
@@ -712,7 +731,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     }
   }
   const nextDue = open
-    .map((row) => settleDay(row))
+    .map((row) => settleDay(row, args.calendar))
     .filter((day): day is string => day !== undefined)
     .sort((a, b) => a.localeCompare(b))[0];
   const scoreLines: string[] = [
@@ -765,7 +784,9 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         })()
       : `${row.level ?? "—"} → ${row.move ?? row.prior ?? "—"}`;
     const band =
-      entry === undefined || entry.token === "untested" || row.delta === undefined
+      entry === undefined ||
+      entry.token === "untested" ||
+      row.delta === undefined
         ? undefined
         : bandText(entry.token, row.delta, unitOf(row.move));
     detail.push({
@@ -789,7 +810,8 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       return `- ${row.id} · ${row.level ?? "—"}`;
     // TWO FIELDS AND NO MORE WHEN THERE IS NO DATUM. The `left out:` summary at
     // the end of the section still carries the source's own words.
-    if (row.untested !== undefined) return `- ${row.id} · ${NO_DATUM} · UNTESTED`;
+    if (row.untested !== undefined)
+      return `- ${row.id} · ${NO_DATUM} · UNTESTED`;
     // A DATUM NOBODY CALLED STILL PRINTS ITS NUMBER. Folding this into the
     // no-datum line put "no datum this period" beside ten sector rows the
     // frame had just priced, on the review-v6 rerun where the author answered
@@ -948,19 +970,25 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       continue;
     }
     admitted.push(row.event);
-    // THREE FIELDS: when, what, and the number the market is quoting. The
-    // 2026-09-06 line carried the type ("earnings", already in the event), the
-    // session twice ("ADBE earnings (post) … · post"), a settle day mechanically
-    // one weekday later, and `implied move 6.9333%` — four decimals of a
-    // fraction nobody quotes. The settle day is the ledger's business; the
-    // percent goes through the units table like every other printed figure.
+    // WHEN, WHAT, AND BOTH NUMBERS. The release TIME is the point of a dated
+    // row — 08:30 ET and 16:05 ET are different events — so the row's own
+    // timestamp is printed whole, never truncated to its day. The forecast and
+    // the prior are printed together: a forecast with nothing to compare it
+    // against says less than either number alone. What the 2026-09-06 line
+    // carried and this one does not: the type ("earnings", already in the
+    // event), the session a second time ("ADBE earnings (post) … · post"), a
+    // settle day mechanically one weekday later (the ledger's business), and
+    // `implied move 6.9333%` — four decimals of a fraction nobody quotes, so
+    // the percent goes through the units table like every other printed figure.
     catalystLines.push(
-      `- ${row.time.slice(0, 10)} · ${row.event}` +
-        (row.forecast !== undefined
-          ? ` · ${roundPercents(row.forecast)}`
-          : row.prev === undefined
-            ? ""
-            : ` · prev ${roundPercents(row.prev)}`),
+      `- ${row.time} · ${row.event}` +
+        (row.session === undefined || row.event.includes(row.session)
+          ? ""
+          : ` · ${row.session}`) +
+        (row.forecast === undefined
+          ? ""
+          : ` · fcst ${roundPercents(row.forecast)}`) +
+        (row.prev === undefined ? "" : ` · prev ${roundPercents(row.prev)}`),
     );
   }
   for (const line of notAdmitted) catalystLines.push(`not admitted: ${line}`);
@@ -1105,11 +1133,11 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       ? "nothing outstanding"
       : [...open]
           .sort((a, b) =>
-            (settleDay(a) ?? "9999-99-99").localeCompare(
-              settleDay(b) ?? "9999-99-99",
+            (settleDay(a, args.calendar) ?? "9999-99-99").localeCompare(
+              settleDay(b, args.calendar) ?? "9999-99-99",
             ),
           )
-          .map((row) => openCallLine(row))
+          .map((row) => openCallLine(row, args.calendar))
           .join("\n");
 
   // Assembled LAST, in §J.1's order, because the bodies are computed in
