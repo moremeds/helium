@@ -140,6 +140,19 @@ beside them. That is the first human read in the plan.
 
 ## Step 3 — wire the shape back into the pipeline (2–3 days)
 
+Defects found by the Step 2 scoring that belong here, not to a prompt:
+
+- The rendered catalysts section prints "No calendar rows were admitted"
+  on the 2026-09-06 weekly although `ow_session_frame` carries 18 dated
+  rows (FOMC 9/16, ADBE/ORCL 9/10, MU 9/30, FOMC 10/28). The admission rule
+  in the renderer drops the frame's calendar; the author's prompt had it.
+- A live weekly takes its day from the clock (`day: 2026-09-07`, `mode:
+no-data` on a Monday holiday) instead of the week it reviews.
+- The reviewer's missing-event pre-pass flags FOMC dates one to three
+  months out on daily pages (`major`, never blocking). Decide the horizon a
+  daily page owes (next scheduled meeting only?) and encode it in the
+  rubric.
+
 - `team.yaml`: `weekly` task requires `reason.deep`; weekly role gets the news
   tool input; delete the "one sentence if nothing settled" persona rule, the
   per-row outlook rule, the restate fault and `FOCUS_BANNED_PATTERNS`; word
