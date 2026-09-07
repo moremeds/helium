@@ -56,7 +56,16 @@ tasks:
                     "sentence":"<verbatim sentence from the page>",
                     "evidence":"<the recording and value that contradicts it, or \"absent from evidence\">",
                     "severity":"blocking"|"major"|"minor"}],
+       "events_checked":[{"event":"<name>","date":"<yyyy-mm-dd or as the recording writes it>",
+                          "recording":"<file it came from>","in_page":true|false}],
        "kept_inference":["<verbatim sentence you judged to be legitimate labelled inference>"]}
+
+      `events_checked` is the rubric's signature 3 procedure, and it is not
+      optional: list EVERY dated event the calendar, earnings, session-frame,
+      review-window and headline recordings carry, whether or not the page
+      mentions it. Every entry with `"in_page":false` needs a matching
+      `missing-major-event` finding unless the page explicitly says there was
+      no such event.
 
       `verdict` is `fail` if any finding is `blocking` or `major`. A `fail`
       needs at least one finding whose `sentence` is copied character for

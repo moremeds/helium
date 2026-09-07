@@ -63,9 +63,30 @@ Severity `blocking`.
 ### 3. `missing-major-event`
 
 An event the evidence carries that a reader of this page had to be told, and
-the page does not name it. Work from the evidence, not from memory: read the
-calendar, earnings, headline and news recordings, list every item that is
-material for the page's day, and check each one appears in the page.
+the page does not name it.
+
+**This one is a procedure, not an impression, and the procedure is mandatory.**
+An omission is invisible to a reader of the page alone — there is nothing on
+the page to notice — so it is only ever found by working the other way round,
+from the evidence to the page. Two calibration rounds were lost to a reviewer
+that read the page attentively and never ran this list.
+
+Before you write any finding:
+
+1. Open every recording whose tool name mentions a calendar, earnings, events,
+   a session frame, a review window or headlines. Read them to the end; use
+   `offset` if one is longer than the byte window.
+2. From their raw text, list every DATED item: a policy meeting, an earnings
+   date, a scheduled print, a named speaker, an event with an implied move or
+   a forecast. Write down the date and the recording it came from.
+3. For each one, search the page text for the event's name AND its date. A
+   mention anywhere on the page counts — an appendix row counts.
+4. Every item on your list that the page never mentions is a finding of this
+   signature, unless the page explicitly says there was nothing of that kind.
+
+Report the whole list in `events_checked`, including the ones the page does
+name. A review that returns an empty or absent `events_checked` has not
+performed this check, whatever else it found.
 
 Material means: an earnings report from a name the page or its watchlist
 tracks; a scheduled macro print or a central-bank speaker; an event whose

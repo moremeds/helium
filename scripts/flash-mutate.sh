@@ -98,26 +98,59 @@ Signature the reviewer must return: `date-conflict`.
 Sentence it must cite: the sentence containing "the final 2026-09-02 print".
 EOF
 
-    # --- M2: the main event's paragraph deleted -----------------------------
-    # The FOMC/hike-probability paragraph is the page's one forward catalyst.
-    # Deleting the sentence that carries it leaves an outlook that names no
-    # policy event at all, while the evidence still carries the probability.
+    # --- M2: the main event deleted ----------------------------------------
+    # The 2026-09-16 FOMC is the page's one forward policy event. The FIRST
+    # version of this mutation removed only the catalysts sentence and was a
+    # dud: the page still named "9/16" in three other places, so a reviewer
+    # that did not report a missing event was reading the page correctly. All
+    # four mentions go, and only they — the evidence still carries
+    # `2026-09-16` and the 55.7% hike probability, so the omission is a real,
+    # checkable one.
     mkdir -p "$out/m2-deleted-event"
-    sed 's/ FOMC 9\/16 with 55\.7% hike probability will reset terminal rate expectations\.//' "$page" \
-      >"$out/m2-deleted-event/page.md"
+    sed -e 's/ FOMC 9\/16 with 55\.7% hike probability will reset terminal rate expectations\.//' \
+        -e 's/the 9\/16 hike probability coin-flip did not resolve/the hike probability coin-flip did not resolve/' \
+        -e 's/"observable": "FOMC 9\/16 resolves by 2026-09-17\."/"observable": ""/' \
+        -e "s/as a live FOMC stays a coin flip,'/on the week,'/" \
+        "$page" >"$out/m2-deleted-event/page.md"
+    if grep -qi 'FOMC\|9\/16' "$out/m2-deleted-event/page.md"; then
+      echo "flash-mutate: m2 still names the event it was meant to delete" >&2
+      exit 1
+    fi
     cat >"$out/m2-deleted-event/MUTATION.md" <<'EOF'
-# M2 — the main event's paragraph deleted
+# M2 — the main event deleted
 
-One deletion, from the catalysts section:
+Four substitutions, and nothing else. Together they remove every mention of the
+2026-09-16 FOMC from the page:
 
-    FOMC 9/16 with 55.7% hike probability will reset terminal rate expectations.
+1. catalysts — drop `FOMC 9/16 with 55.7% hike probability will reset terminal
+   rate expectations.`
+2. review — `the 9/16 hike probability coin-flip did not resolve` becomes
+   `the hike probability coin-flip did not resolve`
+3. the `policy.path` coverage row — `"observable": "FOMC 9/16 resolves by
+   2026-09-17."` becomes `"observable": ""`
+4. the 10-session week-review body — the quoted cause `Vol bleeding to a
+   three-week low as a live FOMC stays a coin flip,` becomes `Vol bleeding to a
+   three-week low on the week,`
 
-Nothing else changed. The evidence still carries the hike probability and the
-FOMC date; the page no longer names the meeting anywhere in its forward view.
+The generator refuses to write the file if `FOMC` or `9/16` survives anywhere
+in it.
+
+The evidence is untouched: `00001-ow_session_frame.json.gz` and
+`00003-…` carry `2026-09-16` and the FOMC hike probability, and
+`00009-ow_review_window.json.gz` carries the FOMC cause line. So the page's
+forward view no longer names the one policy event its own evidence says is
+coming.
 
 Signature the reviewer must return: `missing-major-event` (or
-`outlook-has-more-than-the-calendar` if it reads the gap as an outlook that
-lost its only policy anchor).
+`outlook-has-more-than-the-calendar`, which is the same omission read from the
+outlook's side).
+
+## Why the first version of this mutation was replaced
+
+It deleted only substitution 1. The page went on naming `9/16` in three other
+places, so there was no missing event to find, and the round-1 reviewer was
+right not to report one. Recorded rather than quietly fixed: a calibration item
+that cannot be failed teaches the rubric nothing.
 EOF
 
     # --- M3: an inserted, plausible, unsourced mechanism ---------------------

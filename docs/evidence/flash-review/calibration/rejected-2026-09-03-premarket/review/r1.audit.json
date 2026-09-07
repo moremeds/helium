@@ -1,0 +1,25 @@
+{
+ "runId": "run-6b7a290b-bab4-46f8-83ff-9e2dca13b2cc",
+ "spans": [
+  {
+   "role": "reviewer",
+   "provider": "anthropic",
+   "model": "claude-opus-4-8",
+   "tin": 10,
+   "tout": 3541,
+   "cache": 86750,
+   "usd": 0.088575,
+   "sec": 53.656
+  },
+  {
+   "role": "delivery",
+   "provider": "none",
+   "model": "none",
+   "tin": 0,
+   "tout": 0,
+   "cache": 0,
+   "usd": 0,
+   "sec": 0.001
+  }
+ ]
+}
