@@ -270,16 +270,23 @@ describe("section 3 — the coverage list never shrinks", () => {
     expect(count(empty)).toBe(ROW_COUNT);
   });
 
-  it("an empty frame reads untested on every row, counts every gap and lists a reason for each", () => {
+  it("an empty frame reads untested on every row, counts every gap and sums them in one line", () => {
     const out = render({});
     const section = body(out.sections, 3);
     for (const line of section.split("\n").filter((l) => l.startsWith("- ")))
       expect(line).toBe(
-        `- ${line.split(" — ")[0]!.slice(2)} — no datum this period — UNTESTED`,
+        `- ${line.split(" · ")[0]!.slice(2)} · no datum this period · UNTESTED`,
       );
     expect(out.gaps).toBe(ROW_COUNT);
+    // ONE line, not one per row: eighteen copies of the same reason is what the
+    // reader was skipping. The per-row reason moved to `view.coverageDetail`.
+    const left = section.split("\n").filter((l) => l.startsWith("left out:"));
+    expect(left.length).toBe(1);
+    expect(left[0]).toContain(`left out: ${String(ROW_COUNT)} rows — `);
     expect(
-      section.split("\n").filter((l) => l.startsWith("left out:")).length,
+      (out.view.coverageDetail ?? []).filter(
+        (row) => row.leftOut !== undefined,
+      ).length,
     ).toBe(ROW_COUNT);
   });
 
@@ -307,9 +314,13 @@ describe("section 3 — the coverage list never shrinks", () => {
       .split("\n")
       .filter((line) => line.startsWith("left out:"));
     expect(printed.length).toBe(ROW_COUNT);
-    expect(left.length).toBe(ROW_COUNT);
+    expect(left.length).toBe(1);
     expect(out.gaps).toBe(ROW_COUNT);
-    expect(section).toContain("left out: rates.front — DGS2 not ingested");
+    expect(left[0]).toContain("rates.front");
+    expect(
+      (out.view.coverageDetail ?? []).find((row) => row.id === "rates.front")
+        ?.leftOut,
+    ).toBe("DGS2 not ingested");
   });
 
   it("a sector row prints its members and a theme row its excess triple", () => {
@@ -338,7 +349,13 @@ describe("section 3 — the coverage list never shrinks", () => {
       },
     });
     const section = body(out.sections, 3);
-    expect(section).toContain("members: NVDA, AMD");
+    // The member list is DATA now, not a tail on the printed bullet.
+    expect(section).not.toContain("members: NVDA, AMD");
+    expect(
+      (out.view.coverageDetail ?? []).find(
+        (row) => row.id === "sector:Computer/GPU",
+      )?.members,
+    ).toEqual(["NVDA", "AMD"]);
     expect(section).toContain("+1.7% (1w)");
     expect(section).toContain("since 2026-09-06");
     expect(section).toContain(`kill armed: ${THEME.kill}`);
@@ -395,9 +412,15 @@ describe("section 3 — the coverage list never shrinks", () => {
       },
     });
     // 1.5 x |−3.1| = 4.65 bp, printed at a basis point's own precision: a
-    // half-basis-point band is a number nobody quotes.
-    expect(body(out.sections, 3)).toContain(">5bp");
-    expect(body(out.sections, 3)).not.toContain("4.65");
+    // half-basis-point band is a number nobody quotes. The band is DATA now —
+    // the reader's bullet carries the row, the change, the token and the why —
+    // but it is still computed and still rounded.
+    const band = (out.view.coverageDetail ?? []).find(
+      (row) => row.id === "rates.front",
+    )?.band;
+    expect(band).toContain(">5bp");
+    expect(band).not.toContain("4.65");
+    expect(body(out.sections, 3)).not.toContain(">5bp");
   });
 
   // review-v6 close: `flow — 39758465 → +0 USD — CONTINUE (0USD..0USD)`. A
@@ -427,7 +450,11 @@ describe("section 3 — the coverage list never shrinks", () => {
     const line = body(out.sections, 3)
       .split("\n")
       .find((row) => row.startsWith("- flow"))!;
-    expect(line).toContain("CONTINUE (no prior move)");
+    expect(line).toContain("· CONTINUE ·");
+    const band = (out.view.coverageDetail ?? []).find(
+      (row) => row.id === "flow",
+    )?.band;
+    expect(band).toBe("(no prior move)");
     expect(line).not.toContain("0USD..0USD");
   });
 });
@@ -452,8 +479,8 @@ describe("what argon's section renderer can actually show", () => {
         ],
       },
     });
-    expect(body(out.sections, 3)).toContain("— CONTINUE");
-    expect(body(out.sections, 3)).toContain("— UNTESTED");
+    expect(body(out.sections, 3)).toContain("· CONTINUE");
+    expect(body(out.sections, 3)).toContain("· UNTESTED");
     for (const section of out.sections)
       expect(section.body, section.title).not.toMatch(/\*\*|__|(?<!`)`(?!`)/u);
   });
@@ -557,13 +584,14 @@ describe("section 1 — the scorecard", () => {
       }),
     });
     const section = body(out.sections, 1);
-    expect(section).toContain("4 scored of 6 issued");
-    expect(section).toContain("callHitRate 0.75");
-    expect(section).not.toContain("callHitRate 0.5 ");
-    expect(section).toContain(`${String(ROW_COUNT)} not called`);
-    expect(section).toContain(
-      "all 18 calls issued since 2026-08-24; none removed",
-    );
+    // 4 settled, 3 of them two-sided hits: the denominator is the SCORED, never
+    // the issued. The whole section is four lines and carries no commitment id.
+    expect(section).toContain("4 settled · hit 3/4");
+    expect(section).not.toContain("hit 3/6");
+    expect(section).toContain("2 open calls");
+    expect(section).toContain(`Coverage gaps: ${String(ROW_COUNT)} rows`);
+    expect(section.split("\n").length).toBe(4);
+    expect(section).not.toMatch(/\b\d{4}-\d{2}-\d{2}-[a-z]+-/u);
     expect(out.citations).toBe(4);
   });
 
@@ -613,8 +641,43 @@ describe("section 1 — the scorecard", () => {
     expect(body(daily.sections, 1)).not.toContain("calibration");
   });
 
-  it("an empty ledger is one coverage line, never an error", () => {
-    expect(body(render({}).sections, 1)).toContain("no call has come due yet");
+  it("an empty ledger says nothing settled, never an error", () => {
+    expect(body(render({}).sections, 1)).toContain(
+      "Nothing settled yet — no call has come due",
+    );
+  });
+
+  it("names the day the first open call settles", () => {
+    const out = render({
+      frame: frame({
+        ledger: {
+          settledToday: [],
+          open: [
+            {
+              id: "2026-09-04-close-verdict-vol",
+              issuedDay: "2026-09-04",
+              issuedPhase: "close",
+              payload: { kind: "coverage-verdict", settleAfterOpenDays: 5 },
+            },
+            {
+              id: "2026-09-04-close-focus-ADBE",
+              issuedDay: "2026-09-04",
+              issuedPhase: "close",
+              payload: {
+                kind: "focus-admit",
+                window: { fromDay: "2026-09-09", toDay: "2026-09-11" },
+              },
+            },
+          ],
+          totalCommitments: 2,
+        },
+      }),
+    });
+    // 2026-09-04 + 5 weekdays is 2026-09-11; the focus window closes the same
+    // day. Either way the reader is told a date, not an id.
+    expect(body(out.sections, 1)).toContain(
+      "Nothing settled yet — first settles 2026-09-11",
+    );
   });
 });
 
@@ -713,7 +776,30 @@ describe("section 5 — dated catalysts", () => {
     expect(out.faults).toEqual([]);
   });
 
-  it("C3: a post-close row dated 2026-09-02 settles the next open session", () => {
+  // The 2026-09-06 line was
+  // `- 2026-09-10 · earnings · ADBE earnings (post) · forecast implied move
+  //   6.9333% · post — settles: 2026-09-11`: the type is already in the event,
+  // the session is printed twice, the settle day is the ledger's business, and
+  // the implied move is four decimals of a number quoted to one.
+  it("prints the day, the event and the quoted number, and nothing else", () => {
+    const out = render({
+      calendarRows: [
+        {
+          time: "2026-09-10",
+          type: "earnings",
+          event: "ADBE earnings (post)",
+          forecast: "implied move 6.9333%",
+          session: "post",
+        },
+      ],
+    });
+    const line = body(out.sections, 5)
+      .split("\n")
+      .find((row) => row.startsWith("- "))!;
+    expect(line).toBe("- 2026-09-10 · ADBE earnings (post) · implied move 6.9%");
+  });
+
+  it("falls back to the prior when a row carries no forecast", () => {
     const out = render({
       calendarRows: [
         {
@@ -725,7 +811,8 @@ describe("section 5 — dated catalysts", () => {
         },
       ],
     });
-    expect(body(out.sections, 5)).toContain("settles: 2026-09-03");
+    expect(body(out.sections, 5)).toContain("- 2026-09-02 · AVGO Q3 · prev 1.24");
+    expect(body(out.sections, 5)).not.toContain("settles:");
   });
 });
 
@@ -802,6 +889,50 @@ describe("section 6 — the focus list", () => {
     expect(out.view.focus?.rows[0]?.why).toBe("");
   });
 
+  // The 2026-09-06 weekly wrote this for all five admitted names:
+  // "Earnings 2026-09-10 post; 6.93% IV expects guidance revision." Both
+  // figures are already printed in their own columns of the same row, so the
+  // sentence adds a noun. It is RECORDED, not dropped: the line is worthless,
+  // not wrong, and an empty cell would hide that the author was asked.
+  it("records a fault when a why is only the date and the implied move", () => {
+    const f = frame({
+      focus: {
+        weekly: [focusRow("TSM")] as never,
+        daily: [focusRow("TSM")] as never,
+        churn: 0,
+        carried: [],
+        dropped: [],
+        notes: [],
+        weightsNote: "weights: declared prior 2026-09-06",
+      },
+    });
+    const bad = render({
+      frame: f,
+      doc: {
+        ...DOC_EMPTY,
+        focus: [
+          { ticker: "TSM", why: "Earnings 2026-10-15; 7.86% IV expects volume recovery." },
+        ],
+      },
+    });
+    expect(bad.faults.join("\n")).toContain("focus-why-restates-date TSM");
+    expect(bad.view.focus?.rows[0]?.why).not.toBe("");
+
+    const good = render({
+      frame: f,
+      doc: {
+        ...DOC_EMPTY,
+        focus: [
+          {
+            ticker: "TSM",
+            why: "earnings 2026-10-15 is far out, so IV rank 12 mostly reflects distance, not complacency; the ASML 10-14 read-through is the nearer tell.",
+          },
+        ],
+      },
+    });
+    expect(good.faults.join("\n")).not.toContain("focus-why-restates-date");
+  });
+
   it("discards a focus entry for a ticker that is not on the list", () => {
     const f = frame({
       focus: {
@@ -821,6 +952,78 @@ describe("section 6 — the focus list", () => {
     expect(out.faults.join("\n")).toContain("GME");
     expect(out.view.focus?.rows.every((row) => row.ticker !== "GME")).toBe(
       true,
+    );
+  });
+});
+
+describe("section 7 — open calls", () => {
+  // The 2026-09-06 §7 was twelve lines of
+  // `2026-09-04-close-verdict-rates.long · issued 2026-09-06 close · pending`:
+  // the id repeats the day, the run label and the kind, and nothing on the
+  // line says WHAT was called or WHEN it comes due.
+  const open: OpenRow[] = [
+    {
+      id: "2026-09-04-close-focus-ADBE",
+      issuedDay: "2026-09-04",
+      issuedPhase: "close",
+      payload: {
+        kind: "focus-admit",
+        ticker: "ADBE",
+        p: 0.5,
+        window: { fromDay: "2026-09-09", toDay: "2026-09-11" },
+      },
+    },
+    {
+      id: "2026-09-04-close-verdict-rates.long",
+      issuedDay: "2026-09-04",
+      issuedPhase: "close",
+      payload: {
+        kind: "coverage-verdict",
+        rowId: "rates.long",
+        token: "continue",
+        p: 0.6,
+        settleAfterOpenDays: 1,
+      },
+    },
+  ];
+
+  it("names the row, the call and the settle day, and no commitment id", () => {
+    const out = render({
+      frame: frame({
+        ledger: { settledToday: [], open, totalCommitments: 2 },
+      }),
+    });
+    const section = body(out.sections, 7);
+    // Sorted by settle day: rates.long comes due 2026-09-07, ADBE 2026-09-11.
+    expect(section.split("\n")).toEqual([
+      "rates.long · CONTINUE p=0.60 · settles 2026-09-07",
+      "ADBE · MOVES p=0.50 · settles 2026-09-11",
+    ]);
+    expect(section).not.toMatch(/\b\d{4}-\d{2}-\d{2}-[a-z]+-/u);
+    expect(section).not.toContain("issued");
+  });
+
+  it("a direction leg settles on bars, and says so", () => {
+    const out = render({
+      frame: frame({
+        ledger: {
+          settledToday: [],
+          open: [
+            {
+              id: "2026-09-04-close-spy-t5",
+              issuedDay: "2026-09-04",
+              issuedPhase: "close",
+              payload: { kind: "spy-direction", symbol: "SPY", pDown: 0.55 },
+              barsSeen: 2,
+              deadlineBars: 5,
+            },
+          ],
+          totalCommitments: 1,
+        },
+      }),
+    });
+    expect(body(out.sections, 7)).toBe(
+      "SPY · DOWN p=0.55 · settles after 5 bars",
     );
   });
 });
@@ -1174,8 +1377,7 @@ describe("the masthead a review document carries", () => {
 
   it("the weekly masthead is the scorecard header the renderer printed", () => {
     const built = view(REVIEW_PERIODS[0]);
-    expect(built.headline).toContain("scored of");
-    expect(built.headline).toContain("issued");
+    expect(built.headline).toContain("Nothing settled yet");
   });
 });
 
@@ -1249,9 +1451,15 @@ describe("the section list a review document delivers", () => {
     expect(titles.slice(0, REVIEW_TITLES.length)).toEqual([...REVIEW_TITLES]);
   });
 
-  it("appends the week-reviewer's windows after the seventh, unchanged", () => {
-    const titles = built().sections.map((section) => section.title);
-    expect(titles.slice(REVIEW_TITLES.length)).toEqual([
+  // The seven are the WHOLE document. The three window essays repeat §1's
+  // counters back at the reader in prose and were the last thing on the page;
+  // they are still carried, so nothing that reads them loses them.
+  it("renders the seven and nothing else, carrying the windows unrendered", () => {
+    const view = built();
+    expect(view.sections.map((section) => section.title)).toEqual([
+      ...REVIEW_TITLES,
+    ]);
+    expect((view.otherSections ?? []).map((section) => section.title)).toEqual([
       "5 sessions, 2026-08-31 to 2026-09-04",
       "10 sessions, 2026-08-24 to 2026-09-04",
       "21 sessions, 2026-08-07 to 2026-09-04",
@@ -1389,7 +1597,7 @@ describe("calls.open is the renderer's row, not the model's", () => {
     const line = body(out.sections, 3)
       .split("\n")
       .find((row) => row.startsWith("- calls.open"))!;
-    expect(line).toBe("- calls.open — 2 — printed from the ledger");
+    expect(line).toBe("- calls.open · 2");
     expect(line).not.toContain("UNTESTED");
   });
 
@@ -1454,15 +1662,17 @@ describe("an untested coverage row prints three fields and no more", () => {
     const line = body(out.sections, 3)
       .split("\n")
       .find((row) => row.startsWith("- rates.front"))!;
-    expect(line).toBe("- rates.front — no datum this period — UNTESTED");
+    expect(line).toBe("- rates.front · no datum this period · UNTESTED");
     expect(line).not.toContain("settles:");
   });
 
-  it("still carries the source's own reason on the left-out line", () => {
+  it("still carries the source's own reason, on the row's detail", () => {
     const out = render({});
-    expect(body(out.sections, 3)).toContain(
-      "left out: rates.front — tool absent",
-    );
+    expect(
+      (out.view.coverageDetail ?? []).find((row) => row.id === "rates.front")
+        ?.leftOut,
+    ).toBe("tool absent");
+    expect(body(out.sections, 3)).toContain("left out: ");
   });
 
   // On the review-v6 rerun the author answered the macro rows and stopped, and
@@ -1474,8 +1684,8 @@ describe("an untested coverage row prints three fields and no more", () => {
       .split("\n")
       .find((row) => row.startsWith("- sector:Computer/GPU"))!;
     expect(line).toContain("4.34 → -3.1 bp");
-    expect(line).toContain("UNTESTED — not called this period");
-    expect(line).toContain("members: NVDA, AMD");
+    expect(line).toContain("UNTESTED · not called this period");
+    expect(line).not.toContain("members: NVDA, AMD");
     expect(line).not.toContain("no datum this period");
     // It is still a gap, and still one of the UNTESTED lines `coverageGaps`
     // is measured against.

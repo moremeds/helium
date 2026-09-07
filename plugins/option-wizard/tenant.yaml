@@ -278,7 +278,7 @@ extensions:
           outlook: 400,
           catalysts: 150,
           rowWords: 15,
-          focusWords: 20,
+          focusWords: 40,
           themeWords: 25,
         }
       daily:
@@ -287,7 +287,7 @@ extensions:
           outlook: 180,
           catalysts: 60,
           rowWords: 10,
-          focusWords: 20,
+          focusWords: 40,
           themeWords: 25,
         }
     # §G. The list is COMPUTED, never chosen: these weights and windows are

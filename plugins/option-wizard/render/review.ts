@@ -245,6 +245,8 @@ export interface ThemeViewRow {
 }
 
 const NO_DATUM = "no datum this period";
+/** The stand-in §3 prints for a priced row the author never answered. */
+const NOT_CALLED = "not called this period";
 /** No inline emphasis in a section body, anywhere. argon's `SectionsPanel`
  *  renders BLOCK-level markdown only — paragraphs, pipe tables, dash lists —
  *  so a `**token**` reaches the public /flash page as literal asterisks. The
@@ -274,6 +276,19 @@ function show(value: number | null | undefined, unit: Unit): string {
 
 function showSigned(value: number | null | undefined, unit: Unit): string {
   return value === null || value === undefined ? "—" : fmtSigned(value, unit);
+}
+
+/** Every percent inside a SOURCE-WRITTEN string, at the units table's own
+ *  precision. The calendar's `forecast` is a string the provider composed, so
+ *  the renderer rounds what it prints rather than re-deriving the number:
+ *  `implied move 6.9333%` prints as `implied move 6.9%`. Only a number that
+ *  carries a decimal point AND a trailing `%` is touched; an integer percent
+ *  and every other figure in the string come through untouched. */
+function roundPercents(value: string): string {
+  return value.replace(
+    /(-?\d+\.\d+)\s*%/gu,
+    (_match, digits: string) => `${fmt(Number(digits), "pct")}%`,
+  );
 }
 
 /** The unit a move string carries, so a band prints in the row's own unit.
@@ -362,6 +377,65 @@ export function pendingLine(row: OpenRow): string {
     : `${head} (${String(row.barsSeen)} of ${String(row.deadlineBars)} bars seen)`;
 }
 
+/**
+ * The day a still-open commitment comes due, from its own payload.
+ *
+ * A `focus-admit` carries the window it settles over; a coverage verdict
+ * carries `settleAfterOpenDays` and is counted forward from the issue day by
+ * the same weekday arithmetic the rest of this file uses. A direction leg
+ * carries neither — it settles on BARS — and gets `undefined`.
+ */
+export function settleDay(row: OpenRow): string | undefined {
+  const payload = payloadOf(row);
+  const window = payload.window;
+  if (window !== null && typeof window === "object") {
+    const to = (window as { toDay?: unknown }).toDay;
+    if (typeof to === "string" && to !== "") return to;
+  }
+  const after = payload.settleAfterOpenDays;
+  if (typeof after !== "number" || !Number.isFinite(after)) return undefined;
+  let day = row.issuedDay;
+  for (let step = 0; step < after; step += 1) day = nextWeekday(day);
+  return day;
+}
+
+/**
+ * §7's one line per outstanding call: what was called, at what probability, and
+ * when it comes due.
+ *
+ * NO COMMITMENT ID. The id is `<day>-<phase>-<kind>-<row>`, so printing it puts
+ * the issue day, the run label and the kind on the page three times over, and
+ * on 2026-09-06 §1 and §7 between them carried 36 of them. The row NAME is the
+ * only part a reader can act on; the id stays in the ledger, where it is
+ * addressable.
+ */
+export function openCallLine(row: OpenRow): string {
+  const payload = payloadOf(row);
+  const name =
+    typeof payload.rowId === "string"
+      ? payload.rowId
+      : typeof payload.ticker === "string"
+        ? payload.ticker
+        : typeof payload.symbol === "string"
+          ? payload.symbol
+          : row.id;
+  const verdict =
+    typeof payload.token === "string"
+      ? payload.token.toUpperCase()
+      : payload.kind === "focus-admit"
+        ? "MOVES"
+        : payload.kind === "spy-direction"
+          ? "DOWN"
+          : "OPEN";
+  const p = typeof payload.p === "number" ? payload.p : payload.pDown;
+  const said = typeof p === "number" ? ` p=${p.toFixed(2)}` : "";
+  const day = settleDay(row);
+  if (day !== undefined) return `${name} · ${verdict}${said} · settles ${day}`;
+  return row.deadlineBars === undefined
+    ? `${name} · ${verdict}${said}`
+    : `${name} · ${verdict}${said} · settles after ${String(row.deadlineBars)} bars`;
+}
+
 /** hit / miss / null. `null` is "not a two-sided call" — a direction leg that
  *  settled `up` is neither, and counting it either way would move a rate
  *  nobody agreed on. */
@@ -424,6 +498,32 @@ function themeTriple(row: CoverageRow): { week: string; since: string } {
   };
 }
 
+/**
+ * What section 3's bullet used to carry and no longer prints.
+ *
+ * NOT a second rendering: nothing here reaches the reader as prose. It exists
+ * so cutting the band, the observable, the member list and the left-out reason
+ * out of the visible line loses no datum — argon can build a real table from
+ * it, and a later run can read what a row was priced at without re-parsing a
+ * sentence.
+ */
+export interface CoverageDetail {
+  id: string;
+  level?: string;
+  prior?: string;
+  move?: string;
+  asOf?: string;
+  members?: string[];
+  /** The interval the printed token claims, from `eval/verdict.ts`. */
+  band?: string;
+  /** The model's "what settles it" clause. */
+  observable?: string;
+  rendererFilled?: true;
+  untested?: string;
+  /** Why this row counted as a gap, in the source's own words. */
+  leftOut?: string;
+}
+
 export interface ReviewSectionsArgs {
   frame: SessionFrame;
   /** The `ow_rotation` payload; null on a daily run. */
@@ -455,6 +555,8 @@ export interface ReviewSectionsResult {
     };
     themes?: ThemeViewRow[];
     rotation?: { asOf: string; benchmark: string; rows: RotationRow[] };
+    /** One entry per coverage row, in the same order §3 printed them. */
+    coverageDetail?: CoverageDetail[];
   };
 }
 
@@ -490,6 +592,19 @@ const COMMITMENT_ID = /\b\d{4}-\d{2}-\d{2}-[a-z]+-[A-Za-z0-9.:_-]+\b/gu;
  *  purpose — "ET", "US" and "PM" are units and places, not events. */
 const EVENT_NAME = /\b(?:[A-Z]{3,8}|\d{4}-\d{2}-\d{2})\b/gu;
 
+/**
+ * A focus `why` that restates its own row and stops.
+ *
+ * The shape, verbatim from the 2026-09-06 weekly: an ISO event day, then the
+ * implied move as a percent, then `IV expects <noun>`. Both figures are printed
+ * in their own columns of the same table row, so the sentence adds a noun and
+ * nothing else. Deliberately narrow — it matches THIS template, not any
+ * sentence that happens to carry a date and a percent, because a real judgment
+ * about a name will usually carry both.
+ */
+export const FOCUS_WHY_DATE_RESTATE =
+  /\b\d{4}-\d{2}-\d{2}\b[^\n]{0,40}?\b\d+(?:\.\d+)?\s*%\s*IV\s+expects\b/iu;
+
 export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const { frame, doc, caps, period } = args;
   const faults: string[] = [];
@@ -503,7 +618,6 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     .map((row) => outcomeOf(row))
     .filter((value): value is "hit" | "miss" => value !== null);
   const hits = outcomes.filter((value) => value === "hit").length;
-  const callHitRate = outcomes.length === 0 ? null : hits / outcomes.length;
   const briers = settled
     .map((row) => row.scores.verdictBrier)
     .filter((value): value is number => typeof value === "number");
@@ -515,8 +629,6 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     (row) => payloadOf(row).kind === "focus-admit",
   );
   const focusHits = focusSettled.filter((row) => row.status === "hit").length;
-  const focusHitRate =
-    focusSettled.length === 0 ? null : focusHits / focusSettled.length;
   const focusOpen = open.filter(
     (row) => payloadOf(row).kind === "focus-admit",
   ).length;
@@ -565,34 +677,22 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       `coverage omits ${String(omittedPriced.length)} priced rows: ${omittedPriced.join(", ")}`,
     );
 
-  const scoreLines: string[] = [
-    `${String(scored.length)} scored of ${String(scored.length + open.length)} issued · ${String(gaps)} not called · ` +
-      (frame.ledger.firstCommitmentDay === undefined
-        ? `all ${String(frame.ledger.totalCommitments)} calls issued; none removed`
-        : `all ${String(frame.ledger.totalCommitments)} calls issued since ${frame.ledger.firstCommitmentDay}; none removed`),
-    `callHitRate ${num(callHitRate)} · verdictBrier ${num(verdictBrier)} · ` +
-      `focusHitRate ${num(focusHitRate)} · coverageGaps ${String(gaps)} · focusChurn ${String(frame.focus.churn)}`,
-  ];
+  // FOUR LINES, AND A READER CAN HOLD ALL FOUR. What stood here on 2026-09-06
+  // was two metric-name lines, then one line per commitment — 24 ids, each
+  // repeating its issue day and run label — then a focus line, a calibration
+  // line and a footer. Nothing in it answered "how did we do", and the ids are
+  // in the ledger, which is where an id belongs. `citations` still counts the
+  // receipts; it is a metric, not a paragraph.
   const citationLines = [...settled]
     .sort((a, b) => b.issuedDay.localeCompare(a.issuedDay))
     .map((row) => citationLine(row));
-  const pendingLines = open
-    .filter((row) => row.issuedDay < frame.day)
-    .map((row) => pendingLine(row));
-  if (citationLines.length === 0 && pendingLines.length === 0)
-    scoreLines.push("no call has come due yet");
-  else scoreLines.push(...citationLines, ...pendingLines);
-  scoreLines.push(
-    `focus: ${String(focusHits)} of ${String(focusSettled.length)} names moved at least their implied move · ${String(focusOpen)} still open`,
-  );
+  let calibration = "";
   if (period === WEEKLY) {
     const verdicts = settled.filter(
       (row) => payloadOf(row).kind === "coverage-verdict",
     );
     if (verdicts.length < CALIBRATION_MIN) {
-      scoreLines.push(
-        `calibration: n=${String(verdicts.length)}, not yet scorable`,
-      );
+      calibration = ` · calibration n=${String(verdicts.length)}, not yet scorable`;
     } else {
       const ps = verdicts
         .map((row) => payloadOf(row).p)
@@ -602,17 +702,32 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         verdicts.filter((row) => outcomeOf(row) === "hit").length /
         verdicts.length;
       const gap = observed - meanP;
-      scoreLines.push(
-        `calibration: said p≈${num(meanP)} · hit ${num(observed)} (${String(verdicts.length)})` +
-          (gap > CALIBRATION_BAND
-            ? " — under-confident"
-            : gap < -CALIBRATION_BAND
-              ? " — over-confident"
-              : ""),
-      );
+      calibration =
+        ` · calibration: said p≈${num(meanP)} · hit ${num(observed)} (${String(verdicts.length)})` +
+        (gap > CALIBRATION_BAND
+          ? " — under-confident"
+          : gap < -CALIBRATION_BAND
+            ? " — over-confident"
+            : "");
     }
   }
-  scoreLines.push(`what we left out: ${String(gaps)} rows`);
+  const nextDue = open
+    .map((row) => settleDay(row))
+    .filter((day): day is string => day !== undefined)
+    .sort((a, b) => a.localeCompare(b))[0];
+  const scoreLines: string[] = [
+    (scored.length === 0
+      ? nextDue === undefined
+        ? "Nothing settled yet — no call has come due"
+        : `Nothing settled yet — first settles ${nextDue}`
+      : `${String(scored.length)} settled · hit ${String(hits)}/${String(outcomes.length)} · Brier ${num(verdictBrier)}`) +
+      calibration,
+    `${String(open.length)} open calls`,
+    `Focus: ${String(focusHits)} of ${String(focusSettled.length)} moved ≥ implied · ${String(focusOpen)} open`,
+    gaps === 0
+      ? "Coverage gaps: none"
+      : `Coverage gaps: ${String(gaps)} rows (${untested.map((row) => row.id).join(", ")})`,
+  ];
   const scorecard = scoreLines.join("\n");
 
   // ---------------- section 3: the fixed coverage list ---------------------
@@ -628,6 +743,14 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   // function — so the figures §4 is faulted for and the figures the author was
   // told to avoid can never be two different lists.
   const levels = printedLevels(rows).map((row) => row.level);
+  // FOUR FIELDS, ONE BULLET, AND NOTHING A READER SKIPS. The 2026-09-06 row
+  // carried six: the band the token claims, the settling observable, the
+  // chain's members and "printed from the ledger" all rode along, and 23 rows
+  // of that is the section nobody read. The four that survive are the row, what
+  // it did, the call, and why. Everything cut is kept — structured, not
+  // sentenced — on `view.coverageDetail`, which is where argon can build a real
+  // table from it.
+  const detail: CoverageDetail[] = [];
   const rowLine = (row: CoverageRow): string => {
     const entry = entries.get(row.id);
     // Staleness is a property of the DATUM, not of whether the model gave the
@@ -635,26 +758,38 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // called.
     if (row.asOf !== undefined && row.asOf.slice(0, 10) < staleBefore)
       stale.push(row);
-    // §J. The ledger's own count, printed by the renderer that holds it. No
-    // verdict token, no probability, no model words — and it still occupies
-    // its declared slot, so the row count does not move.
-    if (row.rendererFilled === true && row.untested === undefined)
-      return `- ${row.id} — ${row.level ?? "—"} — printed from the ledger`;
-    // THREE FIELDS AND NO MORE WHEN THERE IS NO DATUM. It used to read
-    // `rates.front — untested — UNTESTED — data not printed this period —
-    // settles: data not printed this period`: five fields, four of which say
-    // the same nothing, on 18 of 23 rows. The `left out:` line below still
-    // carries the source's own words.
-    if (row.untested !== undefined)
-      return `- ${row.id} — ${NO_DATUM} — UNTESTED`;
     const shown = row.id.startsWith("theme:")
       ? (() => {
           const triple = themeTriple(row);
           return `${triple.week} (1w) · ${triple.since} (since ${row.theme === undefined ? "?" : (frame.declared.themes.find((t) => `theme:${t.id}` === row.id)?.entered ?? "?")})`;
         })()
       : `${row.level ?? "—"} → ${row.move ?? row.prior ?? "—"}`;
-    const members =
-      row.members === undefined ? "" : ` — members: ${row.members.join(", ")}`;
+    const band =
+      entry === undefined || entry.token === "untested" || row.delta === undefined
+        ? undefined
+        : bandText(entry.token, row.delta, unitOf(row.move));
+    detail.push({
+      id: row.id,
+      ...(row.level === undefined ? {} : { level: row.level }),
+      ...(row.move === undefined ? {} : { move: row.move }),
+      ...(row.prior === undefined ? {} : { prior: row.prior }),
+      ...(row.asOf === undefined ? {} : { asOf: row.asOf }),
+      ...(row.members === undefined ? {} : { members: row.members }),
+      ...(band === undefined || band === "" ? {} : { band }),
+      ...(entry?.observable === undefined || entry.observable === ""
+        ? {}
+        : { observable: entry.observable }),
+      ...(row.rendererFilled === true ? { rendererFilled: true } : {}),
+      ...(row.untested === undefined ? {} : { untested: row.untested }),
+    });
+    // §J. The ledger's own count, printed by the renderer that holds it. No
+    // verdict token, no probability, no model words — and it still occupies
+    // its declared slot, so the row count does not move.
+    if (row.rendererFilled === true && row.untested === undefined)
+      return `- ${row.id} · ${row.level ?? "—"}`;
+    // TWO FIELDS AND NO MORE WHEN THERE IS NO DATUM. The `left out:` summary at
+    // the end of the section still carries the source's own words.
+    if (row.untested !== undefined) return `- ${row.id} · ${NO_DATUM} · UNTESTED`;
     // A DATUM NOBODY CALLED STILL PRINTS ITS NUMBER. Folding this into the
     // no-datum line put "no datum this period" beside ten sector rows the
     // frame had just priced, on the review-v6 rerun where the author answered
@@ -662,14 +797,10 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // count is what `coverageGaps` is measured against — but it does not
     // claim the frame came back empty.
     if (entry === undefined)
-      return `- ${row.id} — ${shown} — UNTESTED — not called this period${members}`;
+      return `- ${row.id} · ${shown} · UNTESTED · ${NOT_CALLED}`;
     if (entry.token === "untested")
-      return `- ${row.id} — ${shown} — UNTESTED — ${entry.why || "—"}${members}`;
-    const band =
-      row.delta === undefined
-        ? ""
-        : ` ${bandText(entry.token, row.delta, unitOf(row.move))}`;
-    return `- ${row.id} — ${shown} — ${entry.token.toUpperCase()}${band} — ${entry.why || "—"} — settles: ${entry.observable || "—"}${members}`;
+      return `- ${row.id} · ${shown} · UNTESTED · ${entry.why || "—"}`;
+    return `- ${row.id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
   };
 
   const macroRows = rows.filter(
@@ -709,9 +840,21 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       );
     }
   }
-  for (const row of untested)
-    coverageLines.push(`left out: ${row.id} — ${untestedReason(row) ?? "?"}`);
+  // ONE LINE, NOT EIGHTEEN. The per-row reason is still recorded — it is on
+  // `coverageDetail[].leftOut` — but eighteen copies of "no verdict token for
+  // this row" under the table taught the reader nothing the count does not.
+  if (untested.length > 0)
+    coverageLines.push(
+      `left out: ${String(untested.length)} rows — ${untested.map((row) => row.id).join(", ")}`,
+    );
   const coverageBody = coverageLines.join("\n");
+  const reasons = new Map(
+    untested.map((row) => [row.id, untestedReason(row) ?? "?"]),
+  );
+  for (const entry of detail) {
+    const reason = reasons.get(entry.id);
+    if (reason !== undefined) entry.leftOut = reason;
+  }
 
   // ---------------- section 2: the model's, checked against §1 -------------
   const printedIds = new Set([
@@ -805,14 +948,19 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       continue;
     }
     admitted.push(row.event);
-    const day = row.time.slice(0, 10);
-    const settles = row.session === "post" ? nextWeekday(day) : day;
+    // THREE FIELDS: when, what, and the number the market is quoting. The
+    // 2026-09-06 line carried the type ("earnings", already in the event), the
+    // session twice ("ADBE earnings (post) … · post"), a settle day mechanically
+    // one weekday later, and `implied move 6.9333%` — four decimals of a
+    // fraction nobody quotes. The settle day is the ledger's business; the
+    // percent goes through the units table like every other printed figure.
     catalystLines.push(
-      `- ${row.time} · ${row.type} · ${row.event}` +
-        (row.forecast === undefined ? "" : ` · forecast ${row.forecast}`) +
-        (row.prev === undefined ? "" : ` · prev ${row.prev}`) +
-        (row.session === undefined ? "" : ` · ${row.session}`) +
-        ` — settles: ${settles}`,
+      `- ${row.time.slice(0, 10)} · ${row.event}` +
+        (row.forecast !== undefined
+          ? ` · ${roundPercents(row.forecast)}`
+          : row.prev === undefined
+            ? ""
+            : ` · prev ${roundPercents(row.prev)}`),
     );
   }
   for (const line of notAdmitted) catalystLines.push(`not admitted: ${line}`);
@@ -896,6 +1044,15 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       );
       continue;
     }
+    // THE SHAPE THAT SAYS NOTHING. "Earnings 2026-10-15; 7.86% IV expects
+    // volume recovery." is the event date and the implied move, both already
+    // printed in their own columns two cells to the left, plus a noun. It is
+    // recorded and NOT dropped: the line is worthless, not wrong, and printing
+    // an empty cell would hide that the author was asked and answered.
+    if (FOCUS_WHY_DATE_RESTATE.test(entry.why))
+      faults.push(
+        `focus-why-restates-date ${entry.ticker}: "${entry.why}" is the date and the implied move, which the row already prints`,
+      );
     whyByTicker.set(entry.ticker, trim(entry.why, caps.focusWords).text);
   }
   const focusRows: FocusViewRow[] = list.map((row) => {
@@ -944,7 +1101,14 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const openBody =
     open.length === 0
       ? "nothing outstanding"
-      : open.map((row) => pendingLine(row)).join("\n");
+      : [...open]
+          .sort((a, b) =>
+            (settleDay(a) ?? "9999-99-99").localeCompare(
+              settleDay(b) ?? "9999-99-99",
+            ),
+          )
+          .map((row) => openCallLine(row))
+          .join("\n");
 
   // Assembled LAST, in §J.1's order, because the bodies are computed in
   // dependency order and not in print order: §2's "not to quote" lines and
@@ -998,6 +1162,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         churn: frame.focus.churn,
       },
       themes: themeView,
+      coverageDetail: detail,
       ...(period === WEEKLY && args.rotation !== null
         ? {
             rotation: {
@@ -1212,16 +1377,26 @@ export function reviewMetrics(args: {
   return rows;
 }
 
-/** The model's share of section 3: one `why` clause and one `observable` per
- *  row. The renderer's own line furniture is NOT the model's words, so it does
- *  not count against `reviewModelWords`. */
+/**
+ * The model's share of section 3: the `why` clause, and only that.
+ *
+ * The row is `- <id> · <change> · <TOKEN> · <why>` and the `why` is LAST, so it
+ * is the final field however many separators the change string itself carries
+ * (`equity.internals` prints three quoted symbols in one cell). The
+ * `observable` no longer prints, so it no longer counts: `reviewModelWords` is
+ * measured over the document the reader gets.
+ */
 function modelWordsInCoverage(args: { sections: Section[] }): number {
   const body = args.sections[2]?.body ?? "";
   let total = 0;
   for (const line of body.split("\n")) {
-    const parts = line.split(" — ");
-    if (parts.length < 5) continue;
-    total += words(parts[3] ?? "") + words(parts[4] ?? "");
+    if (!line.startsWith("- ")) continue;
+    const parts = line.split(" · ");
+    if (parts.length < 4) continue;
+    const why = parts[parts.length - 1] ?? "";
+    // The renderer's own stand-ins for an answer nobody gave.
+    if (why === "—" || why === NOT_CALLED || why === NO_DATUM) continue;
+    total += words(why);
   }
   return total;
 }

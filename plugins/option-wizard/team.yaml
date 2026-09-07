@@ -703,7 +703,9 @@ tasks:
       - `outlook` at most 180 words. The frame's `noRestate` array is the EXACT
         list of figures the coverage table prints — one `{id, level}` per row. DO
         NOT REPEAT THESE FIGURES: a paragraph carrying one is dropped whole. Name
-        the row id instead.
+        the row id instead. DO NOT RESTATE ANY NUMBER THAT APPEARS IN SECTION 3.
+        Every sentence names a row and says whether it continues, reverses or
+        strengthens, and one reason.
       - `catalysts` at most 60 words, naming only admitted dated events.
       - `coverage` carries ONE entry per row you were given, in that order. THE ROWS
         ARE THESE 23 AND THE REPLY CARRIES ALL 23: rates.front, rates.long,
@@ -723,7 +725,12 @@ tasks:
         between 0.50 and 0.95; `why` and `observable` are at most 10 words each. A
         token with no usable `p` still prints and mints nothing.
 
-      FOCUS. You are handed a focus list. For each name write ONE line of at most 20 words: what the dated event is and what would make it matter more — never a direction, never a size, never a recommendation, never a price target. A line carrying one of those is dropped and the row prints empty.
+      FOCUS. You are handed a focus list, already ranked and already priced. For each name write ONE line of at most 40 words that is YOUR OWN JUDGMENT of the setup, and answers three things in one breath: why this name is on the list at all; what its IV rank and implied move say about how the market is PRICING the event; and whether anything else lands before the event — another dated catalyst from the frame's `calendar`, a sector row that is already moving, a split or ex-dividend, an index event — that changes the read.
+      NEVER MAP IV TO A DIRECTION. Nobody calls an earnings print from an IV rank, and a line that tries to is worse than no line. "No view yet" is an allowed and often correct stance; say it and say what you are waiting for.
+      Do NOT restate the event date and the implied move and stop: both are already printed in their own columns of the same row. A line shaped `Earnings <date>; <n>% IV expects <noun>` is recorded as a fault against you.
+      Wanted: "TSM: earnings 2026-10-15 is far out, so IV rank 12 mostly reflects distance, not complacency; INTC 10-22 and the Semi-Cap/EDA fade are the nearer tells — nothing to do yet, watch for the ASML 10-14 read-through."
+      Not wanted: "Earnings 2026-10-15; 7.86% IV expects volume recovery."
+      Never a size, never a recommendation, never a price target: a line carrying one is dropped whole and the row prints empty.
       THEMES. For each active theme you are handed, say in at most 25 words whether this week's sector leadership confirms it, contradicts it, or is mixed. You may propose a NEW theme with exactly one line of the form "PROPOSED: <id> — <thesis> — evidence: <source>"; a proposal is not a row and is not scored, and the operator promotes it by editing the manifest.
       You may not re-rank the focus list, add a name to it, or drop one. The numbers beside each name are already computed.
 
@@ -824,7 +831,10 @@ tasks:
         taken from section 1. A paragraph naming an id section 1 did not print is
         dropped whole.
       - `outlook` is 下周展望, at most 400 words: the WHY behind each verdict that is
-        not `continue`, one observable each. The frame's `noRestate` array is the
+        not `continue`, one observable each. DO NOT RESTATE ANY NUMBER THAT
+        APPEARS IN SECTION 3. Every sentence names a row and says whether it
+        continues, reverses or strengthens, and one reason — a sentence that
+        names no row is a sentence the reader cannot act on. The frame's `noRestate` array is the
         EXACT list of figures section 3 prints — one `{id, level}` per row. DO NOT
         REPEAT THESE FIGURES: a paragraph carrying any one of those numbers is
         dropped whole. Name the row id and say what it did; the number is already
@@ -856,7 +866,12 @@ tasks:
         words each. A row with a token and no usable `p` still prints and mints
         nothing.
 
-      FOCUS. You are handed a focus list. For each name write ONE line of at most 20 words: what the dated event is and what would make it matter more — never a direction, never a size, never a recommendation, never a price target. A line carrying one of those is dropped and the row prints empty.
+      FOCUS. You are handed a focus list, already ranked and already priced. For each name write ONE line of at most 40 words that is YOUR OWN JUDGMENT of the setup, and answers three things in one breath: why this name is on the list at all; what its IV rank and implied move say about how the market is PRICING the event; and whether anything else lands before the event — another dated catalyst from the frame's `calendar`, a sector row that is already moving, a split or ex-dividend, an index event — that changes the read.
+      NEVER MAP IV TO A DIRECTION. Nobody calls an earnings print from an IV rank, and a line that tries to is worse than no line. "No view yet" is an allowed and often correct stance; say it and say what you are waiting for.
+      Do NOT restate the event date and the implied move and stop: both are already printed in their own columns of the same row. A line shaped `Earnings <date>; <n>% IV expects <noun>` is recorded as a fault against you.
+      Wanted: "TSM: earnings 2026-10-15 is far out, so IV rank 12 mostly reflects distance, not complacency; INTC 10-22 and the Semi-Cap/EDA fade are the nearer tells — nothing to do yet, watch for the ASML 10-14 read-through."
+      Not wanted: "Earnings 2026-10-15; 7.86% IV expects volume recovery."
+      Never a size, never a recommendation, never a price target: a line carrying one is dropped whole and the row prints empty.
       THEMES. For each active theme you are handed, say in at most 25 words whether this week's sector leadership confirms it, contradicts it, or is mixed. You may propose a NEW theme with exactly one line of the form "PROPOSED: <id> — <thesis> — evidence: <source>"; a proposal is not a row and is not scored, and the operator promotes it by editing the manifest.
       You may not re-rank the focus list, add a name to it, or drop one. The numbers beside each name are already computed.
 

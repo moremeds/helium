@@ -195,7 +195,7 @@ describe("measureReview", () => {
     const measured = measureReview(
       {
         coverage: [{ id: "rates.long", why: long(22), observable: "ok" }],
-        focus: [{ ticker: "NVDA", why: long(24) }],
+        focus: [{ ticker: "NVDA", why: long(44) }],
         themes: [{ id: "el-nino-ag-2026", why: long(30) }],
       },
       REVIEW_BUDGET.weekly,
