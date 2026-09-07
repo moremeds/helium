@@ -1,0 +1,16 @@
+{
+  "id": "2026-09-06-density-arm-f",
+  "repo": "argon",
+  "hypothesis": "Loop 1 showed arm H (Student-t) overshoots the left tail on the reconstructed set (q05 ratio 1.048 -> 1.079) while helping the holdout slightly. Arm F (Student-t with multi-start fit, no parameter carry) refits from scratch each night; if the carried parameters are what drags the t tail too far, F keeps H's upper-tail gain without the left-tail overshoot.",
+  "change": "argon src/uw_scan/density/forecast.py: ARM = \"G\" -> \"F\" (candidate only; production untouched)",
+  "baselineSweepRun": 3,
+  "candidateSweepRun": null,
+  "candidateSweepStrategy": "spx-density-calibration-arm-F",
+  "holdout": { "origin": "prospective", "rows": 80 },
+  "decisionSet": { "origin": "reconstructed", "rows": 320 },
+  "metrics": {
+    "q05PinballRatio": { "improveIfDeltaAtMost": -0.03 },
+    "meanPinball": { "regressIfDeltaAbove": 0.01 }
+  },
+  "rule": "On the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.03 vs run 3 AND mean pinball (model) does not rise by > 0.01; regressed if either q05 ratio rises by > 0.03 or mean pinball rises by > 0.01; otherwise flat. Additionally no PR unless the reconstructed set's q05 ratio is not worse than run 3's 1.0476. Thresholds fixed at mint time; never edited after."
+}

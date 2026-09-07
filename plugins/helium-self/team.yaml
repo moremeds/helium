@@ -17,19 +17,14 @@ tasks:
   - id: restate
     role: scribe
     requires: [structured.output]
-    # The declaration is INLINE, not a file path: this role has no tools, so a
-    # prompt that pointed at `experiments/` would be asking a model to read
-    # something it cannot open — which is exactly what the first run of this
-    # tenant did. `tests/prompt.spec.ts` fails if these two lines stop matching
-    # the experiment file, so the file stays the single source of truth.
+    # This role has no tools and is handed no experiment text on purpose: the
+    # commitment is minted by the renderer from experiments/*.json, and an
+    # earlier prompt that inlined one experiment went stale as soon as a
+    # second file existed. The model step is the tenant's one required task
+    # and nothing more.
     prompt: |-
-      This is the experiment declaration this run is minting a commitment
-      about. Its hypothesis and its acceptance rule were both fixed before any
-      result existed.
-
-      id: 2026-09-06-density-arm-h
-      hypothesis: Switching uw_scan.density.forecast.ARM from G (normal innovations) to H (Student-t innovations, otherwise identical) fixes the SPX cone's left-tail underweight: q05 pinball loses to the EWMA baseline (ratio 1.00-1.08) on reconstructed rows while q90/q95 is the model's strength.
-      rule: On the holdout (origin=prospective, all h pooled): improved if q05 pinball ratio drops by >= 0.03 vs run 3 AND mean pinball (model) does not rise by > 0.01; regressed if either q05 ratio rises by > 0.03 or mean pinball rises by > 0.01; otherwise flat. Thresholds fixed at mint time; never edited after.
-
-      Restate the hypothesis and the acceptance rule in at most three
-      sentences of plain English. Do not predict whether the change will work.
+      This run mints one commitment per file under
+      plugins/helium-self/experiments/. The renderer reads those files and
+      mints them; you are handed nothing and decide nothing. Reply with one
+      sentence stating that the commitments of this run come from the
+      experiment files and were fixed before any result existed.

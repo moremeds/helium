@@ -60,10 +60,14 @@ describe("helium-self renderer", () => {
     });
   });
 
-  it("skips an id the ledger already holds", () => {
+  it("skips every id the ledger already holds", () => {
+    const experiments = loadExperiments();
+    const minted = new Set(experiments.map((e) => String(e.id)));
+    expect(commitmentDrafts(experiments, minted)).toEqual([]);
+    const [first] = minted;
     expect(
-      commitmentDrafts(loadExperiments(), new Set(["2026-09-06-density-arm-h"])),
-    ).toEqual([]);
+      commitmentDrafts(experiments, new Set([first])).map((d) => d.id),
+    ).not.toContain(first);
   });
 
   it("renders text and mints against an empty state root", () => {

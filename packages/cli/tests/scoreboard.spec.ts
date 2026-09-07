@@ -47,6 +47,11 @@ describe("summarise", () => {
     });
     expect(board.byGroup["live@abc1234"]!.n).toBe(3);
     expect(board.byGroup["live@abc1234"]!.pending).toBe(1);
+    expect(board.byGroup["live@abc1234"]!.statuses).toEqual({
+      down: 1,
+      up: 1,
+      pending: 1,
+    });
     expect(board.byGroup["live@abc1234"]!.means.t1Brier).toBeCloseTo(0.2, 10);
     expect(board.byGroup["live@abc1234"]!.ranges.t1Brier).toEqual({
       min: 0.04,
