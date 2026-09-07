@@ -3,7 +3,7 @@
   "kind": "helium-run-metric",
   "repo": "helium",
   "prNumber": 100,
-  "mergeSha": null,
+  "mergeSha": "3641985",
   "hypothesis": "Landing the review framework (feat/review-framework: three new deterministic steps, four new tools, the seven-section renderer and rewritten personas) does not raise option-wizard's production failed-run rate. Cost per run and p50 wall time are expected to rise with the added steps and are deliberately not the metric.",
   "change": "helium plugins/option-wizard: review framework PR",
   "metric": "failedRunRate",
@@ -30,7 +30,7 @@
   },
   "window": {
     "runs": 5,
-    "startsAfter": "the first launchd run whose audit span.code_version equals mergeSha",
+    "startsAfter": "the first launchd run whose audit span.code_version is mergeSha or a descendant of it on master (the deploy carrying this file is necessarily a later commit than the merge it measures)",
     "excluded": "runs whose log outcome line begins with 'outcome: skipped' (calendar closed) are excluded from both denominators"
   },
   "rule": "A run is failed when its log outcome line begins with 'outcome: FAILED'; completed when it begins with 'outcome: completed'; skipped runs are excluded. Span-row count is NOT the rule (run-9db61cd7 completed with 18 spans, run-ba6f14a6 FAILED with 32). improved if window failedRunRate < 0.2; regressed if failedRunRate > 0.4; flat otherwise. A 5-run window only takes the values 0, 0.2, 0.4, 0.6, 0.8, 1.0, so 'improved' means zero failures in five and 'regressed' means three or more of five; this is a coarse V0 gauge, not a precise rate. Thresholds fixed at mint time; never edited after."
