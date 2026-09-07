@@ -1,5 +1,11 @@
 # Flash recovery plan (2026-09-07)
 
+**Update 2026-09-08:** the [implementation pickup](2026-09-08-flash-pickup.md)
+supersedes this document's conflicting product and acceptance instructions:
+weekly means the market week, self-review stays internal, human page reading
+precedes batch scoring, and schema 3 is reused. The dated record below is kept
+as history, not as current authorization or an execution status.
+
 Companion to `2026-09-07-flash-executive-summary.md`. Written after the Codex
 review of that summary. Status: draft for the user; nothing here is executed.
 

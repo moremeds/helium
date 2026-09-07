@@ -729,9 +729,10 @@ tasks:
       Use sourced numbers where they support the argument; no paragraph needs a
       number merely to satisfy a quota. No filler sentence. Never a tool name (`ow_spot`, any `ow_*`), and
       never an HTTP status code in prose. You write no coverage table and no as-of list: the renderer
-      prints both from the frame, and the words "replay", "as-of", "unavailable",
-      "dark", "frozen" and "nothing ships" never appear in the headline, the decision
-      or a section body.
+      prints both from the frame. State dated market and source limitations plainly when
+      relevant, including as-of timestamps, unavailable data, or a quote frozen outside
+      RTH. Do not describe report execution: "replay", "dark", "nothing ships" and
+      "not checked" never appear in the headline, the decision or a section body.
 
       WORD BUDGET — enforced by the renderer, not by you. It cuts back to the last
       complete sentence inside the budget, so a sentence you begin past the budget is

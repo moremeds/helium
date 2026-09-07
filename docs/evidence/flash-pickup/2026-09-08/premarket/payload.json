@@ -1,0 +1,176 @@
+{
+  "tenant": "option-wizard",
+  "kind": "premarket",
+  "run_day": "2026-09-03",
+  "week_key": "2026-W36",
+  "run_id": "run-fb84b6fd-68e5-48e3-aefc-7e4da8e0ee33",
+  "code_sha": "18a953a",
+  "schema_version": 3,
+  "outcome": "completed",
+  "headline": "A 60% September hike probability taxes duration while call-heavy flows resist risk-off.",
+  "view": {
+    "schemaVersion": 3,
+    "date": "2026-09-03",
+    "tenant": "option-wizard",
+    "outcome": "completed",
+    "headline": "A 60% September hike probability taxes duration while call-heavy flows resist risk-off.",
+    "tape": [],
+    "schedule": [],
+    "overnight": [],
+    "sections": [
+      {
+        "title": "Market review",
+        "body": "Premarket evidence is policy-led rather than price-confirmed. The 2026-09-16 path prices a 60% probability of Hike 25 bp, while the 2026-09-02 session ended with call-heavy broad-market and SPY ETF tides. That conflict supports a guarded regime: duration remains valuation-sensitive, but prior-session demand prevents a clean risk-off declaration. No current Treasury, credit, volatility, rotation or dealer-positioning reading was supplied to adjudicate the conflict."
+      },
+      {
+        "title": "Outlook",
+        "body": "The guarded thesis strengthens if the 2026-09-16 Hike 25 bp probability stays at or above 60% and today's flow fails to reproduce the prior call-heavy finish. It weakens if that probability closes below 60% or if today's SPY and broad-market tides decisively confirm call demand. Long-duration equity and long-maturity fixed income remain the first places to inspect because their cash flows carry the greatest discount-rate sensitivity. Credit, volatility, the 2Y, 10Y and 2s10s remain open questions until current readings arrive; they cannot confirm either regime."
+      },
+      {
+        "title": "Dated catalysts",
+        "body": "Policy meetings dated 2026-09-16 and 2026-12-09 are the admitted catalysts."
+      },
+      {
+        "title": "Supporting coverage",
+        "body": "Coverage detail is unavailable because this recorded run has no deterministic session frame."
+      }
+    ],
+    "regime": {
+      "paragraph": "{\"headline\":\"A 60% September hike probability keeps the premarket guarded, although the prior session’s call-heavy finish argues against declaring an outright risk-off regime.\",\"tape\":[],\"schedule\":[],\"sections\":[{\"title\":\"Hawkish policy pricing is the dominant measurable input defining today’s premarket regime.\",\"body\":\"At 08:45 on 2026-09-03, the regime is guarded and exposed to higher-for-longer policy risk rather than confirmed risk-off price action. For the 2026-09-16 meeting, the policy path reports a 60% probability of a Hike 25 bp, an implied rate of 3.78 and a target range of 3.75-4.00%. For 2026-12-09, it reports a 64% probability of a Hike 25 bp and an implied rate of 4.015. These probabilities are futures-implied via Frenzy Capital, not CME FedWatch, with snapshot date 2026-09-02.\"},{\"title\":\"Long-duration cash flows sit at the top of today’s valuation-risk ranking.\",\"body\":\"The vulnerability ranking by cash-flow duration is: 1) pre-revenue and unprofitable growth companies, whose value depends most heavily on distant cash flows; 2) profitable high-multiple growth and long-duration technology; 3) long-maturity fixed income and equity bond proxies; 4) shorter-duration cyclicals; and 5) cash-rich value and financial companies, which have the least direct duration exposure. This is a discount-rate sensitivity ranking, not evidence that each group has already moved.\"},{\"title\":\"The prior session’s call-heavy finish is meaningful counterevidence to the hawkish setup.\",\"body\":\"Unusual Whales’ market tide is frozen outside RTH; these figures are from the 2026-09-02 session, not today’s session. At 2026-09-02T16:15:00-04:00, market tide showed net_call_premium 123667467.0000, net_put_premium -35001803.0000 and net_volume 621655. At 2026-09-02T19:59:00Z, the SPY ETF tide showed net_call_premium 121014190.00000000, net_put_premium -25110342.0000, net_volume 238808 and underlying_price 765.16. That late call accumulation tempers the bearish implication of the futures-implied Fed path, but it cannot establish today’s premarket direction.\"}]}"
+    },
+    "candidates": [],
+    "riskList": [],
+    "charts": {
+      "policyPath": {
+        "meetings": [
+          {
+            "label": "9/16",
+            "probability": 60,
+            "stance": "HIKE",
+            "impliedRate": "3.78",
+            "targetRange": "3.75-4.00%"
+          },
+          {
+            "label": "10/28",
+            "probability": 70,
+            "stance": "HOLD",
+            "impliedRate": "3.855",
+            "targetRange": "3.50-3.75%"
+          },
+          {
+            "label": "12/9",
+            "probability": 64,
+            "stance": "HIKE",
+            "impliedRate": "4.015",
+            "targetRange": "3.75-4.00%"
+          }
+        ],
+        "snapshotDate": "2026-09-02"
+      },
+      "gex": []
+    },
+    "degradation": "Data degraded: gate flash-budget refused (3 of 3 sections over 60 words (79, 68, 66)); gate meta-leak refused (1 meta leak: section 3 body /\\bfrozen\\b/ \"les’ market tide is frozen outside RTH; these \"); step gex failed (quota-exhausted); step gex failed (quota-exhausted); step gex failed (quota-exhausted); step gex failed (quota-exhausted)",
+    "spyForecast": {
+      "scorable": false,
+      "reason": "the scenarios step wrote no spyForecast object"
+    },
+    "edited": true,
+    "decision": [
+      {
+        "label": "Call",
+        "value": "No book this session — approved levels were not supplied for SPY, QQQ, IWM, TLT and XLF."
+      },
+      {
+        "label": "Action",
+        "value": "none"
+      },
+      {
+        "label": "Aggression",
+        "value": "none"
+      },
+      {
+        "label": "WhyNow",
+        "value": "Without approved levels, no compliant defined-risk proposal could be produced."
+      },
+      {
+        "label": "MaxRisk",
+        "value": "n/a"
+      },
+      {
+        "label": "Invalidation",
+        "value": "n/a"
+      },
+      {
+        "label": "NextTrigger",
+        "value": "n/a"
+      },
+      {
+        "label": "Confidence",
+        "value": "High that standing aside is required; no approved levels supported proposals."
+      }
+    ],
+    "oneThing": {
+      "title": "The one thing",
+      "body": "Futures-implied pricing via Frenzy Capital, with snapshot date 2026-09-02, gives the 2026-09-16 meeting a 60% probability of a Hike 25 bp, an implied rate of 3.78 and a target range of 3.75-4.00%. That makes higher-for-longer policy risk the dominant measurable premarket input and puts pre-revenue growth, high-multiple technology and long-maturity fixed income at the front of the valuation-risk queue. This is a discount-rate sensitivity interpretation, not evidence those assets have already fallen. Counterevidence comes from 2026-09-02T16:15:00-04:00, when market tide showed net_call_premium 123667467.0000, net_put_premium -35001803.0000 and net_volume 621655; at 2026-09-02T19:59:00Z, SPY ETF tide showed net_call_premium 121014190.00000000, net_put_premium -25110342.0000 and net_volume 238808. That call-heavy finish argues against confirmed risk-off before today's tape.",
+      "why": "",
+      "checksLine": ""
+    },
+    "changeMyMind": {
+      "text": "A reading below 60% by today's close would weaken the higher-for-longer lead.",
+      "series": "2026-09-16 Hike 25 bp probability",
+      "threshold": "<60%",
+      "horizon": "today's session"
+    },
+    "checks": [
+      {
+        "series": "2026-09-16 Hike 25 bp probability",
+        "level": "60%",
+        "text": "Does hawkish pricing hold through today's session?"
+      },
+      {
+        "series": "SPY ETF tide net_call_premium",
+        "level": "121014190.00000000",
+        "text": "Does today's flow confirm or unwind the prior call-heavy finish?"
+      },
+      {
+        "series": "Market tide net_volume",
+        "level": "621655",
+        "text": "Does participation validate a directional break after the open?"
+      }
+    ],
+    "everythingElse": [
+      "No prior premarket record was supplied for comparison.",
+      "For 2026-12-09, Hike 25 bp probability is 64%.",
+      "The corresponding implied rate is 4.015.",
+      "SPY ETF tide underlying_price was 765.16 on 2026-09-02.",
+      "No overnight developments were supplied."
+    ],
+    "runLabel": "premarket",
+    "otherSections": [
+      {
+        "title": "Hawkish policy pricing is the dominant measurable input defining today’s premarket regime.",
+        "body": "At 08:45 on 2026-09-03, the regime is guarded and exposed to higher-for-longer policy risk rather than confirmed risk-off price action. For the 2026-09-16 meeting, the policy path reports a 60% probability of a Hike 25 bp, an implied rate of 3.78 and a target range of 3.75-4.00%."
+      },
+      {
+        "title": "Long-duration cash flows sit at the top of today’s valuation-risk ranking.",
+        "body": "The vulnerability ranking by cash-flow duration is: 1) pre-revenue and unprofitable growth companies, whose value depends most heavily on distant cash flows; 2) profitable high-multiple growth and long-duration technology; 3) long-maturity fixed income and equity bond proxies; 4) shorter-duration cyclicals; and 5) cash-rich value and financial companies, which have the least direct duration exposure."
+      },
+      {
+        "title": "The prior session’s call-heavy finish is meaningful counterevidence to the hawkish setup.",
+        "body": "Unusual Whales’ market tide is frozen outside RTH; these figures are from the 2026-09-02 session, not today’s session. At 2026-09-02T16:15:00-04:00, market tide showed net_call_premium 123667467.0000, net_put_premium -35001803.0000 and net_volume 621655. At 2026-09-02T19:59:00Z, the SPY ETF tide showed net_call_premium 121014190.00000000, net_put_premium -25110342.0000, net_volume 238808 and underlying_price 765.16."
+      }
+    ],
+    "footer": {
+      "coverage": [],
+      "asOf": [],
+      "notes": [
+        "Incomplete provenance: this recorded run has no deterministic session frame."
+      ]
+    }
+  },
+  "report": {
+    "subject": "",
+    "body": "",
+    "artifacts": []
+  }
+}

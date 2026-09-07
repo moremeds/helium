@@ -1,0 +1,146 @@
+[
+  {
+    "role": "delivery",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "editor",
+    "model": "gpt-5.6-sol",
+    "spans": 3,
+    "input_tokens": 9345,
+    "output_tokens": 8061,
+    "latency_ms": 262856,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "editor",
+    "model": "none",
+    "spans": 3,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 4,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "frame-clerk",
+    "model": "none",
+    "spans": 2,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 1,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "gex-reporter",
+    "model": "gpt-5.6-luna",
+    "spans": 4,
+    "input_tokens": 2300,
+    "output_tokens": 101,
+    "latency_ms": 5595,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "gex-reporter",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "overnight-reporter",
+    "model": "gpt-5.6-luna",
+    "spans": 3,
+    "input_tokens": 2267,
+    "output_tokens": 125,
+    "latency_ms": 5842,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "regime-analyst",
+    "model": "gpt-5.6-sol",
+    "spans": 16,
+    "input_tokens": 44766,
+    "output_tokens": 5042,
+    "latency_ms": 171621,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "regime-analyst",
+    "model": "none",
+    "spans": 4,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 4,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "risk-reviewer",
+    "model": "gpt-5.6-sol",
+    "spans": 1,
+    "input_tokens": 1758,
+    "output_tokens": 124,
+    "latency_ms": 5997,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "risk-reviewer",
+    "model": "none",
+    "spans": 2,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "scenario-analyst",
+    "model": "gpt-5.6-sol",
+    "spans": 1,
+    "input_tokens": 1754,
+    "output_tokens": 54,
+    "latency_ms": 3878,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "scenario-analyst",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 1,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "structure-designer",
+    "model": "gpt-5.6-sol",
+    "spans": 7,
+    "input_tokens": 10931,
+    "output_tokens": 524,
+    "latency_ms": 28454,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "structure-designer",
+    "model": "none",
+    "spans": 2,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "universe-builder",
+    "model": "none",
+    "spans": 2,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 1,
+    "reported_cost_usd": 0.0
+  }
+]

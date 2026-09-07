@@ -783,9 +783,10 @@ tasks:
       No filler: no "as noted", "it is worth remembering", "in summary", "going
       forward", no hedge that is true under every outcome. Never a tool name (any
       `ow_*`) and never an HTTP status code in prose. You write no coverage table and
-      no as-of list — the renderer prints both — and the words "replay", "as-of",
-      "unavailable", "dark", "frozen" and "nothing ships" never appear in the
-      headline, the decision or a section body.
+      no as-of list — the renderer prints both. State dated market and source limitations
+      plainly when relevant, including as-of timestamps, unavailable data, or a quote
+      frozen outside RTH. Do not describe report execution: "replay", "dark", "nothing
+      ships" and "not checked" never appear in the headline, the decision or a section body.
 
       WORD BUDGET — enforced by the renderer, not by you. It cuts back to the last
       complete sentence inside the budget, so a sentence you begin past the budget is

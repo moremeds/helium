@@ -1,0 +1,65 @@
+[
+  {
+    "role": "delivery",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 1,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "frame-clerk",
+    "model": "none",
+    "spans": 4,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 3,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "scenario-analyst",
+    "model": "claude-opus-4-8",
+    "spans": 6,
+    "input_tokens": 6,
+    "output_tokens": 1250,
+    "latency_ms": 24453,
+    "reported_cost_usd": 0.031279999999999995
+  },
+  {
+    "role": "scenario-analyst",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 0,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "week-reviewer",
+    "model": "gpt-5.6-sol",
+    "spans": 3,
+    "input_tokens": 36278,
+    "output_tokens": 2750,
+    "latency_ms": 124742,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "weekly-analyst",
+    "model": "gpt-5.6-sol",
+    "spans": 7,
+    "input_tokens": 82433,
+    "output_tokens": 9525,
+    "latency_ms": 310840,
+    "reported_cost_usd": 0.0
+  },
+  {
+    "role": "weekly-analyst",
+    "model": "none",
+    "spans": 1,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "latency_ms": 2,
+    "reported_cost_usd": 0.0
+  }
+]

@@ -1,6 +1,6 @@
 /**
  * The `meta-leak` advisory gate. The editor persona already forbade
- * replay/coverage words in prose; v3 still shipped "No prior intraday brief
+ * report-execution chatter in prose; v3 still shipped "No prior intraday brief
  * exists" as a headline (docs/evidence/pit-replays/2026-09-05/pit-v3/). A
  * persona is a request; this is a match.
  * @module dsh-plugin-tenant-option-wizard/tests/gate-meta-leak
@@ -43,13 +43,27 @@ describe("findMetaLeaks", () => {
       headline: "Clean.",
       sections: [
         { title: "This is a replay", body: "Nothing to see." },
-        { title: "Fine", body: "The tape was frozen at the open." },
+        { title: "Fine", body: "The source was not checked before publication." },
       ],
     });
     expect(leaks.map((leak) => leak.field)).toEqual([
       "section 1 title",
       "section 2 body",
     ]);
+  });
+
+  it("allows truthful market and source limitations in public prose", () => {
+    const leaks = findMetaLeaks({
+      headline: "As-of Friday's close, breadth improved.",
+      sections: [
+        {
+          title: "Market review",
+          body:
+            "The quote was frozen outside RTH; the source was unavailable and the next print is not available.",
+        },
+      ],
+    });
+    expect(leaks).toEqual([]);
   });
 
   it("scans decision values in both the object and the row shape", () => {
@@ -70,13 +84,12 @@ describe("findMetaLeaks", () => {
     expect(asRows.map((leak) => leak.field)).toEqual(["decision Call"]);
   });
 
-  it("is case-insensitive and matches every listed pattern once", () => {
+  it("is case-insensitive and matches every report-runtime pattern once", () => {
     const leaks = findMetaLeaks({
-      headline:
-        "REPLAY as-of unavailable FROZEN nothing ships no prior close brief not checked",
+      headline: "REPLAY nothing ships no prior close brief NOT CHECKED",
       sections: [],
     });
-    expect(leaks).toHaveLength(7);
+    expect(leaks).toHaveLength(4);
   });
 });
 

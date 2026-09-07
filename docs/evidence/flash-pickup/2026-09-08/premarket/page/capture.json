@@ -1,0 +1,11 @@
+{
+  "url": "http://localhost:3107/flash/2026-W36/2026-09-03?phase=premarket",
+  "runId": "run-fb84b6fd-68e5-48e3-aefc-7e4da8e0ee33",
+  "capturedAt": "2026-09-07T16:33:09.857Z",
+  "argonSha": "49ab3845d14d92bbcf8ba53830deea826db43f3f",
+  "argonDirty": false,
+  "sourceSha256": "339c6e51978b946007ae19857be0b41650c53ec405657b38e4cb397c229e1d2b",
+  "viewSha256": "2a0e2425ceb1307000eb9a8fd110608e57bed3d92001cf0ecf1cc3f13ec9fa4b",
+  "pageSha256": "b6cc8b33312ef67fc28cfd9bfa6a99a92d74a54ecccfc881b7eb002deb77f4ad",
+  "mobileOverflow": 0
+}
