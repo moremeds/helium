@@ -865,7 +865,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   for (const match of review.matchAll(COMMITMENT_ID))
     if (!printedIds.has(match[0])) {
       faults.push(
-        `复盘 names ${match[0]}, which section 1 did not print — the paragraph is dropped`,
+        `复盘 names ${match[0]}, which the ledger does not carry — the paragraph is dropped`,
       );
       review = "";
       break;
@@ -1066,9 +1066,11 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       event,
       why: whyByTicker.get(row.ticker) ?? "",
       ...(row.ivRank === undefined ? {} : { ivRank: row.ivRank }),
-      ...(row.openCallIds[0] === undefined
-        ? {}
-        : { openCall: row.openCallIds[0] }),
+      // THAT there is an open call, not its id. The id is
+      // `2026-09-04-close-focus-ADBE` — the day, the run label and the kind,
+      // all three already on the page — and a reader who wants the call itself
+      // reads §7, which lists it by name.
+      ...(row.openCallIds[0] === undefined ? {} : { openCall: "open" }),
       ...(row.sticky === true ? { sticky: true } : {}),
     };
   });

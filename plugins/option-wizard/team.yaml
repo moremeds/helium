@@ -827,9 +827,11 @@ tasks:
        "themes":[{"id","leadership","why"}]}
 
       - `review` is 上周复盘, at most 300 words. It names exactly one largest miss and
-        cites it by its commitment id and by the receipt number that killed it, both
-        taken from section 1. A paragraph naming an id section 1 did not print is
-        dropped whole.
+        cites it by its ROW NAME — `rates.long`, `sector:Foundry`, `vol` — and by the
+        receipt number that killed it. DO NOT WRITE A COMMITMENT ID: an id is the
+        day, the run label and the kind concatenated, all three already on the page,
+        and section 1 no longer prints any. A paragraph naming an id the ledger does
+        not carry is dropped whole.
       - `outlook` is 下周展望, at most 400 words: the WHY behind each verdict that is
         not `continue`, one observable each. DO NOT RESTATE ANY NUMBER THAT
         APPEARS IN SECTION 3. Every sentence names a row and says whether it

@@ -933,6 +933,30 @@ describe("section 6 — the focus list", () => {
     expect(good.faults.join("\n")).not.toContain("focus-why-restates-date");
   });
 
+  // A commitment id is the day, the run label and the kind concatenated — all
+  // three already on the page — and the /flash focus table printed one per
+  // sticky name on 2026-09-06.
+  it("says a name carries an open call without printing the call's id", () => {
+    const f = frame({
+      focus: {
+        weekly: [
+          focusRow("ADBE", {
+            openCallIds: ["2026-09-04-close-focus-ADBE"],
+          }),
+        ] as never,
+        daily: [] as never,
+        churn: 0,
+        carried: [],
+        dropped: [],
+        notes: [],
+        weightsNote: "weights: declared prior 2026-09-06",
+      },
+    });
+    const out = render({ frame: f });
+    expect(out.view.focus?.rows[0]?.openCall).toBe("open");
+    expect(body(out.sections, 6)).not.toContain("2026-09-04-close-focus-ADBE");
+  });
+
   it("discards a focus entry for a ticker that is not on the list", () => {
     const f = frame({
       focus: {
