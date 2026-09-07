@@ -28,8 +28,13 @@ const gate: Gate = {
   id: "regime-state",
   phase: "output",
   advisory: true,
-  // Only the step that is asked for the record can fail to produce one.
-  appliesTo: ["regime-analyst"],
+  // Only the step that is asked for the record can fail to produce one — and
+  // that is now the EDITOR. The runner's `liftState` runs on every step and a
+  // later fence overwrites an earlier one, so exactly one step may emit the
+  // block, and it must be the last step that knows the three checks the next
+  // run scores. The regime analyst writes the read; the editor writes the
+  // record.
+  appliesTo: ["editor"],
   async check(
     input: unknown,
     _ctx: GateCtx,

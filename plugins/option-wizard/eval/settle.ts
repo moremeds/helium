@@ -14,7 +14,8 @@
  * @module dsh-plugin-tenant-option-wizard/eval/settle
  */
 import { createHash } from "node:crypto";
-import type { Commitment, Receipt, Settler } from "@helium/core";
+import { readLedger, type Commitment, type Receipt, type Settler } from "@helium/core";
+import { settleFocus, settleVerdict } from "./verdict.js";
 import {
   apexBarSource,
   MIN_RTH_BARS,
@@ -24,6 +25,10 @@ import {
   type BarSource,
   type TenantCalendar,
 } from "./bars.js";
+
+/** The tenant whose ledger the verdict settler reads its later observations
+ *  from. The same literal `quality/frame.ts` and `ow_review_window` use. */
+const TENANT = "option-wizard";
 
 type Side = "above" | "below";
 type Level = { level: number; side: Side };
@@ -54,7 +59,10 @@ function touches(bar: Bar, level: Level): boolean {
     : bar.low <= level.level;
 }
 
-function hashBars(bars: readonly Bar[]): string {
+/** Exported so `eval/verdict.ts`'s focus settler hashes its evidence the same
+ *  way this one does. One definition, because two settlers that disagreed
+ *  about what a bar hash is would make two receipts incomparable. */
+export function hashBars(bars: readonly Bar[]): string {
   return createHash("sha256")
     .update(
       bars
@@ -67,7 +75,12 @@ function hashBars(bars: readonly Bar[]): string {
     .digest("hex");
 }
 
-function pending(commitment: Commitment, now: Date, reason: string): Receipt {
+/** Exported for the same reason as `hashBars`: one shape for "not yet". */
+export function pending(
+  commitment: Commitment,
+  now: Date,
+  reason: string,
+): Receipt {
   return {
     commitmentId: commitment.id,
     runId: "",
@@ -326,20 +339,66 @@ async function settleCandidate(
   };
 }
 
+/**
+ * @param source Null when no bar source is configured. The BAR-BACKED kinds
+ * then pend and the ledger-backed ones still settle — a verdict is scored
+ * against the next stored observation of its own row and needs no market data,
+ * so an unset apex base must not stop it.
+ * @param all Every commitment in the ledger, open or settled. A verdict's next
+ * dated observation is usually a commitment that has ALREADY settled, so the
+ * open set alone cannot supply it.
+ */
 export async function settleAll(
   open: Commitment[],
   now: Date,
-  source: BarSource,
+  source: BarSource | null,
   calendar?: TenantCalendar,
+  all?: readonly Commitment[],
 ): Promise<Receipt[]> {
   const out: Receipt[] = [];
+  const NO_BARS = "OW_APEX_API_BASE is unset; nothing was checked";
+  // The ledger's rows UNION the open set, deduplicated by id: a verdict's next
+  // observation is usually already settled (so it is in `all` and not in
+  // `open`), but on a machine whose ledger could not be read the open set is
+  // still evidence we hold.
+  const byId = new Map<string, Commitment>();
+  for (const row of [...(all ?? []), ...open]) byId.set(row.id, row);
+  const later = [...byId.values()];
   for (const commitment of open) {
     const kind = (commitment.payload as { kind?: unknown }).kind;
     try {
       if (kind === "spy-direction")
-        out.push(await settleSpy(commitment, now, source, calendar));
+        out.push(
+          source === null
+            ? pending(commitment, now, NO_BARS)
+            : await settleSpy(commitment, now, source, calendar),
+        );
       else if (kind === "candidate-entry" || kind === "candidate-result")
-        out.push(await settleCandidate(commitment, now, source, calendar));
+        out.push(
+          source === null
+            ? pending(commitment, now, NO_BARS)
+            : await settleCandidate(commitment, now, source, calendar),
+        );
+      else if (kind === "coverage-verdict")
+        out.push(
+          settleVerdict({
+            commitment,
+            later,
+            now,
+            ...(calendar === undefined ? {} : { calendar }),
+          }),
+        );
+      else if (kind === "focus-admit")
+        out.push(
+          source === null
+            ? pending(commitment, now, NO_BARS)
+            : await settleFocus({
+                commitment,
+                now,
+                source,
+                ...(calendar === undefined ? {} : { calendar }),
+              }),
+        );
       // A kind this build does not know is left ALONE, not settled: a newer
       // renderer's commitment must not be closed off by an older settler.
     } catch (error: unknown) {
@@ -377,15 +436,21 @@ export function buildSettler(cfg: {
   return {
     async settle(open: Commitment[], now: Date): Promise<Receipt[]> {
       const base = cfg.env.OW_APEX_API_BASE;
-      if (base === undefined || base === "")
-        return open.map((commitment) =>
-          pending(
-            commitment,
-            now,
-            "OW_APEX_API_BASE is unset; nothing was checked",
-          ),
-        );
-      return settleAll(open, now, apexBarSource(base), cfg.calendar);
+      // The guard NARROWED (2026-09-06): it used to pend everything, which
+      // would have made a coverage verdict unscorable on a machine with no
+      // apex — and a verdict settles from the ledger, not from bars.
+      const source =
+        base === undefined || base === "" ? null : apexBarSource(base);
+      // The ledger's own rows are the verdict settler's evidence. An absent or
+      // unreadable ledger is not an error here: `settleAll` then falls back to
+      // the open set, and a verdict with no later observation simply pends.
+      let all: readonly Commitment[] | undefined;
+      try {
+        all = readLedger(cfg.stateRoot, TENANT).commitments;
+      } catch {
+        all = undefined;
+      }
+      return settleAll(open, now, source, cfg.calendar, all);
     },
   };
 }

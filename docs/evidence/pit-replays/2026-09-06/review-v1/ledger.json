@@ -1,0 +1,121 @@
+{
+ "commitments": [
+  {
+   "id": "2026-09-04-close-verdict-rates.long",
+   "issuedAt": "2026-09-06T16:30:16.150Z",
+   "kind": "coverage-verdict",
+   "rowId": "rates.long",
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-credit",
+   "issuedAt": "2026-09-06T16:30:16.150Z",
+   "kind": "coverage-verdict",
+   "rowId": "credit",
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-04-close-verdict-vol",
+   "issuedAt": "2026-09-06T16:30:16.150Z",
+   "kind": "coverage-verdict",
+   "rowId": "vol",
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-04-close-verdict-fx",
+   "issuedAt": "2026-09-06T16:30:16.150Z",
+   "kind": "coverage-verdict",
+   "rowId": "fx",
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-04-close-verdict-equity.internals",
+   "issuedAt": "2026-09-06T16:30:16.150Z",
+   "kind": "coverage-verdict",
+   "rowId": "equity.internals",
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-spy-t1",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "spy-direction"
+  },
+  {
+   "id": "2026-09-06-weekly-spy-t5",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "spy-direction"
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-rates.long",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "coverage-verdict",
+   "rowId": "rates.long",
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-credit",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "coverage-verdict",
+   "rowId": "credit",
+   "token": "strengthen",
+   "p": 0.65
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-vol",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "coverage-verdict",
+   "rowId": "vol",
+   "token": "continue",
+   "p": 0.6
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-fx",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "coverage-verdict",
+   "rowId": "fx",
+   "token": "continue",
+   "p": 0.55
+  },
+  {
+   "id": "2026-09-06-weekly-verdict-equity.internals",
+   "issuedAt": "2026-09-06T16:31:55.471Z",
+   "kind": "coverage-verdict",
+   "rowId": "equity.internals",
+   "token": "continue",
+   "p": 0.6
+  }
+ ],
+ "receipts": [
+  {
+   "id": "2026-09-04-close-verdict-rates.long",
+   "status": "pending",
+   "reason": "no later observation of rates.long yet"
+  },
+  {
+   "id": "2026-09-04-close-verdict-credit",
+   "status": "pending",
+   "reason": "no later observation of credit yet"
+  },
+  {
+   "id": "2026-09-04-close-verdict-vol",
+   "status": "pending",
+   "reason": "no later observation of vol yet"
+  },
+  {
+   "id": "2026-09-04-close-verdict-fx",
+   "status": "pending",
+   "reason": "no later observation of fx yet"
+  },
+  {
+   "id": "2026-09-04-close-verdict-equity.internals",
+   "status": "pending",
+   "reason": "no later observation of equity.internals yet"
+  }
+ ]
+}

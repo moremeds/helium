@@ -115,7 +115,14 @@ describe("as-of, live-only tools", () => {
       "ow_spot",
       "the live quote route has no history",
     ]);
-    expect(marked).toHaveLength(14);
+    // 15 since ow_argon_watchlist joined the list: argon keeps no dated
+    // snapshot of chain membership, so a replay must not print today's members
+    // under a past date.
+    expect(marked).toHaveLength(15);
+    expect(marked).toContainEqual([
+      "ow_argon_watchlist",
+      "argon's live watchlist rail has no history",
+    ]);
     expect(marked).toContainEqual([
       "ow_uw_calendar",
       "economic calendar has no history",

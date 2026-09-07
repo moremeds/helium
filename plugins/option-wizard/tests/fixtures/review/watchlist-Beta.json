@@ -1,0 +1,85 @@
+{
+ "scanned_at_min": null,
+ "scanned_at_max": null,
+ "scheduler_lag_seconds": null,
+ "queue": {
+  "total": 0,
+  "queued": 0
+ },
+ "hot_count": 0,
+ "hot_max": 0,
+ "tickers": [
+  {
+   "ticker": "SPY",
+   "sector": "Index",
+   "chains": [
+    "Beta"
+   ],
+   "pinned": true,
+   "hot": false,
+   "sort_rank": 0,
+   "spot": 765.16,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": 8.0306,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "QQQ",
+   "sector": "Index",
+   "chains": [
+    "Beta"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 1,
+   "spot": 709.24,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": 20.6943,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "IWM",
+   "sector": "Index",
+   "chains": [
+    "Beta"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 2,
+   "spot": 294.01,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": 7.1784,
+   "market_cap": null,
+   "aum": null
+  },
+  {
+   "ticker": "DIA",
+   "sector": "Index",
+   "chains": [
+    "Beta"
+   ],
+   "pinned": false,
+   "hot": false,
+   "sort_rank": 3,
+   "spot": null,
+   "spot_quoted_at": null,
+   "spot_source": null,
+   "scanned_at": null,
+   "iv_atm": null,
+   "iv_rank": null,
+   "market_cap": null,
+   "aum": null
+  }
+ ]
+}

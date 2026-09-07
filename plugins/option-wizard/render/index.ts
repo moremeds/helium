@@ -12,13 +12,46 @@
  */
 import type { RenderedReport, RunReport, TenantSpec } from "@helium/core";
 import { priceStructure, width, type Leg, type Pricing } from "./math.js";
-import { FLASH_BUDGET, trim } from "./budget.js";
+import {
+  FLASH_BUDGET,
+  ONE_THING_BUDGET,
+  PERSISTENCE_BUDGET,
+  trim,
+  words,
+} from "./budget.js";
+import {
+  ONE_THING_TITLE,
+  channelMetrics,
+  leadFields,
+  parseOneThingDoc,
+  type ChangeMyMind,
+  type LeadFrame,
+  type OneThingCheck,
+  type OneThingDoc,
+} from "./one-thing.js";
+import { frameFrom } from "../quality/frame.js";
+import { LEVEL_METRIC, MOVE_METRIC } from "../quality/history.js";
 import { chartsFrom, type Charts } from "./charts.js";
 import { renderHtml } from "./html.js";
 import { extractJson } from "./json.js";
 import { renderText } from "./text.js";
 import { qualityMetrics } from "../quality/index.js";
 import { baselineDraft, forecastCommitments } from "./ledger.js";
+import {
+  parseReviewDoc,
+  reviewHeadline,
+  reviewMetrics,
+  reviewSections,
+  verdictCommitments,
+  type CalendarRow,
+  type FocusViewRow,
+  type ReviewDoc,
+  type RotationResult,
+  type ThemeViewRow,
+} from "./review.js";
+import { REVIEW_PERIODS, type ReviewPeriod } from "../quality/review-config.js";
+import { toolPayloadStrings, type SessionFrame } from "../quality/frame.js";
+import type { RotationRow } from "../quality/themes.js";
 
 export { extractJson } from "./json.js";
 
@@ -165,7 +198,12 @@ export interface ForecastBlock {
 }
 
 function probability(value: unknown): boolean {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1
+  );
 }
 
 export function forecastFrom(report: RunReport): ForecastBlock | undefined {
@@ -174,7 +212,10 @@ export function forecastFrom(report: RunReport): ForecastBlock | undefined {
   const parsed = extractJson(step.text);
   const raw = parsed?.spyForecast;
   if (raw === undefined || raw === null || typeof raw !== "object")
-    return { scorable: false, reason: "the scenarios step wrote no spyForecast object" };
+    return {
+      scorable: false,
+      reason: "the scenarios step wrote no spyForecast object",
+    };
   const row = raw as Record<string, unknown>;
   const reference = row.referenceClose as Record<string, unknown> | undefined;
   if (
@@ -185,10 +226,25 @@ export function forecastFrom(report: RunReport): ForecastBlock | undefined {
     typeof reference.value !== "number" ||
     !Number.isFinite(reference.value)
   )
-    return { scorable: false, reason: "referenceClose is not a {date, value} pair" };
+    return {
+      scorable: false,
+      reason: "referenceClose is not a {date, value} pair",
+    };
+  // A zero anchor is not a price, and every direction leg minted against one is
+  // unfalsifiable: `settleSpy` compares the settling close to it, and every
+  // close is above zero. A laptop PIT replay minted t1/t5 commitments anchored
+  // at 0 before this refusal existed.
+  if (!(reference.value > 0))
+    return {
+      scorable: false,
+      reason: "referenceClose.value is not a positive price",
+    };
   const bad = ["t1Down", "t5Down"].filter((key) => !probability(row[key]));
   if (bad.length > 0)
-    return { scorable: false, reason: `${bad.join(", ")} outside [0,1] or not a number` };
+    return {
+      scorable: false,
+      reason: `${bad.join(", ")} outside [0,1] or not a number`,
+    };
   return {
     scorable: true,
     forecast: {
@@ -209,7 +265,7 @@ export function forecastFrom(report: RunReport): ForecastBlock | undefined {
  * something was dropped. With a version it says "I was written for version N,
  * this is N+1" and the fix is a deploy rather than an investigation.
  */
-export const BRIEF_VIEW_SCHEMA_VERSION = 2;
+export const BRIEF_VIEW_SCHEMA_VERSION = 3;
 
 export interface BriefView {
   /** Which shape this document is in. See `BRIEF_VIEW_SCHEMA_VERSION`. */
@@ -297,6 +353,40 @@ export interface BriefView {
   /** argon's public origin, from `ARGON_APP_BASE`. Unset on a machine that has
    *  no Flash page to link to, and then no link is printed at all. */
   appBase?: string;
+  /** The lead item, after trim. Absent in `no-data` mode: a day nothing could
+   *  be ranked has no one thing, and the footer says so. */
+  oneThing?: { title: string; body: string; why: string; checksLine: string };
+  /** The price that would kill the view, and by when. Dropped WHOLE when the
+   *  triple is incomplete — never padded — and one `faults` line says so. */
+  changeMyMind?: ChangeMyMind;
+  /** The three the NEXT run scores. Written by the editor, carried to disk by
+   *  the runner's `liftState`, never written from here. */
+  checks?: OneThingCheck[];
+  everythingElse?: string[];
+  /** Renderer-owned, outside the prose budget and outside the model's reach:
+   *  coverage by layer, every source's own as-of copied verbatim, and the
+   *  frame's own notes. */
+  footer?: { coverage: string[]; asOf: string[]; notes: string[] };
+  /** One line per renderer-detected authoring fault. NOT `degradation`:
+   *  nothing failed. */
+  faults?: string[];
+  /** §G. The list this run printed, already trimmed and already filtered.
+   *  `period` is which list it is — from the emitting TASK id, never a run
+   *  label. Additive and optional: argon's `SectionsPanel` renders the seven
+   *  sections generically today, and these three fields exist for a future
+   *  component that wants a real table. */
+  focus?: {
+    period: ReviewPeriod;
+    rows: FocusViewRow[];
+    /** Present only when fewer rows than declared were available — §G.4's
+     *  "exactly 15 / exactly 5 rows, or the row says why not". */
+    shortfall?: string;
+    churn: number;
+  };
+  /** §H. One entry per declared theme, in declared order. */
+  themes?: ThemeViewRow[];
+  /** §H.4. Weekly only. */
+  rotation?: { asOf: string; benchmark: string; rows: RotationRow[] };
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -577,6 +667,49 @@ function settlementSections(
   return sections;
 }
 
+/** The `sections[]` one step returned, cleaned. Shared with
+ *  `stepSectionKeys` so "which step wrote this section" is answered by one
+ *  parse rather than by two that could disagree. */
+function sectionsOfStep(step: RunReport["steps"][number]): Section[] {
+  const parsed = extractJson(step.text);
+  const raws =
+    parsed !== null && Array.isArray(parsed.sections) ? parsed.sections : null;
+  if (raws === null) return [];
+  const out: Section[] = [];
+  for (const raw of raws) {
+    if (raw === null || typeof raw !== "object") continue;
+    const { title, body } = raw as Record<string, unknown>;
+    if (typeof title !== "string" || typeof body !== "string") continue;
+    // An empty body under a title is worse than no block at all: the reader
+    // reads it as content that got lost on the way.
+    if (title.trim() === "" || body.trim() === "") continue;
+    out.push({ title: title.trim(), body: body.trim() });
+  }
+  return out;
+}
+
+/**
+ * The TITLES the scenario step wrote.
+ *
+ * §5 already carries the dated catalysts, computed from the admitted calendar
+ * rows, so the scenario step's own "Section 5 — …" is the same content written
+ * twice — and on the 2026-09-06 acceptance run it was written FIRST, ahead of
+ * the seven-section document. The renderer already names this task id (see
+ * `spyForecastFrom`), so keying on it is not a new coupling.
+ *
+ * The TITLE and not the body, which was the first fix's own defect: a body is
+ * word-trimmed by `enforceBudget` AFTER `sectionsFrom` has run, so a
+ * title-plus-body key never matched the delivered section and the block came
+ * straight back on the review-v6 rerun.
+ */
+export function scenarioSectionTitles(report: RunReport): Set<string> {
+  const out = new Set<string>();
+  for (const step of report.steps)
+    if (step.task === "scenarios")
+      for (const section of sectionsOfStep(step)) out.add(section.title);
+  return out;
+}
+
 function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
   const sections: Section[] = [];
   const ledger = ledgerIds(report);
@@ -584,24 +717,12 @@ function sectionsFrom(report: RunReport, regime: RegimeView): Section[] {
     const parsed = extractJson(step.text);
     if (parsed !== null && Array.isArray(parsed.settlements))
       sections.push(...settlementSections(parsed.settlements, ledger));
-    const raws =
-      parsed !== null && Array.isArray(parsed.sections)
-        ? parsed.sections
-        : null;
-    if (raws === null) {
+    if (parsed === null || !Array.isArray(parsed.sections)) {
       if (step.task === "regime" && regime.paragraph !== "")
         sections.push({ title: "今日 regime", body: regime.paragraph });
       continue;
     }
-    for (const raw of raws) {
-      if (raw === null || typeof raw !== "object") continue;
-      const { title, body } = raw as Record<string, unknown>;
-      if (typeof title !== "string" || typeof body !== "string") continue;
-      // An empty body under a title is worse than no block at all: the reader
-      // reads it as content that got lost on the way.
-      if (title.trim() === "" || body.trim() === "") continue;
-      sections.push({ title: title.trim(), body: body.trim() });
-    }
+    sections.push(...sectionsOfStep(step));
   }
   return sections;
 }
@@ -995,7 +1116,8 @@ function arithmeticFaults(
 export const DEFAULT_DEADLINE_BARS = 5;
 
 function deadlineBars(raw: unknown): number {
-  if (typeof raw !== "number" || !Number.isInteger(raw)) return DEFAULT_DEADLINE_BARS;
+  if (typeof raw !== "number" || !Number.isInteger(raw))
+    return DEFAULT_DEADLINE_BARS;
   if (raw < 1 || raw > DEFAULT_DEADLINE_BARS) return DEFAULT_DEADLINE_BARS;
   return raw;
 }
@@ -1084,7 +1206,8 @@ export function candidatesFrom(
             entry: {
               ...toInvalidation(proposal.entry)![0]!,
               deadlineBars: deadlineBars(
-                (proposal.entry as Record<string, unknown> | null)?.deadlineBars,
+                (proposal.entry as Record<string, unknown> | null)
+                  ?.deadlineBars,
               ),
             },
           }
@@ -1151,6 +1274,10 @@ interface EditorDoc {
   riskList?: Array<{ ticker: string; reason: string }>;
   /** id -> rationale. Prose only; every other key on the entry is ignored. */
   rationales?: Map<string, string>;
+  /** The One Thing half of the same document, when the editor wrote one. */
+  oneThing?: OneThingDoc;
+  /** One string per authoring fault `parseOneThingDoc` found. */
+  problems?: string[];
 }
 
 function sectionList(raw: unknown): Section[] {
@@ -1224,8 +1351,19 @@ function editorDocFrom(report: RunReport): EditorDoc | undefined {
     }
   }
 
+  // The One Thing half of the SAME document. A run whose editor still writes
+  // the `sections` shape has no `oneThing` key, `parseOneThingDoc` reports it
+  // as a problem, and the fallback path renders exactly as it did before.
+  const lead = parseOneThingDoc(parsed);
+  const wroteLead =
+    typeof (parsed as Record<string, unknown>).oneThing === "string";
+
   return {
     ...(headline === undefined ? {} : { headline }),
+    ...(wroteLead && lead.doc !== null ? { oneThing: lead.doc } : {}),
+    ...(wroteLead && lead.problems.length > 0
+      ? { problems: lead.problems }
+      : {}),
     ...(tape.length === 0 ? {} : { tape }),
     ...(schedule.length === 0 ? {} : { schedule }),
     ...(overnight.length === 0 ? {} : { overnight }),
@@ -1251,6 +1389,28 @@ function applyEditor(view: BriefView, doc: EditorDoc | undefined): BriefView {
     ...(doc.coverage === undefined ? {} : { coverage: doc.coverage }),
     ...(doc.decision === undefined ? {} : { decision: doc.decision }),
     ...(doc.riskList === undefined ? {} : { riskList: doc.riskList }),
+    // The lead item's body arrives untrimmed and with placeholder metadata:
+    // `why` and `checksLine` are the FRAME's, filled in below once the budget
+    // has been enforced, so the model never supplies either.
+    ...(doc.oneThing === undefined
+      ? {}
+      : {
+          oneThing: {
+            title: ONE_THING_TITLE,
+            body: doc.oneThing.oneThing,
+            why: "",
+            checksLine: "",
+          },
+          ...(doc.oneThing.changeMyMind === undefined
+            ? {}
+            : { changeMyMind: doc.oneThing.changeMyMind }),
+          ...(doc.oneThing.checks.length === 0
+            ? {}
+            : { checks: doc.oneThing.checks }),
+          ...(doc.oneThing.everythingElse.length === 0
+            ? {}
+            : { everythingElse: doc.oneThing.everythingElse }),
+        }),
     candidates:
       doc.rationales === undefined
         ? view.candidates
@@ -1484,11 +1644,63 @@ function assembleView(report: RunReport, cfg: TenantSpec): BriefView {
  *  the `as-of-verbatim` gate protects, and a trim there would delete
  *  evidence to save words. Runs after `applyEditor` so the editor's prose is
  *  what gets measured, and before charts, which it cannot touch. */
-function enforceBudget(view: BriefView): BriefView {
+/** `mode` is the SELECTION MODE the frame reported, not a run label: nothing
+ *  here learns which run produced the document, and a sixth run label would
+ *  cost no edit. `persistence` means nothing stood out, so the lead item gets
+ *  half the room and two fewer else-lines. */
+function enforceBudget(view: BriefView, mode?: string): BriefView {
   const cut = (text: string, max: number): string => trim(text, max).text;
+  const quiet = mode === "persistence";
   return {
     ...view,
-    headline: cut(view.headline, FLASH_BUDGET.headlineWords),
+    ...(view.oneThing === undefined
+      ? {}
+      : {
+          oneThing: {
+            ...view.oneThing,
+            body: cut(
+              view.oneThing.body,
+              quiet
+                ? PERSISTENCE_BUDGET.oneThingWords
+                : ONE_THING_BUDGET.oneThingWords,
+            ),
+          },
+        }),
+    ...(view.everythingElse === undefined
+      ? {}
+      : {
+          everythingElse: view.everythingElse
+            .slice(
+              0,
+              quiet ? PERSISTENCE_BUDGET.elseLines : ONE_THING_BUDGET.elseLines,
+            )
+            .map((line) => cut(line, ONE_THING_BUDGET.elseLineWords)),
+        }),
+    ...(view.changeMyMind === undefined
+      ? {}
+      : {
+          changeMyMind: {
+            ...view.changeMyMind,
+            text: cut(
+              view.changeMyMind.text,
+              ONE_THING_BUDGET.changeMyMindWords,
+            ),
+          },
+        }),
+    ...(view.checks === undefined
+      ? {}
+      : {
+          checks: view.checks.map((check) => ({
+            ...check,
+            text: cut(check.text, ONE_THING_BUDGET.checkWords),
+          })),
+        }),
+    headline: cut(
+      view.headline,
+      view.oneThing === undefined
+        ? FLASH_BUDGET.headlineWords
+        : ONE_THING_BUDGET.headlineWords,
+    ),
     sections: view.sections.slice(0, FLASH_BUDGET.sectionCount).map((s) => ({
       ...s,
       body: cut(s.body, FLASH_BUDGET.sectionBodyWords),
@@ -1524,11 +1736,138 @@ function withPolicyAsOf(view: BriefView, report: RunReport): BriefView {
   };
 }
 
+/** Every word the reader gets from the model, after the trim. The denominator
+ *  of `brief.proseWords`. */
+function proseWordsOf(view: BriefView): number {
+  return (
+    words(view.headline) +
+    words(view.oneThing?.body ?? "") +
+    words(view.changeMyMind?.text ?? "") +
+    (view.checks ?? []).reduce((total, row) => total + words(row.text), 0) +
+    (view.everythingElse ?? []).reduce(
+      (total, line) => total + words(line),
+      0,
+    ) +
+    view.candidates.reduce((total, row) => total + words(row.rationale), 0)
+  );
+}
+
+/**
+ * The `ow_rotation` payload, found BY SHAPE the way `argonBaseline` finds
+ * argon's. A tool output does not record its producer, and `benchmarkReturns`
+ * beside a `rows` array is a shape nothing else in this tenant emits.
+ */
+function rotationFrom(report: RunReport): RotationResult | null {
+  for (const raw of toolPayloadStrings(report)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    const envelope = parsed as Record<string, unknown>;
+    if (
+      envelope.benchmarkReturns === undefined ||
+      !Array.isArray(envelope.rows) ||
+      typeof envelope.benchmark !== "string"
+    )
+      continue;
+    return parsed as RotationResult;
+  }
+  return null;
+}
+
+/** The dated rows `ow_uw_calendar` answered with. Same shape lookup: a `rows`
+ *  array whose entries carry a `time` and an `event`. */
+function calendarRowsFrom(report: RunReport): CalendarRow[] {
+  for (const raw of toolPayloadStrings(report)) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== "object") continue;
+    const rows = (parsed as { rows?: unknown }).rows;
+    if (!Array.isArray(rows) || rows.length === 0) continue;
+    const first = rows[0] as Record<string, unknown>;
+    if (typeof first.time !== "string" || typeof first.event !== "string")
+      continue;
+    return rows as CalendarRow[];
+  }
+  return [];
+}
+
+/**
+ * The seven review sections, when a step that writes them ran.
+ *
+ * Which cadence is decided by the emitting TASK id — `weekly` writes the full
+ * document, `edit` writes the same seven sections at a third the size. That is
+ * a manifest fact, not a clock fact: the renderer still does not know what a
+ * run label is.
+ */
+function reviewOf(
+  report: RunReport,
+  frame: SessionFrame | null,
+): {
+  sections: Section[];
+  faults: string[];
+  gaps: number;
+  citations: number;
+  focusWhyMissing: number;
+  focusWhyRejected: number;
+  staleRowsQuoted: number;
+  proposed: Array<{ id: string; thesis: string; evidence: string }>;
+  view: {
+    focus?: BriefView["focus"];
+    themes?: ThemeViewRow[];
+    rotation?: BriefView["rotation"];
+  };
+  doc: ReviewDoc | null;
+  period: ReviewPeriod;
+  rotationRows: number | null;
+} | null {
+  if (frame === null) return null;
+  const weeklyTask = REVIEW_PERIODS[0];
+  const step =
+    report.steps.find((entry) => entry.task === weeklyTask) ??
+    report.steps.find((entry) => entry.task === "edit");
+  if (step === undefined) return null;
+  const period: ReviewPeriod =
+    step.task === weeklyTask ? REVIEW_PERIODS[0] : REVIEW_PERIODS[1];
+  const parsed = extractJson(step.text);
+  const doc = parsed === null ? null : parseReviewDoc(parsed).doc;
+  const rotation = period === REVIEW_PERIODS[0] ? rotationFrom(report) : null;
+  const out = reviewSections({
+    frame,
+    rotation,
+    doc,
+    caps: period === REVIEW_PERIODS[0] ? frame.caps.weekly : frame.caps.daily,
+    period,
+    // The FRAME's rows first. `ow_uw_calendar` and `ow_argon_policy_path` are
+    // siblings of `ow_session_frame`; their payloads never reach
+    // `report.toolOutputs`, so the shape-matched lookup below found nothing on
+    // 2026-09-06 and §5 was written entirely by the model. It stays as the
+    // fallback for a run whose calendar came from a step of its own.
+    calendarRows:
+      frame.calendar !== undefined && frame.calendar.length > 0
+        ? frame.calendar
+        : calendarRowsFrom(report),
+  });
+  return {
+    ...out,
+    doc,
+    period,
+    rotationRows: rotation === null ? null : rotation.rows.length,
+  };
+}
+
 export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
+  const doc = editorDocFrom(report);
+  const frame = frameFrom(report);
   const view = withPolicyAsOf(
-    enforceBudget(
-      applyEditor(assembleView(report, cfg), editorDocFrom(report)),
-    ),
+    enforceBudget(applyEditor(assembleView(report, cfg), doc), frame?.mode),
     report,
   );
   // The two fields the mail's Flash link is built from. `ARGON_APP_BASE` is
@@ -1538,7 +1877,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
   // Flash page, and the mail simply carries no link.
   const appBase = (process.env.ARGON_APP_BASE ?? "").trim();
   const runLabel = report.phase;
-  return {
+  const base: BriefView = {
     ...view,
     ...(runLabel === undefined ? {} : { runLabel }),
     ...(appBase === "" ? {} : { appBase }),
@@ -1547,6 +1886,68 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
       view.candidates.map((candidate) => candidate.ticker),
     ),
   };
+  // No frame, no lead item: the fallback path renders exactly as it did before
+  // this design existed, which is what a run with no deterministic step gets.
+  if (frame === null) return base;
+  const lead = leadFields({
+    frame: frame as unknown as LeadFrame,
+    body: base.oneThing?.body ?? "",
+    problems: doc?.problems ?? [],
+  });
+  const review = reviewOf(report, frame);
+  const faults = [...(lead.faults ?? []), ...(review?.faults ?? [])];
+  const fromScenarios = scenarioSectionTitles(report);
+  return {
+    ...base,
+    ...(lead.oneThing === undefined
+      ? { oneThing: undefined }
+      : { oneThing: lead.oneThing }),
+    footer: lead.footer,
+    ...(faults.length === 0 ? {} : { faults }),
+    // Appended AFTER the budget trim on purpose: sections 1/3/5/6/7 are the
+    // renderer's own prints, and a word cap on the model's prose must not eat
+    // a coverage row.
+    ...(review === null
+      ? {}
+      : {
+          // THE SEVEN ARE THE DOCUMENT, AND THEY COME FIRST. On 2026-09-06 the
+          // delivered weekly opened with the scenario step's own
+          // "Section 5 — Dated Catalysts" and the week-reviewer's three window
+          // sections, and only then reached "1 · Scorecard". The scenario
+          // step's block is dropped outright — §5 is the same content, built
+          // from the admitted calendar rows — and everything else a step wrote
+          // (the three windows) follows §7 unchanged.
+          sections: [
+            ...review.sections,
+            ...base.sections.filter(
+              (section) => !fromScenarios.has(section.title),
+            ),
+          ],
+          // A review run has no `regime` step, so nothing upstream fills the
+          // masthead and the 2026-09-06 weekly reached argon with an empty
+          // one. Renderer-computed, never empty, never a model sentence.
+          headline:
+            base.headline.trim() === ""
+              ? reviewHeadline({
+                  period: review.period,
+                  scorecard: review.sections[0]?.body ?? "",
+                  ...(lead.oneThing === undefined
+                    ? {}
+                    : { oneThing: lead.oneThing.body }),
+                  checksLine: frame.checks.line,
+                })
+              : base.headline,
+          ...(review.view.focus === undefined
+            ? {}
+            : { focus: review.view.focus }),
+          ...(review.view.themes === undefined
+            ? {}
+            : { themes: review.view.themes }),
+          ...(review.view.rotation === undefined
+            ? {}
+            : { rotation: review.view.rotation }),
+        }),
+  };
 }
 
 export default function renderReport(
@@ -1554,12 +1955,25 @@ export default function renderReport(
   cfg: TenantSpec,
 ): RenderedReport {
   const view = buildView(report, cfg);
+  const frame = frameFrom(report);
   // What this run promised, handed to the runner to stamp and write to the
   // ledger BEFORE any delivery is attempted. The renderer mints the ids and
   // the payloads; it never stamps the run context, because the runner already
   // holds it.
   const label = report.phase;
-  const commitments = forecastCommitments(view, label);
+  const review = reviewOf(report, frame);
+  const commitments = [
+    ...forecastCommitments(view, label),
+    ...(review === null || frame === null
+      ? []
+      : verdictCommitments({
+          frame,
+          doc: review.doc,
+          day: report.day,
+          phase: label,
+          period: review.period,
+        })),
+  ];
   const baselines = [baselineDraft(view, report, label)];
   // NO SUBJECT. The renderer does not know the phase — render.spec.ts forbids
   // it naming one — so every subject it could mint reads `option-wizard
@@ -1574,7 +1988,42 @@ export default function renderReport(
     data: view as unknown as Record<string, unknown>,
     // Measured over the document the READER gets, after the budget trim. The
     // runner writes these to the audit table and prints one header line.
-    metrics: qualityMetrics({ view, report }),
+    metrics: [
+      ...qualityMetrics({ view, report }),
+      // The channel rows, from the frame the deterministic step computed. An
+      // absent frame writes none of them rather than a screen of nulls.
+      ...(frame === null
+        ? []
+        : channelMetrics({
+            frame: frame as unknown as LeadFrame,
+            moveMetric: MOVE_METRIC,
+            levelMetric: LEVEL_METRIC,
+            order: frame.ranked.map((row) => row.id),
+            proseWords: proseWordsOf(view),
+            invalidationComplete: view.changeMyMind !== undefined,
+          })),
+      // The §F/§G/§H rows. Written only when a review step ran: a screen of
+      // nulls on a run that writes no review says nothing.
+      ...(review === null || frame === null
+        ? []
+        : reviewMetrics({
+            frame,
+            sections: review.sections,
+            gaps: review.gaps,
+            citations: review.citations,
+            focus: {
+              churn: frame.focus.churn,
+              whyMissing: review.focusWhyMissing,
+              whyRejected: review.focusWhyRejected,
+            },
+            themes: {
+              rows: frame.declared.themes.length,
+              proposed: review.proposed.length,
+            },
+            rotationRows: review.rotationRows,
+            staleRowsQuoted: review.staleRowsQuoted,
+          })),
+    ],
     ...(commitments.length === 0 ? {} : { commitments }),
     baselines,
   };

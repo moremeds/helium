@@ -1,0 +1,37 @@
+{
+  "id": "2026-09-07-review-framework-failed-run-rate",
+  "kind": "helium-run-metric",
+  "repo": "helium",
+  "prNumber": 100,
+  "mergeSha": null,
+  "hypothesis": "Landing the review framework (feat/review-framework: three new deterministic steps, four new tools, the seven-section renderer and rewritten personas) does not raise option-wizard's production failed-run rate. Cost per run and p50 wall time are expected to rise with the added steps and are deliberately not the metric.",
+  "change": "helium plugins/option-wizard: review framework PR",
+  "metric": "failedRunRate",
+  "tenant": "option-wizard",
+  "deployment": "production",
+  "baseline": {
+    "source": "macmini ~/.helium/logs/option-wizard-<phase>.log outcome lines, paired with ~/.helium/audit.db span run_ids, read 2026-09-07",
+    "runIds": [
+      "run-bda82345-4596-4319-815c-d8c1c2dc1114",
+      "run-9db61cd7-f9bb-4022-a782-de5e8ec07971",
+      "run-a1af9a1e-f538-41c0-a0fa-7827713f9a3b",
+      "run-ba6f14a6-7417-4b96-a1f0-a81e51593617",
+      "run-2e6f5d6d-5c80-44f3-aa23-69be7ef2da9a"
+    ],
+    "outcomes": [
+      "completed",
+      "completed",
+      "completed",
+      "FAILED provider-error",
+      "completed"
+    ],
+    "failed": 1,
+    "value": 0.2
+  },
+  "window": {
+    "runs": 5,
+    "startsAfter": "the first launchd run whose audit span.code_version equals mergeSha",
+    "excluded": "runs whose log outcome line begins with 'outcome: skipped' (calendar closed) are excluded from both denominators"
+  },
+  "rule": "A run is failed when its log outcome line begins with 'outcome: FAILED'; completed when it begins with 'outcome: completed'; skipped runs are excluded. Span-row count is NOT the rule (run-9db61cd7 completed with 18 spans, run-ba6f14a6 FAILED with 32). improved if window failedRunRate < 0.2; regressed if failedRunRate > 0.4; flat otherwise. A 5-run window only takes the values 0, 0.2, 0.4, 0.6, 0.8, 1.0, so 'improved' means zero failures in five and 'regressed' means three or more of five; this is a coarse V0 gauge, not a precise rate. Thresholds fixed at mint time; never edited after."
+}

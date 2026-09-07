@@ -15,8 +15,9 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
-import { AuditStore } from "@helium/core";
+import { AuditStore, readLedger } from "@helium/core";
 import type { ToolRunContext, ToolVocabularyEntry } from "@helium/core";
+import { summarise } from "@helium/cli/scoreboard";
 import {
   candidatesFrom,
   extractJson,
@@ -29,8 +30,45 @@ import {
   tenantThresholds,
 } from "../gates/ib-preflight.js";
 import { parseRegimeState } from "../state/regime.js";
+import { parseReviewConfig } from "../quality/review-config.js";
+import type { ChannelInputs } from "../quality/channels.js";
+import type { FocusInputs } from "../quality/focus.js";
+import { MIN_HISTORY } from "../quality/history.js";
+import {
+  attachFocusCalendar,
+  attachThresholds,
+  buildFrame,
+} from "../quality/frame.js";
+import { realizedThreshold } from "../eval/verdict.js";
+import { rotationTable } from "../quality/themes.js";
+import type { Bar } from "../eval/bars.js";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Every tool `ow_session_frame` may call. It is a LIST, not a comment: the
+ * frame refuses a name that is not on it, so adding a source is a visible edit
+ * here rather than a line buried in one `await`. `ow_ib_positions` is absent
+ * and must stay absent — the /flash page this frame feeds is public.
+ */
+export const SESSION_FRAME_SIBLINGS: readonly string[] = [
+  "ow_macro_rates",
+  "ow_argon_policy_path",
+  "ow_uw_gex",
+  "ow_spot",
+  "ow_uw_market_state",
+  "ow_uw_calendar",
+  "ow_tv_commodities",
+  "ow_argon_watchlist",
+  "ow_tv_watchlist",
+  "ow_uw_earnings",
+  "ow_massive_actions",
+  // §G.5's implied move. It answers only AFTER the focus list exists — the
+  // frame is built, its names are read, and the term structure is asked for
+  // those names — so it is a second pass, not one of the parallel reads above.
+  "ow_uw_iv_term",
+  "ow_apex_bars",
+];
 
 /**
  * The US equity venues TradingView tags an optionable listing with. Everything
@@ -52,6 +90,28 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_spot", { mutating: false }],
   ["ow_argon_metrics", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
   ["ow_argon_levels", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
+  // Unconfigured on the laptop by design, exactly like ow_argon_levels: the
+  // rail is a live read of the operator's own watchlist, and a machine without
+  // argon reports the gap rather than inventing a universe.
+  ["ow_argon_watchlist", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
+  // Unconfigured on the laptop, and as of 2026-09-06 not in
+  // ~/.config/helium/helium.env on the mini either — the deploy step that adds
+  // it is still outstanding, and `requiresEnv` is what makes that gap say its
+  // own name at the top of the run report rather than looking like a quiet
+  // corporate-action calendar.
+  ["ow_massive_actions", { mutating: false, requiresEnv: "MASSIVE_API_KEY" }],
+  // The frame's primary source is argon's macro store: without it there is no
+  // rates, curve, credit or vol level to rank or to cover, and a frame built
+  // from the remaining three siblings would be a ranking of whatever answered
+  // rather than of the session. It never throws — an unrankable day comes back
+  // as `mode: "no-data"` with a full set of `untested` rows — so this entry is
+  // about saying the gap's name at the top of the run report, not about
+  // stopping the run.
+  ["ow_session_frame", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  // 12 + N ow_apex_bars calls, weekly only. apex is the only source, so a
+  // machine without it prints a table of `untested` rows rather than a shorter
+  // one.
+  ["ow_rotation", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -600,6 +660,39 @@ async function uwGet(
   return response.json();
 }
 
+/**
+ * One massive.com REST call.
+ *
+ * The bearer header is copied from argon's own working client for the same
+ * provider (`src/uw_scan/sources/massive_fundamentals.py`:
+ * `headers={"Authorization": f"Bearer {api_key}"}`) rather than invented, and
+ * the default base is the same `https://api.massive.com` argon defaults to.
+ */
+async function massiveGet(
+  env: Env,
+  tool: string,
+  path: string,
+  query: Record<string, string>,
+  ctx?: ToolRunContext,
+): Promise<unknown> {
+  const key = need(env, "MASSIVE_API_KEY", tool);
+  const base = env.MASSIVE_BASE_URL?.trim() || "https://api.massive.com";
+  const url = new URL(path, base);
+  for (const [name, value] of Object.entries(query))
+    url.searchParams.set(name, value);
+  const doFetch = ctx?.fetchImpl ?? fetch;
+  const response = await doFetch(url, {
+    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `${tool}: ${url.pathname} returned ${response.status} ${response.statusText}`,
+    );
+  }
+  return response.json();
+}
+
 /** One argon FastAPI call. No credential — argon's own API takes none for
  *  these routes — so the only failure modes are "unreachable" and a non-2xx
  *  status, both named with the host and path so a gap is actionable rather
@@ -1068,6 +1161,16 @@ const ReviewWindowParams = z.object({
  * The store is opened per call and closed in a `finally`. A tool that leaks a
  * SQLite handle leaks one per run, forever.
  */
+/** `select.mode` is stored as a NUMBER (the audit table holds numbers), and
+ *  `render/one-thing.ts`'s `MODE_CODE` is what wrote it. This is that map read
+ *  backwards, so the histogram's keys are the mode names a reader knows. */
+const MODE_NAMES: Record<number, string> = {
+  0: "ratio",
+  1: "persistence",
+  2: "invalidation",
+  3: "no-data",
+};
+
 function qualityByDay(
   env: NodeJS.ProcessEnv,
   fromDay: string,
@@ -1249,12 +1352,26 @@ const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 const EarningsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
 });
+/** `EarningsParams`' own cap, named so the frame's batching and the schema can
+ *  never drift apart. The tool makes one round trip per ticker either way — the
+ *  cap is what keeps a MODEL from asking about a hundred names in one line. */
+export const EARNINGS_PER_CALL = 12;
 
 const GexParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(12).optional(),
 });
 const ArgonLevelsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(12),
+});
+/** Optional on purpose: a deterministic step calls this with `{}` and gets the
+ *  `extensions.review.sectors` list the tenant declared. */
+const ArgonWatchlistParams = z.object({
+  chains: z.array(z.string().min(1).max(64)).max(40).optional(),
+});
+const MassiveActionsParams = z.object({
+  tickers: z.array(z.string().min(1).max(8)).max(200).optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
 });
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
@@ -1388,6 +1505,11 @@ const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
   ["ow_spot", "the live quote route"],
   ["ow_strike_check", "the live quote route"],
   ["ow_argon_levels", "argon's live regime API"],
+  // The rail is CURRENT membership. argon keeps no dated snapshot of which
+  // tickers were in a chain on a past day, so a replay gets the honest
+  // "unavailable" and the sector rows print `untested` rather than today's
+  // membership under a past date.
+  ["ow_argon_watchlist", "argon's live watchlist rail"],
   ["ow_ib_positions", "xenon's live account API"],
   ["ow_uw_chain", "the Unusual Whales chain endpoint as used here"],
   ["ow_uw_ticker_metrics", "the Unusual Whales ticker-metrics endpoint"],
@@ -1525,6 +1647,38 @@ export function openDaysBack(
   return out.reverse();
 }
 
+/**
+ * OPEN sessions from `from` to `to`; negative when `to` is behind `from`.
+ *
+ * Walked back from the later date with `priorOpenDay` rather than subtracted:
+ * the same reason `openDaysBack` gives — a subtraction guesses which holidays
+ * fall inside. Bounded so a malformed pair cannot spin.
+ */
+export function openDaysBetween(
+  from: string,
+  to: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): number {
+  if (to === from) return 0;
+  const forward = to > from;
+  const stop = forward ? from : to;
+  let cursor = forward ? to : from;
+  let count = 0;
+  while (cursor > stop && count < 400) {
+    cursor = priorOpenDay(cursor, calendar);
+    count += 1;
+  }
+  return forward ? count : -count;
+}
+
+/** A CALENDAR-day bound for a feed whose endpoint takes a date range. The open
+ *  -session arithmetic is the decay's, never this. */
+function plusCalendarDays(day: string, count: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + count * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
 
@@ -1554,6 +1708,18 @@ export function buildTools(cfg: {
   extensions?: Record<string, unknown>;
 }) {
   const { env } = cfg;
+  // The tenant's own `extensions.review` declaration, parsed ONCE, here.
+  // Parsing at the top of the factory is what makes a malformed declaration
+  // skip exactly this tenant with a recorded reason: `buildTools` throwing IS
+  // the tenant-skip seam (AGENTS.md, Architecture), so the review framework
+  // needs no validation gate of its own. A tenant that declares no `review:`
+  // block at all — a test harness, a future tenant — gets `undefined` and the
+  // review tools report `not declared`; a tenant that declares a BROKEN one
+  // never loads.
+  const review =
+    (cfg.extensions as { review?: unknown } | undefined)?.review === undefined
+      ? undefined
+      : parseReviewConfig(cfg.extensions);
   const asOf = cfg.asOf;
   const asOfIso = asOf?.toISOString();
   // The as-of DAY in the zone this tenant files its reports in. Every dated
@@ -1567,6 +1733,93 @@ export function buildTools(cfg: {
           asOf,
         );
   const dateCut = (column: string): string => dateCutSql(column, asOfDay);
+
+  /**
+   * Daily bars for a set of symbols, one `ow_apex_bars` round trip each.
+   *
+   * Shared by `ow_rotation` (11 sector ETFs + each theme's instruments) and by
+   * `ow_session_frame` (every watchlist chain's members + the same theme
+   * instruments), because a table and a coverage row that priced the same
+   * basket from two different reads could disagree about one week.
+   *
+   * One symbol's failure is that symbol's absence and a note — never the
+   * caller's failure.
+   */
+  async function dailyBars(
+    symbols: readonly string[],
+    lookbackDays: number,
+    ctx?: ToolRunContext,
+  ): Promise<{ bars: Map<string, Bar[]>; notes: string[] }> {
+    const bars = new Map<string, Bar[]>();
+    const notes: string[] = [];
+    const barsTool = built.find((entry) => entry.name === "ow_apex_bars");
+    const answered = await Promise.allSettled(
+      symbols.map(async (symbol) => ({
+        symbol,
+        body:
+          barsTool === undefined
+            ? undefined
+            : (JSON.parse(
+                await barsTool.run(
+                  { symbol, timeframe: "1d", lookbackDays },
+                  ctx,
+                ),
+              ) as { bars?: unknown[] }),
+      })),
+    );
+    answered.forEach((result, index) => {
+      const symbol = symbols[index]!;
+      if (result.status === "rejected") {
+        const why: unknown = result.reason;
+        notes.push(
+          `${symbol}: ${why instanceof Error ? why.message : String(why)}`,
+        );
+        return;
+      }
+      const rows = result.value.body?.bars;
+      if (!Array.isArray(rows)) {
+        notes.push(`${symbol}: ow_apex_bars is not built`);
+        return;
+      }
+      bars.set(
+        symbol,
+        rows.flatMap((raw) => {
+          const bar = raw as Record<string, unknown>;
+          const close = numeric(bar.close);
+          if (typeof bar.time !== "string" || close === undefined) return [];
+          return [
+            {
+              time: bar.time,
+              open: numeric(bar.open) ?? close,
+              high: numeric(bar.high) ?? close,
+              low: numeric(bar.low) ?? close,
+              close,
+              volume: numeric(bar.volume) ?? 0,
+            },
+          ];
+        }),
+      );
+    });
+    return { bars, notes };
+  }
+
+  /** The newest bar day a symbol reaches at or before `day`. The local apex
+   *  series lags — 2026-08-28 on 2026-09-06 — and a basket measured to a day
+   *  it has no bar for reports a perfectly calm 0.00 % week. */
+  function newestBarDay(
+    bars: ReadonlyMap<string, readonly Bar[]>,
+    symbol: string,
+    day: string,
+  ): string | undefined {
+    let best: string | undefined;
+    for (const bar of bars.get(symbol) ?? []) {
+      const stamp = bar.time.slice(0, 10);
+      if (stamp > day) continue;
+      if (best === undefined || stamp > best) best = stamp;
+    }
+    return best;
+  }
+
   const built = [
     {
       // opencli's TradingView adapter is read-only and drives the LOCAL app over
@@ -2592,15 +2845,11 @@ export function buildTools(cfg: {
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
-        const declared = (
-          cfg.extensions as { review?: { windows?: unknown } } | undefined
-        )?.review?.windows;
-        const windows = (
-          Array.isArray(declared) &&
-          declared.every((n) => typeof n === "number" && n > 0 && n <= 60)
-            ? declared
-            : [5, 10, 21]
-        ) as number[];
+        // `review` is the parsed declaration; `parseReviewConfig` has already
+        // refused a window that is not a positive integer <= 60, so there is
+        // nothing left to re-check here. A tenant with no `review:` block at
+        // all falls back to the framework's own 5/10/21.
+        const windows: number[] = review?.windows ?? [5, 10, 21];
         const dir = join(cfg.stateRoot, "reports");
         let names: string[] = [];
         try {
@@ -2627,9 +2876,33 @@ export function buildTools(cfg: {
             span[span.length - 1] ?? cutoff,
           );
           const sessions = [];
+          // The counters are a FOLD over what this loop already holds — the
+          // metric rows `qualityByDay` returned and the per-day regime records
+          // — never a second audit query.
+          const realRegime = new Set<string>();
+          let reported = 0;
+          let withRegime = 0;
           for (const day of span) {
             const causeTitles: Record<string, string> = {};
-            const quality = measured.rows.get(day) ?? {};
+            // ROUNDED before the model ever sees it. A stored score is a
+            // full-precision double — `channel.vol.score` reached the week
+            // reviewer as 1.3037037037037023 on 2026-09-06 — and a model
+            // handed sixteen decimals will quote sixteen decimals.
+            const quality = Object.fromEntries(
+              Object.entries(measured.rows.get(day) ?? {}).map(
+                ([label, byName]) => [
+                  label,
+                  Object.fromEntries(
+                    Object.entries(byName).map(([name, value]) => [
+                      name,
+                      typeof value === "number" && Number.isFinite(value)
+                        ? Math.round(value * 1e4) / 1e4
+                        : value,
+                    ]),
+                  ),
+                ],
+              ),
+            );
             const regime: Record<string, unknown> = {};
             for (const entry of byDay.get(day) ?? []) {
               let markdown: string;
@@ -2645,6 +2918,7 @@ export function buildTools(cfg: {
               if (typeof first.title === "string" && first.title !== "")
                 causeTitles[entry.label] = first.title;
             }
+            let stateReason = "no regime record on disk for this session";
             try {
               const stateDir = join(cfg.stateRoot, "option-wizard", day);
               for (const file of await readdir(stateDir)) {
@@ -2653,11 +2927,35 @@ export function buildTools(cfg: {
                 const parsed = parseRegimeState(
                   JSON.parse(await readFile(join(stateDir, file), "utf8")),
                 );
-                if (parsed !== null) regime[match[1]!] = parsed;
+                if (parsed !== null) {
+                  regime[match[1]!] = parsed;
+                  realRegime.add(`${day}/${match[1]!}`);
+                }
               }
-            } catch {
-              // No records for that day. The empty object says so.
+            } catch (error: unknown) {
+              // THE 2026-09-06 DEFECT. This catch used to be silent, with the
+              // comment "No records for that day. The empty object says so."
+              // It did not say so: `<stateRoot>/option-wizard/<day>/` only
+              // began being written in PR #92, so for every earlier day the
+              // directory is absent — and `week-reviewer`'s rule "a window
+              // whose sessions are empty is reported as empty" turned that
+              // into the weekly's claim that 20 of 21 sessions were "not
+              // written", while the reports for those days sat on disk.
+              //
+              // A session's EXISTENCE is decided by the report file below. A
+              // missing state record is an unavailable BLOCK, and it says
+              // which error made it unavailable.
+              stateReason = `no regime record: ${
+                error instanceof Error ? error.message : String(error)
+              }`;
             }
+            const labels = (byDay.get(day) ?? []).map((entry) => entry.label);
+            for (const label of labels)
+              if (regime[label] === undefined)
+                regime[label] = { regime: "unavailable", reason: stateReason };
+            if (labels.length > 0) reported += 1;
+            if (labels.some((label) => realRegime.has(`${day}/${label}`)))
+              withRegime += 1;
             sessions.push({ day, causeTitles, regime, quality });
           }
           // The Outcome Ledger is a peer session's module and may not be
@@ -2666,34 +2964,47 @@ export function buildTools(cfg: {
           // that never runs.
           let ledger: unknown = null;
           const coverage: string[] = [];
+          // The ledger itself, read LITERALLY: `@helium/core` is a real
+          // dependency of this tenant. Only `summarise` still goes through the
+          // `cliSpecifier` indirection below, because `@helium/cli` is not.
+          let receipts: Array<{
+            commitmentId: string;
+            status: string;
+            scores: Record<string, number>;
+            detail?: unknown;
+          }> = [];
+          let commitments: Array<{
+            id: string;
+            issuedAt: string;
+            payload: unknown;
+          }> = [];
+          try {
+            const read = readLedger(cfg.stateRoot, "option-wizard", {
+              since: sessions[0]?.day ?? cutoff,
+            });
+            receipts = read.receipts as typeof receipts;
+            commitments = read.commitments as typeof commitments;
+          } catch {
+            // An unreadable ledger is a zero, not a throw. The scoreboard note
+            // below already tells the reader the ledger was not available.
+          }
           // An audit database that would not open is one input missing, not a
           // failed review: the cause titles and the regime records still went
           // out above.
           if (measured.note !== undefined) coverage.push(measured.note);
           try {
-            const core = (await import("@helium/core")) as {
-              readLedger?: (
-                stateRoot: string,
-                tenant: string,
-                options?: { since?: string },
-              ) => unknown;
-            };
-            // Not a literal specifier on purpose: `@helium/cli` is not yet a
-            // dependency of this tenant (the Outcome Ledger session adds it
-            // with `summarise`), and a literal would make `tsc` fail to
-            // resolve it rather than letting the runtime say so as a coverage
-            // note. Remove the indirection once the dependency lands.
-            const cliSpecifier: string = "@helium/cli";
-            const cli = (await import(cliSpecifier)) as {
-              summarise?: (
-                records: unknown,
-                options: { deployment?: string; variant?: string },
-              ) => unknown;
-            };
-            if (core.readLedger === undefined || cli.summarise === undefined)
-              throw new Error("readLedger/summarise not installed");
-            ledger = cli.summarise(
-              core.readLedger(cfg.stateRoot, "option-wizard", {
+            // A LITERAL specifier, and `@helium/cli` is a real dependency of
+            // this tenant. It went through a `const cliSpecifier: string`
+            // indirection while it was not, which meant the import could only
+            // ever fail: on 2026-09-06 all three windows carried
+            // "ledger scoreboard unavailable: Cannot find package
+            // '@helium/cli'", and the week reviewer wrote "Ledger scoreboard
+            // unavailable this window" three times. `summarise` was also not
+            // reachable from that package's entry point, so declaring the
+            // dependency alone would have swapped one failure for another —
+            // it is exported through `@helium/cli/scoreboard`.
+            ledger = summarise(
+              readLedger(cfg.stateRoot, "option-wizard", {
                 since: sessions[0]?.day ?? cutoff,
               }),
               {},
@@ -2705,12 +3016,128 @@ export function buildTools(cfg: {
               }`,
             );
           }
+          // ---- the counters: one fold over data already in hand ----
+          const sumOf = (name: string): number => {
+            let total = 0;
+            for (const day of span)
+              for (const byName of Object.values(measured.rows.get(day) ?? {}))
+                total += byName[name] ?? 0;
+            return total;
+          };
+          const modeHistogram: Record<string, number> = {
+            ratio: 0,
+            persistence: 0,
+            invalidation: 0,
+            "no-data": 0,
+          };
+          for (const day of span)
+            for (const byName of Object.values(measured.rows.get(day) ?? {})) {
+              const code = byName["select.mode"];
+              const name = MODE_NAMES[code ?? -1];
+              if (name !== undefined) modeHistogram[name] += 1;
+            }
+          // The one-thing leader is the channel with the top stored score on
+          // that session. Read back out of the metric rows the renderer wrote,
+          // so the counter and the audit table cannot disagree.
+          const leaders: Array<{ day: string; id: string }> = [];
+          for (const day of span) {
+            let best: { id: string; score: number } | undefined;
+            for (const byName of Object.values(measured.rows.get(day) ?? {}))
+              for (const [name, value] of Object.entries(byName)) {
+                const match = /^channel\.([a-z]+)\.score$/u.exec(name);
+                if (match === null) continue;
+                if (best === undefined || value > best.score)
+                  best = { id: match[1]!, score: value };
+              }
+            if (best !== undefined) leaders.push({ day, id: best.id });
+          }
+          const stillTop = (gap: number): number => {
+            let held = 0;
+            for (const [index, row] of leaders.entries()) {
+              const later = leaders[index + gap];
+              if (later === undefined) continue;
+              if (later.id === row.id) held += 1;
+            }
+            return held;
+          };
+          const settledVerdicts = receipts.filter(
+            (row) => row.status !== "pending" && "verdictBrier" in row.scores,
+          );
+          const byToken: Record<string, number> = {};
+          for (const row of settledVerdicts) {
+            const got = (row.detail as { got?: unknown } | undefined)?.got;
+            if (typeof got === "string") byToken[got] = (byToken[got] ?? 0) + 1;
+          }
+          const settledFocus = receipts.filter(
+            (row) => row.status === "hit" || row.status === "miss",
+          );
+          const decided = receipts.filter((row) => row.status !== "pending");
+          const hit = decided.filter((row) => {
+            if (row.status === "hit") return true;
+            const detail = row.detail as
+              { said?: unknown; got?: unknown } | undefined;
+            return (
+              typeof detail?.said === "string" &&
+              typeof detail.got === "string" &&
+              detail.said === detail.got
+            );
+          }).length;
+          const settledIds = new Set(receipts.map((row) => row.commitmentId));
+          const counters = {
+            sessionsWithReport: reported,
+            sessionsWithRegime: withRegime,
+            checks: {
+              hit: sumOf("checks.hit"),
+              miss: sumOf("checks.miss"),
+              notObserved: sumOf("checks.notObserved"),
+              scored: sumOf("checks.scored"),
+            },
+            oneThingHitRate: {
+              leaderStillTopAt1: stillTop(1),
+              leaderStillTopAt3: stillTop(3),
+              of: leaders.length,
+            },
+            modeHistogram,
+            budgetViolations: sumOf("budgetViolations"),
+            coverageGaps: sumOf("coverageGaps"),
+            verdicts: {
+              settled: settledVerdicts.length,
+              meanBrier:
+                settledVerdicts.length === 0
+                  ? null
+                  : settledVerdicts.reduce(
+                      (total, row) => total + (row.scores.verdictBrier ?? 0),
+                      0,
+                    ) / settledVerdicts.length,
+              byToken,
+            },
+            focus: {
+              churn: sumOf("focusChurn"),
+              hitRate:
+                settledFocus.length === 0
+                  ? null
+                  : settledFocus.filter((row) => row.status === "hit").length /
+                    settledFocus.length,
+              whyRejected: sumOf("focusWhyRejected"),
+            },
+            calls: {
+              scored: decided.length,
+              outstanding: commitments.filter((row) => !settledIds.has(row.id))
+                .length,
+              hitRate: decided.length === 0 ? null : hit / decided.length,
+            },
+            // P/L lands ONLY on the longest window: process review and outcome
+            // review are different documents, and mixing them anchors
+            // judgement to outcome. `null` until closed trades exist.
+            ...(days === Math.max(...windows) ? { pnl: null } : {}),
+          };
           out.push({
             days,
             from: sessions[0]?.day ?? cutoff,
             to: sessions[sessions.length - 1]?.day ?? cutoff,
             sessions,
             ledger,
+            counters,
             coverage,
           });
         }
@@ -3537,10 +3964,775 @@ export function buildTools(cfg: {
       },
     },
     {
+      // 2026-09-06. Shape READ FROM ARGON'S OWN SOURCE, NOT YET FROM A LIVE
+      // RESPONSE — argon was not running on this laptop and OW_ARGON_API_BASE
+      // is unset here, so no live call could be made. The source read,
+      // read-only and never edited:
+      //   src/uw_scan/api/server.py            — both routes mount under /api
+      //   src/uw_scan/api/routers/watchlist.py — the two handlers
+      //   src/uw_scan/api/models/watchlist.py  — the field list
+      //   src/uw_scan/watchlist_taxonomy.py    — the chain names and members
+      //
+      //   GET /api/watchlist/chains -> { chains: [{ layer, layer_name, focus,
+      //     chain, count }] } — DECLARED TAXONOMY ORDER, not alphabetical, and
+      //     the rail leads with Index & Macro on purpose (the handler's own
+      //     docstring says so); this tool preserves whatever order argon
+      //     returns. `count` is LIVE db membership, which can differ from the
+      //     taxonomy tuple length.
+      //   GET /api/watchlist?chain=<name> -> { scanned_at_min, scanned_at_max,
+      //     scheduler_lag_seconds, queue{…}, hot_count, hot_max,
+      //     tickers: [{ ticker, sector, chains[], pinned, hot, sort_rank, spot,
+      //     spot_quoted_at, spot_source, scanned_at, iv_atm, iv_rank,
+      //     market_cap, aum, setup{}, aggression_pct, returns{}, gamma{},
+      //     skew{}, positioning{}, queue }] }.
+      //
+      // KEPT beyond the members: `pinned` (it IS the tickers-of-interest list)
+      // and `iv_rank` (the §G.4 column and the flowAnomaly input).
+      // EXCLUDED as noise: setup, aggression_pct, returns, gamma, skew,
+      // positioning, queue, market_cap, aum, iv_atm, spot. This tool answers
+      // ONE question — which tickers are in this chain — and the weekly % comes
+      // from the bars tool, never from a card field whose vintage is the
+      // scan's, not the week's. `scanned_at_max` is copied through as `asOf`,
+      // verbatim.
+      name: "ow_argon_watchlist",
+      description:
+        "The argon watchlist rail: every chain with its layer and live member count, the members of each requested chain, and the operator's tickers of interest (the pinned rows). A chain name is matched EXACTLY as argon spells it; a name argon does not serve comes back in `unknown` and is reported as untested rather than guessed at.",
+      paramsSchema: ArgonWatchlistParams,
+      mutating: false,
+      dshParams: {
+        chains: {
+          type: "array",
+          description:
+            'Chain names, e.g. ["Computer/GPU"]. Omit for the declared `extensions.review.sectors` list.',
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const parsed = ArgonWatchlistParams.parse(args);
+        const tool = "ow_argon_watchlist";
+        const base = need(env, "OW_ARGON_API_BASE", tool);
+        const wanted = parsed.chains ?? review?.sectors ?? [];
+        const rail = (await argonGet(
+          tool,
+          base,
+          "/api/watchlist/chains",
+          ctx,
+        )) as { chains?: Array<Record<string, unknown>> };
+        const known = new Map<string, Record<string, unknown>>();
+        for (const row of rail.chains ?? []) {
+          if (typeof row.chain === "string") known.set(row.chain, row);
+        }
+        const unknownNames: string[] = [];
+        const served: string[] = [];
+        for (const name of wanted) {
+          if (known.has(name)) served.push(name);
+          else unknownNames.push(name);
+        }
+        // One failing chain must not cost the others their members — the
+        // ow_argon_levels discipline. A 500 lands in `unknown` WITH its reason,
+        // so a partial answer never reads as a complete one.
+        const settled = await Promise.allSettled(
+          served.map(async (name) => {
+            const body = (await argonGet(
+              tool,
+              base,
+              `/api/watchlist?chain=${encodeURIComponent(name)}`,
+              ctx,
+            )) as {
+              scanned_at_max?: unknown;
+              tickers?: Array<Record<string, unknown>>;
+            };
+            return { name, body };
+          }),
+        );
+        const chains: Array<Record<string, unknown>> = [];
+        const ofInterest: string[] = [];
+        const ivRank: Record<string, number> = {};
+        let newest: string | undefined;
+        settled.forEach((result, index) => {
+          const name = served[index]!;
+          if (result.status === "rejected") {
+            const why: unknown = result.reason;
+            unknownNames.push(
+              `${name} (${why instanceof Error ? why.message : String(why)})`,
+            );
+            return;
+          }
+          const { body } = result.value;
+          const rows = Array.isArray(body.tickers) ? body.tickers : [];
+          const members: string[] = [];
+          for (const row of rows) {
+            const ticker = row.ticker;
+            if (typeof ticker !== "string") continue;
+            members.push(ticker);
+            // The operator's TICKERS OF INTEREST. This is what replaces the
+            // positions read: a name is covered because someone put it here by
+            // hand, and the public page only ever sees "of interest".
+            if (row.pinned === true && !ofInterest.includes(ticker))
+              ofInterest.push(ticker);
+            // argon's own iv_rank, COPIED. Never computed here.
+            const rank = Number(row.iv_rank);
+            if (row.iv_rank !== null && Number.isFinite(rank))
+              ivRank[ticker] = rank;
+          }
+          const info = known.get(name)!;
+          const asOf =
+            typeof body.scanned_at_max === "string"
+              ? body.scanned_at_max
+              : undefined;
+          if (asOf !== undefined && (newest === undefined || asOf > newest))
+            newest = asOf;
+          chains.push({
+            chain: name,
+            ...(typeof info.layer === "string" ? { layer: info.layer } : {}),
+            ...(typeof info.count === "number" ? { count: info.count } : {}),
+            members,
+            ...(asOf === undefined ? {} : { asOf }),
+          });
+        });
+        return JSON.stringify({
+          source: "argon",
+          ...(newest === undefined ? {} : { asOf: newest }),
+          chains,
+          unknown: unknownNames,
+          ofInterest,
+          ivRank,
+        });
+      },
+    },
+    {
+      // 2026-09-06. Shape TRANSCRIBED FROM THE MASSIVE DOCUMENTATION, NOT YET
+      // OBSERVED LIVE — this comment is rewritten from the first real
+      // response (repo convention: a tool's comment records the shape it was
+      // VERIFIED against, with the date and the excluded fields). The it.skip
+      // in tests/tools-massive-actions.spec.ts names exactly that debt.
+      // Documentation read 2026-09-06 at
+      // https://massive.com/docs/rest/stocks/corporate-actions/{splits,dividends}
+      // (the polygon.io/docs URLs 301 there).
+      //
+      //   GET {MASSIVE_BASE_URL}/stocks/v1/splits
+      //       ?execution_date.gte=<yyyy-mm-dd>&execution_date.lte=<yyyy-mm-dd>
+      //       [&ticker=<sym>]
+      //   -> { request_id, status, results: [{ ticker, execution_date,
+      //        split_from, split_to, adjustment_type,
+      //        historical_adjustment_factor, id }] }
+      //   GET {MASSIVE_BASE_URL}/stocks/v1/dividends
+      //       ?ex_dividend_date.gte=<yyyy-mm-dd>&ex_dividend_date.lte=<yyyy-mm-dd>
+      //       [&ticker=<sym>]
+      //   -> { request_id, status, results: [{ ticker, declaration_date,
+      //        ex_dividend_date, pay_date, record_date, cash_amount, currency,
+      //        frequency, distribution_type, split_adjusted_cash_amount,
+      //        historical_adjustment_factor, id }] }
+      // Both are "included in all Stocks plans" and update daily. The envelope
+      // key is `results`, the same one argon's client reads on this provider's
+      // older Polygon-shaped paths (/v3/reference/{splits,dividends}).
+      //
+      // EXCLUDED as noise: request_id, status, id,
+      // historical_adjustment_factor, split_adjusted_cash_amount, currency,
+      // frequency and distribution_type. `pay_date` and `record_date` are kept
+      // ONLY because assignment risk is a date question. This tool answers ONE
+      // question — which dated corporate actions fall inside this window — and
+      // never a price.
+      //
+      // TWO THINGS ARE UNCONFIRMED, and they bound what the `corporate` weight
+      // may do:
+      //   1. the docs do not state whether an ANNOUNCED-but-unexecuted split
+      //      is returned ahead of its execution_date;
+      //   2. whether FORWARD-dated ex-dividend rows are served at all — the
+      //      documented dividend sample's ex-date (2025-08-11) is in the PAST,
+      //      so nothing here establishes it.
+      // Until a live call settles both, the `corporate` weight fires on
+      // execution_date and nothing earlier.
+      name: "ow_massive_actions",
+      description:
+        "Dated corporate actions from massive.com: stock splits by execution date and dividends by ex-dividend date, for a ticker set and a date window. Read the dates; this tool carries no price, no direction and no opinion.",
+      paramsSchema: MassiveActionsParams,
+      mutating: false,
+      dshParams: {
+        tickers: {
+          type: "array",
+          description:
+            'Tickers, e.g. ["NVDA"]. Omit for the whole window across the universe the caller passes.',
+        },
+        from: {
+          type: "string",
+          required: true,
+          description: "yyyy-mm-dd, inclusive.",
+        },
+        to: {
+          type: "string",
+          required: true,
+          description: "yyyy-mm-dd, inclusive.",
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const { tickers, from, to } = MassiveActionsParams.parse(args);
+        const tool = "ow_massive_actions";
+        const wanted =
+          tickers === undefined
+            ? undefined
+            : new Set(tickers.map((t) => symbolLiteral(t, tool)));
+        // The endpoint's `ticker` filter is SINGULAR, so it is only passed
+        // when exactly one name was asked for; otherwise the window is fetched
+        // once and filtered in code. Either way this is TWO calls per run, not
+        // one per ticker.
+        const one =
+          wanted !== undefined && wanted.size === 1
+            ? [...wanted][0]!
+            : undefined;
+        const notes: string[] = [];
+        const fetchRows = async (
+          path: string,
+          gte: string,
+          lte: string,
+        ): Promise<Array<Record<string, unknown>>> => {
+          try {
+            const body = (await massiveGet(
+              env,
+              tool,
+              path,
+              {
+                [gte]: from,
+                [lte]: to,
+                ...(one === undefined ? {} : { ticker: one }),
+              },
+              ctx,
+            )) as { results?: unknown };
+            return Array.isArray(body.results)
+              ? (body.results as Array<Record<string, unknown>>)
+              : [];
+          } catch (error: unknown) {
+            // One endpoint down must not blank the other: assignment risk and
+            // split risk are separate questions and a partial answer beats no
+            // answer, as long as the gap is named.
+            if (
+              error instanceof Error &&
+              error.message.includes("MASSIVE_API_KEY is unset")
+            )
+              throw error;
+            notes.push(
+              `${path}: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            return [];
+          }
+        };
+        const [splitRows, dividendRows] = await Promise.all([
+          fetchRows(
+            "/stocks/v1/splits",
+            "execution_date.gte",
+            "execution_date.lte",
+          ),
+          fetchRows(
+            "/stocks/v1/dividends",
+            "ex_dividend_date.gte",
+            "ex_dividend_date.lte",
+          ),
+        ]);
+        const inWindow = (day: unknown): day is string =>
+          typeof day === "string" && day >= from && day <= to;
+        const admitted = (ticker: unknown): ticker is string =>
+          typeof ticker === "string" &&
+          (wanted === undefined || wanted.has(ticker));
+        const splits = splitRows.flatMap((row) => {
+          if (!admitted(row.ticker) || !inWindow(row.execution_date)) return [];
+          const fromRatio = numeric(row.split_from);
+          const toRatio = numeric(row.split_to);
+          if (fromRatio === undefined || toRatio === undefined) return [];
+          return [
+            {
+              ticker: row.ticker,
+              executionDate: row.execution_date,
+              from: fromRatio,
+              to: toRatio,
+              ...(typeof row.adjustment_type === "string"
+                ? { type: row.adjustment_type }
+                : {}),
+              ...(typeof row.status === "string" ? { status: row.status } : {}),
+            },
+          ];
+        });
+        const dividends = dividendRows.flatMap((row) => {
+          if (!admitted(row.ticker) || !inWindow(row.ex_dividend_date))
+            return [];
+          const amount = numeric(row.cash_amount);
+          if (amount === undefined) return [];
+          return [
+            {
+              ticker: row.ticker,
+              exDate: row.ex_dividend_date,
+              ...(typeof row.declaration_date === "string"
+                ? { declared: row.declaration_date }
+                : {}),
+              ...(typeof row.pay_date === "string"
+                ? { payDate: row.pay_date }
+                : {}),
+              ...(typeof row.record_date === "string"
+                ? { recordDate: row.record_date }
+                : {}),
+              amount,
+              ...(typeof row.status === "string" ? { status: row.status } : {}),
+            },
+          ];
+        });
+        return JSON.stringify({
+          source: "massive",
+          window: { from, to },
+          splits,
+          dividends,
+          notes,
+        });
+      },
+    },
+    {
+      // 2026-09-06. The ranking, the coverage rows, the focus list and the
+      // ledger citation rows are arithmetic and bookkeeping, so they are
+      // computed ONCE, here, and read three times: the editor / weekly analyst
+      // through the deterministic step's handoff, the renderer out of
+      // report.toolOutputs, and the flash-budget gate out of GateCtx. Two
+      // computations of one ranking is how a prompt and an audit table end up
+      // disagreeing about what moved.
+      //
+      // It re-calls its sibling tools rather than reading their outputs, because
+      // a deterministic step's tool can only be handed `{}` (packages/cli/src/
+      // runner.ts `toolArgs`: a schema that accepts {} is called with {}). That
+      // is inside the existing envelope — the 2026-09-03 close replay already
+      // called ow_macro_rates three times and ow_argon_policy_path twice in one
+      // run — and it buys the property that the number in the prompt and the
+      // number in the audit table are the same number.
+      //
+      // CALL BUDGET (doctrine 4 — cost is part of the design): ow_uw_earnings
+      // is ONE round trip PER TICKER, capped at focus.maxEarningsLookups,
+      // pinned first then alphabetical so WHICH 60 is deterministic;
+      // ow_massive_actions is TWO calls for the whole window whatever the
+      // universe size (both endpoints take a date range); every other sibling is
+      // one call. ow_uw_iv_term is NOT called: nothing scores from it today
+      // (quality/focus.ts says why — §G.2's volume-ratio half has no verified
+      // feed), and paying focus.maxIvTermCalls round trips for a column no
+      // reader prints yet is cost with no consumer. Its coverage row says that
+      // out loud rather than going quiet. Every truncation is a focus note.
+      //
+      // The LEDGER read is `readLedger` from @helium/core. It is called AFTER
+      // the settler has run (the runner settles before the DAG), so
+      // `settledToday` is this morning's verdicts already scored.
+      //
+      // ow_ib_positions is NOT a sibling and never will be: the /flash page is
+      // public. SESSION_FRAME_SIBLINGS is asserted against in the tests.
+      name: "ow_session_frame",
+      description:
+        "This session's frame, computed not narrated: the ranked channels with each one's named series, today's level and the prior one copied verbatim and the move against that channel's own 20-session median; the FIXED coverage list in its declared order with a level, a move and an as-of per row (or `untested`); the weekly-15 and daily-5 focus lists with the dated event that admitted each name; yesterday's three checks already scored; and the ledger rows — what the settler closed today, and what is still open. Write about rank 1, the rows you were given and the names you were given; you may not re-rank, you may not add or drop a row or a name, and every number you quote is copied from this payload.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const skipped: Record<string, string> = {};
+        // One failing sibling must not cost the frame: it becomes a `skipped`
+        // coverage row with its own reason, and every channel, coverage row or
+        // focus feed it fed prints `untested`.
+        const answer = async (
+          layer: string,
+          name: string,
+          args: Record<string, unknown> = {},
+        ): Promise<unknown> => {
+          if (!SESSION_FRAME_SIBLINGS.includes(name)) {
+            skipped[layer] = `${name}: not a declared sibling`;
+            return undefined;
+          }
+          const tool = built.find((entry) => entry.name === name);
+          if (tool === undefined) {
+            skipped[layer] = `${name}: not built`;
+            return undefined;
+          }
+          try {
+            return JSON.parse(await tool.run(args, ctx)) as unknown;
+          } catch (error: unknown) {
+            skipped[layer] =
+              `${name}: ${error instanceof Error ? error.message : String(error)}`;
+            return undefined;
+          }
+        };
+
+        const [macro, policy, gex, spot, tide, calendar, commodities] =
+          await Promise.all([
+            answer("macro", "ow_macro_rates"),
+            answer("policy", "ow_argon_policy_path"),
+            answer("gex", "ow_uw_gex", { tickers: ["SPY", "QQQ"] }),
+            answer("spot", "ow_spot", {
+              tickers: ["SPY", "QQQ", "IWM", "VIX", "DXY"],
+            }),
+            answer("tide", "ow_uw_market_state", {
+              sector: "Technology",
+              etf: "SPY",
+            }),
+            answer("calendar", "ow_uw_calendar"),
+            answer("commodities", "ow_tv_commodities"),
+          ]);
+
+        const watchlist = await answer("watchlist", "ow_argon_watchlist");
+        const tv = await answer("tvWatchlist", "ow_tv_watchlist");
+        delete skipped.tvWatchlist; // not a declared coverage layer
+
+        const chains = Array.isArray(
+          (watchlist as { chains?: unknown } | undefined)?.chains,
+        )
+          ? ((watchlist as { chains: Array<{ members?: unknown }> }).chains ??
+            [])
+          : [];
+        const universe = new Set<string>();
+        for (const chain of chains)
+          for (const member of Array.isArray(chain.members)
+            ? chain.members
+            : [])
+            if (typeof member === "string") universe.add(member);
+        const ofInterest = Array.isArray(
+          (watchlist as { ofInterest?: unknown } | undefined)?.ofInterest,
+        )
+          ? ((watchlist as { ofInterest: string[] }).ofInterest ?? [])
+          : [];
+        for (const ticker of ofInterest) universe.add(ticker);
+        for (const ticker of Array.isArray(
+          (tv as { tickers?: unknown } | undefined)?.tickers,
+        )
+          ? ((tv as { tickers: string[] }).tickers ?? [])
+          : [])
+          universe.add(ticker);
+        const ivRank = ((watchlist as { ivRank?: unknown } | undefined)
+          ?.ivRank ?? {}) as Record<string, number>;
+
+        const focusNotes: string[] = [];
+        // Pinned first, then alphabetical, so WHICH names get the round trips
+        // is deterministic and the truncation says its own size.
+        const ordered = [
+          ...ofInterest.filter((ticker) => universe.has(ticker)),
+          ...[...universe]
+            .filter((ticker) => !ofInterest.includes(ticker))
+            .sort((a, b) => a.localeCompare(b, "en")),
+        ];
+        const cap = review?.focus?.maxEarningsLookups ?? ordered.length;
+        const asked = ordered.slice(0, cap);
+        if (asked.length < ordered.length)
+          focusNotes.push(
+            `earnings: ${String(asked.length)} of ${String(ordered.length)} universe members looked up (maxEarningsLookups)`,
+          );
+        // CHUNKED. `EarningsParams` caps `tickers` at 12 — a MODEL-facing
+        // guard, not a provider limit: the tool already makes one round trip
+        // per ticker. The 2026-09-06 acceptance run handed it the whole
+        // 45-name universe in one call and zod refused with
+        // `Too big: expected array to have <=12 items`, so the earnings layer
+        // was skipped, no focus row carried a dated event, and not one
+        // `focus-admit` commitment could mint. Batched here, the same way the
+        // iv-term pass batches at that tool's own cap of three.
+        const earningsRows: unknown[] = [];
+        const earningsMissing: unknown[] = [];
+        let earningsAnswered = false;
+        for (let index = 0; index < asked.length; index += EARNINGS_PER_CALL) {
+          const batch = asked.slice(index, index + EARNINGS_PER_CALL);
+          const reply = await answer("earnings", "ow_uw_earnings", {
+            tickers: batch,
+          });
+          if (reply === undefined) {
+            // The reason is not lost when a later batch answers: it rides in
+            // `missing`, beside the per-ticker failures the tool itself
+            // reports, naming the batch it cost.
+            earningsMissing.push({
+              ticker: batch.join(","),
+              reason: skipped.earnings ?? "ow_uw_earnings: no reason recorded",
+            });
+            continue;
+          }
+          earningsAnswered = true;
+          const body = reply as { rows?: unknown; missing?: unknown };
+          if (Array.isArray(body.rows)) earningsRows.push(...body.rows);
+          if (Array.isArray(body.missing))
+            earningsMissing.push(...body.missing);
+        }
+        // One failing batch must not cost the layer the batches that answered:
+        // the skip is cleared and the failures ride in `missing`, which is
+        // what the tool's own per-ticker failures already do.
+        if (earningsAnswered) delete skipped.earnings;
+        const earnings = earningsAnswered
+          ? {
+              asOf: new Date().toISOString(),
+              rows: earningsRows,
+              missing: earningsMissing,
+            }
+          : undefined;
+
+        // Both Massive endpoints take a date range, so the whole window is two
+        // calls whatever the universe size. The bound is calendar days wide
+        // enough to hold the longest declared OPEN-session window; the decay
+        // does the session arithmetic.
+        const actions = await answer("actions", "ow_massive_actions", {
+          from: day,
+          to: plusCalendarDays(day, 21),
+        });
+
+        // ---- the bars every basket row is priced from ----------------------
+        // THE 2026-09-06 DEFECT. `themeBars` and `weekFrom` were never
+        // supplied, so all ten sector rows read "no weekly bars for the chain
+        // members" and the theme row "no bars for 4 of 4 instruments" — while
+        // ow_rotation, in the very same run, priced that same theme basket at
+        // +3.4072 four-week excess off bars it fetched itself.
+        //
+        // Cost: one ow_apex_bars round trip per distinct symbol, against the
+        // LOCAL lake. The set is bounded by the tenant's own declaration —
+        // the members of the declared chains plus the declared themes'
+        // instruments plus the benchmark — so it cannot grow behind anyone's
+        // back.
+        const benchmark = review?.rotation?.benchmark ?? "SPY";
+        const basketSymbols = [
+          ...new Set([
+            benchmark,
+            ...chains.flatMap((chain) =>
+              (Array.isArray(chain.members) ? chain.members : []).filter(
+                (member): member is string => typeof member === "string",
+              ),
+            ),
+            ...(review?.themes ?? []).flatMap((theme) => theme.instruments),
+          ]),
+        ];
+        const basket = await dailyBars(basketSymbols, 150, ctx);
+        focusNotes.push(
+          `bars: ${String(basket.bars.size)} of ${String(basketSymbols.length)} basket symbols answered`,
+        );
+        for (const note of basket.notes.slice(0, 3)) focusNotes.push(note);
+        // The as-of is the BENCHMARK's newest bar, exactly as `rotationTable`
+        // takes it, and the week is measured back from that rather than from
+        // today.
+        const barsAsOf = newestBarDay(basket.bars, benchmark, day);
+        const weekFrom =
+          barsAsOf === undefined
+            ? undefined
+            : openDaysBack(
+                barsAsOf,
+                (review?.rotation?.lookbacks.w1 ?? 5) + 1,
+                cfg.calendar,
+              )[0];
+        if (barsAsOf !== undefined && barsAsOf !== day)
+          focusNotes.push(
+            `bars: ${benchmark}'s newest bar is ${barsAsOf}, so every basket row is as of ${barsAsOf} rather than ${day}`,
+          );
+
+        const inputs: ChannelInputs = {
+          ...(basket.bars.size === 0 ? {} : { themeBars: basket.bars }),
+          ...(barsAsOf === undefined ? {} : { barsAsOf }),
+          ...(weekFrom === undefined ? {} : { weekFrom }),
+          benchmark,
+          ...(macro === undefined ? {} : { macro }),
+          ...(policy === undefined ? {} : { policy }),
+          ...(gex === undefined ? {} : { gex }),
+          ...(spot === undefined ? {} : { spot }),
+          ...(tide === undefined ? {} : { tide }),
+          ...(calendar === undefined ? {} : { calendar }),
+          ...(commodities === undefined ? {} : { commodities }),
+          ...(watchlist === undefined ? {} : { watchlist }),
+          day,
+        };
+        const focusInputs: FocusInputs = {
+          day,
+          universe: [...universe],
+          pinned: ofInterest,
+          ivRank,
+          ...(earnings === undefined ? {} : { earnings }),
+          ...(calendar === undefined ? {} : { calendar }),
+          ...(policy === undefined ? {} : { policy }),
+          ...(actions === undefined ? {} : { actions }),
+          themes: review?.themes ?? [],
+          pins: review?.focus?.calendarPins ?? [],
+          openDaysBetween: (from: string, to: string) =>
+            openDaysBetween(from, to, cfg.calendar),
+          notes: focusNotes,
+        };
+        if (review === undefined) {
+          // A tenant with no `review:` block has no coverage list, no caps and
+          // no focus weights; there is nothing to frame and saying so beats
+          // returning an empty shape that looks like a framed session.
+          return JSON.stringify({
+            unavailable: "not declared",
+            reason:
+              "ow_session_frame: extensions.review is not declared for this tenant",
+          });
+        }
+        const frame = buildFrame({
+          inputs,
+          focusInputs,
+          days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
+          stateRoot: cfg.stateRoot,
+          // buildTools is not given the run's phase, so the newest record
+          // strictly before ANY known label on `day` is what the frame wants:
+          // `variant` is not a phase label and therefore ranks last, which
+          // reads as "the newest record written before this run".
+          label: cfg.variant ?? "live",
+          review,
+          skipped,
+          env,
+        });
+
+        // ---- §G.5's scoring bar, a SECOND pass over the names just chosen ----
+        // It has to be second: the implied move is asked for the focus list,
+        // and the focus list does not exist until the frame is built. It is
+        // also kept OUT of the score — a threshold that fed the ranking would
+        // make the list rank itself on the number it is judged against.
+        const names = frame.focus.weekly.map((row) => row.ticker);
+        const perCall = 3; // ow_uw_iv_term's own cap
+        const calls = Math.min(
+          review.focus?.maxIvTermCalls ?? 0,
+          Math.ceil(names.length / perCall),
+        );
+        const ivRows: unknown[] = [];
+        for (let index = 0; index < calls; index += 1) {
+          const batch = names.slice(index * perCall, (index + 1) * perCall);
+          if (batch.length === 0) break;
+          const reply = await answer("ivTerm", "ow_uw_iv_term", {
+            tickers: batch,
+          });
+          const got = (reply as { rows?: unknown } | undefined)?.rows;
+          if (Array.isArray(got)) ivRows.push(...got);
+        }
+        attachThresholds(frame, { rows: ivRows });
+        // The coverage table was built inside `buildFrame`, before this pass
+        // ran, so it still says the layer was not supplied. Corrected here: a
+        // table that reports a source as skipped while the run read it is
+        // worse than no table.
+        const ivLayer = frame.coverage.find(
+          (entry) => entry.layer === "ivTerm",
+        );
+        if (ivLayer !== undefined) {
+          if (ivRows.length > 0) {
+            ivLayer.state = "ok";
+            delete ivLayer.reason;
+          } else {
+            ivLayer.reason =
+              calls === 0
+                ? "no focus names to look up"
+                : "no expiry rows returned for the focus names";
+          }
+        }
+        // The realized fallback, for the names the term structure could not
+        // answer for. Bounded by the same reach as the IV pass, so a wide
+        // universe cannot turn one frame into eighty apex round trips.
+        const missing = frame.focus.weekly
+          .filter((row) => row.threshold === undefined)
+          .map((row) => row.ticker)
+          .slice(0, calls * perCall);
+        if (missing.length > 0) {
+          const realized = new Map<string, number>();
+          await Promise.all(
+            missing.map(async (ticker) => {
+              const bars = await answer("bars", "ow_apex_bars", {
+                symbol: ticker,
+                timeframe: "1d",
+                lookbackDays: 120,
+              });
+              const rows = (bars as { bars?: unknown } | undefined)?.bars;
+              if (!Array.isArray(rows)) return;
+              const value = realizedThreshold(rows as never, 2);
+              if (value !== null && value > 0) realized.set(ticker, value);
+            }),
+          );
+          delete skipped.bars;
+          attachThresholds(frame, { rows: [] }, realized);
+        }
+        // §5's admitted set gets the focus list's own dated events. Last,
+        // because the forecast on each one is the threshold the two passes
+        // above just filled in.
+        attachFocusCalendar(frame);
+        return JSON.stringify(frame);
+      },
+    },
+    {
+      // 2026-09-06. Eleven Select Sector SPDRs plus each active theme's basket,
+      // against the declared benchmark, over 5/20/60 OPEN sessions — the rank
+      // ORDER is the rotation signal (§H.4), so it is computed here and the
+      // model gets one sentence about it and no arithmetic. Symbols come from
+      // extensions.review.rotation and .themes; a symbol apex cannot answer
+      // prints `untested` and is NOT dropped, exactly like a coverage row.
+      //
+      // Cost: 12 + N ow_apex_bars calls, weekly only — which is why this is a
+      // separate step with `phases: [weekly]` rather than a field on the frame.
+      // A daily table would pay that on each of four daily runs for a ranking
+      // that moves by rounding between sessions.
+      //
+      // Every one of the 16 shipped symbols was confirmed to answer on
+      // 2026-09-06 (tests/fixtures/review/README.md records the probe and the
+      // one real gap it found: XLE's daily series stops at 2026-07-13).
+      name: "ow_rotation",
+      description:
+        "Sector and theme rotation: for each sector ETF and each active theme basket, the 1-week, 4-week and 12-week return and the excess over the benchmark, ranked by the 1-week excess. Every number is computed here from daily bars — read the ranking and say what it confirms or contradicts; compute nothing.",
+      paramsSchema: NoParams,
+      mutating: false,
+      dshParams: {},
+      async run(
+        _args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const rotation = review?.rotation;
+        if (rotation === undefined) {
+          return JSON.stringify({
+            unavailable: "not declared",
+            reason:
+              "ow_rotation: extensions.review.rotation is not declared for this tenant",
+          });
+        }
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const themes = review?.themes ?? [];
+        const symbols = [
+          ...new Set([
+            rotation.benchmark,
+            ...rotation.sectorEtfs,
+            ...themes.flatMap((theme) => theme.instruments),
+          ]),
+        ];
+        // 12+N symbols, one round trip each. One failure is that symbol's
+        // `untested` row and nothing else — the table still prints in full.
+        // 60 OPEN sessions is roughly 90 calendar days; 150 gives the w12
+        // window room for a holiday run and for a lake a few sessions behind.
+        const { bars, notes } = await dailyBars(symbols, 150, ctx);
+        const table = rotationTable({
+          sectorEtfs: rotation.sectorEtfs,
+          themes,
+          benchmark: rotation.benchmark,
+          lookbacks: rotation.lookbacks,
+          bars,
+          day,
+          // n OPEN sessions back from `from`, `from` counting as session 0.
+          openDaysBack: (from: string, n: number) =>
+            openDaysBack(from, n + 1, cfg.calendar)[0]!,
+        });
+        return JSON.stringify({
+          ...table,
+          notes: [...notes, ...table.notes],
+        });
+      },
+    },
+    {
       // Verified 2026-09-03 against the live NVDA response: GET
       // /api/stock/{ticker}/volatility/term-structure answers
       // { data: [{ date, ticker, expiry, dte, volatility, implied_move,
       // implied_move_perc }] }, every number a STRING.
+      //
+      // `implied_move_perc` is a FRACTION despite the name — re-verified
+      // against the live AVGO response 2026-09-06: the 2026-09-09 expiry read
+      // implied_move "8.45730425844076" and implied_move_perc
+      // "0.02363365728221534" against a spot near 357.9. Whoever reads this
+      // field multiplies by 100 to get a percent; `quality/frame.ts`
+      // `attachThresholds` is the one place that does.
       //
       // The dte 0 row is dropped. On 2026-09-02 NVDA's expiring-today row read
       // volatility 5.31 — 531% — which is the arithmetic of an expiring

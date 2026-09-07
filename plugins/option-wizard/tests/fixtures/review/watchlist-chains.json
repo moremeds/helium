@@ -1,0 +1,81 @@
+{
+ "chains": [
+  {
+   "layer": "L1",
+   "layer_name": "Chip & System",
+   "focus": "AI",
+   "chain": "Computer/GPU",
+   "count": 7
+  },
+  {
+   "layer": "L1",
+   "layer_name": "Chip & System",
+   "focus": "AI",
+   "chain": "Semi-Logic/ASIC",
+   "count": 13
+  },
+  {
+   "layer": "L1",
+   "layer_name": "Chip & System",
+   "focus": "AI",
+   "chain": "Foundry",
+   "count": 6
+  },
+  {
+   "layer": "L1",
+   "layer_name": "Chip & System",
+   "focus": "AI",
+   "chain": "Semi-Cap/EDA",
+   "count": 19
+  },
+  {
+   "layer": "L1",
+   "layer_name": "Chip & System",
+   "focus": "AI",
+   "chain": "Memory/Storage",
+   "count": 6
+  },
+  {
+   "layer": "L2",
+   "layer_name": "Cloud & Data Platform",
+   "focus": "AI",
+   "chain": "Cloud/Hyperscaler",
+   "count": 6
+  },
+  {
+   "layer": "L2",
+   "layer_name": "Cloud & Data Platform",
+   "focus": "AI",
+   "chain": "Cybersecurity",
+   "count": 13
+  },
+  {
+   "layer": "L4",
+   "layer_name": "Application & Endpoint",
+   "focus": "AI",
+   "chain": "Software/SaaS",
+   "count": 13
+  },
+  {
+   "layer": "L4",
+   "layer_name": "Application & Endpoint",
+   "focus": "AI",
+   "chain": "Devices/Endpoint",
+   "count": 5
+  },
+  {
+   "layer": "L5",
+   "layer_name": "Model & Tooling",
+   "focus": "AI",
+   "chain": "Foundation-Model-Proxy",
+   "count": 5
+  },
+  {
+   "layer": "IDX",
+   "layer_name": "Index & Macro",
+   "focus": "Index & Macro",
+   "chain": "Beta",
+   "count": 4
+  }
+ ]
+}

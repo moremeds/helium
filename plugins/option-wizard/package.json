@@ -27,6 +27,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@helium/cli": "file:../../packages/cli",
     "@helium/core": "file:../../packages/core",
     "zod": "^4.4.3"
   },

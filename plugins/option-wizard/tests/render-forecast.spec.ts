@@ -89,3 +89,33 @@ describe("spyForecast", () => {
     expect(forecastFrom(report(text))!.scorable).toBe(false);
   });
 });
+
+describe("a zero anchor is not a price", () => {
+  // A laptop PIT replay minted t1/t5 commitments anchored at 0. `settleSpy`
+  // compares the settling close to that anchor, and every close is above zero,
+  // so the leg was unfalsifiable — a forecast that cannot be wrong.
+  it("refuses referenceClose.value 0 with the reason", () => {
+    const zero = JSON.stringify({
+      spyForecast: {
+        referenceClose: { date: "2026-09-03", value: 0 },
+        t1Down: 0.42,
+        t5Down: 0.47,
+      },
+    });
+    expect(forecastFrom(report(zero))).toEqual({
+      scorable: false,
+      reason: "referenceClose.value is not a positive price",
+    });
+  });
+
+  it("accepts SPY's real 2026-09-03 raw close", () => {
+    const real = JSON.stringify({
+      spyForecast: {
+        referenceClose: { date: "2026-09-03", value: 773.17 },
+        t1Down: 0.42,
+        t5Down: 0.47,
+      },
+    });
+    expect(forecastFrom(report(real))?.scorable).toBe(true);
+  });
+});

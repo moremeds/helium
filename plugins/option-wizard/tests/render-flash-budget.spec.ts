@@ -7,7 +7,15 @@
 import { readFileSync } from "node:fs";
 import type { RunReport, TenantSpec } from "@helium/core";
 import { describe, expect, it } from "vitest";
-import { FLASH_BUDGET, trim, words } from "../render/budget.js";
+import {
+  FLASH_BUDGET,
+  ONE_THING_BUDGET,
+  REVIEW_BUDGET,
+  measureOneThing,
+  measureReview,
+  trim,
+  words,
+} from "../render/budget.js";
 import { buildView, type BriefView } from "../render/index.js";
 
 const cfg = { tenant: "option-wizard" } as unknown as TenantSpec;
@@ -166,5 +174,27 @@ describe("enforceBudget in buildView", () => {
       cfg,
     );
     expect(refused.edited).toBeUndefined();
+  });
+});
+
+describe("the budget tables name a field, never a run label", () => {
+  it("holds no phase name and takes a mode or a caps object", () => {
+    // The renderer may not learn a phase. `measureOneThing` is switched by the
+    // SELECTION MODE the tool reported and `measureReview` by the CAPS the
+    // tenant declared — both data handed in, so adding a sixth run label costs
+    // no edit here.
+    const src = readFileSync(
+      new URL("../render/budget.ts", import.meta.url).pathname,
+      "utf8",
+    );
+    for (const name of ["premarket", "intraday", "weekly", "frank"])
+      expect(src.includes(`"${name}"`), name).toBe(false);
+    expect(measureOneThing.length).toBe(2);
+    expect(measureReview.length).toBe(2);
+    expect(Object.keys(ONE_THING_BUDGET).some((k) => k.includes("phase"))).toBe(
+      false,
+    );
+    expect(REVIEW_BUDGET.weekly.total).toBe(900);
+    expect(REVIEW_BUDGET.daily.total).toBe(300);
   });
 });

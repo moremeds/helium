@@ -30,7 +30,7 @@ function review(proposal: Record<string, unknown>): string {
 
 describe("typed target and deadlines", () => {
   it("bumps the schema version, because target changed meaning", () => {
-    expect(BRIEF_VIEW_SCHEMA_VERSION).toBe(2);
+    expect(BRIEF_VIEW_SCHEMA_VERSION).toBe(3);
   });
 
   it("keeps a level+side target as a number and leaves thesis empty", () => {

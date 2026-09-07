@@ -100,6 +100,41 @@ describe("openDaysBack", () => {
   });
 });
 
+/**
+ * A `review:` block the loader accepts. `buildTools` parses the whole
+ * declaration now (`quality/review-config.ts`), so a block carrying only
+ * `windows` is refused — the same refusal that skips a tenant whose theme has
+ * no kill condition. This is the smallest valid one; the windows are what this
+ * file is about.
+ */
+const REVIEW_EXTENSIONS = {
+  review: {
+    windows: [5, 10, 21],
+    coverage: ["rates.front"],
+    verdicts: ["continue", "reverse", "strengthen", "fade", "untested"],
+    caps: {
+      weeklyModelWords: 900,
+      dailyModelWords: 300,
+      weekly: {
+        review: 300,
+        outlook: 400,
+        catalysts: 150,
+        rowWords: 15,
+        focusWords: 20,
+        themeWords: 25,
+      },
+      daily: {
+        review: 120,
+        outlook: 180,
+        catalysts: 60,
+        rowWords: 10,
+        focusWords: 20,
+        themeWords: 25,
+      },
+    },
+  },
+};
+
 describe("ow_review_window", () => {
   function tool(stateRoot: string, dbPath = auditDb()) {
     return buildTools({
@@ -107,7 +142,7 @@ describe("ow_review_window", () => {
       env: { HELIUM_AUDIT_DB: dbPath },
       variant: "live",
       calendar: CALENDAR,
-      extensions: { review: { windows: [5, 10, 21] } },
+      extensions: REVIEW_EXTENSIONS,
     }).find((entry) => entry.name === "ow_review_window")!;
   }
 
@@ -155,6 +190,44 @@ describe("ow_review_window", () => {
     });
   });
 
+  // THE 2026-09-06 DEFECT. All three windows carried "ledger scoreboard
+  // unavailable: Cannot find package '@helium/cli'", and the week reviewer
+  // wrote "Ledger scoreboard unavailable this window" three times. The import
+  // went through a `const cliSpecifier: string` indirection precisely because
+  // the package was not a dependency — so it could only ever fail.
+  it("carries the ledger scoreboard rather than a note saying it is missing", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    for (const window of out.windows as Array<{
+      ledger: { byGroup?: unknown } | null;
+      coverage?: string[];
+    }>) {
+      expect(window.ledger).not.toBeNull();
+      // The shape `summarise` returns after core PR #97: grouped by
+      // `variant@codeSha`, not by variant.
+      expect(window.ledger!.byGroup).toEqual({});
+      for (const note of window.coverage ?? [])
+        expect(note).not.toContain("ledger scoreboard unavailable");
+    }
+  });
+
+  it("rounds a stored score before the reviewer ever reads it", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const dbPath = auditDb();
+    report(stateRoot, "2026-09-04", "close", "t");
+    // The real value the 2026-09-06 run stored and handed to the reviewer.
+    seedMetrics(dbPath, "2026-09-04", "close", {
+      "channel.vol.score": 1.3037037037037023,
+    });
+    const out = JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+    const friday = out.windows[0].sessions.find(
+      (s: { day: string }) => s.day === "2026-09-04",
+    );
+    expect(friday.quality.close["channel.vol.score"]).toBe(1.3037);
+  });
+
   it("reads only the newest run when a (day, label) ran twice", async () => {
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
     const dbPath = auditDb();
@@ -198,11 +271,18 @@ describe("ow_review_window", () => {
     });
   });
 
-  it("notes the ledger as unavailable rather than failing", async () => {
+  it("summarises an empty ledger as an empty scoreboard, not as an absence", async () => {
+    // It used to assert `ledger === null` with a coverage note, and that was
+    // the DEFECT being asserted: `@helium/cli` was not a dependency, so the
+    // import could only ever fail. An empty ledger is `{byGroup: {}}` — a
+    // scoreboard with nothing on it, which is a different statement from
+    // "the scoreboard could not be read".
     const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
     const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
-    expect(out.windows[0].ledger).toBe(null);
-    expect(out.windows[0].coverage.join(" ")).toContain("ledger");
+    expect(out.windows[0].ledger).toEqual({ byGroup: {} });
+    expect(out.windows[0].coverage.join(" ")).not.toContain(
+      "ledger scoreboard unavailable",
+    );
   });
 
   it("notes an unreadable audit database rather than failing", async () => {
@@ -238,5 +318,131 @@ describe("ow_review_window", () => {
     expect(out.windows.map((w: { days: number }) => w.days)).toEqual([
       5, 10, 21,
     ]);
+  });
+});
+
+/**
+ * The defect spec §E names, and the counters that replace `week-reviewer`'s
+ * second page.
+ *
+ * The 2026-09-06 weekly reported 20 of 21 sessions as "not written" while the
+ * reports for those days sat on disk: `ow_review_window` decided a session
+ * existed by looking in the STATE tree, which only began being written in
+ * PR #92. A day with a report is a day that ran.
+ */
+describe("ow_review_window — a missing regime record is not a missing session", () => {
+  function tool(stateRoot: string, dbPath = auditDb()) {
+    return buildTools({
+      stateRoot,
+      env: { HELIUM_AUDIT_DB: dbPath },
+      variant: "live",
+      calendar: CALENDAR,
+      extensions: REVIEW_EXTENSIONS,
+    }).find((entry) => entry.name === "ow_review_window")!;
+  }
+
+  async function threeDays(dbPath: string, stateRoot: string) {
+    for (const day of ["2026-09-02", "2026-09-03", "2026-09-04"])
+      report(stateRoot, day, "close", `cause on ${day}`);
+    // Only ONE of the three has a regime record.
+    state(stateRoot, "2026-09-04", "close", "cause on 2026-09-04");
+    return JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+  }
+
+  it("reports every day with a report as a session, and an absent record as unavailable", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = await threeDays(auditDb(), stateRoot);
+    const window = out.windows[0];
+    const days = ["2026-09-02", "2026-09-03", "2026-09-04"].map((day) =>
+      window.sessions.find((s: { day: string }) => s.day === day),
+    );
+    for (const session of days) expect(session.causeTitles.close).toBeDefined();
+    expect(days[0].regime.close.regime).toBe("unavailable");
+    expect(days[1].regime.close.regime).toBe("unavailable");
+    expect(days[2].regime.close.cause).toBe("cause on 2026-09-04");
+    expect(JSON.stringify(window)).not.toContain("not written");
+    expect(window.counters.sessionsWithReport).toBe(3);
+    expect(window.counters.sessionsWithRegime).toBe(1);
+    expect(window.counters.sessionsWithRegime).toBeLessThanOrEqual(
+      window.counters.sessionsWithReport,
+    );
+  });
+
+  it("sums the stored checks, mode and focus rows into the window counters", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const dbPath = auditDb();
+    seedMetrics(dbPath, "2026-09-03", "close", {
+      "checks.scored": 3,
+      "checks.hit": 2,
+      "checks.miss": 1,
+      "checks.notObserved": 0,
+      "select.mode": 0,
+      focusChurn: 2,
+      focusWhyRejected: 1,
+      coverageGaps: 4,
+      budgetViolations: 1,
+    });
+    seedMetrics(dbPath, "2026-09-04", "close", {
+      "checks.scored": 3,
+      "checks.hit": 1,
+      "checks.miss": 0,
+      "checks.notObserved": 2,
+      "select.mode": 3,
+      focusChurn: 1,
+      focusWhyRejected: 0,
+      coverageGaps: 5,
+      budgetViolations: 0,
+    });
+    const out = JSON.parse(
+      await tool(stateRoot, dbPath).run({ today: "2026-09-04" }),
+    );
+    const counters = out.windows[0].counters;
+    expect(counters.checks).toEqual({
+      scored: 6,
+      hit: 3,
+      miss: 1,
+      notObserved: 2,
+    });
+    expect(counters.modeHistogram).toEqual({
+      ratio: 1,
+      persistence: 0,
+      invalidation: 0,
+      "no-data": 1,
+    });
+    expect(counters.focus.churn).toBe(3);
+    expect(counters.focus.whyRejected).toBe(1);
+    expect(counters.coverageGaps).toBe(9);
+    expect(counters.budgetViolations).toBe(1);
+  });
+
+  it("keeps P/L out of every window but the longest, and says nothing about divergence", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    expect(out.windows).toHaveLength(3);
+    // Process review and P/L review are different documents; mixing them
+    // anchors judgement to outcome. Asserted as an ABSENCE, deliberately.
+    expect("pnl" in out.windows[0].counters).toBe(false);
+    expect("pnl" in out.windows[1].counters).toBe(false);
+    expect("pnl" in out.windows[2].counters).toBe(true);
+    expect(out.windows[2].counters.pnl).toBe(null);
+    for (const window of out.windows)
+      expect(JSON.stringify(window.counters)).not.toContain("divergence");
+  });
+
+  it("still returns three windows, with an empty scoreboard and no note, when the ledger is empty", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-review-"));
+    const out = JSON.parse(await tool(stateRoot).run({ today: "2026-09-04" }));
+    for (const window of out.windows) {
+      expect(
+        (window.coverage as string[]).filter((line) =>
+          line.includes("ledger scoreboard unavailable"),
+        ),
+      ).toHaveLength(0);
+      expect(window.ledger).toEqual({ byGroup: {} });
+      expect(window.counters.verdicts.settled).toBe(0);
+      expect(window.counters.calls.hitRate).toBe(null);
+    }
   });
 });

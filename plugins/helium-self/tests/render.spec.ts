@@ -70,6 +70,27 @@ describe("helium-self renderer", () => {
     ).not.toContain(first);
   });
 
+  // A declaration whose own `kind` no settler in this tenant knows mints and
+  // is left outstanding. Stamping it `argon-sweep-compare` would hand it to a
+  // settler that cannot read it, once per run, for ever.
+  it("keeps a declaration's own kind and defaults only when it names none", () => {
+    const drafts = commitmentDrafts(loadExperiments(), new Set());
+    const own = drafts.find(
+      (draft) => draft.id === "2026-09-07-review-framework-failed-run-rate",
+    );
+    expect((own?.payload as Record<string, unknown>).kind).toBe(
+      "helium-run-metric",
+    );
+    expect(
+      (
+        commitmentDrafts([{ id: "x" }], new Set())[0]!.payload as Record<
+          string,
+          unknown
+        >
+      ).kind,
+    ).toBe(EXPERIMENT_KIND);
+  });
+
   it("renders text and mints against an empty state root", () => {
     process.env.HELIUM_STATE_ROOT = mkdtempSync(join(tmpdir(), "helium-self-"));
     const out = render(REPORT, SPEC);

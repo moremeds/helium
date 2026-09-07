@@ -20,7 +20,13 @@ import { extractJson } from "../render/json.js";
 /** The order the day's runs happen in. A label not listed sorts last within
  *  its day — it is a run this list has not been taught about, and putting it
  *  after the ones it knows is the answer that cannot reorder a known pair. */
-const LABEL_ORDER = ["premarket", "intraday", "close", "weekly", "frank"];
+export const LABEL_ORDER = [
+  "premarket",
+  "intraday",
+  "close",
+  "weekly",
+  "frank",
+];
 
 const REPORT_FILE = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
 const STEP_HEADING = /^## ([a-z0-9-]+) — .*$/gmu;

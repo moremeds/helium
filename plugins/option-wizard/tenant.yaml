@@ -38,6 +38,12 @@ env:
   - OW_IB_API_KEY
   - OW_IB_MAX_SNAPSHOT_AGE_HOURS
   - OW_UW_API_KEY
+  # massive.com (ex-Polygon), for ow_massive_actions — dated splits and
+  # ex-dividends. argon already talks to the same provider under the SAME
+  # names (uw_scan/config.py), so the operator holds one key and two consumers.
+  - MASSIVE_API_KEY
+  # Optional; defaults to https://api.massive.com, the same default argon uses.
+  - MASSIVE_BASE_URL
   # argon's ingest for structured runs. Separate from OW_ARGON_API_BASE, which
   # is a TOOL's read endpoint: this one is a WRITE and it is authenticated.
   # Reusing one key for both is how a laptop ends up publishing to the mini.
@@ -217,3 +223,152 @@ extensions:
   # ow_review_window tool; the host carries this block and never opens it.
   review:
     windows: [5, 10, 21]
+    coverage: # ORDER IS THE PRINT ORDER. Rows are never dropped.
+      - rates.front # 2Y level + bp change
+      - rates.long # 10Y / 30Y level + bp change
+      - curve.shape # steepen / flatten, bull or bear
+      - policy.path # dated meeting, hike/cut odds
+      - credit # HY OAS
+      - vol # VIX + term structure
+      - dealer.positioning # call wall / put wall / zero gamma
+      - flow # ETF tide, sector tide
+      - commodities # gold, crude
+      - fx # DXY
+      - equity.internals # index %, sector leaders/laggards
+      - calls.open # our published candidates and forecasts still pending —
+        # NEVER real positions/size/PnL. The /flash page is public;
+        # 仓位 is a separate, private project.
+    # Each entry is an argon watchlist chain name, VERBATIM from
+    # `GET /watchlist/chains` (uw_scan/watchlist_taxonomy.py is the source of
+    # truth). Members come from `GET /watchlist?chain=<name>` via
+    # OW_ARGON_API_BASE. One coverage row per entry, same verdict token, same
+    # <=15-word clause. Members and weekly % are renderer-filled, never recalled.
+    sectors:
+      - Computer/GPU
+      - Semi-Logic/ASIC
+      - Foundry
+      - Semi-Cap/EDA
+      - Memory/Storage
+      - Cybersecurity
+      - Software/SaaS
+      - Cloud/Hyperscaler
+      - Foundation-Model-Proxy
+      - Devices/Endpoint
+    verdicts: [continue, reverse, strengthen, fade, untested]
+    # `weeklyModelWords`/`dailyModelWords` are the totals spec C.6/§J cap; the
+    # per-section numbers are what render/budget.ts trims to.
+    #
+    # `dailyModelWords` was 300 — written before the coverage table existed,
+    # and it budgeted for §2 and §4 alone. The daily document also carries the
+    # model's per-row clauses: 22 model-answered coverage rows (23 declared,
+    # less the renderer-filled `calls.open`) x two clauses, a `why` capped at
+    # `rowWords` 10 and an `observable` of about the same, is ~240 words that
+    # no cap accounted for. The 2026-09-04 close measured 483 against 300, of
+    # which .s3 alone was 241. 300 + 240 = 540, rounded to 550.
+    #
+    # The PER-FIELD caps are unchanged: §2 <= 120 and §4 <= 180 still bound the
+    # prose, so this raises no paragraph's length. Weekly is untouched.
+    caps:
+      weeklyModelWords: 900
+      dailyModelWords: 550
+      reviewWords: 300
+      weekly:
+        {
+          review: 300,
+          outlook: 400,
+          catalysts: 150,
+          rowWords: 15,
+          focusWords: 20,
+          themeWords: 25,
+        }
+      daily:
+        {
+          review: 120,
+          outlook: 180,
+          catalysts: 60,
+          rowWords: 10,
+          focusWords: 20,
+          themeWords: 25,
+        }
+    # §G. The list is COMPUTED, never chosen: these weights and windows are
+    # the whole methodology, and they live here so helium-self can diff them
+    # and so a re-weight is a reviewable PR rather than a prompt edit. They
+    # are a DECLARED PRIOR (2026-09-06), not fitted — §I.6 re-weights them
+    # from focusHitRate after ~8 weeks, and the renderer prints
+    # "weights: declared prior 2026-09-06" under the focus table until it does.
+    focus:
+      weekly: 15
+      daily: 5
+      # Points. An event ON the day earns the full weight and decays in a
+      # straight line to zero at its window's end; an event already past
+      # earns nothing (it happened — 关注 is about what is ahead).
+      weights:
+        earnings: 10
+        corporate: 8
+        macroNamed: 4
+        openCall: 6
+        theme: 3
+        flowAnomaly: 3
+        pinned: 2
+        # §I.1 assignment risk: an ex-dividend date INSIDE an open call's
+        # window, from ow_massive_actions. Weighted just under `openCall`
+        # because it only ever fires on a name we already have a commitment
+        # on — it sharpens an existing admission rather than creating one.
+        # Declared prior, like every weight here.
+        assignmentRisk: 6
+      # OPEN sessions, counted with the `calendar` block above.
+      windows:
+        {
+          earnings: 7,
+          corporate: 10,
+          macroNamed: 5,
+          openCall: 10,
+          assignmentRisk: 5,
+        }
+      # score DESC, then nearest event ASC, then ticker A-Z. Alphabetical
+      # last so a tie is stable across runs — that is what makes the 15
+      # replayable.
+      tieBreak: [score, daysToNearestEvent, ticker]
+      # ow_uw_earnings is one HTTP round trip PER TICKER. The universe is the
+      # argon chains plus the TV flag lists and can exceed 80 names, so the
+      # lookup is capped and the truncation is REPORTED (pinned first, then
+      # alphabetical, so which 60 is deterministic).
+      maxEarningsLookups: 60
+      # ow_uw_iv_term takes at most 3 tickers per call: 15 names = 5 calls.
+      maxIvTermCalls: 5
+      # Operator-dated events with no machine feed: §I.3 index rebalances,
+      # index add/remove, spin-offs, §I.4 product days. Splits and
+      # ex-dividends do NOT belong here — ow_massive_actions serves them
+      # (Task 6). Hand-kept, dated, PR-reviewed; `ticker: MARKET` makes it a
+      # macroNamed event for every universe member. Empty is fine.
+      calendarPins: []
+      #  - { ticker: MARKET, day: 2026-09-18, kind: corporate,
+      #      label: "S&P quarterly rebalance effective" }
+    # §H. A theme lands ONLY with a pollable evidence line, a horizon and a
+    # kill condition. No kill, no theme — the loader refuses it and the tenant
+    # is skipped with the reason, which is the only way a register stays a
+    # register instead of a mood.
+    themes:
+      - id: el-nino-ag-2026
+        thesis: "El Nino 2026 tightens soft/grain supply; medium-term bid for ag inputs and grain"
+        horizon: 6m
+        entered: 2026-09-06
+        instruments: [DBA, MOS, NTR, DE] # what we watch, not what we hold
+        evidence:
+          - text: "NOAA ONI monthly >= +0.5 for 3 consecutive months"
+            # No tool serves NOAA. `tool:` is optional and its absence prints
+            # `evidence: operator-checked` on the row — honest, and it does
+            # not block the verdict, which settles on the excess-move number.
+          - text: "CBOT corn/wheat front-month vs 20d"
+        kill: "ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions"
+        # The machine-checkable half of `kill`, so the renderer can print
+        # CONDITION MET without reading English. Optional.
+        killExcess: { pct: -10, sessions: 60 }
+    # §H.4. The eleven Select Sector SPDRs plus the theme baskets, against
+    # SPY. In yaml so an operator can correct the list without a code change;
+    # Task 9 Step 1 confirms every symbol answers from ow_apex_bars, and one
+    # that does not prints `untested` rather than being dropped.
+    rotation:
+      benchmark: SPY
+      lookbacks: { w1: 5, w4: 20, w12: 60 } # OPEN sessions
+      sectorEtfs: [XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, XLY]
