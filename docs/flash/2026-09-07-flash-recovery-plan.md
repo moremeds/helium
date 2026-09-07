@@ -30,14 +30,14 @@ version of this table said the tool outputs were missing; they are not.
 What is missing is that the recordings live in a session-scoped scratchpad a
 fresh session cannot see. Inventory as of 2026-09-07:
 
-| sample                                  | recorded runs (raw tool outputs) in the scratchpad | rendered page / step JSON in the repo                                              | not recorded anywhere                    |
-| --------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------- |
-| 2026-09-03 premarket, intraday          | `item4` (2 runs)                                   | none                                                                               | —                                        |
-| 2026-09-03 close                        | `fix-v1`, `argon-local`                            | `docs/evidence/pit-replays/2026-09-05/pit-v3/`                                     | —                                        |
-| 2026-09-04 premarket, intraday          | none                                               | premarket page in `pit-v3/`                                                        | both runs (recorder landed after pit-v3) |
-| 2026-09-04 close                        | `review-v1` … `review-v8b`                         | `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` (with step JSON)   | —                                        |
-| 2026-09-06 weekly                       | `review-v1` … `review-v7`, `weekend-2026-09-06`    | `review-v7/` (with step JSON)                                                      | news (the weekly has no news tool)       |
-| 2026-09-02 close (hold-out)             | none                                               | none                                                                               | the whole run                            |
+| sample                         | recorded runs (raw tool outputs) in the scratchpad | rendered page / step JSON in the repo                                            | not recorded anywhere                    |
+| ------------------------------ | -------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
+| 2026-09-03 premarket, intraday | `item4` (2 runs)                                   | none                                                                             | —                                        |
+| 2026-09-03 close               | `fix-v1`, `argon-local`                            | `docs/evidence/pit-replays/2026-09-05/pit-v3/`                                   | —                                        |
+| 2026-09-04 premarket, intraday | none                                               | premarket page in `pit-v3/`                                                      | both runs (recorder landed after pit-v3) |
+| 2026-09-04 close               | `review-v1` … `review-v8b`                         | `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` (with step JSON) | —                                        |
+| 2026-09-06 weekly              | `review-v1` … `review-v7`, `weekend-2026-09-06`    | `review-v7/` (with step JSON)                                                    | news (the weekly has no news tool)       |
+| 2026-09-02 close (hold-out)    | none                                               | none                                                                             | the whole run                            |
 
 Step 0 therefore: move `run-pit-review.sh` into the repo as
 `scripts/pit-replay.sh` with a `record` mode (live run, as-of, named state
@@ -98,6 +98,23 @@ PnL. Coverage, ledger and the full Focus table stay as an appendix.
 
 Exit: three drafts per sample exist with their inputs recorded. No human
 reads them yet.
+
+Done 2026-09-07 on `feat/flash-step0` (`docs/evidence/flash-drafts/`,
+`scripts/flash-abc.sh`, `plugins/option-wizard/team.{B,C,C-nonews}.yaml`).
+Sixteen runs, all exit 0. Three limits Step 2 must respect, recorded in full
+in `docs/evidence/flash-drafts/README.md` and in each sample's `CRITERIA.md`:
+
+- **No daily sample contains news, earnings or a calendar.** Every
+  `ow_uw_headlines`, `ow_uw_earnings` and `ow_uw_calendar` recording in the six
+  daily samples is an `{"unavailable":"as-of"}` refusal. So the missing-event
+  failures in the table above — AVGO/SNOW, claims, NFP, Waller — cannot be
+  scored on the frozen inputs at all; they become testable at Step 4.
+- **The daily A/C comparison is prompt shape only.** The `edit` task already
+  required `reason.deep`, so A and C route the daily author to the same model
+  and neither had news. Only the weekly separates model (A→B), shape (B→C) and
+  news (C→C-nonews).
+- **The weekly is a live run**, four variants back to back inside nine minutes,
+  and its report day resolves to the clock's day, not the sample's.
 
 ## Step 2 — an acceptance pass, calibrated before it sees C (1 day)
 
