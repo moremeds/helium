@@ -39,6 +39,7 @@ import {
   attachThresholds,
   buildFrame,
 } from "../quality/frame.js";
+import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
 import type { Bar } from "../eval/bars.js";
@@ -1336,17 +1337,6 @@ function stepsOf(markdown: string): Map<string, string> {
  *  not match is not one of our reports and is ignored rather than guessed at. */
 const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
 
-/** The order the day's runs happen in, for walking BACKWARDS from one of them.
- *  A label not listed sorts last within its day: it is a run this list has not
- *  been taught about, and putting it after the known ones is the answer that
- *  cannot reorder a known pair. */
-const PHASE_ORDER = ["premarket", "frank", "intraday", "close", "weekly"];
-
-function phaseRank(label: string): number {
-  const at = PHASE_ORDER.indexOf(label);
-  return at === -1 ? PHASE_ORDER.length : at;
-}
-
 const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 
 const EarningsParams = z.object({
@@ -1691,6 +1681,8 @@ export function buildTools(cfg: {
   /** Point-in-time replay instant. Undefined is an ordinary run and every
    *  tool below behaves exactly as it did before this flag existed. */
   asOf?: Date;
+  /** The current run phase, supplied by a phase-aware host. */
+  phase?: string;
   variant?: string;
   pit?: { markUnavailable: (tool: string, reason: string) => void };
   /** The tenant's `calendar:` block, passed through by the runner. Absent in a
@@ -3319,25 +3311,41 @@ export function buildTools(cfg: {
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const { phase, today } = PriorBriefParams.parse(args);
-        const wanted = phase ?? "premarket";
         // The report day in the zone the filenames are stamped in. Same
         // reasoning as ow_reports' date counting: a cutoff taken from this
         // process's clock disagrees with the filenames by a whole day for a
         // HK-scheduled run reading ET-dated files.
         // 2026-09-05, as-of: the replayed day replaces "today" as the
         // exclusive cutoff, so a replay of 09-02 reads the 09-01 brief and not
-        // whatever the last run on disk happened to write. An explicit `today`
-        // argument still wins — a caller naming a day means that day. VERIFIED
-        // by construction (same zone as the filenames); nothing external.
-        const cutoff =
-          today ??
+        // whatever the last run on disk happened to write. On a phase-aware
+        // host an explicit day may look back but never ahead of this run.
+        const runDay =
           asOfDay ??
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
-        const here = phaseRank(wanted);
+        if (cfg.phase !== undefined && today !== undefined && today > runDay)
+          throw new Error(
+            `ow_prior_brief: ${today} is after this run day ${runDay}`,
+          );
+        const cutoff = today ?? runDay;
+        const wanted = phase ?? cfg.phase ?? "premarket";
+        if (
+          phase !== undefined &&
+          cfg.phase !== undefined &&
+          cutoff === runDay &&
+          labelRank(phase) > labelRank(cfg.phase)
+        )
+          throw new Error(
+            `ow_prior_brief: ${phase} is after this ${cfg.phase} run`,
+          );
         const earlier = (day: string, label: string): boolean =>
-          day < cutoff || (day === cutoff && phaseRank(label) < here);
+          isPriorRun({
+            candidateDay: day,
+            candidateLabel: label,
+            day: cutoff,
+            label: wanted,
+          });
         const stateDir = join(cfg.stateRoot, "option-wizard");
         // 1. The newest STATE RECORD strictly before this run. Calendar-aware
         //    for free: a closed day produced no run, so it wrote no file.
@@ -3354,7 +3362,7 @@ export function buildTools(cfg: {
                 best !== null &&
                 (day < best.day ||
                   (day === best.day &&
-                    phaseRank(label) < phaseRank(best.label)))
+                    labelRank(label) < labelRank(best.label)))
               )
                 continue;
               let parsed: unknown;
@@ -3392,7 +3400,7 @@ export function buildTools(cfg: {
             const byDay = b.match![1]!.localeCompare(a.match![1]!);
             return byDay !== 0
               ? byDay
-              : phaseRank(b.match![2]!) - phaseRank(a.match![2]!);
+              : labelRank(b.match![2]!) - labelRank(a.match![2]!);
           })[0];
         const byStep =
           found === undefined
@@ -4570,11 +4578,9 @@ export function buildTools(cfg: {
           focusInputs,
           days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
           stateRoot: cfg.stateRoot,
-          // buildTools is not given the run's phase, so the newest record
-          // strictly before ANY known label on `day` is what the frame wants:
-          // `variant` is not a phase label and therefore ranks last, which
-          // reads as "the newest record written before this run".
-          label: cfg.variant ?? "live",
+          // A phase-aware host gives the frame the exact daily predecessor;
+          // older hosts retain their prior variant-based behavior.
+          label: cfg.phase ?? cfg.variant ?? "live",
           review,
           skipped,
           env,

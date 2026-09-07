@@ -9,8 +9,7 @@
  * `need(env, …)`. That IS the laptop's shape, and the frame it produces is the
  * one an unconfigured machine gets.
  */
-import { readFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -87,6 +86,42 @@ describe("ow_session_frame", () => {
       expect(row.reason?.length ?? 0).toBeGreaterThan(0);
     }
     expect(frame.focus.weightsNote).toBe("weights: declared prior 2026-09-06");
+  });
+
+  it("uses the actual premarket phase, not the live variant, for prior checks", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-frame-phase-"));
+    const record = {
+      cause: "recorded",
+      tide: "flat",
+      thesis: "recorded thesis",
+      checks: [
+        { series: "a", level: "1", text: "a" },
+        { series: "b", level: "1", text: "b" },
+        { series: "c", level: "1", text: "c" },
+      ],
+    };
+    for (const [day, label] of [
+      ["2026-09-04", "close"],
+      ["2026-09-08", "intraday"],
+      ["2026-09-08", "close"],
+    ]) {
+      const dir = join(stateRoot, "option-wizard", day);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${label}.regime.json`), JSON.stringify(record));
+    }
+    const frame = JSON.parse(
+      await buildTools({
+        stateRoot,
+        env: { HELIUM_AUDIT_DB: join(stateRoot, "audit.db") },
+        asOf: new Date("2026-09-08T12:45:00.000Z"),
+        phase: "premarket",
+        variant: "live",
+        extensions: spec.extensions,
+      })
+        .find((tool) => tool.name === "ow_session_frame")!
+        .run({}),
+    ) as { checks: { from?: { day: string; label: string } } };
+    expect(frame.checks.from).toEqual({ day: "2026-09-04", label: "close" });
   });
 
   // THE 2026-09-06 DEFECT. The frame handed `ow_uw_earnings` the whole

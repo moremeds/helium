@@ -786,6 +786,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     (await loadTenantTools(options.tenant.dir, {
       stateRoot: options.stateRoot,
       env,
+      phase,
       variant: options.variant ?? "live",
       pit,
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),

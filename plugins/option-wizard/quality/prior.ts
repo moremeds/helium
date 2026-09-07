@@ -22,11 +22,44 @@ import { extractJson } from "../render/json.js";
  *  after the ones it knows is the answer that cannot reorder a known pair. */
 export const LABEL_ORDER = [
   "premarket",
+  "frank",
   "intraday",
   "close",
   "weekly",
-  "frank",
-];
+] as const;
+
+/** The three reports that make one trading-day narrative. Supplements never
+ * become a daily baseline, even when they happened between two daily phases. */
+export const DAILY_LABEL_ORDER = ["premarket", "intraday", "close"] as const;
+
+export function isDailyLabel(label: string): boolean {
+  return DAILY_LABEL_ORDER.includes(label as (typeof DAILY_LABEL_ORDER)[number]);
+}
+
+export function labelRank(label: string): number {
+  const at = LABEL_ORDER.indexOf(label as (typeof LABEL_ORDER)[number]);
+  return at === -1 ? LABEL_ORDER.length : at;
+}
+
+/** Whether one persisted run may be the predecessor of another. Daily phases
+ * deliberately see only the prior daily phase; frank and weekly retain their
+ * normal schedule order for their own callers. */
+export function isPriorRun(args: {
+  candidateDay: string;
+  candidateLabel: string;
+  day: string;
+  label: string;
+}): boolean {
+  if (
+    args.candidateDay > args.day ||
+    (isDailyLabel(args.label) && !isDailyLabel(args.candidateLabel))
+  ) return false;
+  return (
+    args.candidateDay < args.day ||
+    (args.candidateDay === args.day &&
+      labelRank(args.candidateLabel) < labelRank(args.label))
+  );
+}
 
 const REPORT_FILE = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
 const STEP_HEADING = /^## ([a-z0-9-]+) — .*$/gmu;
@@ -38,11 +71,6 @@ export function reportsDir(env: NodeJS.ProcessEnv = process.env): string {
     env.HELIUM_STATE_ROOT ?? resolve(process.cwd(), ".helium-state"),
     "reports",
   );
-}
-
-function rank(label: string): number {
-  const at = LABEL_ORDER.indexOf(label);
-  return at === -1 ? LABEL_ORDER.length : at;
 }
 
 function stepsOf(markdown: string): Map<string, string> {
@@ -67,15 +95,20 @@ export function priorCauseTitle(args: {
   day: string;
   label: string;
 }): string | null {
-  const here = [args.day, rank(args.label)] as const;
+  const here = [args.day, labelRank(args.label)] as const;
   let best: { day: string; rank: number; file: string } | null = null;
   try {
     for (const name of readdirSync(args.dir)) {
       const match = REPORT_FILE.exec(name);
       if (match === null) continue;
       const day = match[1]!;
-      const at = rank(match[2]!);
-      const earlier = day < here[0] || (day === here[0] && at < here[1]);
+      const at = labelRank(match[2]!);
+      const earlier = isPriorRun({
+        candidateDay: day,
+        candidateLabel: match[2]!,
+        day: here[0],
+        label: args.label,
+      });
       if (!earlier) continue;
       if (
         best === null ||

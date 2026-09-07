@@ -117,6 +117,8 @@ export interface TenantToolConfig {
   asOf?: Date;
   /** The run's flavour label. `live` on an ordinary run. */
   variant: string;
+  /** The scheduled phase, distinct from the experiment/variant label. */
+  phase?: string;
   /** Where a tool says it has no history for `asOf`. The runner counts these
    *  and never inspects the reason — what a source is remains the tenant's
    *  business (doctrine 2). */
@@ -154,6 +156,7 @@ export async function loadTenantTools(
       env: Record<string, string | undefined>;
       asOf?: Date;
       variant: string;
+      phase?: string;
       pit?: { markUnavailable: (tool: string, reason: string) => void };
       calendar?: { weekdaysOnly: boolean; closed: string[] };
       recordings?: {
@@ -171,6 +174,7 @@ export async function loadTenantTools(
     stateRoot: cfg.stateRoot,
     env: cfg.env,
     variant: cfg.variant,
+    ...(cfg.phase === undefined ? {} : { phase: cfg.phase }),
     ...(cfg.asOf === undefined ? {} : { asOf: cfg.asOf }),
     ...(cfg.pit === undefined ? {} : { pit: cfg.pit }),
     ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
