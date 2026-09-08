@@ -1,0 +1,39 @@
+# The acceptance pass of the Flash recovery plan (docs/flash/2026-09-07-flash-
+# recovery-plan.md, Step 2). One job: read ONE page as a reader would, check it
+# against the rubric and the run's frozen evidence, and return a verdict.
+#
+# It is a tenant and not a gate on purpose. A gate is deterministic code inside
+# option-wizard's own pipeline; this has to read prose, which is the one thing
+# code cannot check — and the reason every earlier acceptance pass counted JSON
+# instead. Doctrine 2: it knows no provider and no model, only three tools and
+# a rubric file.
+#
+# `enabled: true` with `triggers: []` is safe for the same reason it is in
+# fake-tenant and helium-self: discovery is a glob, and a tenant that ships no
+# schedule runs only when a human names it.
+tenant: flash-review
+enabled: true
+team: team.yaml
+sandbox: none
+# Generous next to the other hand-run tenants because the inputs are: a page is
+# ~15 KB and a sample's recordings run to ~150 KB of raw tool output, and a
+# reviewer that runs out of budget half way through the evidence returns a
+# verdict it did not earn. Both ceilings are hard, so this is the number that
+# has to be wrong in the safe direction.
+budget:
+  usd: 3.0
+  tokens: 900000
+triggers: []
+# Key NAMES only, and neither is a credential: FR_PAGE is the page under
+# review, FR_EVIDENCE_DIR the sample's `tool-io/`. They are declared here so a
+# run with either unset says so at the top of the report (`tool unconfigured`)
+# instead of reviewing an empty string.
+env:
+  - FR_PAGE
+  - FR_EVIDENCE_DIR
+# markdown, like fake-tenant and helium-self: `external = false`, so a verdict
+# never leaves the machine and no operator brake is involved.
+delivery:
+  - channel: markdown
+    config:
+      dir: reports
