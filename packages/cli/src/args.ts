@@ -19,6 +19,14 @@ export interface RunArgs {
    * always did.
    */
   replayFrom?: string;
+  /**
+   * Restrict this run to one execution target, named by its opaque id
+   * (`<provider>:<model>`). Absent is the normal run: the router picks the
+   * cheapest capable target. Present, it is a hard routing filter — the way
+   * an operator says "not the model that wrote the thing being graded"
+   * without a team manifest ever naming one.
+   */
+  modelPin?: string;
 }
 
 export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
@@ -26,6 +34,7 @@ export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
   let variant = "live";
   let asOf: Date | undefined;
   let replayFrom: string | undefined;
+  let modelPin: string | undefined;
   for (let i = 0; i < rest.length; i += 1) {
     const flag = rest[i];
     const value = rest[i + 1];
@@ -83,6 +92,21 @@ export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
       i += 1;
       continue;
     }
+    if (flag === "--model-pin") {
+      const bad = needsValue();
+      if (bad !== undefined)
+        return {
+          error:
+            "--model-pin needs a target id, e.g. --model-pin dsh:claude-haiku-4-5",
+        };
+      // No shape check here on purpose. The id is opaque, and the one thing
+      // worth refusing — a value no registered target answers to — is
+      // refused in `cli.ts`, where the catalog is, with the available ids in
+      // the message. A regex beside that check is a second, weaker copy of it.
+      modelPin = value!;
+      i += 1;
+      continue;
+    }
     return { error: `unknown argument: ${String(flag)}` };
   }
   return {
@@ -90,5 +114,6 @@ export function parseRunArgs(rest: string[]): RunArgs | { error: string } {
     variant,
     ...(asOf === undefined ? {} : { asOf }),
     ...(replayFrom === undefined ? {} : { replayFrom }),
+    ...(modelPin === undefined ? {} : { modelPin }),
   };
 }

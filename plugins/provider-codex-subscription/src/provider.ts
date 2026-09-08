@@ -18,7 +18,9 @@ import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
 import { selectedTools } from "@helium/provider-sdk/tool-loop";
 import type { CodexEffort } from "./catalog.js";
-import { invokeCodex, turnEvents } from "./invoke.js";
+import { invokeCodex, turnEvents,
+  REQUEST_TIMEOUT_MS,
+} from "./invoke.js";
 
 const ENDPOINT = "https://chatgpt.com/backend-api/codex/responses";
 
@@ -58,8 +60,11 @@ const SPARK_POOL = "codex-spark";
  * target — so it WON every tool-using step and then failed it at execution
  * with "performs inference only". The rule that came out of it is the one
  * being honoured now, not overturned: the tag goes back only together with a
- * tool loop. `invoke.ts` has one (`MAX_TOOL_TURNS` turns of the Responses API
- * function-call protocol, tool spans folded into the audit), so it is true again.
+ * tool loop. `invoke.ts` has one (the shared `@helium/provider-sdk`
+ * `MAX_TOOL_TURNS` turns of the Responses API function-call protocol, tool
+ * spans folded into the audit), so it is true again. This edge still uses the
+ * shared constant; `provider-claude-subscription` now defines its own, so the
+ * two numbers are no longer one number and neither comment may speak for both.
  *
  * `cheap.bulk` on the spark tier still does NOT claim it: a chore tier exists
  * to be chosen for extraction and formatting, and letting it win tool-using
@@ -201,7 +206,10 @@ export class CodexSubscriptionProvider implements Provider {
       model: selection.model,
       effort: (selection.effort ?? "low") as CodexEffort,
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
+      timeoutMs: work.constraints.maxLatencyMs ?? REQUEST_TIMEOUT_MS,
+      ...(work.constraints.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: work.constraints.maxOutputTokens }),
       env: this.env as Record<string, string>,
       signal,
       ...(tools.length === 0 ? {} : { tools }),

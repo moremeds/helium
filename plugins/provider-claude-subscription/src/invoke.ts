@@ -1,6 +1,5 @@
 import { curlPostJson } from "@helium/provider-sdk/curl";
 import {
-  MAX_TOOL_TURNS,
   parseToolArgs,
   runToolCall,
   toolCallEvents,
@@ -9,6 +8,51 @@ import {
 import type { ToolSpec } from "@helium/provider-sdk/tool-loop";
 import type { EcosystemTool, LogEvent } from "@helium/core";
 import type { ClaudeEffort } from "./catalog.js";
+
+/**
+ * How many times this provider lets a model answer with tool calls before the
+ * loop gives up. Provider-local on purpose: the shared `MAX_TOOL_TURNS` in
+ * `@helium/provider-sdk` is 8, sized for "the option-wizard team's longest
+ * role calls five tools once each", and raising THAT would silently change
+ * the codex edge too.
+ *
+ * Why it had to move. The flash-review reviewer needs, at minimum,
+ * `fr_rubric` + `fr_page` + `fr_dated_events` + one `fr_evidence` index call
+ * + one `fr_evidence` read per recording — 13 calls against the nine-file
+ * 2026-09-06 weekly sample, before it re-reads anything to check a finding.
+ * At 8 it returned nothing but "[helium: stopped after 8 tool turns]" on all
+ * four calibration mutations (2026-09-08).
+ *
+ * Why 64 and not a number closer to 13. The provider that DOES complete this
+ * review, `plugins/provider-dsh`, imposes no turn ceiling at all — the dsh
+ * runtime loops until the model stops. So the order of magnitude to match is
+ * "does not bind", and the cap's remaining job is only to stop a model stuck
+ * re-asking the same question forever. 64 is 8x the old ceiling and ~5x the
+ * measured need, and every turn re-sends the transcript, so a runaway still
+ * ends in bounded, not quadratic-forever, spend.
+ *
+ * A second ceiling binds independently and is NOT this one: each turn is a
+ * single request with `timeoutMs: work.constraints.maxLatencyMs ??
+ * REQUEST_TIMEOUT_MS`
+ * (`provider.ts`, `executor.ts`), plus curl's own +2s hard kill. A turn that
+ * exceeds it fails the whole call however many turns are left — which is
+ * exactly how the codex edge failed this same review.
+ */
+export const MAX_TOOL_TURNS = 64;
+
+/**
+ * Per-REQUEST ceiling, in milliseconds, when the work order names no latency
+ * constraint of its own. One turn of the tool loop is one request, so this is
+ * not a ceiling on the whole call.
+ *
+ * 300_000 was the original value and it was measured to be too low: on
+ * 2026-09-08 a flash-review run through this backend produced NO SSE bytes at
+ * all on its FIRST request and was killed at 300_014 ms with zero tokens
+ * billed. The user's tribunal-review skill drives the same backend and has
+ * 600s as its working ceiling, so that is the number here — taken from a
+ * measurement on this backend, not chosen for roundness.
+ */
+export const REQUEST_TIMEOUT_MS = 600_000;
 
 export type ClaudeClassification =
   "proxy" | "auth" | "timeout" | "cancelled" | "quota-exhausted" | "error";
@@ -45,6 +89,8 @@ export interface ClaudeInvocation {
   /** System prompt appended after the mandatory Claude Code identity block. */
   systemPrompt?: string;
   timeoutMs: number;
+  /** Role-declared ceiling on the reply, in tokens. Absent uses this edge's own default. */
+  maxOutputTokens?: number;
   /**
    * The provider's declared environment. Three keys are read: the credential,
    * as `CLAUDE_CODE_OAUTH_TOKEN` (a `claude setup-token`) then
@@ -184,9 +230,18 @@ export async function invokeClaude(
     input_schema: spec.parameters,
   }));
 
+  // The role's declared reply budget, or this edge's default. One number, one
+  // place: a reply cut off mid-JSON is indistinguishable from a model that
+  // stopped early, and REPLY_HEADROOM was sized for a paragraph.
+  const reply = input.maxOutputTokens ?? REPLY_HEADROOM;
   const messages: unknown[] = [{ role: "user", content: input.prompt }];
   const events: LogEvent[] = [];
-  const said: string[] = [];
+  // Only the LAST assistant turn's text is the answer. Every turn before it is
+  // the model narrating its way to a tool call ("I'll start by reading the
+  // rubric"), and concatenating those in front of a structured reply is what
+  // made a valid verdict fail its own schema check. `provider-dsh` returns the
+  // final message and this edge now agrees with it.
+  let said = "";
   let seq = 0;
   let raw: unknown;
 
@@ -194,7 +249,7 @@ export async function invokeClaude(
     const startedAt = Date.now();
     const body: Record<string, unknown> = {
       model: input.model,
-      max_tokens: budget + REPLY_HEADROOM,
+      max_tokens: budget + reply,
       system: [
         { type: "text", text: CLAUDE_CODE_IDENTITY },
         ...(input.systemPrompt === undefined
@@ -284,7 +339,7 @@ export async function invokeClaude(
       .filter((block) => block.type === "text")
       .map((block) => block.text ?? "")
       .join("");
-    if (spoken !== "") said.push(spoken);
+    if (spoken !== "") said = spoken;
 
     const calls = content.filter(
       (block) => block.type === "tool_use" && typeof block.id === "string",
@@ -292,7 +347,7 @@ export async function invokeClaude(
     if (calls.length === 0) {
       return {
         ok: true,
-        text: said.join("\n"),
+        text: said,
         raw,
         runtimeSnapshot: runtime(),
         events,
@@ -339,12 +394,14 @@ export async function invokeClaude(
   // what it has said so far is right — the turns were paid for and the partial
   // answer is real — but the reader must be told it is partial, or a truncated
   // reply reads as a considered short one.
-  said.push(
-    `[helium: stopped after ${String(MAX_TOOL_TURNS)} tool turns; the model was still calling tools]`,
-  );
   return {
     ok: true,
-    text: said.join("\n"),
+    text: [
+      said,
+      `[helium: stopped after ${String(MAX_TOOL_TURNS)} tool turns; the model was still calling tools]`,
+    ]
+      .filter((part) => part !== "")
+      .join("\n"),
     raw,
     runtimeSnapshot: runtime(),
     events,

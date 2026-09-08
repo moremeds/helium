@@ -41,6 +41,14 @@ export const TeamRoleSchema = z.strictObject({
   }),
   /** Overrides the tenant's sandbox kind for this role only. */
   sandbox: z.string().min(1).max(64).optional(),
+  /**
+   * How many tokens this role's reply may take. Declared where the role is,
+   * because the role is what knows the shape of its own answer: a reviewer
+   * that must return one JSON object listing every event it checked needs
+   * room a one-paragraph editor does not. Absent leaves the edge's default
+   * alone. It is a budget (doctrine 4), never a model setting.
+   */
+  maxOutputTokens: z.number().int().positive().max(1_000_000).optional(),
   persona: z.string().max(4000).optional(),
 });
 

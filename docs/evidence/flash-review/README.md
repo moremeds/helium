@@ -163,8 +163,16 @@ defect.
 
 The router picked `dsh:claude-opus-4-8` for the reviewer on all eight runs —
 the cheapest target carrying `reason.deep`, `long.context` and `tool.use` under
-the credentials available on this laptop. There is no model pin, and no
-`team.yaml` names a model.
+the credentials available on this laptop. No `team.yaml` names a model, and
+none should.
+
+**A per-run model pin now exists** (added 2026-09-08): `helium run <tenant>
+--model-pin <targetId>`, honoured by the capability router as a hard filter
+before every other one, with `FR_MODEL_PIN` as this script's passthrough. It
+narrows and never relaxes — a pinned target that lacks a required capability
+is still refused — and a pin no registered target answers to is refused before
+the run starts, with the available ids printed. The runs below are the first
+use of it.
 
 **The plan's "reviewer model differs from author model" rule is only half
 satisfied, and it is not being worked around.** Both source pages were written
@@ -175,11 +183,126 @@ by more than one model:
 | 2026-09-06 weekly    | `dsh:claude-opus-4-8` ×2 sections, `dsh:claude-haiku-4-5` ×1 |
 | 2026-09-03 premarket | `dsh:claude-opus-4-8` ×5 sections, `dsh:claude-haiku-4-5` ×2 |
 
-So the reviewer is a different model from the `weekly` author (haiku) and the
-SAME model as the `scenarios` and `week-review` authors (opus). Nothing in the
-harness can currently fix that: Step 5 of the recovery plan already records
-that a per-run model pin does not exist. Stated here so a later reader does not
-mistake a same-model review for an independent one.
+So the eight runs above used a reviewer that is a different model from the
+`weekly` author (haiku) and the SAME model as the `scenarios` and `week-review`
+authors (opus). Stated here so a later reader does not mistake a same-model
+review for an independent one.
+
+### The four mutations, re-reviewed by a model that wrote none of the page
+
+`FR_MODEL_PIN=claude-subscription:claude-opus-5`, 2026-09-08, same pages, same
+`2026-09-06-weekly/tool-io`, rubric and mutations untouched. The model is read
+from the `span` table, not the log; every run recorded
+`claude-subscription / claude-opus-5`.
+
+| page                     | run id            | model turns | tool calls | wall | verdict  | the mutation's own signature                          | mutated sentence cited verbatim |
+| ------------------------ | ----------------- | ----------- | ---------- | ---- | -------- | ----------------------------------------------------- | -------------------------------- |
+| `m1-swapped-date`        | `run-2b91b6c7…`   | 12          | 14         | 359s | **fail** | `date-conflict`, **blocking**                          | yes                              |
+| `m2-deleted-event`       | `run-7f9d9609…`   | 9           | 17         | 402s | **fail** | `missing-major-event`, **blocking** ×2                 | yes — on the same "No calendar rows were admitted to this run" sentence the dsh r4 run cited |
+| `m3-unsourced-mechanism` | `run-ef536820…`   | 11          | 16         | 341s | **fail** | `unsourced-causal-story`, major                        | yes                              |
+| `m4-miss-as-hit`         | `run-81f2f478…`   | 9           | 12         | 364s | **fail** | quoted under `unsourced-causal-story`, not `weekly-is-our-review` | yes                              |
+
+**The gate is `verdict: fail` AND the mutated sentence quoted verbatim.** The
+signature a reviewer reaches for is diagnostic — useful for reading how it
+thinks, never the pass condition — because a defect found under the wrong label
+is still found, and a rubric tuned until the labels line up is a rubric fitted
+to its calibration set. On that criterion all four pass.
+
+All four rejected, every one quoting a page sentence verbatim. Two honest
+qualifications: **m4's defect is caught under the wrong signature** — the
+rewritten "vol behaved as called…" sentence is quoted, but as an unsourced
+causal story rather than as the ledger failure the rubric defines — and **m2 is
+caught through the calendar-absence sentence rather than by naming the FOMC**,
+which is the same anchor the dsh round-4 run used but reached with a noisier
+finding list (15 findings against dsh's 3). This reviewer is stricter and
+less well aimed than the one it is standing in for; it is not a scoring
+equivalent, and no number here should be compared to a dsh row.
+
+### The clock is not the cause of `stale-as-today`
+
+Checked once and then dropped: both edges send `work.inputs.prompt` verbatim
+(`provider-claude-subscription/src/provider.ts` and `provider-dsh/src/host.ts`
+read the same field), that prompt opens with the runner's `phase / now / now
+(UTC) / report day` block, and it is present byte-for-byte in the saved
+`assembledPrompt` of every run below — so the review's clock does reach the
+model on the subscription edge, `flash-review` is not run with `--as-of` at
+all, and the dsh rounds returned `stale-as-today` too. It is the reviewer
+reading page numbers dated before the page's own day, not a lost clock.
+
+### Three provider-edge ceilings this exposed, in the order they bound
+
+1. **Tool turns.** `@helium/provider-sdk`'s shared `MAX_TOOL_TURNS = 8` was
+   sized for "the option-wizard team's longest role calls five tools once
+   each". This reviewer needs 12–17 calls over 9–12 turns, so all four runs
+   returned nothing but `[helium: stopped after 8 tool turns]`.
+   `plugins/provider-claude-subscription` now defines its OWN
+   `MAX_TOOL_TURNS = 64` in `invoke.ts` — provider-local, because raising the
+   shared constant would have moved the codex edge too, and 64 because the
+   provider that DOES complete this review, `provider-dsh`, has no turn
+   ceiling at all.
+2. **Per-request timeout.** Both subscription edges defaulted to
+   `maxLatencyMs ?? 300_000` per request. A `codex-subscription:gpt-5.6-sol`
+   run was killed at 300_014 ms with zero tokens billed. Both now default to a
+   named `REQUEST_TIMEOUT_MS = 600_000`, the working ceiling measured against
+   the same backend by the user's tribunal-review skill.
+3. **Reply length.** Three of the four verdicts above are truncated mid-string
+   inside `events_checked` — the final reply hit `max_tokens`, which was a
+   fixed `REPLY_HEADROOM = 4_096` this role could not influence. `findings` and
+   `verdict` come first in the schema and survive intact, which is why the
+   table above is readable, but `scripts/flash-review-validate.mjs` refused all
+   four as `reviewer output is not one JSON object`. Fixed by making the cap a
+   BUDGET rather than a constant: `maxOutputTokens` is now a work-order
+   constraint a role declares, `flash-review`'s reviewer declares 48,000 in its
+   own `team.yaml`, and both subscription edges spend it (each keeping its
+   previous default when a role declares nothing). No rubric, schema or
+   validator was weakened.
+
+### After the two edge fixes: one re-run of m2
+
+`run-c91ddd15-d170-43a1-a223-1e32d86143f2`, same pin, 332s, 10 model turns, 14
+tool calls, 26,591 output tokens. Evidence beside the page as
+`m2-deleted-event/review/fixed-opus5.*`.
+
+The reply now **starts at `{"verdict"` and parses end to end** — no narration
+prefix, no truncation — with 13 findings and all 54 `events_checked` rows
+present. `verdict: fail`, `missing-major-event` **blocking**, quoting "No
+calendar rows were admitted to this run…" verbatim: the gate criterion is met.
+
+`flash-review-validate.mjs` still refuses it, but on a DIFFERENT and later
+check than before — `events_checked omits an enumerated event occurrence
+(2026-09-09|00001-ow_session_frame.json.gz)`. That is the reviewer not
+enumerating one row `fr_dated_events` returned, i.e. the same
+faults-defined-by-absence weakness the r1–r3 rounds documented, reached by a
+different model. It is a reviewer question, not an edge one; the rubric and the
+mutations were not touched to make it go away.
+
+### The codex edge, re-run once at 600s
+
+`FR_MODEL_PIN=codex-subscription:gpt-5.6-sol`, `m1-swapped-date`,
+`run-f59d27db-0449-4089-a267-f2a7556ef8e6`, 734s wall. At 300_000 ms this
+target produced NO output at all — its FIRST request returned no SSE bytes and
+was killed at 300_014 ms with zero tokens billed. At `REQUEST_TIMEOUT_MS =
+600_000` the same run returned **`verdict: fail`, `date-conflict` blocking,
+quoting "…the SPY ETF tide underlying at the final 2026-09-02 print: 770.19."
+verbatim** — the mutation, found for the right reason, by a model from a
+different lineage than anything that wrote the page. 6 model turns, 20 tool
+calls, 132_872 in / 3_715 out tokens; per-turn latencies
+3.4s, 3.4s, 4.2s, 17.0s, 103.3s, then 600.0s. So **the timeout was the
+variable that moved it**, and reasoning effort was never changed — `high` is
+what `reason.deep` asks for and `high` is what completed.
+
+Two caveats. The last turn still ended at the 600s ceiling, after the verdict
+had already been emitted on the turn before it. And this output truncates in
+`events_checked` at the same reply-length ceiling as the opus-5 runs, so the
+validator refuses it too. Unlike the claude edge, it carries no preamble: the
+text begins at `{"verdict"`.
+
+A fourth difference was not a ceiling but the same class of defect: this edge
+concatenated EVERY turn's assistant text, so each verdict arrived prefixed with
+the model's opening `I'll start by reading the rubric and the page.` line. The
+turns before the answer are narration on the way to a tool call, and
+`provider-dsh` has always returned the final message only. The claude edge now
+agrees with it.
 
 ## Blindness — the check, and its result
 

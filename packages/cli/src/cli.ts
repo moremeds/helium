@@ -15,6 +15,7 @@ import { resolve } from "node:path";
 import {
   AuditStore,
   CapabilityCatalog,
+  ExecutionTargetId,
   loadTenants,
   auditDbPath,
   loadOperatorEnv,
@@ -248,7 +249,7 @@ async function main(argv: string[]): Promise<number> {
   if (command === "run") {
     if (argument === undefined) {
       console.error(
-        "usage: helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>]",
+        "usage: helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>] [--model-pin <targetId>]",
       );
       return 2;
     }
@@ -257,7 +258,7 @@ async function main(argv: string[]): Promise<number> {
       console.error(parsed.error);
       return 2;
     }
-    const { phase, asOf, variant, replayFrom } = parsed;
+    const { phase, asOf, variant, replayFrom, modelPin } = parsed;
     const tenantsRoot = tenantsDir(env);
     const pluginsRoot = pluginsDir(env);
     const { tenants, skipped } = loadTenants(tenantsRoot);
@@ -279,6 +280,20 @@ async function main(argv: string[]): Promise<number> {
     const providers = await discoverProviders(pluginsRoot);
     const catalog = new CapabilityCatalog();
     registerProviders(catalog, providers.live);
+    // Fail closed, here, where the operator's typo is still nameable. The
+    // router would refuse a pin that matches nothing too — but per STEP, as a
+    // capability shortage, leaving a report that looks like a run rather than
+    // like a mistake.
+    if (modelPin !== undefined && catalog.get(ExecutionTargetId(modelPin)) === undefined) {
+      const known = catalog
+        .snapshot()
+        .targets.map((target) => String(target.targetId))
+        .sort((a, b) => a.localeCompare(b, "en"));
+      console.error(
+        `--model-pin ${modelPin} is not a registered target; available: ${known.join(", ") || "(none)"}`,
+      );
+      return 2;
+    }
 
     const store = AuditStore.open(env);
     try {
@@ -300,6 +315,9 @@ async function main(argv: string[]): Promise<number> {
           ? {}
           : { asOf, now: (): Date => new Date(asOf.getTime()) }),
         ...(replayFrom === undefined ? {} : { replayFrom }),
+        // The pin is the operator's, per run. No team manifest names a model
+        // and none has to: the constraint lives where the experiment does.
+        ...(modelPin === undefined ? {} : { modelPin }),
       });
       printRun(report);
       return report.outcome === "completed" ? 0 : 1;
@@ -311,13 +329,16 @@ async function main(argv: string[]): Promise<number> {
   console.error(
     [
       "usage:",
-      "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>]",
+      "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>] [--model-pin <targetId>]",
       "      run one tenant's team once. --as-of replays a past instant: it becomes",
       "      the run's clock, and every tool that has no history for it says so",
       "      instead of answering with today. --variant labels the run (default live).",
       "      --replay-from serves a live-only tool's recorded response from an",
       "      earlier run instead of refusing it. Recordings live under",
       "      <stateRoot>/runs/<runId>/tool-io and are pruned after 30 days.",
+      "      --model-pin restricts routing to one target id (<provider>:<model>),",
+      "      so a run can be graded by something other than what wrote it. A pin",
+      "      no registered target matches is refused before the run starts.",
       "  helium audit <run-id>   per-step cost and token rows for a run",
       "  helium scoreboard <tenant> [--since <ISO>] [--deployment production|backtest|test|all] [--variant <label>] [--code-sha <sha>]",
       "      what the outcome ledger says: mean and observed range per score key,",

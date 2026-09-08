@@ -1,0 +1,25 @@
+{
+ "runId": "run-81f2f478-bfab-4c5b-a1ca-3f42ea2039a6",
+ "spans": [
+  {
+   "role": "delivery",
+   "provider": "none",
+   "model": "none",
+   "tin": 0,
+   "tout": 0,
+   "cache": 0,
+   "usd": 0,
+   "sec": 0.001
+  },
+  {
+   "role": "reviewer",
+   "provider": "claude-subscription",
+   "model": "claude-opus-5",
+   "tin": 467689,
+   "tout": 29797,
+   "cache": 0,
+   "usd": 0,
+   "sec": 361.635
+  }
+ ]
+}

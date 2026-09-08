@@ -38,3 +38,19 @@ describe("--replay-from", () => {
     });
   });
 });
+
+describe("--model-pin", () => {
+  it("is absent by default and carries the target id when given", () => {
+    expect(parseRunArgs(["--phase", "review"]).modelPin).toBeUndefined();
+    expect(
+      parseRunArgs(["--phase", "review", "--model-pin", "dsh:claude-haiku-4-5"]),
+    ).toMatchObject({ phase: "review", modelPin: "dsh:claude-haiku-4-5" });
+  });
+
+  it("refuses a missing value", () => {
+    expect(parseRunArgs(["--model-pin"])).toEqual({
+      error:
+        "--model-pin needs a target id, e.g. --model-pin dsh:claude-haiku-4-5",
+    });
+  });
+});

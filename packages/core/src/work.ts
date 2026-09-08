@@ -49,6 +49,13 @@ export const WorkConstraintsSchema = z.strictObject({
   maxCost: z.number().nonnegative().optional(),
   maxLatencyMs: z.number().int().positive().optional(),
   maxContextTokens: z.number().int().positive().optional(),
+  /**
+   * Ceiling on the tokens ONE step's reply may occupy, when the role declares
+   * one. A number, not a model setting: core neither knows nor asks how an
+   * edge spends it. Absent means the edge keeps its own default, which is what
+   * every step did before a role needed a long structured answer.
+   */
+  maxOutputTokens: z.number().int().positive().optional(),
 });
 
 export const WorkOrderSchema = z.strictObject({

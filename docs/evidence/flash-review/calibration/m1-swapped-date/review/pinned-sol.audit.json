@@ -1,0 +1,25 @@
+{
+ "runId": "run-f59d27db-0449-4089-a267-f2a7556ef8e6",
+ "spans": [
+  {
+   "role": "delivery",
+   "provider": "none",
+   "model": "none",
+   "tin": 0,
+   "tout": 0,
+   "cache": 0,
+   "usd": 0,
+   "sec": 0
+  },
+  {
+   "role": "reviewer",
+   "provider": "codex-subscription",
+   "model": "gpt-5.6-sol",
+   "tin": 132872,
+   "tout": 3715,
+   "cache": 0,
+   "usd": 0,
+   "sec": 731.489
+  }
+ ]
+}

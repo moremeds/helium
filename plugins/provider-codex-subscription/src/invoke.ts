@@ -10,6 +10,20 @@ import type { ToolSpec } from "@helium/provider-sdk/tool-loop";
 import type { EcosystemTool, LogEvent } from "@helium/core";
 import type { CodexEffort } from "./catalog.js";
 
+/**
+ * Per-REQUEST ceiling, in milliseconds, when the work order names no latency
+ * constraint of its own. One turn of the tool loop is one request, so this is
+ * not a ceiling on the whole call.
+ *
+ * 300_000 was the original value and it was measured to be too low: on
+ * 2026-09-08 a flash-review run through this backend produced NO SSE bytes at
+ * all on its FIRST request and was killed at 300_014 ms with zero tokens
+ * billed. The user's tribunal-review skill drives the same backend and has
+ * 600s as its working ceiling, so that is the number here — taken from a
+ * measurement on this backend, not chosen for roundness.
+ */
+export const REQUEST_TIMEOUT_MS = 600_000;
+
 export type CodexClassification =
   "proxy" | "auth" | "timeout" | "cancelled" | "quota-exhausted" | "error";
 
@@ -41,6 +55,8 @@ export interface CodexInvocation {
   /** Becomes the Responses API `instructions` field. */
   systemPrompt?: string;
   timeoutMs: number;
+  /** Role-declared ceiling on the reply, in tokens. Absent leaves the API's own default. */
+  maxOutputTokens?: number;
   /**
    * The provider's declared environment. Two keys are read:
    * `CODEX_ACCESS_TOKEN`, the `access_token` from `~/.codex/auth.json`, and
@@ -306,6 +322,9 @@ export async function invokeCodex(
         instructions: input.systemPrompt ?? "You are a helpful assistant.",
         input: conversation,
         reasoning: { effort: input.effort, summary: "auto" },
+        ...(input.maxOutputTokens === undefined
+          ? {}
+          : { max_output_tokens: input.maxOutputTokens }),
         ...(declared.length === 0 ? {} : { tools: declared }),
         tool_choice: "auto",
         parallel_tool_calls: true,
