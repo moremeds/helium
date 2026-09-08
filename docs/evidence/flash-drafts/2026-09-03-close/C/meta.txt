@@ -1,0 +1,16 @@
+sample: 2026-09-03-close
+variant: C
+manifest: /Users/chenxi/projects/helium/.worktrees/flash-step0/plugins/option-wizard/team.C.yaml
+teamYamlSha256: aa8a3cb0764f0e1385792d78100286a6fc4c16c72c9408a828e04b9c331862fb
+runId: run-b036938b-49ce-4ee8-9500-85509db43aa4
+reportDay: 2026-09-03
+exit: 0
+startedAt: 2026-09-07T12:47:14Z
+finishedAt: 2026-09-07T12:49:33Z
+authorTask: edit
+authorRole: editor
+authorModel: claude-opus-4-8
+inputTokens: 6
+outputTokens: 3453
+cacheReadTokens: 44004
+pit coverage: 20/29 (from recordings: ow_spot, ow_tv_watchlist, ow_uw_calendar) (unavailable: ow_argon_levels, ow_argon_watchlist, ow_frank, ow_spot, ow_uw_chain, ow_uw_earnings, ow_uw_gex, ow_uw_iv_term, ow_uw_ticker_metrics)

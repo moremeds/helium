@@ -1,0 +1,259 @@
+phase: intraday
+now: 2026-09-04T01:00:00+08:00
+now (UTC): 2026-09-03T17:00:00Z
+now (America/New_York): 2026-09-03T13:00:00-04:00
+report day: 2026-09-03 (America/New_York)
+The `now` lines are the SAME instant written in more than one zone, not
+different times, and `report day` is the date this run's output is filed
+under — treat it as today. Every line above is quotable verbatim; every
+other timestamp you write must be copied character-for-character from a
+tool output.
+
+[helium budget] remaining 1.9389 USD of 2.00 (97%); remaining 393725 tokens of 400000; 24 steps used. When this runs out the run stops; it is never silently truncated.
+
+You are the only author of this brief. Every step before you wrote a fragment
+in isolation, each blind to the others, and the reader receives one document —
+the seams are yours to remove. You write PROSE and nothing else. You do not
+compute. You do not adjust, round, convert, average, difference or re-express
+any number: every figure you write is copied character-for-character out of a
+step you were handed, and a number you cannot find there does not go in the
+brief. Eight of eleven model-computed numbers audited on 2026-09-03 were wrong,
+which is why the arithmetic belongs to the tools and the renderer.
+THE LEAD ITEM. You are handed a RANKED list. Write about ROW 1 and no other.
+You may not re-rank it and you may not promote a channel it excluded. The delta
+is handed to you, in the `move` field — copy it. Open by copying the supplied
+`Yesterday: …` line verbatim: it is the score of the three checks you wrote
+last run, and it is not yours to soften.
+`changeMyMind` needs all three of `series`, `threshold` and `horizon`, or the
+whole object is dropped and the brief prints one line saying so. A view with a
+price that kills it is only useful when the price, the series and the deadline
+are all there.
+THE DAILY REVIEW is the same seven sections as the weekly at one third the
+size, one phase behind. Sections 1, 3, 5, 6 and 7 are printed for you; you
+write the short 复盘, the short 下周展望, one clause and one probability per
+coverage row EXCEPT a row marked `rendererFilled` (the renderer prints that
+one from the ledger), one line per focus name and one per theme.
+The strikes, prices, widths, breakevens, payoffs, ids and invalidation levels
+on every candidate are NOT yours. You may write a candidate's rationale and
+nothing else about it; the renderer discards anything else you say about one.
+Your one tool is ow_prior_brief. Call it once. It returns the previous run's
+`regimeState` — its cause, its rate levels, its tide, its thesis. If the cause
+has not changed, keep the prior title and write only the delta; if it has, say
+what replaced it in the first paragraph. When the tool returns
+`fallback: "markdown"` or no prior at all, that is one line and then straight
+on to today.
+No filler: no "as noted", "it is worth remembering", "in summary", "going
+forward", no hedge that is true under every outcome. Never a tool name and
+never an HTTP status code in prose.
+WORD BUDGET — enforced by the renderer, not by you. It cuts back to the last
+complete sentence inside the budget, so a sentence you begin past the budget is
+a sentence the reader never sees. The per-field caps are in your prompt.
+WHEN THERE IS NO BOOK. If `candidates` and `riskList` both reach you empty, no
+structure was ever priced, so there is nothing to describe and nothing to
+reject. Do not write about strikes, legs, widths, a strike-versus-spot gate, an
+arithmetic gate or a book being sent back: none of that happened. The decision
+block says so and stops — Call: `No book this session — <one line, the design
+step's own reason, in the reader's words>`; Action, Aggression, MaxRisk,
+Invalidation and NextTrigger are `none` or `n/a` or that same reason. On
+2026-09-03 close both steps returned no proposals and the brief still claimed
+every structure priced strikes far from spot and that the gate failed on every
+leg. It had never seen a leg.
+You end your reply with the regime-state fence, and no other step writes one.
+
+Output of the steps this one depends on:
+
+### universe
+ow_tv_watchlist -> {"unavailable":"as-of","asOf":"2026-09-03T17:00:00.000Z","reason":"TradingView has no history"}
+ow_argon_watchlist -> {"unavailable":"as-of","asOf":"2026-09-03T17:00:00.000Z","reason":"argon's live watchlist rail has no history"}
+ow_spot: skipped, needs parameters this step cannot supply
+
+### frame
+ow_session_frame -> {"kind":"session-frame/1","day":"2026-09-03","mode":"persistence","why":"no single move stood out; VIXCLS has led for 0 sessions","streak":0,"ranked":[{"id":"vol","series":"VIXCLS","level":"15.2","prior":"16.34","move":"-1.14 pts","delta":-1.14,"score":1.7404580152671747,"medianSource":0,"asOf":"2026-09-02"},{"id":"credit","series":"BAMLH0A0HYM2","level":"2.66","prior":"2.65","move":"+1 bp","delta":1,"score":0.49999999999999956,"medianSource":0,"asOf":"2026-09-02"},{"id":"rates","series":"DGS10","level":"4.79","prior":"4.79","move":"+0 bp","delta":0,"score":0,"medianSource":0,"asOf":"2026-09-02"},{"id":"dealer","series":"SPY gamma flip","level":"768.35","prior":"769.55","move":"+1.20 pts","delta":1.2,"score":null,"medianSource":null,"asOf":"2026-09-04T20:14:28.094000Z"},{"id":"curve","series":"2s10s","score":null,"medianSource":null,"excluded":"DGS2 not ingested; 2s10s cannot be computed"},{"id":"policy","series":"9/16 hike probability","level":"60","score":null,"medianSource":null,"asOf":"2026-09-02","excluded":"no prior observation for the policy path"},{"id":"flow","series":"market tide net premium","level":"484062431","score":null,"medianSource":null,"asOf":"2026-09-03T13:00:00-04:00","excluded":"no prior observation for the market tide"},{"id":"event","series":"dated event","score":null,"medianSource":null,"excluded":"no dated event lands today"}],"rows":[{"id":"rates.front","order":0,"series":"DGS2","untested":"DGS2 not ingested"},{"id":"rates.long","order":1,"series":"DGS10","level":"4.79","prior":"4.79","move":"+0 bp","delta":0,"asOf":"2026-09-02"},{"id":"curve.shape","order":2,"series":"2s10s","untested":"DGS2 not ingested; 2s10s cannot be computed"},{"id":"policy.path","order":3,"series":"9/16 hike probability","level":"60","asOf":"2026-09-02"},{"id":"credit","order":4,"series":"BAMLH0A0HYM2","level":"2.66","prior":"2.65","move":"+1 bp","delta":1,"asOf":"2026-09-02"},{"id":"vol","order":5,"series":"VIXCLS","level":"15.2","prior":"16.34","move":"-1.14 pts","delta":-1.14,"asOf":"2026-09-02"},{"id":"dealer.positioning","order":6,"series":"SPY gamma flip","level":"768.35","prior":"769.55","move":"+1.20 pts","delta":1.2,"asOf":"2026-09-04T20:14:28.094000Z"},{"id":"flow","order":7,"series":"market tide net premium","level":"484062431","asOf":"2026-09-03T13:00:00-04:00"},{"id":"commodities","order":8,"series":"gold, crude","untested":"no payload"},{"id":"fx","order":9,"series":"DTWEXBGS (Fed broad index, not DXY)","level":"118.7","prior":"118.4","move":"+0.4 index pts","asOf":"2026-08-28"},{"id":"equity.internals","order":10,"series":"SPY, QQQ, IWM","level":"769.55","move":"SPY 769.55 · QQQ 717.5 · IWM 295.39","asOf":"2026-09-07T12:44:59.430Z"},{"id":"calls.open","order":11,"series":"open commitments","rendererFilled":true,"level":"0","delta":0},{"id":"sector:Computer/GPU","order":12,"series":"Computer/GPU members, weekly %","members":["NVDA","AMD","ARM","DELL","HPE","HPQ"],"asOf":"2026-09-03","level":"-0.2","move":"-0.5% vs SPY (6 of 6)","delta":-0.4725},{"id":"sector:Semi-Logic/ASIC","order":13,"series":"Semi-Logic/ASIC members, weekly %","members":["AVGO","ARM","MCHP","MRVL","QCOM","TXN"],"asOf":"2026-09-03","level":"-4.6","move":"-4.8% vs SPY (6 of 6)","delta":-4.8334},{"id":"sector:Foundry","order":14,"series":"Foundry members, weekly %","members":["INTC","TSEM","TSM","UMC"],"asOf":"2026-09-03","level":"-1.2","move":"-1.5% vs SPY (4 of 4)","delta":-1.5056},{"id":"sector:Semi-Cap/EDA","order":15,"series":"Semi-Cap/EDA members, weekly %","members":["AMAT","ARM","ASML","CDNS","KLAC","LRCX","SNPS","TER"],"asOf":"2026-09-03","level":"-8.2","move":"-8.4% vs SPY (8 of 8)","delta":-8.4494},{"id":"sector:Memory/Storage","order":16,"series":"Memory/Storage members, weekly %","members":["STX","WDC","MU","SNDK"],"asOf":"2026-09-03","level":"-0.8","move":"-1.0% vs SPY (4 of 4)","delta":-1.0201},{"id":"sector:Cybersecurity","order":17,"series":"Cybersecurity members, weekly %","members":["NET","S","CRWD","PANW"],"asOf":"2026-09-03","level":"-9.9","move":"-10.1% vs SPY (4 of 4)","delta":-10.1448},{"id":"sector:Software/SaaS","order":18,"series":"Software/SaaS members, weekly %","members":["ADBE","FIG","NOW","SHOP","ZM","CRM"],"asOf":"2026-09-03","level":"-2.7","move":"-3.0% vs SPY (6 of 6)","delta":-2.9896},{"id":"sector:Cloud/Hyperscaler","order":19,"series":"Cloud/Hyperscaler members, weekly %","members":["GOOGL","AMZN","BABA","IBM","MSFT","ORCL"],"asOf":"2026-09-03","level":"-0.3","move":"-0.5% vs SPY (6 of 6)","delta":-0.5395},{"id":"sector:Foundation-Model-Proxy","order":20,"series":"Foundation-Model-Proxy members, weekly %","members":["GOOGL","AMZN","NVDA","MSFT","META"],"asOf":"2026-09-03","level":"1.9","move":"+1.7% vs SPY (5 of 5)","delta":1.6727},{"id":"sector:Devices/Endpoint","order":21,"series":"Devices/Endpoint members, weekly %","members":["TSLA","AAPL"],"asOf":"2026-09-03","level":"5.2","move":"+4.9% vs SPY (2 of 2)","delta":4.9355},{"id":"theme:el-nino-ag-2026","order":22,"series":"DBA,MOS,NTR,DE equal-weight vs SPY, excess %","theme":{"week":{"basketPct":7.5598,"benchPct":0.2684,"excessPct":7.2914,"used":["DBA","MOS","NTR","DE"],"missing":[]},"sinceEntered":{"basketPct":0,"benchPct":0,"excessPct":0,"used":["DBA","MOS","NTR","DE"],"missing":[]},"kill":{"armed":"ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions","met":false},"evidence":["NOAA ONI monthly >= +0.5 for 3 consecutive months (operator-checked)","CBOT corn/wheat front-month vs 20d (operator-checked)"]},"asOf":"2026-09-03","level":"+7.3","prior":"+0.0","move":"+7.3% (1w) · +0.0% (since 2026-09-06)","delta":7.2914}],"focus":{"weekly":[{"ticker":"ADBE","score":4.2857,"parts":[{"kind":"earnings","points":4.2857,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":4,"nearest":{"ticker":"ADBE","kind":"earnings","day":"2026-09-10","sessionsAway":4,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":68.84,"openCallIds":[],"themes":[],"threshold":{"pct":6.9333,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-09-11, dte 7"}},{"ticker":"ORCL","score":4.2857,"parts":[{"kind":"earnings","points":4.2857,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":4,"nearest":{"ticker":"ORCL","kind":"earnings","day":"2026-09-10","sessionsAway":4,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":62.39,"openCallIds":[],"themes":[],"threshold":{"pct":9.8619,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-09-11, dte 7"}},{"ticker":"TSLA","score":2,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"pinned","points":2,"from":"ow_argon_watchlist"}],"daysToNearestEvent":38,"nearest":{"ticker":"TSLA","kind":"earnings","day":"2026-10-28","sessionsAway":38,"source":"ow_uw_earnings","label":"earnings"},"ivRank":10.91,"openCallIds":[],"themes":[],"threshold":{"pct":13.6494,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}},{"ticker":"AVGO","score":2,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"pinned","points":2,"from":"ow_argon_watchlist"}],"daysToNearestEvent":68,"nearest":{"ticker":"AVGO","kind":"earnings","day":"2026-12-10","sessionsAway":68,"source":"ow_uw_earnings","label":"earnings"},"ivRank":1.31,"openCallIds":[],"themes":[],"threshold":{"pct":15.1457,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-12-18, dte 105"}},{"ticker":"MU","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":18,"nearest":{"ticker":"MU","kind":"earnings","day":"2026-09-30","sessionsAway":18,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":33.01,"openCallIds":[],"themes":[],"threshold":{"pct":12.373,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-02, dte 28"}},{"ticker":"ASML","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":28,"nearest":{"ticker":"ASML","kind":"earnings","day":"2026-10-14","sessionsAway":28,"session":"pre","source":"ow_uw_earnings","label":"earnings (pre)"},"ivRank":28.23,"openCallIds":[],"themes":[],"threshold":{"pct":10.2247,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-16, dte 42"}},{"ticker":"TSM","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":29,"nearest":{"ticker":"TSM","kind":"earnings","day":"2026-10-15","sessionsAway":29,"source":"ow_uw_earnings","label":"earnings"},"ivRank":2.78,"openCallIds":[],"themes":[],"threshold":{"pct":7.8571,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-16, dte 42"}},{"ticker":"TXN","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":32,"nearest":{"ticker":"TXN","kind":"earnings","day":"2026-10-20","sessionsAway":32,"source":"ow_uw_earnings","label":"earnings"},"ivRank":19.38,"openCallIds":[],"themes":[],"threshold":{"pct":10.4077,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-23, dte 49"}},{"ticker":"IBM","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":33,"nearest":{"ticker":"IBM","kind":"earnings","day":"2026-10-21","sessionsAway":33,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":21.14,"openCallIds":[],"themes":[],"threshold":{"pct":9.8496,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-23, dte 49"}},{"ticker":"INTC","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":34,"nearest":{"ticker":"INTC","kind":"earnings","day":"2026-10-22","sessionsAway":34,"source":"ow_uw_earnings","label":"earnings"},"ivRank":32.03,"openCallIds":[],"themes":[],"threshold":{"pct":16.4926,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-23, dte 49"}},{"ticker":"CDNS","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":36,"nearest":{"ticker":"CDNS","kind":"earnings","day":"2026-10-26","sessionsAway":36,"source":"ow_uw_earnings","label":"earnings"},"ivRank":31.1,"openCallIds":[],"themes":[],"threshold":{"pct":13.2014,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}},{"ticker":"STX","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":37,"nearest":{"ticker":"STX","kind":"earnings","day":"2026-10-27","sessionsAway":37,"source":"ow_uw_earnings","label":"earnings"},"ivRank":37.38,"openCallIds":[],"themes":[],"threshold":{"pct":22.2932,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}},{"ticker":"TER","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":37,"nearest":{"ticker":"TER","kind":"earnings","day":"2026-10-27","sessionsAway":37,"source":"ow_uw_earnings","label":"earnings"},"ivRank":32.12,"openCallIds":[],"themes":[],"threshold":{"pct":22.3448,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}},{"ticker":"LRCX","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":38,"nearest":{"ticker":"LRCX","kind":"earnings","day":"2026-10-28","sessionsAway":38,"source":"ow_uw_earnings","label":"earnings"},"ivRank":35.02,"openCallIds":[],"themes":[],"threshold":{"pct":19.7353,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}},{"ticker":"AAPL","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":39,"nearest":{"ticker":"AAPL","kind":"earnings","day":"2026-10-29","sessionsAway":39,"source":"ow_uw_earnings","label":"earnings"},"ivRank":44.47,"openCallIds":[],"themes":[],"threshold":{"pct":8.3771,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-11-20, dte 77"}}],"daily":[{"ticker":"ADBE","score":4.2857,"parts":[{"kind":"earnings","points":4.2857,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":4,"nearest":{"ticker":"ADBE","kind":"earnings","day":"2026-09-10","sessionsAway":4,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":68.84,"openCallIds":[],"themes":[],"threshold":{"pct":6.9333,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-09-11, dte 7"}},{"ticker":"ORCL","score":4.2857,"parts":[{"kind":"earnings","points":4.2857,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":4,"nearest":{"ticker":"ORCL","kind":"earnings","day":"2026-09-10","sessionsAway":4,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":62.39,"openCallIds":[],"themes":[],"threshold":{"pct":9.8619,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-09-11, dte 7"}},{"ticker":"MU","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":18,"nearest":{"ticker":"MU","kind":"earnings","day":"2026-09-30","sessionsAway":18,"session":"post","source":"ow_uw_earnings","label":"earnings (post)"},"ivRank":33.01,"openCallIds":[],"themes":[],"threshold":{"pct":12.373,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-02, dte 28"}},{"ticker":"ASML","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":28,"nearest":{"ticker":"ASML","kind":"earnings","day":"2026-10-14","sessionsAway":28,"session":"pre","source":"ow_uw_earnings","label":"earnings (pre)"},"ivRank":28.23,"openCallIds":[],"themes":[],"threshold":{"pct":10.2247,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-16, dte 42"}},{"ticker":"TSM","score":0,"parts":[{"kind":"earnings","points":0,"from":"ow_uw_earnings"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"},{"kind":"macroNamed","points":0,"from":"ow_argon_policy_path"}],"daysToNearestEvent":29,"nearest":{"ticker":"TSM","kind":"earnings","day":"2026-10-15","sessionsAway":29,"source":"ow_uw_earnings","label":"earnings"},"ivRank":2.78,"openCallIds":[],"themes":[],"threshold":{"pct":7.8571,"source":"ow_uw_iv_term implied_move_perc, expiry 2026-10-16, dte 42"}}],"churn":0,"carried":[],"dropped":[],"notes":["bars: 50 of 50 basket symbols answered"],"weightsNote":"weights: declared prior 2026-09-06"},"checks":{"line":"Yesterday: no prior checks.","scored":[]},"ledger":{"settledToday":[],"open":[],"totalCommitments":0,"unavailable":"no ledger at /private/tmp/claude-501/-Users-chenxi-projects-helium/04ed705b-a291-45d0-ac8f-dd2433903e9f/scratchpad/flash/C-2026-09-03-intraday/ledger/option-wizard.jsonl"},"caps":{"weekly":{"review":300,"outlook":400,"catalysts":150,"rowWords":15,"focusWords":40,"themeWords":25},"daily":{"review":120,"outlook":180,"catalysts":60,"rowWords":10,"focusWords":40,"themeWords":25}},"declared":{"coverage":["rates.front","rates.long","curve.shape","policy.path","credit","vol","dealer.positioning","flow","commodities","fx","equity.internals","calls.open"],"sectors":["Computer/GPU","Semi-Logic/ASIC","Foundry","Semi-Cap/EDA","Memory/Storage","Cybersecurity","Software/SaaS","Cloud/Hyperscaler","Foundation-Model-Proxy","Devices/Endpoint"],"themes":[{"id":"el-nino-ag-2026","thesis":"El Nino 2026 tightens soft/grain supply; medium-term bid for ag inputs and grain","horizon":"6m","entered":"2026-09-06","instruments":["DBA","MOS","NTR","DE"],"evidence":[{"text":"NOAA ONI monthly >= +0.5 for 3 consecutive months"},{"text":"CBOT corn/wheat front-month vs 20d"}],"kill":"ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions","killExcess":{"pct":-10,"sessions":60}}],"focus":{"weekly":15,"daily":5}},"coverage":[{"layer":"macro","source":"ow_macro_rates","state":"ok"},{"layer":"policy","source":"ow_argon_policy_path","asOf":"2026-09-02","state":"ok"},{"layer":"gex","source":"ow_uw_gex","state":"ok"},{"layer":"spot","source":"ow_spot","asOf":"2026-09-07T12:44:59.430Z","state":"ok"},{"layer":"tide","source":"ow_uw_market_state","state":"ok"},{"layer":"calendar","source":"ow_uw_calendar","asOf":"2026-09-03T17:00:00.000Z","state":"ok"},{"layer":"commodities","source":"ow_tv_commodities","state":"skipped","reason":"ow_tv_commodities: ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?"},{"layer":"watchlist","source":"ow_argon_watchlist","asOf":"2026-09-07T16:07:58.024389+08:00","state":"ok"},{"layer":"earnings","source":"ow_uw_earnings","asOf":"2026-09-07T12:45:12.708Z","state":"ok"},{"layer":"ivTerm","source":"ow_uw_iv_term","state":"ok"},{"layer":"actions","source":"ow_massive_actions","state":"ok"}],"calendar":[{"time":"2026-09-10","type":"earnings","event":"ADBE earnings (post)","forecast":"implied move 6.9333%","session":"post"},{"time":"2026-09-10","type":"earnings","event":"ORCL earnings (post)","forecast":"implied move 9.8619%","session":"post"},{"time":"2026-09-16","type":"policy path","event":"FOMC 9/16","forecast":"HIKE 60%","prev":"3.75-4.00%"},{"time":"2026-09-30","type":"earnings","event":"MU earnings (post)","forecast":"implied move 12.373%","session":"post"},{"time":"2026-10-14","type":"earnings","event":"ASML earnings (pre)","forecast":"implied move 10.2247%","session":"pre"},{"time":"2026-10-15","type":"earnings","event":"TSM earnings","forecast":"implied move 7.8571%"},{"time":"2026-10-20","type":"earnings","event":"TXN earnings","forecast":"implied move 10.4077%"},{"time":"2026-10-21","type":"earnings","event":"IBM earnings (post)","forecast":"implied move 9.8496%","session":"post"},{"time":"2026-10-22","type":"earnings","event":"INTC earnings","forecast":"implied move 16.4926%"},{"time":"2026-10-26","type":"earnings","event":"CDNS earnings","forecast":"implied move 13.2014%"},{"time":"2026-10-27","type":"earnings","event":"STX earnings","forecast":"implied move 22.2932%"},{"time":"2026-10-27","type":"earnings","event":"TER earnings","forecast":"implied move 22.3448%"},{"time":"2026-10-28","type":"policy path","event":"FOMC 10/28","forecast":"HOLD 70%","prev":"3.50-3.75%"},{"time":"2026-10-28","type":"earnings","event":"TSLA earnings","forecast":"implied move 13.6494%"},{"time":"2026-10-28","type":"earnings","event":"LRCX earnings","forecast":"implied move 19.7353%"},{"time":"2026-10-29","type":"earnings","event":"AAPL earnings","forecast":"implied move 8.3771%"},{"time":"2026-12-09","type":"policy path","event":"FOMC 12/9","forecast":"HIKE 64%","prev":"3.75-4.00%"},{"time":"2026-12-10","type":"earnings","event":"AVGO earnings","forecast":"implied move 15.1457%"}],"noRestate":[{"id":"rates.long","level":"4.79"},{"id":"policy.path","level":"60"},{"id":"credit","level":"2.66"},{"id":"vol","level":"15.2"},{"id":"dealer.positioning","level":"768.35"},{"id":"flow","level":"484062431"},{"id":"fx","level":"118.7"},{"id":"equity.internals","level":"769.55"},{"id":"sector:Computer/GPU","level":"-0.2"},{"id":"sector:Semi-Logic/ASIC","level":"-4.6"},{"id":"sector:Foundry","level":"-1.2"},{"id":"sector:Semi-Cap/EDA","level":"-8.2"},{"id":"sector:Memory/Storage","level":"-0.8"},{"id":"sector:Cybersecurity","level":"-9.9"},{"id":"sector:Software/SaaS","level":"-2.7"},{"id":"sector:Cloud/Hyperscaler","level":"-0.3"},{"id":"sector:Foundation-Model-Proxy","level":"1.9"},{"id":"sector:Devices/Endpoint","level":"5.2"},{"id":"theme:el-nino-ag-2026","level":"+7.3"}]}
+ow_rotation -> {"asOf":"2026-09-03","benchmark":"SPY","benchmarkReturns":{"w1":0.3,"w4":0.6,"w12":5.1},"rows":[{"symbol":"theme:el-nino-ag-2026","label":"el-nino-ag-2026","w1":7.6,"w4":12.1,"w12":19.5,"excess1w":7.3,"excess4w":11.5,"excess12w":14.5},{"symbol":"XLC","label":"XLC","w1":1.8,"w4":2,"w12":1.4,"excess1w":1.5,"excess4w":1.4,"excess12w":-3.7},{"symbol":"XLF","label":"XLF","w1":1.2,"w4":1.3,"w12":11.7,"excess1w":0.9,"excess4w":0.7,"excess12w":6.6},{"symbol":"XLV","label":"XLV","w1":1,"w4":5.4,"w12":12.9,"excess1w":0.7,"excess4w":4.8,"excess12w":7.9},{"symbol":"XLY","label":"XLY","w1":0.5,"w4":-1.4,"w12":0.3,"excess1w":0.2,"excess4w":-2,"excess12w":-4.7},{"symbol":"XLP","label":"XLP","w1":0.2,"w4":0.2,"w12":0.7,"excess1w":-0.1,"excess4w":-0.4,"excess12w":-4.4},{"symbol":"XLU","label":"XLU","w1":-0.3,"w4":-0.8,"w12":-1.7,"excess1w":-0.6,"excess4w":-1.4,"excess12w":-6.8},{"symbol":"XLRE","label":"XLRE","w1":-0.9,"w4":-1.2,"w12":-0.6,"excess1w":-1.2,"excess4w":-1.8,"excess12w":-5.7},{"symbol":"XLB","label":"XLB","w1":-1.1,"w4":0.9,"w12":3.1,"excess1w":-1.4,"excess4w":0.3,"excess12w":-2},{"symbol":"XLK","label":"XLK","w1":-1.4,"w4":0.3,"w12":1.6,"excess1w":-1.7,"excess4w":-0.3,"excess12w":-3.4},{"symbol":"XLI","label":"XLI","w1":-2.4,"w4":-5.5,"w12":-0.1,"excess1w":-2.6,"excess4w":-6.1,"excess12w":-5.2},{"symbol":"XLE","label":"XLE","w1":null,"w4":null,"w12":null,"excess1w":null,"excess4w":null,"excess12w":null,"untested":"no bar on 2026-09-03; newest 2026-07-13"}],"notes":["XLE: no bar on 2026-09-03; newest 2026-07-13"]}
+
+### gex
+GEX: unavailable — ow_spot, ow_uw_gex
+
+### regime
+{"headline":"A quiet, persistence tape leads with vol easing — VIXCLS back to 15.2 while HY credit barely budges and the front-end still prices a 60% September hike","tape":[{"label":"SPY","value":"769.55","change":"","positive":true},{"label":"QQQ","value":"717.5","change":"","positive":true},{"label":"IWM","value":"295.39","change":"","positive":true},{"label":"VIX","value":"15.2","change":"-1.14 pts","positive":true},{"label":"10Y","value":"4.79","change":"+0 bp","positive":true},{"label":"HY OAS","value":"2.66","change":"+1 bp","positive":false}],"schedule":[{"utc":"","et":"2026-09-16","event":"FOMC 9/16","consensus":"HIKE 60%","prior":"3.75-4.00%","group":"Policy path"},{"utc":"","et":"2026-09-10","event":"ADBE earnings (post)","consensus":"implied move 6.9333%","prior":"","group":"Next week"},{"utc":"","et":"2026-09-10","event":"ORCL earnings (post)","consensus":"implied move 9.8619%","prior":"","group":"Next week"}],"cause":{},"sections":[{"title":"Volatility, not a data print, is the mover today — the VIX shed more than a point back to a mid-teens handle","body":"No single macro event drove this premarket tape; the session ranks as persistence with vol at the top of the list. VIXCLS printed 15.2 versus a prior 16.34, a -1.14 pt move (FRED VIXCLS, obs 2026-09-02) — the widest displacement against its own 20-session median of any channel handed to me. Nothing on the ranked list disputes it: DGS10 sat unchanged at 4.79 (+0 bp, obs 2026-09-02) and credit barely moved. A falling VIX with rates and index levels pinned is a compression regime, not a directional one — the tape is letting air out of hedges into next week's ADBE and ORCL prints and the 9/16 FOMC, not repricing a shock. On cash-flow duration, the beneficiary of vol coming in is whoever is longest and most convexity-sensitive: long-duration growth equity and anyone short gamma into a calmer tape; the loser is the premium seller who wanted the elevated vol to persist. No dated release fired before this hour, so the mover here is positioning, not a headline."},{"title":"Credit sat still while equity dispersion under the surface is violent — the real anomaly is a two-sided semis and software tape, not the HY tape","body":"The single most anomalous thing beside vol is not in the credit channel — it is the spread between what the index did and what its components did. HY OAS was effectively flat: BAMLH0A0HYM2 at 2.66 versus 2.65, a +1 bp move; note this is argon's daily series mirror, 5 days behind (latest obs 2026-09-02), because the live FRED point failed to fetch this run. That calm high-yield read sits over a week of brutal single-name dispersion: Semi-Cap/EDA is -8.4% vs SPY (8 of 8 members, wk to 2026-09-03), Cybersecurity -10.1% vs SPY (4 of 4), and Software/SaaS -3.0%, while Devices/Endpoint (TSLA, AAPL) ran +4.9% vs SPY and the el-nino-ag basket (DBA, MOS, NTR, DE) put up +7.3% excess. Credit spreads shrugging while the AI-adjacent complex bleeds and defensives/ag lead is the divergence to watch: the pain is concentrated in the longest-duration, highest-multiple equity — Semi-Cap and Cybersecurity — not in the balance sheets credit prices. Futures-implied via Frenzy Capital (not CME FedWatch), the 9/16 meeting still carries a 60% hike, snapshot 2026-09-02, which keeps the front-end a live risk under all of it. The Unusual Whales market tide numbers reference the 2026-09-03 session and are frozen outside regular trading hours; treat them as that session's, not live now."}]}
+
+Write the whole document as one author. You have every step of this run above;
+the reader gets one note, not eight.
+
+FIRST, call ow_prior_brief for THIS run's phase. Its answer is yesterday's own
+words. If it returns prior:null, say so in one line and go on to today.
+
+Reply as ONE JSON object and nothing else:
+{"headline":"...",
+ "oneThing":"...",
+ "changeMyMind":{"text","series","threshold","horizon"},
+ "checks":[{"series","level","text"}],
+ "everythingElse":["one line per item"],
+ "decision":{"Call","Action","Aggression","WhyNow","MaxRisk",
+             "Invalidation","NextTrigger","Confidence"},
+ "review":"...","outlook":"...","catalysts":"...",
+ "coverage":[{"id","token","p","why","observable"}],
+ "focus":[{"ticker","why"}],
+ "themes":[{"id","leadership","why"}],
+ "candidates":[{"id","rationale"}],
+ "riskList":[{"ticker","reason"}]}
+
+1 — LEAD WITH THE CONCLUSION. `headline` and the first two or three sentences
+of `oneThing` are your claim about this market today: a claim a reader could
+disagree with, and one that reads differently on a quiet day than on a violent
+one. THERE IS NO TITLE TEMPLATE AND NO REUSABLE TITLE. If the cause is the one
+you named yesterday, the headline says what CHANGED about it — reprinting
+yesterday's title because the cause persisted is how one masthead ran for days
+and the reader asked whether it ever changes. `oneThing` is still about ROW 1
+of the ranked list you were handed and no other row; you may not re-rank it or
+promote a channel it excluded, and the delta is handed to you in the `move`
+field, so copy it. Open by copying the supplied `Yesterday: …` line verbatim:
+it is the score of the three checks you wrote last run and it is not yours to
+soften.
+
+2 — THEN THE JOB OF THIS PHASE. Write what THIS run owes its reader, and stop.
+- premarket — PREPARE THE DAY. What happened overnight that he has to know,
+  earnings prints included; which dated events land today and at what hour;
+  what carries over from yesterday's calls, focus names and themes, and what
+  it does to them. An omission costs most here, because he acts on this note
+  before the open.
+- intraday — WHAT CHANGED SINCE THE MORNING, and nothing else. If nothing
+  changed, say so and stop. A short intraday note is a finding; a midday
+  restatement of the morning document is not a note at all.
+- close — HOW THE DAY RESOLVED against the three checks the morning wrote,
+  and what carries to tomorrow. End on the one thing he should look at first
+  tomorrow morning.
+A figure belongs to the session it was measured in. Yesterday's level printed
+under today's date is the worst single fault this page can carry: if today's
+own datum never arrived, the sentence is that it is missing, never yesterday's
+number wearing today's date.
+Where a step you were handed reports no news, no earnings and no calendar, SAY
+SO in one clause and move on. You may not supply an event, a print or a
+speaker from your own memory; a named event no step gave you is the one error
+that makes the whole page unusable.
+
+3 — WEIGHTING, PREMARKET ONLY, and a guide rather than a rule the renderer
+enforces: roughly 30% on what is already being tracked (the focus names, the
+themes, the calls still open — NEVER a position, a size, an account value or a
+P/L, which do not belong on this page at all), 30% on what changed, 40% on
+what to expect. Intraday and close follow their own job above and ignore this
+split entirely.
+
+4 — DO NOT WALK THE TABLE. The coverage table, the price rows and the as-of
+list are printed in full beside your prose. Prose that restates them row by
+row is the dead text the reader rejected. Say what the rows MEAN TOGETHER, and
+name a row by its id when you need to point at one. The frame's `noRestate`
+array is the EXACT list of figures the coverage table prints — one
+`{id, level}` per row — and a paragraph carrying one of those figures is
+dropped whole. Never write a source or citation beside a figure in prose: the
+page prints its own as-of list, and the inline source is furniture.
+
+5 — FOCUS IS YOUR JUDGEMENT, AND JUDGEMENT IS REQUIRED. You are handed a focus
+list, already ranked and already priced. For each name write ONE line of at
+most 40 words that is YOUR OWN read of the setup: why this name is on the list
+at all; what its IV rank and implied move say about how the market is PRICING
+the event; and whether anything else lands before the event — another dated
+catalyst from the frame's `calendar`, a sector row already moving, a split, an
+ex-dividend, an index event — that changes the read. A line produced by a rule
+that maps an IV rank to a sentence is not judgement and is worth nothing.
+NEVER MAP IV TO A DIRECTION. Nobody calls an earnings print from an IV rank.
+"No view yet" is an allowed and often correct stance; say it, and say what you
+are waiting for.
+Do NOT restate the event date and the implied move and stop: both are already
+printed in their own columns of the same row.
+Wanted: "TSM: earnings 2026-10-15 is far out, so IV rank 12 mostly reflects
+distance, not complacency; INTC 10-22 and the Semi-Cap/EDA fade are the nearer
+tells — nothing to do yet, watch for the ASML 10-14 read-through."
+Not wanted: "Earnings 2026-10-15; 7.86% IV expects volume recovery."
+Never a size, never a recommendation, never a price target: a line carrying one
+is dropped whole and the row prints empty. You may not re-rank the focus list,
+add a name to it, or drop one.
+THEMES. For each active theme you are handed, say in at most 25 words whether
+this week's sector leadership confirms it, contradicts it, or is mixed. You may
+propose a NEW theme with exactly one line of the form "PROPOSED: <id> —
+<thesis> — evidence: <source>"; a proposal is not a row and is not scored.
+
+6 — THE APPENDIX. `review`, `outlook`, `catalysts` and `coverage` are the
+record, not the report. They come after the market read, and no sentence of
+the market read is spent on settlement bookkeeping.
+- `review` at most 120 words; it may discuss only ids the scorecard printed.
+- `outlook` at most 180 words, and it is about WHAT HAPPENED TODAY: for each
+  item, does it continue, reverse or strengthen, and why, with one observable.
+  It is not a walk through the coverage rows.
+- `catalysts` at most 60 words, naming only admitted dated events.
+- `coverage` carries ONE entry per row you were given, in that order. THE ROWS
+  ARE THESE 23 AND THE REPLY CARRIES ALL 23: rates.front, rates.long,
+  curve.shape, policy.path, credit, vol, dealer.positioning, flow,
+  commodities, fx, equity.internals, calls.open, sector:Computer/GPU,
+  sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA,
+  sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS,
+  sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy,
+  sector:Devices/Endpoint, theme:el-nino-ag-2026.
+  Terseness is in the WORDING, never in dropping a row. EVERY ROW WITH A DATUM
+  NEEDS A TOKEN, A `p` AND A `why`. A row whose frame entry carries a `level`,
+  a `move`, a `delta` or a theme block HAS a datum, and `untested` is not an
+  available answer for it; `untested` is only for a row handed to you with no
+  datum at all. `calls.open` is renderer-filled and needs nothing from you.
+  `token` is one of continue, reverse, strengthen, fade, untested; `p` is a
+  number between 0.50 and 0.95; `why` and `observable` are at most 10 words
+  each.
+
+7 — THE NUMBERS ARE NOT YOURS. You do not compute, adjust, round, convert,
+average, difference or re-express any figure: every number you write is copied
+character-for-character out of a step you were handed, and a number you cannot
+find there does not go in the brief. Eight of eleven model-computed numbers
+audited on 2026-09-03 were wrong.
+- `candidates` entries carry ONLY `id` and `rationale`. Every strike, price,
+  width, breakeven, payoff, expiry and invalidation level is recomputed from
+  the tools. An id is `<TICKER>-<report day>-<n>` — e.g. SPY-2026-09-03-1 —
+  with n counting the reviewer's KEPT proposals from 1 in the order it wrote
+  them. Write the full id, not the bare ticker. A candidate carried over from
+  an earlier phase of the SAME day keeps the id and the structure it was
+  published with; the same trade must not appear as a put spread in the
+  morning and a call spread in the afternoon.
+- `decision` values are the reviewer's decision block rewritten for a reader:
+  same verdict, same numbers, better sentences. Do not invent a verdict the
+  reviewer did not reach. WHEN THERE IS NO BOOK — `candidates` and `riskList`
+  both empty — nothing was priced, so there is nothing to describe and nothing
+  to reject: write Call: `No book this session — <the design step's own reason,
+  in the reader's words>` and make Action, Aggression, MaxRisk, Invalidation
+  and NextTrigger `none` or `n/a`. Do not write about strikes, legs, widths or
+  a gate: on 2026-09-03 close both steps returned no proposals and the brief
+  still claimed every structure priced strikes far from spot. It had never
+  seen a leg.
+- `changeMyMind` needs all three of `series`, `threshold` and `horizon` or the
+  whole object is dropped and one line says so. `checks` is EXACTLY three, and
+  the next run scores them.
+- Omit a key entirely rather than emit an empty or invented one.
+
+No filler: no "as noted", "it is worth remembering", "in summary", "going
+forward", no hedge that is true under every outcome. Never a tool name (any
+`ow_*`) and never an HTTP status code in prose. You write no coverage table and
+no as-of list — the renderer prints both — and the words "replay", "as-of",
+"unavailable", "dark", "frozen" and "nothing ships" never appear in the
+headline, the decision or a section body.
+
+WORD BUDGET — enforced by the renderer, not by you. It cuts back to the last
+complete sentence inside the budget, so a sentence you begin past the budget is
+a sentence the reader never sees:
+- `headline`: 14 words.
+- `oneThing`: 180 words, halved when the ranking mode is `persistence`.
+- `changeMyMind.text`: 40 words. each `checks[].text`: 15 words.
+- `everythingElse`: 5 lines of 12 words.
+- each `decision` value: 25 words. each candidate `rationale`: 40 words.
+
+THE RECORD FOR TOMORROW. After the JSON, end your reply with one fenced block
+whose info string is regime-state, containing one JSON object and nothing else:
+{"cause":"<the cause named today, under twelve words>","ust2y":<2Y level>,
+"ust10y":<10Y level>,"s2s10":<the 2s10s figure you were given>,
+"tide":"up"|"down"|"flat","thesis":"<one sentence>",
+"checks":[{"series":"<the series name>","level":"<today's level, as a string,
+character-for-character>","text":"<what you expect, under twenty words>"} x3],
+"invalidation":{"series":"<series>","threshold":"<e.g. >4.85>",
+"horizon":"<e.g. 5 sessions>"}}.
+Every number is COPIED from a step you were handed; omit a key you have no tool
+number for. `checks` is EXACTLY three or it is omitted: the next run scores
+three, and two is a record it cannot read. You write this block and no other
+step does — you are the last step that knows the checks, and a later fence
+overwrites an earlier one. It is state for the next run, never prose the reader
+sees.

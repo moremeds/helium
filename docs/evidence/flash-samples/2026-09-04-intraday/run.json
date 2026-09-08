@@ -1,0 +1,7 @@
+{
+  "runId": "run-f305044a-b3a6-498e-983a-96eed94cdaad",
+  "date": "2026-09-04",
+  "phase": "intraday",
+  "asOf": "2026-09-04T17:00:00.000Z",
+  "source": "recorded live by scripts/pit-replay.sh record on 2026-09-07"
+}

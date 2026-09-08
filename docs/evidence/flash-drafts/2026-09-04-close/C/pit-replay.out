@@ -1,0 +1,3 @@
+pit coverage: 18/29 (from recordings: ow_argon_watchlist, ow_tv_watchlist, ow_uw_calendar, ow_uw_gex) (unavailable: ow_argon_levels, ow_frank, ow_ib_positions, ow_spot, ow_strike_check, ow_tv_commodities, ow_uw_chain, ow_uw_headlines, ow_uw_iv_term, ow_uw_ticker_metrics, ow_x_posts)
+log: /private/tmp/claude-501/-Users-chenxi-projects-helium/04ed705b-a291-45d0-ac8f-dd2433903e9f/scratchpad/flash/C-2026-09-04-close/logs/2026-09-04-close-replay.log
+runId: run-b1abafe8-9912-4ef3-a997-c576c9f65588  replayed-from: run-e7abdf17-ab5e-4dee-ac74-5d5450bea282

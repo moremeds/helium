@@ -1,0 +1,16 @@
+sample: 2026-09-04-intraday
+variant: A
+manifest: /Users/chenxi/projects/helium/.worktrees/flash-step0/plugins/option-wizard/team.yaml (variant A, unswapped)
+teamYamlSha256: 92a25fe03389c319ea936e975402034d71679ee433454c2dff340dc453276392
+runId: run-33d281e9-d069-4ef1-9d54-86c4d5ed7662
+reportDay: 2026-09-04
+exit: 0
+startedAt: 2026-09-07T12:37:13Z
+finishedAt: 2026-09-07T12:39:22Z
+authorTask: edit
+authorRole: editor
+authorModel: claude-opus-4-8
+inputTokens: 4
+outputTokens: 3749
+cacheReadTokens: 20468
+pit coverage: 19/29 (from recordings: ow_argon_watchlist, ow_spot, ow_tv_watchlist, ow_uw_calendar, ow_uw_gex) (unavailable: ow_argon_levels, ow_frank, ow_ib_positions, ow_strike_check, ow_tv_commodities, ow_uw_chain, ow_uw_earnings, ow_uw_headlines, ow_uw_iv_term, ow_uw_ticker_metrics)

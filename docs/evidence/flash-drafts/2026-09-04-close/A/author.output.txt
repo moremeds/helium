@@ -1,0 +1,52 @@
+No prior record on disk. I'll write today from the ranked frame, with volatility as row 1.
+
+```json
+{"headline":"Volatility bled 0.88 points as the semis tape split hard between silicon and software.",
+ "oneThing":"Yesterday: no prior checks. VIXCLS printed 14.32 on 2026-09-03, down 0.88 pts from 15.2 — the largest single-channel move against its own 20-session median in today's ranked set. No single move stood out enough to lead outright, so the frame ran in persistence mode; vol only edged ahead. The mechanism is positioning, not a data shock: the market paid less for protection into a fortnight carrying the 9/16 FOMC and the ADBE/ORCL prints, while credit sat tight and the ten-year barely moved. Who is hurt: anyone long protection sees it decay, and anyone short vol into two-sided flow — net call premium closed 39,758,465 after swinging negative midday — carries gap risk against a coin-flip Fed.",
+ "changeMyMind":{"text":"HY OAS sustained wider than 2.65 for three sessions, or VIXCLS back above 15.2, breaks the quiet grind-lower read and says protection is being bid again.","series":"VIXCLS","threshold":">15.2","horizon":"3 sessions"},
+ "checks":[
+   {"series":"VIXCLS","level":"14.32","text":"Does the fall extend or reverse off this level."},
+   {"series":"DGS10","level":"4.77","text":"Held below 4.79 or clawed back up."},
+   {"series":"BAMLH0A0HYM2","level":"2.65","text":"Stays tight or spreads start to widen."}],
+ "everythingElse":[
+   "Memory/Storage +7.5% vs SPY, Foundry +5.3% — hardware bid.",
+   "Cybersecurity -7.0%, Software/SaaS -4.8% vs SPY — dumped.",
+   "9/16 FOMC a coin flip: HOLD 50.7%.",
+   "El-Nino ag basket +6.5% excess this week, kill unarmed.",
+   "2Y, 2s10s, commodities: not observed today."],
+ "decision":{"Call":"No book this session — every source needed to name and price a strike returned nothing.","Action":"Stand down; file nothing and re-run when live quotes are restored.","Aggression":"none","WhyNow":"No live spot to anchor a strike, no chain mids to price a leg; the design pass built zero proposals.","MaxRisk":"None — no position is proposed, so no capital is at risk.","Invalidation":"N/A — no strike or level to compare a spot against.","NextTrigger":"Re-run once live spot, strike checks and chain mids serve again.","Confidence":"n/a"},
+ "review":"Vol led a persistence-mode tape, edging ahead as VIXCLS fell against its own median while rates and credit barely moved — a quiet grind, not a shock. The louder story sat inside tech: dealer.positioning ticked its gamma flip while the sector rows split roughly fourteen points between the best and worst sleeve in one week. Memory and foundry ran; cyber and software were dumped. Flow closed two-sided, not a one-way melt-up, which fits rotation over broad risk-on. No positions were open and none settled.",
+ "outlook":"The read into next week is rotation, not a regime turn: capital is chasing the silicon supply chain and fleeing high-multiple software and security. Watch whether the vol row keeps bleeding or snaps back — a coin-flip FOMC on 9/16 plus ADBE and ORCL prints the same session is a lot of event risk to be shorting protection into. The credit row staying tight is what keeps this benign; watch it first for any crack. On the sector rows, the memory and foundry leadership either broadens into semi-cap and logic or narrows and reverses — the semi-cap/EDA fade is the tell. The el-nino ag theme keeps running with its kill unarmed. If the ten-year holds where it is and spreads stay put, the hardware-over-software split is the only trade the tape is actually expressing.",
+ "catalysts":"ADBE and ORCL both report post-close 2026-09-10 (implied moves 6.9333% and 9.8619%). FOMC 9/16 prints a HOLD at 50.7%. MU earnings 2026-09-30.",
+ "coverage":[
+   {"id":"rates.front","token":"untested","p":0.50,"why":"DGS2 not ingested","observable":"front-end yield when served"},
+   {"id":"rates.long","token":"continue","p":0.60,"why":"two-basis-point move is noise","observable":"DGS10 vs 4.79"},
+   {"id":"curve.shape","token":"untested","p":0.50,"why":"2s10s cannot be computed","observable":"needs DGS2 ingested"},
+   {"id":"policy.path","token":"continue","p":0.55,"why":"9/16 hold near a coin flip","observable":"path prob vs 50.7"},
+   {"id":"credit","token":"continue","p":0.70,"why":"spreads tight, one-bp tighter","observable":"OAS vs 2.66"},
+   {"id":"vol","token":"continue","p":0.62,"why":"fell against its own median","observable":"VIXCLS vs 15.2"},
+   {"id":"dealer.positioning","token":"continue","p":0.55,"why":"gamma flip ticked lower","observable":"flip vs spot"},
+   {"id":"flow","token":"fade","p":0.55,"why":"two-sided, swung negative midday","observable":"net premium sign"},
+   {"id":"commodities","token":"untested","p":0.50,"why":"no commodity answered numerically","observable":"gold, crude closes"},
+   {"id":"fx","token":"continue","p":0.55,"why":"broad dollar index nudged up","observable":"DTWEXBGS trend"},
+   {"id":"equity.internals","token":"continue","p":0.55,"why":"indices flat, dispersion under surface","observable":"SPY vs QQQ vs IWM"},
+   {"id":"sector:Computer/GPU","token":"continue","p":0.62,"why":"all six members beat SPY","observable":"vs SPY weekly"},
+   {"id":"sector:Semi-Logic/ASIC","token":"continue","p":0.58,"why":"modest breadth, all six positive","observable":"vs SPY weekly"},
+   {"id":"sector:Foundry","token":"strengthen","p":0.65,"why":"four of four led sharply","observable":"vs SPY weekly"},
+   {"id":"sector:Semi-Cap/EDA","token":"fade","p":0.58,"why":"all eight lagged SPY","observable":"vs SPY weekly"},
+   {"id":"sector:Memory/Storage","token":"strengthen","p":0.66,"why":"biggest sleeve winner, four of four","observable":"vs SPY weekly"},
+   {"id":"sector:Cybersecurity","token":"fade","p":0.64,"why":"worst sleeve, all four dumped","observable":"vs SPY weekly"},
+   {"id":"sector:Software/SaaS","token":"fade","p":0.62,"why":"all six lagged badly","observable":"vs SPY weekly"},
+   {"id":"sector:Cloud/Hyperscaler","token":"fade","p":0.55,"why":"six of six slightly behind","observable":"vs SPY weekly"},
+   {"id":"sector:Foundation-Model-Proxy","token":"continue","p":0.53,"why":"marginal edge over SPY","observable":"vs SPY weekly"},
+   {"id":"sector:Devices/Endpoint","token":"continue","p":0.53,"why":"both names just ahead","observable":"vs SPY weekly"},
+   {"id":"theme:el-nino-ag-2026","token":"strengthen","p":0.62,"why":"basket ran, kill unarmed","observable":"excess vs SPY, ONI"}],
+ "focus":[
+   {"ticker":"ADBE","why":"Earns in three sessions and IV rank 68.84 says the market is pricing a real event, not distance; the 6.9333% implied move is the only near dated risk before it — no directional view, watching the software sleeve's continued weakness for read-through."},
+   {"ticker":"ORCL","why":"Same 2026-09-10 print, richer IV rank at 62.39 relative to its 9.8619% implied move — the market is paying up for a wide swing; cloud sleeve lagging cuts against a clean beat. No view yet, waiting on the tape into the print."},
+   {"ticker":"TSLA","why":"Pinned watchlist name with earnings 37 sessions out and IV rank 10.91 — that low reading is distance and calm, not complacency; nothing dated lands before it. Nothing to do; watch the devices sleeve which is barely positive."},
+   {"ticker":"AVGO","why":"Pinned, earnings 67 sessions away and IV rank 1.31 — essentially no event premium, purely distance. The semi-logic sleeve it sits in led only modestly. No setup here; revisit closer to the December print."},
+   {"ticker":"MU","why":"Earnings 2026-09-30, seventeen sessions out, IV rank 33.01 against a 12.373% implied move — the market prices a big swing befitting memory's volatility. The memory sleeve is this week's biggest winner; watch whether that leadership holds into the print."}],
+ "themes":[
+   {"id":"el-nino-ag-2026","leadership":"confirmed","why":"Basket ran +6.5% excess this week with the kill switch unarmed; ag inputs bid as the thesis expects, no contradicting sector row."}]}
+```

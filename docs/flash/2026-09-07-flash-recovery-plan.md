@@ -30,14 +30,14 @@ version of this table said the tool outputs were missing; they are not.
 What is missing is that the recordings live in a session-scoped scratchpad a
 fresh session cannot see. Inventory as of 2026-09-07:
 
-| sample                                  | recorded runs (raw tool outputs) in the scratchpad | rendered page / step JSON in the repo                                              | not recorded anywhere                    |
-| --------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------- |
-| 2026-09-03 premarket, intraday          | `item4` (2 runs)                                   | none                                                                               | —                                        |
-| 2026-09-03 close                        | `fix-v1`, `argon-local`                            | `docs/evidence/pit-replays/2026-09-05/pit-v3/`                                     | —                                        |
-| 2026-09-04 premarket, intraday          | none                                               | premarket page in `pit-v3/`                                                        | both runs (recorder landed after pit-v3) |
-| 2026-09-04 close                        | `review-v1` … `review-v8b`                         | `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` (with step JSON)   | —                                        |
-| 2026-09-06 weekly                       | `review-v1` … `review-v7`, `weekend-2026-09-06`    | `review-v7/` (with step JSON)                                                      | news (the weekly has no news tool)       |
-| 2026-09-02 close (hold-out)             | none                                               | none                                                                               | the whole run                            |
+| sample                         | recorded runs (raw tool outputs) in the scratchpad | rendered page / step JSON in the repo                                            | not recorded anywhere                    |
+| ------------------------------ | -------------------------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
+| 2026-09-03 premarket, intraday | `item4` (2 runs)                                   | none                                                                             | —                                        |
+| 2026-09-03 close               | `fix-v1`, `argon-local`                            | `docs/evidence/pit-replays/2026-09-05/pit-v3/`                                   | —                                        |
+| 2026-09-04 premarket, intraday | none                                               | premarket page in `pit-v3/`                                                      | both runs (recorder landed after pit-v3) |
+| 2026-09-04 close               | `review-v1` … `review-v8b`                         | `docs/evidence/pit-replays/2026-09-06/review-v1/`, `review-v7/` (with step JSON) | —                                        |
+| 2026-09-06 weekly              | `review-v1` … `review-v7`, `weekend-2026-09-06`    | `review-v7/` (with step JSON)                                                    | news (the weekly has no news tool)       |
+| 2026-09-02 close (hold-out)    | none                                               | none                                                                             | the whole run                            |
 
 Step 0 therefore: move `run-pit-review.sh` into the repo as
 `scripts/pit-replay.sh` with a `record` mode (live run, as-of, named state
@@ -50,7 +50,18 @@ history is a partial replay. Each sample carries a `MISSING.md` naming what
 was not recorded. The hold-out is never shown to the author or the reviewer
 during tuning.
 
-Exit: a fresh session can reproduce every A/B/C run from the repo alone.
+Done 2026-09-07 on `feat/flash-step0` (`docs/evidence/flash-samples/`,
+`scripts/pit-replay.sh`). Two limits every later step must respect:
+
+- An as-of replay only sees the tools that have point-in-time history
+  (13–14 of 29); the other 10–11 recordings are the refusal the model was
+  shown, not data. A/B/C in Step 1 compare authors on those thin inputs.
+  The production run sees all 29, so a draft that reads well on a frozen
+  sample is not yet proven on production inputs; Step 4 is where that is
+  judged. The 2026-09-03/04 production runs predate the recorder, so their
+  full inputs cannot be recovered.
+- The weekly runs with no as-of and cannot be `--replay-from`ed; its six
+  recordings are read directly.
 
 ## Step 1 — candidate drafts from the frozen inputs (1–2 days)
 
@@ -88,6 +99,23 @@ PnL. Coverage, ledger and the full Focus table stay as an appendix.
 Exit: three drafts per sample exist with their inputs recorded. No human
 reads them yet.
 
+Done 2026-09-07 on `feat/flash-step0` (`docs/evidence/flash-drafts/`,
+`scripts/flash-abc.sh`, `plugins/option-wizard/team.{B,C,C-nonews}.yaml`).
+Sixteen runs, all exit 0. Three limits Step 2 must respect, recorded in full
+in `docs/evidence/flash-drafts/README.md` and in each sample's `CRITERIA.md`:
+
+- **No daily sample contains news, earnings or a calendar.** Every
+  `ow_uw_headlines`, `ow_uw_earnings` and `ow_uw_calendar` recording in the six
+  daily samples is an `{"unavailable":"as-of"}` refusal. So the missing-event
+  failures in the table above — AVGO/SNOW, claims, NFP, Waller — cannot be
+  scored on the frozen inputs at all; they become testable at Step 4.
+- **The daily A/C comparison is prompt shape only.** The `edit` task already
+  required `reason.deep`, so A and C route the daily author to the same model
+  and neither had news. Only the weekly separates model (A→B), shape (B→C) and
+  news (C→C-nonews).
+- **The weekly is a live run**, four variants back to back inside nine minutes,
+  and its report day resolves to the clock's day, not the sample's.
+
 ## Step 2 — an acceptance pass, calibrated before it sees C (1 day)
 
 The rubric is fixed before any draft is scored. Eight failure signatures,
@@ -111,6 +139,19 @@ pass go to the user: one weekly and one daily triple, with the blind scores
 beside them. That is the first human read in the plan.
 
 ## Step 3 — wire the shape back into the pipeline (2–3 days)
+
+Defects found by the Step 2 scoring that belong here, not to a prompt:
+
+- The rendered catalysts section prints "No calendar rows were admitted"
+  on the 2026-09-06 weekly although `ow_session_frame` carries 18 dated
+  rows (FOMC 9/16, ADBE/ORCL 9/10, MU 9/30, FOMC 10/28). The admission rule
+  in the renderer drops the frame's calendar; the author's prompt had it.
+- A live weekly takes its day from the clock (`day: 2026-09-07`, `mode:
+no-data` on a Monday holiday) instead of the week it reviews.
+- The reviewer's missing-event pre-pass flags FOMC dates one to three
+  months out on daily pages (`major`, never blocking). Decide the horizon a
+  daily page owes (next scheduled meeting only?) and encode it in the
+  rubric.
 
 - `team.yaml`: `weekly` task requires `reason.deep`; weekly role gets the news
   tool input; delete the "one sentence if nothing settled" persona rule, the
