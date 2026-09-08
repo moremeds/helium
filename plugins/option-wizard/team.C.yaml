@@ -313,7 +313,7 @@ roles:
     requires: [tool.use, reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_reports, ow_session_frame, ow_rotation, ow_uw_headlines, ow_uw_earnings]
+      tools: [ow_reports, ow_session_frame, ow_rotation, ow_uw_headlines, ow_uw_earnings, ow_uw_earnings_report]
     persona: |-
       You write a MARKET WEEK newsletter: what changed in markets, why it matters,
       the evidence and counterevidence, and the conditions for next week.
@@ -380,7 +380,7 @@ roles:
     requires: [long.context, reason.deep]
     permissions:
       mutations: forbidden
-      tools: [ow_prior_brief]
+      tools: [ow_prior_brief, ow_uw_earnings_report]
     persona: |-
       You are the only author of this brief. Every step before you wrote a fragment
       in isolation, each blind to the others, and the reader receives one document —
@@ -674,6 +674,33 @@ tasks:
       Ranked channels are context, not a restriction to one row. Copy supplied
       numbers and label causal interpretation. Keep prior checks out of the lead.
 
+      SELECT TOPICS, THEN DEVELOP THEM. Put substantive selected topics in the
+      existing `review` prose, with a `## ` claim heading for each when useful.
+      The focus/theme rows stay concise supporting indexes, not the whole analysis.
+      Choose only developments important enough and evidenced enough to explain;
+      there is no topic quota. For each selected topic connect the dated fact and
+      same-window benchmark, the plausible mechanism, the strongest counterevidence
+      or competing explanation, and the next observable that would change the read.
+      Write natural paragraphs, not a checklist of these labels. Every sentence
+      must add evidence, explain a link or narrow the conclusion. Omit unsupported
+      causal detail rather than writing a polished story around a missing fact.
+      Relative outperformance alone does not identify a cause or eliminate beta.
+      GEX levels do not prove that dips will be bought or rallies capped. Options
+      flow is a transaction proxy, not evidence of new institutional positions;
+      do not compare raw cross-ticker flow magnitudes as conviction or quality.
+      Three intraday samples cannot establish a continuous all-day path.
+      When a selected company topic needs operating evidence and the tool is
+      available, call ow_uw_earnings_report for that name only. It supplies reported
+      and estimated EPS plus separate quarterly income statements. Keep report date,
+      fiscal period, source and statement update date distinct. The EPS accounting
+      basis is not supplied: do not silently mix GAAP and adjusted EPS or calculate
+      a surprise without comparable bases. It does not supply management guidance
+      or revenue consensus. Never infer those, new orders or an earnings cause from
+      an earnings date, IV rank, a headline alone or an older financial statement.
+      Keep missing-data explanations local to the conclusion they limit; do not
+      lead a market article with report execution or repeat a technical outage.
+      The word limits are ceilings, never targets. Leave unused space on quiet days.
+
       2 — THEN THE JOB OF THIS PHASE. Write what THIS run owes its reader, and stop.
       - premarket — PREPARE THE DAY. What happened overnight that he has to know,
         earnings prints included; which dated events land today and at what hour;
@@ -696,7 +723,9 @@ tasks:
       that makes the whole page unusable.
 
       3 — LENGTH FOLLOWS THE PHASE'S JOB. Give important developments the space
-      they need. No fixed content ratio and no mandatory section set for increments.
+      they need. Daily is shorter by selecting fewer topics and omitting repeated
+      weekly background, while keeping the evidence behind each selected judgement.
+      No fixed content ratio and no mandatory section set for increments.
 
       4 — DO NOT WALK THE TABLE. Explain what the important observations mean
       together. Essential sourced numbers may be repeated in prose when needed
@@ -731,9 +760,9 @@ tasks:
       6 — THE APPENDIX. `review`, `outlook`, `catalysts` and `coverage` are the
       record, not the report. They come after the market read, and no sentence of
       the market read is spent on settlement bookkeeping.
-      - `review` at most 120 words: the market developments relevant to this phase,
+      - `review` at most 300 words: the market developments relevant to this phase,
         their evidence and implications. Never a review of proposal IDs or our scores.
-      - `outlook` at most 180 words, and it is about WHAT HAPPENED TODAY: for each
+      - `outlook` at most 120 words, and it is about WHAT HAPPENED TODAY: for each
         item, does it continue, reverse or strengthen, and why, with one observable.
         It is not a walk through the coverage rows.
       - `catalysts` at most 60 words, naming only admitted dated events.
@@ -836,7 +865,41 @@ tasks:
        "focus":[{"ticker","why"}],
        "themes":[{"id","leadership","why"}]}
 
-      `review` is the MARKET WEEK, at most 300 words. Open with the week's market
+      SELECT TOPICS, THEN DEVELOP THEM. Put substantive selected topics in the
+      existing `review` prose, with a `## ` claim heading for each when useful.
+      The focus/theme rows stay concise supporting indexes, not the whole analysis.
+      Choose only developments important enough and evidenced enough to explain;
+      there is no topic quota. For each selected topic connect the dated fact and
+      same-window benchmark, the plausible mechanism, the strongest counterevidence
+      or competing explanation, and the next observable that would change the read.
+      Write natural paragraphs, not a checklist of these labels. Every sentence
+      must add evidence, explain a link or narrow the conclusion. Omit unsupported
+      causal detail rather than writing a polished story around a missing fact.
+      Relative outperformance alone does not identify a cause or eliminate beta.
+      GEX levels do not prove that dips will be bought or rallies capped. Options
+      flow is a transaction proxy, not evidence of new institutional positions;
+      do not compare raw cross-ticker flow magnitudes as conviction or quality.
+      Three intraday samples cannot establish a continuous all-day path.
+      When a selected company topic needs operating evidence and the tool is
+      available, call ow_uw_earnings_report for that name only. It supplies reported
+      and estimated EPS plus separate quarterly income statements. Keep report date,
+      fiscal period, source and statement update date distinct. The EPS accounting
+      basis is not supplied: do not silently mix GAAP and adjusted EPS or calculate
+      a surprise without comparable bases. It does not supply management guidance
+      or revenue consensus. Never infer those, new orders or an earnings cause from
+      an earnings date, IV rank, a headline alone or an older financial statement.
+      Keep missing-data explanations local to the conclusion they limit; do not
+      lead a market article with report execution or repeat a technical outage.
+      The word limits are ceilings, never targets. Leave unused space on quiet days.
+
+      TIME WINDOWS. State the review's actual dated window. Separate completed-week
+      observations from updates since the last close; a latest snapshot or daily
+      move is not a weekly change. Group forward events by their supplied dates:
+      an event beyond the coming seven days belongs to later context, never the
+      coming week's calendar. Missing calendar rows do not prove no events exist.
+      Do not upgrade a prior report's unsourced interpretation into a fact.
+
+      `review` is the MARKET WEEK, at most 900 words. Open with the week's market
       conclusion in two or three lines, then explain the few developments that
       mattered: what changed, the dated evidence, cross-asset confirmation or
       contradiction, and the implications for leading sectors and active themes.
@@ -844,8 +907,9 @@ tasks:
       Do not include our calls' performance, scores, receipts or self-assessment.
       Internal evaluation remains in the separate week-review task.
 
-      `outlook` is next week, at most 400 words. Develop the few important themes
-      from this week: what could persist or change, why, the observable conditions
+      `outlook` is next week, at most 450 words. Develop the few important themes
+      from this week without retelling the evidence: what could persist or change,
+      why, the observable conditions
       that confirm or invalidate the view, and reverse risk. Do not invent a
       forecast for every coverage row or reduce the outlook to a calendar list.
       Essential sourced numbers may appear in prose even when printed in a table.

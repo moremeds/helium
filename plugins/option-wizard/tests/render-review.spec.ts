@@ -1610,6 +1610,21 @@ describe("the section list a review document delivers", () => {
       SPEC,
     );
 
+  it("preserves weekly topic headings and their closing counterevidence without widening daily", () => {
+    const review = "## Policy repricing needs price confirmation\n\n" +
+      Array.from({ length: 55 }, () => "The dated observation supports a limited interpretation.").join(" ") +
+      "\n\n## The opposing evidence\n\nCredit has not confirmed the interpretation.";
+    const render = (task: string) => buildView(report({ steps: [
+      { task: "frame", role: "frame-clerk", mode: "deterministic", text: "",
+        toolOutputs: [JSON.stringify(frame({ rows: fullRows() }))] },
+      { task, role: "weekly-analyst", mode: "model", text: JSON.stringify({
+        review, outlook: "", catalysts: "", coverage: [], focus: [], themes: [],
+      }) },
+    ] } as never), SPEC).sections[0]!.body;
+    expect(render("weekly")).toBe(review);
+    expect(render("edit").length).toBeLessThan(review.length);
+  });
+
   it("opens with the four weekly market titles, in order", () => {
     const titles = built().sections.map((section) => section.title);
     expect(titles).toEqual([...MARKET_REPORT_TITLES]);

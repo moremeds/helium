@@ -120,6 +120,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_gex", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_earnings", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_earnings_report", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   // No `requiresEnv`: the state root is always known, and an empty reports
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
@@ -1362,6 +1363,9 @@ const MassiveActionsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(200).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+});
+const UwEarningsReportParams = z.object({
+  ticker: z.string().min(1).max(24),
 });
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
@@ -4293,6 +4297,159 @@ export function buildTools(cfg: {
           splits,
           dividends,
           notes,
+        });
+      },
+    },
+    {
+      // Verified 2026-09-08 against live AVGO: `/api/earnings/AVGO` supplied
+      // completed company rows with report_date, actual_eps and street_mean_est;
+      // `/api/stock/AVGO/income-statements` supplied quarterly reported figures.
+      // They are intentionally returned separately: their quarter labels and EPS
+      // basis are not a contract to join.
+      name: "ow_uw_earnings_report",
+      description:
+        "Completed earnings EPS rows and separately reported quarterly income-statement facts for one ticker from Unusual Whales. These are reported facts, not guidance, revenue consensus, calculated growth, or an EPS surprise.",
+      paramsSchema: UwEarningsReportParams,
+      mutating: false,
+      dshParams: {
+        ticker: {
+          type: "string",
+          required: true,
+          description: 'One ticker, e.g. "AVGO".',
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const tool = "ow_uw_earnings_report";
+        const ticker = symbolLiteral(UwEarningsReportParams.parse(args).ticker, tool);
+        const cutoff = asOf ?? new Date();
+        const cutoffDay = new Intl.DateTimeFormat("en-CA", {
+          timeZone: REPORT_ZONE,
+        }).format(cutoff);
+        const fetchedAt = new Date().toISOString();
+        const numericString = (value: unknown): string | undefined =>
+          typeof value === "string" && value.trim() !== "" &&
+          Number.isFinite(Number(value))
+            ? value
+            : undefined;
+        const getRows = async (path: string) => {
+          try {
+            const body = (await uwGet(env, tool, path, {}, ctx)) as {
+              data?: unknown;
+            };
+            return {
+              rows: Array.isArray(body.data)
+                ? (body.data as Array<Record<string, unknown>>)
+                : [],
+            };
+          } catch (error: unknown) {
+            return {
+              rows: [] as Array<Record<string, unknown>>,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        };
+        const [earningsResult, statementsResult] = await Promise.all([
+          getRows(`/api/earnings/${encodeURIComponent(ticker)}`),
+          getRows(`/api/stock/${encodeURIComponent(ticker)}/income-statements`),
+        ]);
+        const earnings = earningsResult.rows.flatMap((row) => {
+          const reportDate = row.report_date;
+          const actualEps = numericString(row.actual_eps);
+          if (
+            row.source !== "company" ||
+            typeof reportDate !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
+            reportDate >= cutoffDay ||
+            actualEps === undefined
+          )
+            return [];
+          const estimate = numericString(row.street_mean_est);
+          return [
+            {
+              reportDate,
+              ...(typeof row.ending_fiscal_quarter === "string"
+                ? { endingFiscalQuarter: row.ending_fiscal_quarter }
+                : {}),
+              actualEps,
+              streetMeanEst: estimate ?? null,
+              source: "company",
+              reportTime:
+                typeof row.report_time === "string" ? row.report_time : null,
+              sourceUrl: `${UW_BASE}/api/earnings/${encodeURIComponent(ticker)}`,
+              fetchedAt,
+            },
+          ];
+        }).slice(0, 4);
+        const statements = statementsResult.rows.flatMap((row) => {
+          const periodEnd = row.fiscal_date_ending;
+          const updatedAt = row.updated_at;
+          const updatedTime =
+            typeof updatedAt === "string" ? Date.parse(updatedAt) : Number.NaN;
+          if (
+            row.ticker !== ticker ||
+            row.report_type !== "quarterly" ||
+            typeof periodEnd !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/u.test(periodEnd) ||
+            periodEnd > cutoffDay ||
+            !Number.isFinite(updatedTime) ||
+            updatedTime > cutoff.getTime()
+          )
+            return [];
+          const revenue = numericString(row.total_revenue);
+          const grossProfit = numericString(row.gross_profit);
+          const operatingIncome = numericString(row.operating_income);
+          const netIncome = numericString(row.net_income);
+          return [
+            {
+              periodEnd,
+              updatedAt,
+              currency:
+                typeof row.reported_currency === "string" &&
+                row.reported_currency !== "" &&
+                row.reported_currency !== "None"
+                  ? row.reported_currency
+                  : null,
+              financials: {
+                ...(revenue === undefined ? {} : { revenue }),
+                ...(grossProfit === undefined ? {} : { grossProfit }),
+                ...(operatingIncome === undefined ? {} : { operatingIncome }),
+                ...(netIncome === undefined ? {} : { netIncome }),
+              },
+              sourceUrl: `${UW_BASE}/api/stock/${encodeURIComponent(ticker)}/income-statements`,
+              fetchedAt,
+            },
+          ];
+        }).slice(0, 4);
+        return JSON.stringify({
+          source: "unusual_whales",
+          ticker,
+          cutoff: cutoff.toISOString(),
+          earnings,
+          statements,
+          ...(earnings.length === 0 && statements.length === 0
+            ? { unavailable: "No completed earnings or current income statement available by cutoff." }
+            : {}),
+          ...(earningsResult.error === undefined && statementsResult.error === undefined
+            ? {}
+            : {
+                sourceErrors: {
+                  ...(earningsResult.error === undefined
+                    ? {}
+                    : { earnings: earningsResult.error }),
+                  ...(statementsResult.error === undefined
+                    ? {}
+                    : { incomeStatements: statementsResult.error }),
+                },
+              }),
+          limitations: [
+            "EPS basis is not provided; earnings and income statements are not joined.",
+            "Current-day earnings are excluded because report time is not an exact publication timestamp.",
+            "Provider history is current data, not a vintage archive.",
+            "Guidance and revenue street consensus are not provided.",
+          ],
         });
       },
     },

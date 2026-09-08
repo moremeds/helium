@@ -172,22 +172,22 @@ export const PERSISTENCE_BUDGET = {
  */
 export const REVIEW_BUDGET = {
   weekly: {
-    review: 300,
-    outlook: 400,
+    review: 900,
+    outlook: 450,
     catalysts: 150,
     rowWords: 15,
     focusWords: 40,
     themeWords: 25,
-    total: 900,
+    total: 2000,
   },
   daily: {
-    review: 120,
-    outlook: 180,
+    review: 300,
+    outlook: 120,
     catalysts: 60,
     rowWords: 10,
     focusWords: 40,
     themeWords: 25,
-    total: 300,
+    total: 800,
   },
 } as const;
 

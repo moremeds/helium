@@ -90,7 +90,7 @@ describe("flash-budget over the one-thing and review shapes", () => {
       mode,
       caps: {
         weekly: {
-          review: 300,
+          review: 900,
           outlook: 400,
           catalysts: 150,
           rowWords: 15,
@@ -128,7 +128,7 @@ describe("flash-budget over the one-thing and review shapes", () => {
 
   it("measures a review document against the caps the frame carries", async () => {
     const doc = JSON.stringify({
-      review: long(200),
+      review: long(350),
       coverage: [{ id: "rates.long", why: "short", observable: "short" }],
       themes: [{ id: "t", why: "short" }],
     });
@@ -142,7 +142,7 @@ describe("flash-budget over the one-thing and review shapes", () => {
     // looser limit guards nothing.
     const strict = await gate.check({ text: doc }, editor as never);
     expect(strict.pass).toBe(false);
-    expect(strict.reason).toContain("review 200 of 120");
+    expect(strict.reason).toContain("review 350 of 300");
   });
 
   it("passes a document with none of the three shapes", async () => {

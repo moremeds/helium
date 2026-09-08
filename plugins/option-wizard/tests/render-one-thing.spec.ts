@@ -181,13 +181,11 @@ describe("parseReviewDoc", () => {
 describe("measureReview", () => {
   const long = (n: number) => Array.from({ length: n }, () => "word").join(" ");
 
-  it("flags the same prose at 300 weekly and 120 daily", () => {
+  it("allows a developed weekly topic while keeping daily shorter", () => {
     const body = { review: long(380) };
-    expect(measureReview(body, REVIEW_BUDGET.weekly).overages[0]?.limit).toBe(
-      300,
-    );
+    expect(measureReview(body, REVIEW_BUDGET.weekly).overages).toEqual([]);
     expect(measureReview(body, REVIEW_BUDGET.daily).overages[0]?.limit).toBe(
-      120,
+      300,
     );
   });
 

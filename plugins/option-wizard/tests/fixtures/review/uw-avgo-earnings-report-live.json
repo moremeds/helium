@@ -1,0 +1,37 @@
+{
+  "earnings": {
+    "data": [
+      {
+        "source": "company",
+        "report_date": "2026-09-02",
+        "report_time": "postmarket",
+        "ending_fiscal_quarter": "2026-07-31",
+        "street_mean_est": "3.22",
+        "actual_eps": "3.03"
+      },
+      {
+        "source": "estimation",
+        "report_date": "2026-12-10",
+        "report_time": "unknown",
+        "ending_fiscal_quarter": "2026-10-31",
+        "street_mean_est": "3.66",
+        "actual_eps": null
+      }
+    ]
+  },
+  "incomeStatements": {
+    "data": [
+      {
+        "ticker": "AVGO",
+        "fiscal_date_ending": "2026-07-31",
+        "report_type": "quarterly",
+        "updated_at": "2026-09-05T03:26:20Z",
+        "total_revenue": "29591000000",
+        "gross_profit": "20456000000",
+        "operating_income": "15955000000",
+        "net_income": "13088000000",
+        "reported_currency": "None"
+      }
+    ]
+  }
+}

@@ -317,9 +317,10 @@ describe("the editor is one author over seven fragments", () => {
     expect(task?.prompt ?? "").toContain("there is no book to describe");
   });
 
-  it("reads yesterday's brief, and only through the tool that caps it", () => {
+  it("reads the capped prior brief and targeted earnings facts", () => {
     expect(manifest.roles.editor?.permissions.tools).toEqual([
       "ow_prior_brief",
+      "ow_uw_earnings_report",
     ]);
     const prompt = task?.prompt ?? "";
     expect(prompt).toContain("ow_prior_brief");
@@ -612,8 +613,8 @@ describe("the review authors, rewritten", () => {
       expect(weekly.prompt).toContain("shortlist of 15 names stable");
       const tools = variant.roles["weekly-analyst"]!.permissions.tools;
       expect(tools).toEqual(name === "team.C-nonews.yaml"
-        ? ["ow_reports", "ow_session_frame", "ow_rotation"]
-        : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings"]);
+        ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_earnings_report"]
+        : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings", "ow_uw_earnings_report"]);
       const internal = variant.tasks.find((task) => task.id === "week-review");
       expect(internal?.phases).toEqual(["weekly"]);
       expect(internal?.prompt).toContain("ow_review_window");

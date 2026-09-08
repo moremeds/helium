@@ -24,7 +24,7 @@ Do not substitute a backdated live run for that execution.
   No September 4 regime state was available there. Treat the markdown as prior
   context, not proof of the new editorial standard or a complete prior frame.
 
-## Source check at 10:00 Hong Kong (02:00 UTC)
+## Source check at 08:00 Hong Kong (00:00 UTC)
 
 On September 7 at 23:29 UTC, UW returned HTTP429 `daily_request_limit_hit`,
 limit 120000, with reset described as 8PM EST / 5PM PST. First try one calendar
@@ -56,6 +56,8 @@ source /Users/chenxi/.config/helium/helium.env
 source /Users/chenxi/.config/helium/argon-local.env
 set +a
 export OW_ARGON_API_BASE="$ARGON_BASE_URL"
+# Keep the configured private Apex service outside the outbound proxy.
+export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1},$(node -e 'process.stdout.write(new URL(process.env.OW_APEX_API_BASE).hostname)')"
 export HELIUM_TENANT_DELIVERY=0 HELIUM_DEPLOYMENT=test
 export HELIUM_STATE_ROOT=/Users/chenxi/.local/state/helium-flash-20260908
 export HELIUM_AUDIT_DB="$HELIUM_STATE_ROOT/audit.db"

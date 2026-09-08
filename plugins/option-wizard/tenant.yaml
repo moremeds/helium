@@ -255,27 +255,17 @@ extensions:
       - Foundation-Model-Proxy
       - Devices/Endpoint
     verdicts: [continue, reverse, strengthen, fade, untested]
-    # `weeklyModelWords`/`dailyModelWords` are the totals spec C.6/§J cap; the
-    # per-section numbers are what render/budget.ts trims to.
-    #
-    # `dailyModelWords` was 300 — written before the coverage table existed,
-    # and it budgeted for §2 and §4 alone. The daily document also carries the
-    # model's per-row clauses: 22 model-answered coverage rows (23 declared,
-    # less the renderer-filled `calls.open`) x two clauses, a `why` capped at
-    # `rowWords` 10 and an `observable` of about the same, is ~240 words that
-    # no cap accounted for. The 2026-09-04 close measured 483 against 300, of
-    # which .s3 alone was 241. 300 + 240 = 540, rounded to 550.
-    #
-    # The PER-FIELD caps are unchanged: §2 <= 120 and §4 <= 180 still bound the
-    # prose, so this raises no paragraph's length. Weekly is untouched.
+    # Main prose carries selected research topics; row notes remain compact.
+    # Weekly has more room than daily. Totals also allow supporting coverage;
+    # these are ceilings, never output targets or required topic counts.
     caps:
-      weeklyModelWords: 900
-      dailyModelWords: 550
+      weeklyModelWords: 2000
+      dailyModelWords: 800
       reviewWords: 300
       weekly:
         {
-          review: 300,
-          outlook: 400,
+          review: 900,
+          outlook: 450,
           catalysts: 150,
           rowWords: 15,
           focusWords: 40,
@@ -283,8 +273,8 @@ extensions:
         }
       daily:
         {
-          review: 120,
-          outlook: 180,
+          review: 300,
+          outlook: 120,
           catalysts: 60,
           rowWords: 10,
           focusWords: 40,
