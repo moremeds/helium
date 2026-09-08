@@ -222,6 +222,12 @@ export interface RunOptions {
    * knows what is behind it and the runner does not (doctrine 2).
    */
   replayFrom?: string;
+  /**
+   * Restrict routing to ONE opaque execution target id for this run. The
+   * router applies it as a hard filter, so a pin nothing satisfies leaves the
+   * step with no candidates instead of quietly routing elsewhere.
+   */
+  modelPin?: string;
 }
 
 /**
@@ -1111,6 +1117,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         tools: [...role.permissions.tools],
         mutations: role.permissions.mutations,
         minIsolationClass: "in-process",
+        ...(role.maxOutputTokens === undefined
+          ? {}
+          : { maxOutputTokens: role.maxOutputTokens }),
       },
       inputs: {
         artifacts: task.dependsOn.map((id) => `step:${id}`),
@@ -1280,6 +1289,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     for (;;) {
       const decision = select(work, catalog.snapshot(), {
         budget: projection(budget, STEP_ESTIMATE),
+        ...(options.modelPin === undefined ? {} : { pin: options.modelPin }),
       });
       if (decision.selected === undefined) {
         // A capability nothing can serve degrades THIS STEP, not the run. It

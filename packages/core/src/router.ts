@@ -101,8 +101,18 @@ function projectedUsd(
 }
 
 /** Every reason one target failed the hard filter, in a stable order. */
-function exclusions(work: WorkOrder, target: TargetSnapshot): string[] {
+function exclusions(
+  work: WorkOrder,
+  target: TargetSnapshot,
+  pin: string | undefined,
+): string[] {
   const reasons: string[] = [];
+  // First, because it is the operator's constraint and outranks every
+  // property of the target: an experiment that must not be graded by the
+  // thing it is grading is not expressible as a capability. The pin is an
+  // opaque target id, compared as a string and never parsed — core still
+  // cannot tell a vendor from a tier.
+  if (pin !== undefined && target.targetId !== pin) reasons.push("target-pin");
   const tags = new Set(target.capabilities);
   if (!work.requires.every((tag) => tags.has(tag))) reasons.push("capability");
 
@@ -120,7 +130,10 @@ function exclusions(work: WorkOrder, target: TargetSnapshot): string[] {
     if (!tags.has("tool.use")) reasons.push("tool-capability");
   }
 
-  if (work.constraints.mutations === "permitted" && !target.supports.mutations) {
+  if (
+    work.constraints.mutations === "permitted" &&
+    !target.supports.mutations
+  ) {
     reasons.push("mutations");
   }
 
@@ -161,7 +174,10 @@ function affordable(
   budget: BudgetProjection | undefined,
 ): boolean {
   if (usd === undefined) return true;
-  if (work.constraints.maxCost !== undefined && usd > work.constraints.maxCost) {
+  if (
+    work.constraints.maxCost !== undefined &&
+    usd > work.constraints.maxCost
+  ) {
     return false;
   }
   return budget === undefined || usd <= budget.remainingUsd;
@@ -172,7 +188,8 @@ function affordable(
  *
  * @param work - capability requirements and hard constraints.
  * @param catalog - a catalog snapshot with availability already resolved.
- * @param options - an optional per-role preference and the budget projection.
+ * @param options - an optional per-role preference, the budget projection and
+ * an optional run-level pin to one opaque target id.
  * @returns the decision, including every candidate's eligibility and reasons.
  * An empty surviving set yields `capability-shortage`; a surviving set none of
  * which fits the budget yields `budget-exhausted`. No requirement is ever
@@ -181,11 +198,21 @@ function affordable(
 export function select(
   work: WorkOrder,
   catalog: CatalogSnapshot,
-  options: { policy?: SelectionPolicy; budget?: BudgetProjection } = {},
+  options: {
+    policy?: SelectionPolicy;
+    budget?: BudgetProjection;
+    /**
+     * An opaque target id this one run is restricted to. Absent is the normal
+     * run and nothing below changes. Present, it is a HARD filter applied
+     * before every other one, so a pin that survives nothing fails the step
+     * with `target-pin` on every candidate rather than falling back.
+     */
+    pin?: string;
+  } = {},
 ): SelectionDecision {
-  const { policy, budget } = options;
+  const { policy, budget, pin } = options;
   const decided = catalog.targets.map((target) => {
-    const reasons = exclusions(work, target);
+    const reasons = exclusions(work, target, pin);
     return {
       target,
       reasons,

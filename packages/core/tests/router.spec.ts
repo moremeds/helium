@@ -123,6 +123,47 @@ describe("select", () => {
   });
 });
 
+describe("a run-level target pin", () => {
+  it("restricts selection to the pinned target even when a cheaper one is capable", () => {
+    const catalog = new CapabilityCatalog();
+    catalog.register(target("thrifty", ["reason.deep", "tool.use"], { usdIn: 1e-7, usdOut: 4e-7 }));
+    catalog.register(target("pricey", ["reason.deep", "tool.use"], { usdIn: 1e-5, usdOut: 3e-5 }));
+
+    const decision = select(work(), catalog.snapshot(), { pin: "pricey" });
+
+    expect(decision.selected).toBe("pricey");
+    expect(
+      decision.candidates.find((entry) => entry.targetId === "thrifty")!.reasons,
+    ).toContain("target-pin");
+  });
+
+  it("fails closed with a named reason when the pin matches no capable target", () => {
+    const catalog = new CapabilityCatalog();
+    catalog.register(target("capable", ["reason.deep", "tool.use"], { usdIn: 1e-7, usdOut: 4e-7 }));
+
+    const decision = select(work(), catalog.snapshot(), { pin: "somebody-else" });
+
+    expect(decision.selected).toBeUndefined();
+    // Not `unavailable`: a pin nobody satisfies is an operator constraint the
+    // catalog cannot serve, and retrying it later would fail the same way.
+    expect(decision.failure?.class).toBe("capability-shortage");
+    expect(decision.failure?.reasons.join("; ")).toContain("capable: target-pin");
+  });
+
+  it("still refuses a pinned target that cannot do the work", () => {
+    // The pin narrows; it never relaxes. A pinned target missing the
+    // capability is the one way an operator could quietly buy a cheaper
+    // review, so the requirement outlives the pin.
+    const catalog = new CapabilityCatalog();
+    catalog.register(target("fast-only", ["reason.fast"], { usdIn: 0, usdOut: 0 }));
+
+    const decision = select(work(), catalog.snapshot(), { pin: "fast-only" });
+
+    expect(decision.selected).toBeUndefined();
+    expect(decision.candidates[0]?.reasons).toEqual(["capability"]);
+  });
+});
+
 describe("a step that carries tools", () => {
   it("excludes a target that cannot call one, whatever the task declared", () => {
     // The task requires `reason.deep` only — no `tool.use` — but the role's
