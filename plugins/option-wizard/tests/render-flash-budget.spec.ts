@@ -94,6 +94,9 @@ describe("trim", () => {
 
   it("returns an in-budget text untouched", () => {
     expect(trim("One. Two.", 5)).toEqual({ text: "One. Two.", cut: "none" });
+    expect(trim("## First topic\n\nOne fact.\n\n## Second topic\n\nMore detail ends here.", 8)).toEqual({
+      text: "## First topic\n\nOne fact.", cut: "sentence",
+    });
   });
 });
 

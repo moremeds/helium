@@ -683,6 +683,11 @@ tasks:
       must add evidence, explain a link or narrow the conclusion. Omit unsupported
       causal detail rather than writing a polished story around a missing fact.
       Relative outperformance alone does not identify a cause or eliminate beta.
+      Do not call falling sectors a funding source for rising sectors: returns do
+      not trace capital transfers. Do not infer complacency or what is already
+      priced in from low VIX and tight credit alone. Keep these as observations.
+      Prefer two or three developed topics to many short headings. Keep theme
+      entry dates and our since-entry performance out of the market article.
       GEX levels do not prove that dips will be bought or rallies capped. Options
       flow is a transaction proxy, not evidence of new institutional positions;
       do not compare raw cross-ticker flow magnitudes as conviction or quality.
@@ -693,6 +698,9 @@ tasks:
       fiscal period, source and statement update date distinct. The EPS accounting
       basis is not supplied: do not silently mix GAAP and adjusted EPS or calculate
       a surprise without comparable bases. It does not supply management guidance
+      or revenue consensus. If you query a report, use its relevant dated operating
+      fact in the selected topic, or drop that company angle; a tool call alone
+      adds no depth. Financials without a known currency cannot be labelled USD.
       or revenue consensus. Never infer those, new orders or an earnings cause from
       an earnings date, IV rank, a headline alone or an older financial statement.
       Keep missing-data explanations local to the conclusion they limit; do not
@@ -848,6 +856,11 @@ tasks:
       must add evidence, explain a link or narrow the conclusion. Omit unsupported
       causal detail rather than writing a polished story around a missing fact.
       Relative outperformance alone does not identify a cause or eliminate beta.
+      Do not call falling sectors a funding source for rising sectors: returns do
+      not trace capital transfers. Do not infer complacency or what is already
+      priced in from low VIX and tight credit alone. Keep these as observations.
+      Prefer two or three developed topics to many short headings. Keep theme
+      entry dates and our since-entry performance out of the market article.
       GEX levels do not prove that dips will be bought or rallies capped. Options
       flow is a transaction proxy, not evidence of new institutional positions;
       do not compare raw cross-ticker flow magnitudes as conviction or quality.
@@ -858,6 +871,9 @@ tasks:
       fiscal period, source and statement update date distinct. The EPS accounting
       basis is not supplied: do not silently mix GAAP and adjusted EPS or calculate
       a surprise without comparable bases. It does not supply management guidance
+      or revenue consensus. If you query a report, use its relevant dated operating
+      fact in the selected topic, or drop that company angle; a tool call alone
+      adds no depth. Financials without a known currency cannot be labelled USD.
       or revenue consensus. Never infer those, new orders or an earnings cause from
       an earnings date, IV rank, a headline alone or an older financial statement.
       Keep missing-data explanations local to the conclusion they limit; do not
@@ -868,7 +884,10 @@ tasks:
       observations from updates since the last close; a latest snapshot or daily
       move is not a weekly change. Group forward events by their supplied dates:
       an event beyond the coming seven days belongs to later context, never the
-      coming week's calendar. Missing calendar rows do not prove no events exist.
+      coming week's calendar OR its outlook pivot. For example, on September 7,
+      September 16 is later context, not an event within the next seven days.
+      Missing calendar rows do not prove no events exist; write "in the supplied
+      calendar" rather than claiming an event is the only one in the market.
       Do not upgrade a prior report's unsourced interpretation into a fact.
 
       `review` is the MARKET WEEK, at most 900 words. Open with the week's market
