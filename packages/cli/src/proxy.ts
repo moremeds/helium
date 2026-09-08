@@ -13,7 +13,7 @@
  * pi-ai's included — and the flag stops being load-bearing.
  * @module @helium/cli/proxy
  */
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { EnvHttpProxyAgent, setGlobalDispatcher } from "undici";
 
 /**
  * @returns the proxy url that was applied, or undefined when none is set.
@@ -21,6 +21,10 @@ import { ProxyAgent, setGlobalDispatcher } from "undici";
 export function applyProxy(env: NodeJS.ProcessEnv): string | undefined {
   const url = env.HELIUM_PROXY ?? env.HTTPS_PROXY ?? env.https_proxy;
   if (url === undefined || url.trim() === "") return undefined;
-  setGlobalDispatcher(new ProxyAgent(url));
+  setGlobalDispatcher(new EnvHttpProxyAgent({
+    httpProxy: url,
+    httpsProxy: url,
+    noProxy: env.NO_PROXY ?? env.no_proxy ?? "",
+  }));
   return url;
 }

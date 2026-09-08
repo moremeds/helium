@@ -1,0 +1,572 @@
+{
+  "tenant": "option-wizard",
+  "kind": "weekly",
+  "run_day": "2026-09-07",
+  "week_key": "2026-W37",
+  "run_id": "run-83852efc-3f9d-440c-8e91-2cb4d58059a1",
+  "code_sha": "33e7c26",
+  "schema_version": 3,
+  "outcome": "completed",
+  "headline": "Markets enter the new week quiet on the surface but with a live policy question underneath: the priced odds of a September 16 Fed hike sit at 57.9% (frame policy path, as-of 2026-09-07), so the front end is doing the work. This week's own bar feed was down (apex bars returned 502 across sectors and themes), so sector-rotation and theme-performance readings are unavailable — treat leadership claims as unsupported this week.",
+  "view": {
+    "schemaVersion": 3,
+    "date": "2026-09-07",
+    "tenant": "option-wizard",
+    "outcome": "completed",
+    "headline": "Markets enter the new week quiet on the surface but with a live policy question underneath: the priced odds of a September 16 Fed hike sit at 57.9% (frame policy path, as-of 2026-09-07), so the front end is doing the work. This week's own bar feed was down (apex bars returned 502 across sectors and themes), so sector-rotation and theme-performance readings are unavailable — treat leadership claims as unsupported this week.",
+    "tape": [],
+    "schedule": [],
+    "overnight": [],
+    "sections": [
+      {
+        "title": "Market review",
+        "body": "Markets enter the new week quiet on the surface but with a live policy question underneath: the priced odds of a September 16 Fed hike sit at 57.9% (frame policy path, as-of 2026-09-07), so the front end is doing the work. This week's own bar feed was down (apex bars returned 502 across sectors and themes), so sector-rotation and theme-performance readings are unavailable — treat leadership claims as unsupported this week.\n\nWhat is priced and dated: 10-year yield 4.79%, up ~1bp from a prior 4.784%; 2-year 4.375%, essentially flat; the 2s10s curve at 41.5bp. High-yield spreads at 2.65% (as-of 2026-09-03), a touch tighter — credit is not flagging stress. VIX at 14.52, up +0.21pts, still a low-teens regime. SPY's dealer gamma flip sits at 768.35 versus spot near 770 (equity internals, as-of 2026-09-08), so positioning is close to the pivot rather than deep in stabilizing territory.\n\nHeadlines corroborate the macro frame, not more: Unusual Whales at 2026-09-08T00:03:48Z notes gold holding near $4,400 with markets pricing '~60% odds of a Fed hike next week,' consistent with the frame's 57.9%. Commodities show gold 4418.92 (-0.25%) and WTI crude 92.51 (+1.13%) — a firmer oil tape is the inflation cross-current the same headline flags. Japan Q2 revised GDP came in +1.4% annualized (2026-09-07T23:51:01Z), below the ~1.8% estimate, and average cash earnings +4.7% beat 3.8% (2026-09-07T23:30:49Z) — reflationary abroad.\n\nJudgement: with a hike near a coin-flip and gamma near the flip level, the setup favors range-respect until the front end resolves. That reading rests on the 57.9% policy print and the 768.35 flip being accurate as-of their stamps; both predate today's session."
+      },
+      {
+        "title": "Outlook",
+        "body": "The week is organized around one dated fork: the September 16 FOMC, priced at HIKE 57.9% (frame calendar). At a near coin-flip, the market has no consensus to lean on, and the front end (2yr 4.375%) will re-rate hard on the outcome. Watch for confirmation in the same instruments: a decisive break of the 2s10s from 41.5bp, a move in the hike probability away from the high-50s, and HY spreads leaving the 2.65% zone. If spreads widen while equities hold, that is the tell the tape is under-pricing tightening; if they stay pinned, the range holds.\n\nThe US CPI print flagged in the 2026-09-08T00:03:48Z headline as capping gold's upside is the near-term input into that hike question — a hot CPI pushes the 57.9% higher and pressures the long end past 4.79%; a soft one relieves it. Crude firming (WTI 92.51, +1.13%) is the reverse risk to any disinflation story: sustained oil strength feeds headline inflation and keeps the hawkish path alive.\n\nDealer positioning is the second axis. With the SPY gamma flip at 768.35 and spot near 770, the market sits just above the pivot; a slip below it removes the stabilizing bid and lets realized volatility rise from a VIX base of 14.52. The observable is simple — hold above 768.35 and dips get bought; break and hold below and the same level caps rallies.\n\nSingle-name catalyst: ADBE reports post-market 2026-09-10 (earnings confirmed, daysToEarnings 2), implied move 6.93%, IV rank 68.84 — the one dated event inside the week for our universe, and a read on software demand ahead of the Fed.\n\nLimitation to carry forward: sector and theme rotation is uninformed this week because the bar feed was down (502 across XLB–XLY, DBA/MOS/NTR/DE). Any leadership conclusion should wait for bars to return; do not infer rotation from price memory. Reverse risk to the range view: a clean CPI-plus-Fed resolution can trend, not chop — the flip level and spread behavior tell you which."
+      },
+      {
+        "title": "Dated catalysts",
+        "body": "- 2026-09-10 · ADBE earnings (post) · fcst implied move 6.9%\n- 2026-09-16 · FOMC 9/16 · fcst HIKE 57.9% · prev 3.75-4.0%\n- 2026-09-24 · COST earnings (post) · fcst implied move 4.0%\n- 2026-09-30 · FDS earnings (pre) · fcst implied move 11.6%\n- 2026-10-08 · DAL earnings · fcst implied move 8.1%\n- 2026-10-13 · GS earnings (pre) · fcst implied move 7.7%\n- 2026-10-14 · ASML earnings (pre) · fcst implied move 10.2%\n- 2026-10-22 · DECK earnings · fcst implied move 11.4%\n- 2026-10-22 · F earnings · fcst implied move 8.8%\n- 2026-10-26 · CDNS earnings · fcst implied move 13.2%\n- 2026-10-27 · BE earnings · fcst implied move 29.1%\n- 2026-10-27 · GLW earnings · fcst implied move 19.8%\n- 2026-10-28 · FOMC 10/28 · fcst HOLD 69.9% · prev 3.50-3.8%\n- 2026-10-28 · TSLA earnings · fcst implied move 13.6%\n- 2026-10-29 · AAPL earnings · fcst implied move 8.4%\n- 2026-10-29 · AMZN earnings · fcst implied move 11.3%\n- 2026-12-09 · FOMC 12/9 · fcst HIKE 54% · prev 3.75-4.0%\n- 2026-12-10 · AVGO earnings · fcst implied move 15.1%"
+      },
+      {
+        "title": "Supporting coverage",
+        "body": "3a macro\n- rates.front · 4.377 → +0 bp · UNTESTED · 2yr 4.375% flat vs 4.374%; awaits FOMC/CPI to move\n- rates.long · 4.792 → +1 bp · UNTESTED · 10yr 4.79%, +1bp; no directional catalyst before CPI\n- curve.shape · 41.5 → — · UNTESTED · 2s10s 41.5bp; no prior observation to gauge trend\n- policy.path · 57.9 → — · UNTESTED · 9/16 hike 57.9% is a coin-flip; no edge either side\n- credit · 2.65 → -1 bp · UNTESTED · HY 2.65%, marginally tighter; no stress signal to trade\n- vol · 14.52 → +0.21 pts · UNTESTED · VIX 14.52, +0.21pts; low-teens regime, no vol call\n- dealer.positioning · 768.35 → +1.84 pts · UNTESTED · SPY flip 768.35 near spot; pivot, not a directional level\n- flow · 39758465 → — · UNTESTED · Tide net premium as-of 09-04; stale, no prior to compare\n- commodities · 4418.4 → gold 4418.4 (-0.26%) · WTI crude 92.64 (+1.27%) · UNTESTED · Gold 4418.92 (-0.25%), crude 92.51 (+1.13%); mixed, no call\n- fx · 118.7 → +0.4 index pts · UNTESTED · Broad dollar index 118.7 as-of 08-28; too stale to trade\n- equity.internals · 770.19 → SPY -2.98 · QQQ +1.29 · IWM +0.82 · UNTESTED · SPY near flip; no weekly bars, leadership unreadable\n3b sectors\n- sector:Computer/GPU · no datum this period · UNTESTED\n- sector:Semi-Logic/ASIC · no datum this period · UNTESTED\n- sector:Foundry · no datum this period · UNTESTED\n- sector:Semi-Cap/EDA · no datum this period · UNTESTED\n- sector:Memory/Storage · no datum this period · UNTESTED\n- sector:Cybersecurity · no datum this period · UNTESTED\n- sector:Software/SaaS · no datum this period · UNTESTED\n- sector:Cloud/Hyperscaler · no datum this period · UNTESTED\n- sector:Foundation-Model-Proxy · no datum this period · UNTESTED\n- sector:Devices/Endpoint · no datum this period · UNTESTED\n3c themes\n- theme:el-nino-ag-2026 · no datum this period · UNTESTED\n  kill armed: ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions\n  evidence: operator-checked\n3d rotation\n  theme:el-nino-ag-2026 · untested — no bars at or before 2026-09-07\n  XLB · untested — no bars at or before 2026-09-07\n  XLC · untested — no bars at or before 2026-09-07\n  XLE · untested — no bars at or before 2026-09-07\n  XLF · untested — no bars at or before 2026-09-07\n  XLI · untested — no bars at or before 2026-09-07\n  XLK · untested — no bars at or before 2026-09-07\n  XLP · untested — no bars at or before 2026-09-07\n  XLRE · untested — no bars at or before 2026-09-07\n  XLU · untested — no bars at or before 2026-09-07\n  XLV · untested — no bars at or before 2026-09-07\n  XLY · untested — no bars at or before 2026-09-07\n  benchmark SPY · 1w —% · 4w —% · 12w —% · as of 2026-09-07\nleft out: 22 rows — rates.front, rates.long, curve.shape, policy.path, credit, vol, dealer.positioning, flow, commodities, fx, equity.internals, sector:Computer/GPU, sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA, sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint, theme:el-nino-ag-2026"
+      }
+    ],
+    "regime": {
+      "paragraph": ""
+    },
+    "candidates": [],
+    "riskList": [],
+    "charts": {
+      "gex": []
+    },
+    "spyForecast": {
+      "scorable": false,
+      "reason": "the scenarios step wrote no spyForecast object"
+    },
+    "runLabel": "weekly",
+    "appBase": "http://127.0.0.1:3001",
+    "footer": {
+      "coverage": [
+        "macro — ow_macro_rates",
+        "policy — ow_argon_policy_path",
+        "gex — ow_uw_gex",
+        "spot — ow_spot",
+        "tide — ow_uw_market_state",
+        "calendar — ow_uw_calendar",
+        "commodities — ow_tv_commodities",
+        "watchlist — ow_argon_watchlist",
+        "earnings — ow_uw_earnings",
+        "ivTerm — ow_uw_iv_term",
+        "actions — ow_massive_actions"
+      ],
+      "asOf": [
+        "ow_argon_policy_path — 2026-09-07",
+        "ow_spot — 2026-09-08T00:11:00.224Z",
+        "ow_uw_calendar — 2026-09-08T00:10:58.222Z",
+        "ow_tv_commodities — 2026-09-08T00:11:02.238Z",
+        "ow_argon_watchlist — 2026-09-08T00:37:33.596719+08:00",
+        "ow_uw_earnings — 2026-09-08T00:11:22.759Z"
+      ],
+      "notes": [
+        "earnings: 60 of 161 universe members looked up (maxEarningsLookups)",
+        "bars: 0 of 50 basket symbols answered",
+        "SPY: ow_apex_bars: /v1/equity/SPY/bars returned 502 Bad Gateway",
+        "NVDA: ow_apex_bars: /v1/equity/NVDA/bars returned 502 Bad Gateway",
+        "AMD: ow_apex_bars: /v1/equity/AMD/bars returned 502 Bad Gateway"
+      ]
+    },
+    "faults": [
+      "dated catalysts names CPI, which the admitted rows do not carry — the paragraph is dropped"
+    ],
+    "otherSections": [
+      {
+        "title": "5 sessions, 2026-08-31 to 2026-09-04",
+        "body": "Only 2 of these 5 sessions have a report on disk, and 0 carry a regime record — the 2026-09-03 and 2026-09-04 blocks both read `regime: unavailable`, meaning those sessions RAN but their regime record is missing."
+      },
+      {
+        "title": "10 sessions, 2026-08-24 to 2026-09-04",
+        "body": "Across these 10 sessions, 0 carry a regime record — sessionsWithRegime is 0 — and only 2 have a report on disk. The 2026-09-03 and 2026-09-04 regime blocks read `regime: unavailable`; those sessions ran but their regime record is missing, and the other eight carry no regime block at all."
+      },
+      {
+        "title": "21 sessions, 2026-08-07 to 2026-09-04",
+        "body": "Process statistics: 2 of 21 sessions have a report on disk; sessionsWithRegime 0. Checks scored 0 (0 hit, 0 miss, 0 not-observed). Mode histogram empty (ratio 0, persistence 0, invalidation 0, no-data 0). Focus churn 0, focus hit rate null. Calls scored 0, outstanding 0, hit rate null. Verdicts settled 0, mean Brier null. Budget violations 0, coverage gaps 0."
+      },
+      {
+        "title": "1 · Scorecard",
+        "body": "Nothing settled yet — no call has come due · calibration n=0, not yet scorable\n0 open calls\nFocus: 0 of 0 moved ≥ implied · 0 open\nCoverage gaps: 22 rows (rates.front, rates.long, curve.shape, policy.path, credit, vol, dealer.positioning, flow, commodities, fx, equity.internals, sector:Computer/GPU, sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA, sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint, theme:el-nino-ag-2026)"
+      },
+      {
+        "title": "6 · Focus",
+        "body": "rank · ticker · event · IV rank · implied move · open call · why\n| 1 | ADBE | earnings (post) 2026-09-10 | 69 | 6.9% | — | On the list because it's the only in-week print (post 09-10). IV rank 68.84 and 6.93% implied move show real event premium, not distance. No sector read available (bars down); wait for the print. |\n| 2 | TSLA | earnings 2026-10-28 | 11 | 13.6% | — | Watchlist-pinned, earnings 10-28 far off; IV rank 10.91 is mostly distance, not complacency. Nothing dated inside the week. No view yet — waiting for bars and a nearer catalyst. |\n| 3 | AVGO | earnings 2026-12-10 | 1 | 15.1% | — | Pinned; earnings 12-10 is 67 sessions out and IV rank 1.31 reflects that distance almost entirely. No near catalyst. No view — watch semis rotation once the bar feed returns. |\n| 4 | COST | earnings (post) 2026-09-24 | — | 4.0% | — | Earnings post 09-24; IV rank low, 3.98% implied move is a tight name. Nothing before it in-week. No view yet — a consumer read after the Fed. |\n| 5 | FDS | earnings (pre) 2026-09-30 | — | 11.6% | — | Earnings pre 09-30; 11.6% implied move is rich for the timeframe. No nearer tell. No view — waiting to see if data-services demand shows in guidance. |\n| 6 | DAL | earnings 2026-10-08 | — | 8.1% | — | Earnings 10-08, three-plus weeks out; 8.1% implied move. Crude firming (+1.13%) is the macro cross-current for fuel. No view yet — watch oil into the print. |\n| 7 | GS | earnings (pre) 2026-10-13 | — | 7.7% | — | Earnings pre 10-13; 7.71% implied move. FOMC 9/16 rate outcome is the read-through to trading and rates desks. No view yet — Fed first. |\n| 8 | ASML | earnings (pre) 2026-10-14 | 28 | 10.2% | — | Earnings pre 10-14; IV rank 28.23, 10.2% implied move. The semi-cap read-through name, but bars are down so rotation is dark. No view — watch the sector when feeds return. |\n| 9 | DECK | earnings 2026-10-22 | — | 11.4% | — | Earnings 10-22, distant; 11.4% implied move. No near catalyst. No view yet — a discretionary/consumer name to revisit closer to the print. |\n| 10 | F | earnings 2026-10-22 | — | 8.8% | — | Earnings 10-22; 8.76% implied move. Rate path and crude are the macro inputs. No view yet — auto demand read tied to the Fed outcome. |\n| 11 | CDNS | earnings 2026-10-26 | 31 | 13.2% | — | Earnings 10-26; IV rank 31.1, 13.2% implied move. EDA name; the ASML 10-14 read-through is the nearer tell. No view — watch that first. |\n| 12 | BE | earnings 2026-10-27 | — | 29.1% | — | Earnings 10-27; 29.1% implied move is by far the richest here — a high-variance name. No near catalyst. No view yet, and size accordingly when it nears. |\n| 13 | GLW | earnings 2026-10-27 | — | 19.8% | — | Earnings 10-27; 19.8% implied move, unusually wide. Distant and no in-week tell. No view — revisit near the print for what's driving that premium. |\n| 14 | AAPL | earnings 2026-10-29 | 44 | 8.4% | — | Earnings 10-29; IV rank 44.47, 8.38% implied move. Devices/Endpoint anchor. No near catalyst. No view yet — watch product/demand headlines into fall. |\n| 15 | AMZN | earnings 2026-10-29 | 22 | 11.3% | — | Earnings 10-29; IV rank 21.92, 11.3% implied move. Cloud/hyperscaler read. Distant, no in-week tell. No view yet — cloud spend into the print is the watch. |\nweights: declared prior 2026-09-06"
+      },
+      {
+        "title": "7 · Open calls",
+        "body": "nothing outstanding"
+      }
+    ],
+    "focus": {
+      "period": "weekly",
+      "rows": [
+        {
+          "ticker": "ADBE",
+          "event": "earnings (post) 2026-09-10",
+          "why": "On the list because it's the only in-week print (post 09-10). IV rank 68.84 and 6.93% implied move show real event premium, not distance. No sector read available (bars down); wait for the print.",
+          "ivRank": 68.84
+        },
+        {
+          "ticker": "TSLA",
+          "event": "earnings 2026-10-28",
+          "why": "Watchlist-pinned, earnings 10-28 far off; IV rank 10.91 is mostly distance, not complacency. Nothing dated inside the week. No view yet — waiting for bars and a nearer catalyst.",
+          "ivRank": 10.91
+        },
+        {
+          "ticker": "AVGO",
+          "event": "earnings 2026-12-10",
+          "why": "Pinned; earnings 12-10 is 67 sessions out and IV rank 1.31 reflects that distance almost entirely. No near catalyst. No view — watch semis rotation once the bar feed returns.",
+          "ivRank": 1.31
+        },
+        {
+          "ticker": "COST",
+          "event": "earnings (post) 2026-09-24",
+          "why": "Earnings post 09-24; IV rank low, 3.98% implied move is a tight name. Nothing before it in-week. No view yet — a consumer read after the Fed."
+        },
+        {
+          "ticker": "FDS",
+          "event": "earnings (pre) 2026-09-30",
+          "why": "Earnings pre 09-30; 11.6% implied move is rich for the timeframe. No nearer tell. No view — waiting to see if data-services demand shows in guidance."
+        },
+        {
+          "ticker": "DAL",
+          "event": "earnings 2026-10-08",
+          "why": "Earnings 10-08, three-plus weeks out; 8.1% implied move. Crude firming (+1.13%) is the macro cross-current for fuel. No view yet — watch oil into the print."
+        },
+        {
+          "ticker": "GS",
+          "event": "earnings (pre) 2026-10-13",
+          "why": "Earnings pre 10-13; 7.71% implied move. FOMC 9/16 rate outcome is the read-through to trading and rates desks. No view yet — Fed first."
+        },
+        {
+          "ticker": "ASML",
+          "event": "earnings (pre) 2026-10-14",
+          "why": "Earnings pre 10-14; IV rank 28.23, 10.2% implied move. The semi-cap read-through name, but bars are down so rotation is dark. No view — watch the sector when feeds return.",
+          "ivRank": 28.23
+        },
+        {
+          "ticker": "DECK",
+          "event": "earnings 2026-10-22",
+          "why": "Earnings 10-22, distant; 11.4% implied move. No near catalyst. No view yet — a discretionary/consumer name to revisit closer to the print."
+        },
+        {
+          "ticker": "F",
+          "event": "earnings 2026-10-22",
+          "why": "Earnings 10-22; 8.76% implied move. Rate path and crude are the macro inputs. No view yet — auto demand read tied to the Fed outcome."
+        },
+        {
+          "ticker": "CDNS",
+          "event": "earnings 2026-10-26",
+          "why": "Earnings 10-26; IV rank 31.1, 13.2% implied move. EDA name; the ASML 10-14 read-through is the nearer tell. No view — watch that first.",
+          "ivRank": 31.1
+        },
+        {
+          "ticker": "BE",
+          "event": "earnings 2026-10-27",
+          "why": "Earnings 10-27; 29.1% implied move is by far the richest here — a high-variance name. No near catalyst. No view yet, and size accordingly when it nears."
+        },
+        {
+          "ticker": "GLW",
+          "event": "earnings 2026-10-27",
+          "why": "Earnings 10-27; 19.8% implied move, unusually wide. Distant and no in-week tell. No view — revisit near the print for what's driving that premium."
+        },
+        {
+          "ticker": "AAPL",
+          "event": "earnings 2026-10-29",
+          "why": "Earnings 10-29; IV rank 44.47, 8.38% implied move. Devices/Endpoint anchor. No near catalyst. No view yet — watch product/demand headlines into fall.",
+          "ivRank": 44.47
+        },
+        {
+          "ticker": "AMZN",
+          "event": "earnings 2026-10-29",
+          "why": "Earnings 10-29; IV rank 21.92, 11.3% implied move. Cloud/hyperscaler read. Distant, no in-week tell. No view yet — cloud spend into the print is the watch.",
+          "ivRank": 21.92
+        }
+      ],
+      "churn": 0
+    },
+    "themes": [
+      {
+        "id": "el-nino-ag-2026",
+        "token": "untested",
+        "excess1w": "—",
+        "excessSinceEntered": "—",
+        "leadership": "mixed",
+        "why": "Cannot confirm: bar feed down (502 on DBA/MOS/NTR/DE), so instrument-vs-SPY excess is unmeasurable this week. Kill not met; evidence is operator-checked only.",
+        "kill": "ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions",
+        "killMet": false
+      }
+    ],
+    "rotation": {
+      "asOf": "2026-09-07",
+      "benchmark": "SPY",
+      "rows": [
+        {
+          "symbol": "theme:el-nino-ag-2026",
+          "label": "el-nino-ag-2026",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLB",
+          "label": "XLB",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLC",
+          "label": "XLC",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLE",
+          "label": "XLE",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLF",
+          "label": "XLF",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLI",
+          "label": "XLI",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLK",
+          "label": "XLK",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLP",
+          "label": "XLP",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLRE",
+          "label": "XLRE",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLU",
+          "label": "XLU",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLV",
+          "label": "XLV",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        },
+        {
+          "symbol": "XLY",
+          "label": "XLY",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bars at or before 2026-09-07"
+        }
+      ]
+    },
+    "coverageDetail": [
+      {
+        "id": "rates.front",
+        "level": "4.377",
+        "move": "+0 bp",
+        "prior": "4.374",
+        "asOf": "2026-09-08T00:11:02.186Z",
+        "leftOut": "2yr 4.375% flat vs 4.374%; awaits FOMC/CPI to move"
+      },
+      {
+        "id": "rates.long",
+        "level": "4.792",
+        "move": "+1 bp",
+        "prior": "4.784",
+        "asOf": "2026-09-08T00:11:02.186Z",
+        "leftOut": "10yr 4.79%, +1bp; no directional catalyst before CPI"
+      },
+      {
+        "id": "curve.shape",
+        "level": "41.5",
+        "leftOut": "2s10s 41.5bp; no prior observation to gauge trend"
+      },
+      {
+        "id": "policy.path",
+        "level": "57.9",
+        "asOf": "2026-09-07",
+        "leftOut": "9/16 hike 57.9% is a coin-flip; no edge either side"
+      },
+      {
+        "id": "credit",
+        "level": "2.65",
+        "move": "-1 bp",
+        "prior": "2.66",
+        "asOf": "2026-09-03",
+        "leftOut": "HY 2.65%, marginally tighter; no stress signal to trade"
+      },
+      {
+        "id": "vol",
+        "level": "14.52",
+        "move": "+0.21 pts",
+        "prior": "14.31",
+        "asOf": "2026-09-08T00:11:02.186Z",
+        "leftOut": "VIX 14.52, +0.21pts; low-teens regime, no vol call"
+      },
+      {
+        "id": "dealer.positioning",
+        "level": "768.35",
+        "move": "+1.84 pts",
+        "prior": "770.19",
+        "asOf": "2026-09-04T20:14:28.094000Z",
+        "leftOut": "SPY flip 768.35 near spot; pivot, not a directional level"
+      },
+      {
+        "id": "flow",
+        "level": "39758465",
+        "asOf": "2026-09-04T16:10:00-04:00",
+        "leftOut": "Tide net premium as-of 09-04; stale, no prior to compare"
+      },
+      {
+        "id": "commodities",
+        "level": "4418.4",
+        "move": "gold 4418.4 (-0.26%) · WTI crude 92.64 (+1.27%)",
+        "asOf": "2026-09-08T00:11:02.238Z",
+        "leftOut": "Gold 4418.92 (-0.25%), crude 92.51 (+1.13%); mixed, no call"
+      },
+      {
+        "id": "fx",
+        "level": "118.7",
+        "move": "+0.4 index pts",
+        "prior": "118.4",
+        "asOf": "2026-08-28",
+        "leftOut": "Broad dollar index 118.7 as-of 08-28; too stale to trade"
+      },
+      {
+        "id": "equity.internals",
+        "level": "770.19",
+        "move": "SPY -2.98 · QQQ +1.29 · IWM +0.82",
+        "asOf": "2026-09-08T00:11:00.224Z",
+        "leftOut": "SPY near flip; no weekly bars, leadership unreadable"
+      },
+      {
+        "id": "sector:Computer/GPU",
+        "asOf": "2026-09-08T00:36:09.951855+08:00",
+        "members": [
+          "NVDA",
+          "AMD",
+          "ARM",
+          "DELL",
+          "HPE",
+          "HPQ"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Semi-Logic/ASIC",
+        "asOf": "2026-09-08T00:35:38.374604+08:00",
+        "members": [
+          "AVGO",
+          "ARM",
+          "MCHP",
+          "MRVL",
+          "QCOM",
+          "TXN"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Foundry",
+        "asOf": "2026-09-08T00:35:49.253967+08:00",
+        "members": [
+          "INTC",
+          "TSEM",
+          "TSM",
+          "UMC"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Semi-Cap/EDA",
+        "asOf": "2026-09-08T00:34:20.237501+08:00",
+        "members": [
+          "AMAT",
+          "ARM",
+          "ASML",
+          "CDNS",
+          "KLAC",
+          "LRCX",
+          "SNPS",
+          "TER"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Memory/Storage",
+        "asOf": "2026-09-08T00:36:56.661330+08:00",
+        "members": [
+          "STX",
+          "WDC",
+          "MU",
+          "SNDK"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Cybersecurity",
+        "asOf": "2026-09-08T00:37:24.969059+08:00",
+        "members": [
+          "NET",
+          "S",
+          "CRWD",
+          "PANW"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Software/SaaS",
+        "asOf": "2026-09-08T00:37:33.596719+08:00",
+        "members": [
+          "ADBE",
+          "FIG",
+          "NOW",
+          "SHOP",
+          "ZM",
+          "CRM"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Cloud/Hyperscaler",
+        "asOf": "2026-09-08T00:37:08.410310+08:00",
+        "members": [
+          "GOOGL",
+          "AMZN",
+          "BABA",
+          "IBM",
+          "MSFT",
+          "ORCL"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Foundation-Model-Proxy",
+        "asOf": "2026-09-08T00:36:51.021848+08:00",
+        "members": [
+          "GOOGL",
+          "AMZN",
+          "NVDA",
+          "MSFT",
+          "META"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "sector:Devices/Endpoint",
+        "asOf": "2026-09-08T00:35:51.332026+08:00",
+        "members": [
+          "TSLA",
+          "AAPL"
+        ],
+        "untested": "no weekly bars for the chain members",
+        "leftOut": "no weekly bars for the chain members"
+      },
+      {
+        "id": "theme:el-nino-ag-2026",
+        "untested": "no bars for 4 of 4 instruments",
+        "leftOut": "no bars for 4 of 4 instruments"
+      }
+    ]
+  },
+  "report": {
+    "subject": "",
+    "body": "",
+    "artifacts": []
+  }
+}

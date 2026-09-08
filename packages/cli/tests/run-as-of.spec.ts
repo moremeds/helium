@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -54,6 +54,27 @@ function catalog(): CapabilityCatalog {
 }
 
 describe("--as-of", () => {
+  it("passes the actual phase to tenant tools independently of the live variant", async () => {
+    const loaded = tenant();
+    const stateRoot = mkdtempSync(join(tmpdir(), "helium-phase-state-"));
+    const captured = join(stateRoot, "config.json");
+    mkdirSync(join(loaded.dir, "lib", "tools"), { recursive: true });
+    writeFileSync(join(loaded.dir, "package.json"), '{"type":"module"}');
+    writeFileSync(join(loaded.dir, "lib", "tools", "index.js"),
+      `import { writeFileSync } from 'node:fs';
+       export function buildTools(cfg) {
+         writeFileSync(${JSON.stringify(captured)}, JSON.stringify({phase: cfg.phase, variant: cfg.variant}));
+         return [];
+       }`);
+    const audit = new AuditStore(":memory:");
+    try {
+      await runTenant({ tenant: loaded, audit, stateRoot, pluginsDir: "/nonexistent",
+        providers: [], providersSkipped: [], gates: [], channels: [], renderer: null,
+        catalog: catalog(), phase: "close", variant: "live" });
+      expect(JSON.parse(readFileSync(captured, "utf8"))).toEqual({phase: "close", variant: "live"});
+    } finally { audit.close(); }
+  });
+
   it("parses the instant, keeps the default variant, and refuses a typo", () => {
     const parsed = parseRunArgs([
       "--phase",

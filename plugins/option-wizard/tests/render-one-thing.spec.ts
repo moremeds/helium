@@ -181,13 +181,11 @@ describe("parseReviewDoc", () => {
 describe("measureReview", () => {
   const long = (n: number) => Array.from({ length: n }, () => "word").join(" ");
 
-  it("flags the same prose at 300 weekly and 120 daily", () => {
+  it("allows a developed weekly topic while keeping daily shorter", () => {
     const body = { review: long(380) };
-    expect(measureReview(body, REVIEW_BUDGET.weekly).overages[0]?.limit).toBe(
-      300,
-    );
+    expect(measureReview(body, REVIEW_BUDGET.weekly).overages).toEqual([]);
     expect(measureReview(body, REVIEW_BUDGET.daily).overages[0]?.limit).toBe(
-      120,
+      300,
     );
   });
 
@@ -339,9 +337,9 @@ describe("buildView over a frame and an edit step", () => {
     expect(view.everythingElse?.length).toBe(PERSISTENCE_BUDGET.elseLines);
   });
 
-  it("has no lead item on a day nothing could be ranked, and says why", () => {
+  it("keeps an editor lead on a day nothing could be ranked", () => {
     const view = run({ frame: frame({ mode: "no-data" }) });
-    expect(view.oneThing).toBeUndefined();
+    expect(view.oneThing?.body).toContain("10Y fell");
     expect(view.footer?.notes.join(" ")).toContain("ow_uw_gex");
   });
 

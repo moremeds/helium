@@ -9,8 +9,7 @@
  * `need(env, …)`. That IS the laptop's shape, and the frame it produces is the
  * one an unconfigured machine gets.
  */
-import { readFileSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -89,6 +88,42 @@ describe("ow_session_frame", () => {
     expect(frame.focus.weightsNote).toBe("weights: declared prior 2026-09-06");
   });
 
+  it("uses the actual premarket phase, not the live variant, for prior checks", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-frame-phase-"));
+    const record = {
+      cause: "recorded",
+      tide: "flat",
+      thesis: "recorded thesis",
+      checks: [
+        { series: "a", level: "1", text: "a" },
+        { series: "b", level: "1", text: "b" },
+        { series: "c", level: "1", text: "c" },
+      ],
+    };
+    for (const [day, label] of [
+      ["2026-09-04", "close"],
+      ["2026-09-08", "intraday"],
+      ["2026-09-08", "close"],
+    ]) {
+      const dir = join(stateRoot, "option-wizard", day);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${label}.regime.json`), JSON.stringify(record));
+    }
+    const frame = JSON.parse(
+      await buildTools({
+        stateRoot,
+        env: { HELIUM_AUDIT_DB: join(stateRoot, "audit.db") },
+        asOf: new Date("2026-09-08T12:45:00.000Z"),
+        phase: "premarket",
+        variant: "live",
+        extensions: spec.extensions,
+      })
+        .find((tool) => tool.name === "ow_session_frame")!
+        .run({}),
+    ) as { checks: { from?: { day: string; label: string } } };
+    expect(frame.checks.from).toEqual({ day: "2026-09-04", label: "close" });
+  });
+
   // THE 2026-09-06 DEFECT. The frame handed `ow_uw_earnings` the whole
   // universe in ONE call and zod refused it with `Too big: expected array to
   // have <=12 items`, so the earnings layer was skipped, not one focus row
@@ -97,9 +132,10 @@ describe("ow_session_frame", () => {
   // stopped batching would ask for zero tickers, not for fourteen.
   it("batches the earnings lookup at the tool's own cap", async () => {
     const members = Array.from(
-      { length: EARNINGS_PER_CALL + 2 },
+      { length: EARNINGS_PER_CALL + 1 },
       (_, index) => `TT${String(index)}`,
     );
+    members.push("NVDA");
     const asked: string[] = [];
     const json = (body: unknown): Response =>
       new Response(JSON.stringify(body), {
@@ -152,6 +188,7 @@ describe("ow_session_frame", () => {
       focus: { weekly: Array<{ nearest?: { day?: string } }> };
     };
     expect([...asked].sort()).toEqual([...members].sort());
+    expect(asked[0]).toBe("NVDA");
     const earnings = frame.coverage.find((row) => row.layer === "earnings")!;
     expect(earnings.state).toBe("ok");
     expect(earnings.reason).toBeUndefined();

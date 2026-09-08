@@ -1,5 +1,6 @@
 import { gzipSync } from "node:zlib";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -218,6 +219,24 @@ describe("fr_dated_events extractor", () => {
     ]);
   });
 
+  it("keeps distinct same-day occurrences while collapsing a repeated one", () => {
+    const first = {
+      date: "2026-09-16",
+      token: "2026-09-16",
+      tool: "ow_session_frame",
+      file: "00001-ow_session_frame.json.gz",
+      snippet: '"event":"FOMC 9/16"',
+    };
+    const second = {
+      ...first,
+      snippet: '"event":"CPI release"',
+    };
+    const collated = collateDatedEvents([first, second, first], {});
+    expect(collated.events).toEqual([second, first]);
+    expect(collated.total).toBe(2);
+    expect(collated.truncated).toBe(false);
+  });
+
   it("caps the list and says so", () => {
     const many = Array.from({ length: MAX_DATED_EVENTS + 5 }, (_, i) => ({
       date: `2026-09-${String((i % 28) + 1).padStart(2, "0")}`,
@@ -244,10 +263,28 @@ describe("fr_dated_events extractor", () => {
     }).find((entry) => entry.name === "fr_dated_events");
     const parsed = JSON.parse(
       await built!.run({ from: "2026-09-15", to: "2026-09-20" }),
-    ) as { total: number; truncated: boolean; events: Array<{ date: string }> };
+    ) as { total: number; offset: number; truncated: boolean; events: Array<{ date: string }> };
+    expect(parsed.offset).toBe(0);
     expect(parsed.truncated).toBe(false);
     expect(parsed.events.every((event) => event.date === "2026-09-16")).toBe(true);
     expect(parsed.total).toBe(parsed.events.length);
+  });
+
+  it("continues a dated-event window from the offset it names", () => {
+    const many = Array.from({ length: MAX_DATED_EVENTS + 1 }, (_, i) => ({
+      date: "2026-09-16",
+      token: `t${String(i)}`,
+      tool: "t",
+      file: "f.json",
+      snippet: `snippet ${String(i)}`,
+    }));
+    const first = collateDatedEvents(many, {});
+    expect(first.nextOffset).toBe(MAX_DATED_EVENTS);
+    const last = collateDatedEvents(many, {}, first.nextOffset);
+    expect(last.events).toHaveLength(1);
+    expect(last.offset).toBe(MAX_DATED_EVENTS);
+    expect(last.nextOffset).toBeUndefined();
+    expect(last.truncated).toBe(false);
   });
 });
 
@@ -277,5 +314,112 @@ describe("fr_evidence traversal", () => {
     await expect(
       tool(sample(100)).run({ file: "../../../etc/passwd" }),
     ).rejects.toThrow(/not a recording name/u);
+  });
+});
+
+describe("saved reviewer verdict validation", () => {
+  function runVerdict(verdict: unknown): () => Buffer {
+    const root = mkdtempSync(join(tmpdir(), "flash-review-verdict-"));
+    const page = join(root, "page.md");
+    const toolIo = join(root, "tool-io");
+    writeFileSync(page, "Market conclusion.\n");
+    mkdirSync(toolIo);
+    writeFileSync(
+      join(root, "evidence.json"),
+      JSON.stringify({
+        run: { toolIo },
+        steps: [{ task: "review", role: "reviewer", output: JSON.stringify(verdict) }],
+      }),
+    );
+    // The validator reads saved tool recordings rather than a markdown
+    // transcript, so a malformed pass cannot become usable after rendering.
+    writeFileSync(
+      join(toolIo, "00001-fr_dated_events.json"),
+      JSON.stringify({
+        tool: "fr_dated_events",
+        raw: JSON.stringify({
+          window: {},
+          total: 1,
+          offset: 0,
+          returned: 1,
+          truncated: false,
+          events: [{ date: "2026-09-16", file: "frame.json", snippet: "FOMC" }],
+        }),
+      }),
+    );
+    writeFileSync(
+      join(toolIo, "00002-fr_evidence.json"),
+      JSON.stringify({
+        tool: "fr_evidence",
+        raw: JSON.stringify({ recordings: [{ file: "frame.json" }] }),
+      }),
+    );
+    return () =>
+      execFileSync(
+        process.execPath,
+        [
+          join(PLUGINS, "flash-review", "..", "..", "scripts", "flash-review-validate.mjs"),
+          page,
+          join(root, "evidence.json"),
+        ],
+        { stdio: "pipe" },
+      );
+  }
+
+  it("rejects a malformed pass that carries a major finding", () => {
+    expect(() =>
+      runVerdict({
+        verdict: "pass",
+        findings: [
+          {
+            signature: "date-conflict",
+            sentence: "Market conclusion.",
+            evidence: "frame.json",
+            severity: "major",
+          },
+        ],
+        events_checked: [
+          { event: "FOMC", date: "2026-09-16", recording: "frame.json", in_page: false },
+        ],
+        kept_inference: [],
+      })(),
+    ).toThrow(/pass conflicts with a blocking or major finding/u);
+  });
+
+  it("accepts a structurally complete pass from saved reviewer evidence", () => {
+    expect(
+      runVerdict({
+        verdict: "pass",
+        findings: [],
+        events_checked: [
+          { event: "FOMC", date: "2026-09-16", recording: "frame.json", in_page: true },
+        ],
+        kept_inference: [],
+      })(),
+    ).toBeInstanceOf(Buffer);
+  });
+
+  it("requires every page in a dated-event sequence", () => {
+    const root = mkdtempSync(join(tmpdir(), "flash-review-pages-"));
+    const page = join(root, "page.md");
+    const toolIo = join(root, "tool-io");
+    writeFileSync(page, "Market conclusion.\n");
+    mkdirSync(toolIo);
+    writeFileSync(
+      join(root, "evidence.json"),
+      JSON.stringify({
+        run: { toolIo },
+        steps: [{ task: "review", role: "reviewer", output: JSON.stringify({ verdict: "pass", findings: [], events_checked: Array.from({ length: 81 }, (_, i) => ({ event: `event ${String(i)}`, date: "2026-09-16", recording: "frame.json", in_page: true })), kept_inference: [] }) }],
+      }),
+    );
+    for (const [name, pageResult] of [
+      ["00001-fr_dated_events.json", { window: {}, total: 81, offset: 0, returned: 80, nextOffset: 80, truncated: true, events: Array.from({ length: 80 }, (_, i) => ({ date: "2026-09-16", file: "frame.json", tool: "t", token: `t${String(i)}`, snippet: `s${String(i)}` })) }],
+      ["00002-fr_dated_events.json", { window: {}, total: 81, offset: 80, returned: 1, truncated: false, events: [{ date: "2026-09-16", file: "frame.json", tool: "t", token: "t80", snippet: "s80" }] }],
+    ] as const) writeFileSync(join(toolIo, name), JSON.stringify({ tool: "fr_dated_events", raw: JSON.stringify(pageResult) }));
+    const command = () => execFileSync(process.execPath, [join(PLUGINS, "flash-review", "..", "..", "scripts", "flash-review-validate.mjs"), page, join(root, "evidence.json")], { stdio: "pipe" });
+    expect(command()).toBeInstanceOf(Buffer);
+    // Removing the continuation turns the prior prefix into an inconclusive review.
+    writeFileSync(join(toolIo, "00002-fr_dated_events.json"), JSON.stringify({ tool: "fr_evidence", raw: JSON.stringify({ recordings: [{ file: "frame.json" }] }) }));
+    expect(command).toThrow(/never completed a dated-event page sequence/u);
   });
 });

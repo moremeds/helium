@@ -1,0 +1,92 @@
+[
+  {
+    "sample": "baseline",
+    "runId": "run-83852efc-3f9d-440c-8e91-2cb4d58059a1",
+    "codeSha": "33e7c26",
+    "asOf": null,
+    "startedAt": "2026-09-08T00:10:57.568Z",
+    "rawRecordings": 8,
+    "sectionWords": {
+      "Market review": 268,
+      "Outlook": 326,
+      "Dated catalysts": 191
+    },
+    "degradation": null,
+    "faults": [
+      "dated catalysts names CPI, which the admitted rows do not carry \u2014 the paragraph is dropped"
+    ],
+    "sourceSha256": "dbc97b7700f4378ce2d329aa40fc1eb875925e3a7bd5a6013cdfd0bd5a14c0ff"
+  },
+  {
+    "sample": "replay",
+    "runId": "run-6d18ff07-ff71-4cc1-89a2-f2509088b6ab",
+    "codeSha": "de50708",
+    "asOf": "2026-09-08T00:10:57.000Z",
+    "startedAt": "2026-09-08T00:39:26.179Z",
+    "rawRecordings": 9,
+    "sectionWords": {
+      "Market review": 292,
+      "Outlook": 345,
+      "Dated catalysts": 191
+    },
+    "degradation": "Data degraded: gate flash-budget refused (review 569 of 300)",
+    "faults": [
+      "dated catalysts names 2026-09-07, CPI, which the admitted rows do not carry \u2014 the paragraph is dropped"
+    ],
+    "sourceSha256": "61941d7a2bace71cf17addbb89e597615e4c4d58a9f9de392616bf628bedfb9a"
+  },
+  {
+    "sample": "after",
+    "runId": "run-0a2ef363-cc5b-40a5-9ba0-f159ec2d04b3",
+    "codeSha": "de50708",
+    "asOf": null,
+    "startedAt": "2026-09-08T00:39:10.495Z",
+    "rawRecordings": 8,
+    "sectionWords": {
+      "Market review": 663,
+      "Outlook": 386,
+      "Dated catalysts": 191
+    },
+    "degradation": "Data degraded: gate flash-budget refused (focusWords ADBE 47 of 40)",
+    "faults": [
+      "dated catalysts names NOT, CPI, which the admitted rows do not carry \u2014 the paragraph is dropped"
+    ],
+    "sourceSha256": "a66afec5d3d6f17fd2474c97ecbc531c69fcbeaa1c0345b6d19ae7ca09712c41"
+  },
+  {
+    "sample": "accept",
+    "runId": "run-dc89f07c-fae4-4f94-ba48-5eaf37172417",
+    "codeSha": "76a3c9f",
+    "asOf": "2026-09-08T00:39:10.495Z",
+    "startedAt": "2026-09-08T00:44:03.374Z",
+    "rawRecordings": 7,
+    "sectionWords": {
+      "Market review": 522,
+      "Outlook": 339,
+      "Dated catalysts": 191
+    },
+    "degradation": "Data degraded: gate flash-budget refused (focusWords ADBE 48 of 40)",
+    "faults": [
+      "dated catalysts names 2026-09-11, which the admitted rows do not carry \u2014 the paragraph is dropped"
+    ],
+    "sourceSha256": "416fcb32d86e9abce25c12f553b036f791857674d6b49306dc6cb3ed1041d5f4"
+  },
+  {
+    "sample": "final",
+    "runId": "run-90bf475f-6686-4219-8f29-903dc9a2b5d5",
+    "codeSha": "3e48937",
+    "asOf": null,
+    "startedAt": "2026-09-08T00:56:18.195Z",
+    "rawRecordings": 10,
+    "sectionWords": {
+      "Market review": 584,
+      "Outlook": 334,
+      "Dated catalysts": 11
+    },
+    "degradation": "Data degraded: gate flash-budget refused (focusWords ADBE 42 of 40)",
+    "faults": [
+      "dated catalysts names 2026-09-11, 2026-05-31, EPS, which the admitted rows do not carry \u2014 the paragraph is dropped"
+    ],
+    "sourceSha256": "f1e5d086166e29bc9a51f84cdcd9665de742d544a62e37e2d7fad86e54f4c597"
+  }
+]

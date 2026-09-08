@@ -186,15 +186,16 @@ const str = (value: unknown): string | undefined =>
 
 const DAY_PREFIX = 10;
 
-/**
- * Extraction only. `_cfg` is declared because every caller already holds the
- * config and the weights belong to the same declaration — but nothing here
- * reads it: an event is a DATE, and what it is worth is `scoreFocus`'s
- * question, not this one's.
- */
+/** Calendar-day horizon for the reader's upcoming-event window. */
+export function inEventWindow(day: string, eventDay: string, days: number): boolean {
+  const distance = (Date.parse(eventDay.slice(0, 10)) - Date.parse(day)) / 86_400_000;
+  return Number.isFinite(distance) && distance >= 0 && distance <= days;
+}
+
+/** Extract only events inside the reader's horizon; scoring stays separate. */
 export function focusEvents(
   inputs: FocusInputs,
-  _cfg: FocusConfig,
+  cfg: FocusConfig,
 ): FocusEvent[] {
   const notes = inputs.notes ?? [];
   const inUniverse = new Set(inputs.universe);
@@ -207,6 +208,10 @@ export function focusEvents(
     const ticker = str(row.ticker);
     const day = str(row.nextEarningsDate);
     if (ticker === undefined || day === undefined || !inUniverse.has(ticker))
+      continue;
+    const important = inputs.pinned.includes(ticker) ||
+      cfg.importantEarningsTickers?.includes(ticker);
+    if (!inEventWindow(inputs.day, day, important ? 14 : 7))
       continue;
     const time = str(row.reportTime);
     const session =

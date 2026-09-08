@@ -126,6 +126,26 @@ describe("priorRecord", () => {
     expect(found.label).toBe("intraday");
   });
 
+  it("keeps the daily chain free of Monday supplements and future reruns", () => {
+    const stateRoot = root([
+      ["2026-09-04", "close"],
+      ["2026-09-08", "premarket"],
+      ["2026-09-08", "frank"],
+      ["2026-09-08", "intraday"],
+      ["2026-09-08", "close"],
+    ]);
+    expect(priorRecord({ stateRoot, day: "2026-09-08", label: "premarket" })).toMatchObject({
+      day: "2026-09-04",
+      label: "close",
+    });
+    expect(
+      priorRecord({ stateRoot, day: "2026-09-08", label: "intraday" })?.label,
+    ).toBe("premarket");
+    expect(
+      priorRecord({ stateRoot, day: "2026-09-08", label: "close" })?.label,
+    ).toBe("intraday");
+  });
+
   it("returns null for a state root that is not there", () => {
     expect(
       priorRecord({

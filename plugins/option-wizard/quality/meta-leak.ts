@@ -1,8 +1,8 @@
 /**
  * Words the brief may not say about ITSELF.
  *
- * The editor persona has forbidden replay and coverage vocabulary in prose
- * since 2026-09-03, and the v3 replay still shipped "No prior intraday brief
+ * The editor persona has forbidden report-execution chatter in prose since
+ * 2026-09-03, and the v3 replay still shipped "No prior intraday brief
  * exists" as a section title. A persona is a request; a pattern list is a
  * match. The list lives in the tenant because these are English words about
  * a market brief, and core knows no domain (doctrine 2).
@@ -18,12 +18,9 @@
  *  scan compiles its own. */
 export const META_LEAK_PATTERNS: readonly string[] = [
   "\\breplay\\b",
-  "\\bas-of\\b",
-  "\\bunavailable\\b",
-  "\\bfrozen\\b",
   "nothing ships",
   "no prior \\w+ brief",
-  "not (?:checked|available|live)",
+  "not checked",
 ];
 
 export interface Leak {

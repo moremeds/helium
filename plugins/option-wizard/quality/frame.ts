@@ -41,6 +41,7 @@ import { channelHistory } from "./history.js";
 import { LABEL_ORDER } from "./prior.js";
 import {
   dailyFocus,
+  inEventWindow,
   scoreFocus,
   selectFocus,
   type FocusInputs,
@@ -132,16 +133,9 @@ function textOrAbsent(value: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * The dated rows, from BOTH dated sources the frame already reads.
- *
- * `ow_uw_calendar` answers a 7-open-session horizon; the 09-16 FOMC is ten
- * calendar days out and is therefore not on it. The policy path is the only
- * source that carries that meeting, and it carries a probability and a target
- * range — a forecast and a prior — so it is admissible under exactly the same
- * gate rather than under an exception.
- */
-export function calendarRowsOf(inputs: ChannelInputs): CalendarRow[] {
+/** Upcoming macro events stay within seven calendar days; later policy
+ *  probabilities remain available in the policy channel as background. */
+export function calendarRowsOf(inputs: ChannelInputs, day: string): CalendarRow[] {
   const out: CalendarRow[] = [];
   const calendar = (inputs.calendar as { rows?: unknown } | undefined)?.rows;
   for (const entry of Array.isArray(calendar) ? calendar : []) {
@@ -185,7 +179,8 @@ export function calendarRowsOf(inputs: ChannelInputs): CalendarRow[] {
       ...(prev === undefined ? {} : { prev }),
     });
   }
-  return out.sort((a, b) => a.time.localeCompare(b.time));
+  return out.filter((row) => inEventWindow(day, row.time, 7))
+    .sort((a, b) => a.time.localeCompare(b.time));
 }
 
 export interface SessionFrame {
@@ -641,7 +636,7 @@ export function buildFrame(args: {
     caps: { weekly: review.caps.weekly, daily: review.caps.daily },
     declared,
     coverage,
-    calendar: calendarRowsOf(inputs),
+    calendar: calendarRowsOf(inputs, args.focusInputs.day),
     noRestate: printedLevels(rows),
     ...(notes.length === 0 ? {} : { notes }),
   };

@@ -204,9 +204,9 @@ describe("the daily total-words cap budgets for the coverage table", () => {
     );
   });
 
-  it("leaves the per-field prose caps and the weekly total alone", () => {
-    expect(review.caps.daily.review).toBe(120);
-    expect(review.caps.daily.outlook).toBe(180);
-    expect(review.caps.weeklyModelWords).toBe(900);
+  it("gives selected weekly topics more room while keeping daily shorter", () => {
+    expect(review.caps.weekly.review).toBeGreaterThan(review.caps.daily.review);
+    expect(review.caps.weekly.outlook).toBeGreaterThan(review.caps.daily.outlook);
+    expect(review.caps.weeklyModelWords).toBeGreaterThan(review.caps.dailyModelWords);
   });
 });

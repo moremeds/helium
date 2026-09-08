@@ -534,22 +534,11 @@ describe("the frame's dated calendar", () => {
   // siblings of `ow_session_frame`, so neither payload ever reached
   // `report.toolOutputs` and the renderer admitted ZERO rows — while §5
   // printed the 09-16 FOMC anyway, out of the model's own head.
-  it("carries the policy path's dated meetings, forecast and prior range", () => {
+  it("keeps later policy meetings out of the seven-day calendar", () => {
     const { stateRoot, env } = scratch();
     const frame = frameOf({ stateRoot, env });
-    const fomc = frame.calendar.find((row) => row.event === "FOMC 9/16")!;
-    expect(fomc).toBeDefined();
-    expect(fomc.time).toBe("2026-09-16");
-    expect(fomc.type).toBe("policy path");
-    // Copied, never computed: the stance and the probability the payload
-    // carries, and the target range as the prior.
-    expect(fomc.forecast).toBe("HIKE 60%");
-    expect(fomc.prev).toBe("3.75-4.00%");
-    expect(frame.calendar.map((row) => row.time)).toEqual([
-      "2026-09-16",
-      "2026-10-28",
-      "2026-12-09",
-    ]);
+    expect(frame.calendar).toEqual([]);
+    expect(frame.rows.find((row) => row.id === "policy.path")?.level).toBe("60");
   });
 
   it("reads a null forecast as absent, never as the value `null`", () => {

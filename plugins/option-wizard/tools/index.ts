@@ -39,6 +39,7 @@ import {
   attachThresholds,
   buildFrame,
 } from "../quality/frame.js";
+import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
 import type { Bar } from "../eval/bars.js";
@@ -119,6 +120,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_uw_market_state", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_gex", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_earnings", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
+  ["ow_uw_earnings_report", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   // No `requiresEnv`: the state root is always known, and an empty reports
   // directory is a real answer — the first ever run of a phase — not a
   // misconfiguration to report as a broken tool.
@@ -1336,17 +1338,6 @@ function stepsOf(markdown: string): Map<string, string> {
  *  not match is not one of our reports and is ignored rather than guessed at. */
 const REPORT_NAME = /^option-wizard-(\d{4}-\d{2}-\d{2})-([a-z0-9-]+)\.md$/u;
 
-/** The order the day's runs happen in, for walking BACKWARDS from one of them.
- *  A label not listed sorts last within its day: it is a run this list has not
- *  been taught about, and putting it after the known ones is the answer that
- *  cannot reorder a known pair. */
-const PHASE_ORDER = ["premarket", "frank", "intraday", "close", "weekly"];
-
-function phaseRank(label: string): number {
-  const at = PHASE_ORDER.indexOf(label);
-  return at === -1 ? PHASE_ORDER.length : at;
-}
-
 const STATE_FILE = /^([a-z0-9-]+)\.regime\.json$/u;
 
 const EarningsParams = z.object({
@@ -1372,6 +1363,9 @@ const MassiveActionsParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).max(200).optional(),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+});
+const UwEarningsReportParams = z.object({
+  ticker: z.string().min(1).max(24),
 });
 const MacroParams = z.object({
   series: z.array(z.string().min(1)).min(1).max(24).optional(),
@@ -1683,7 +1677,7 @@ const AS_OF_BLIND_SENTENCE =
   "Unavailable in an as-of replay: this source is live-only and returns nothing for a past instant. Record that only in Layer Coverage; never write about the gap in a headline, title or section body.";
 
 const AS_OF_REPLAYED_SENTENCE =
-  "In this as-of replay the answer comes from a recording of an earlier live run of this tenant, not from the source. Treat it exactly as a live answer; the report's own header says which tools were served this way.";
+  "This replay returns the saved response for these exact arguments. Preserve its original observation timestamps; a missing recording is unavailable, never a live fallback.";
 
 export function buildTools(cfg: {
   stateRoot: string;
@@ -1691,6 +1685,8 @@ export function buildTools(cfg: {
   /** Point-in-time replay instant. Undefined is an ordinary run and every
    *  tool below behaves exactly as it did before this flag existed. */
   asOf?: Date;
+  /** The current run phase, supplied by a phase-aware host. */
+  phase?: string;
   variant?: string;
   pit?: { markUnavailable: (tool: string, reason: string) => void };
   /** The tenant's `calendar:` block, passed through by the runner. Absent in a
@@ -3319,25 +3315,41 @@ export function buildTools(cfg: {
       },
       async run(args: Record<string, unknown>): Promise<string> {
         const { phase, today } = PriorBriefParams.parse(args);
-        const wanted = phase ?? "premarket";
         // The report day in the zone the filenames are stamped in. Same
         // reasoning as ow_reports' date counting: a cutoff taken from this
         // process's clock disagrees with the filenames by a whole day for a
         // HK-scheduled run reading ET-dated files.
         // 2026-09-05, as-of: the replayed day replaces "today" as the
         // exclusive cutoff, so a replay of 09-02 reads the 09-01 brief and not
-        // whatever the last run on disk happened to write. An explicit `today`
-        // argument still wins — a caller naming a day means that day. VERIFIED
-        // by construction (same zone as the filenames); nothing external.
-        const cutoff =
-          today ??
+        // whatever the last run on disk happened to write. On a phase-aware
+        // host an explicit day may look back but never ahead of this run.
+        const runDay =
           asOfDay ??
           new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
             new Date(),
           );
-        const here = phaseRank(wanted);
+        if (cfg.phase !== undefined && today !== undefined && today > runDay)
+          throw new Error(
+            `ow_prior_brief: ${today} is after this run day ${runDay}`,
+          );
+        const cutoff = today ?? runDay;
+        const wanted = phase ?? cfg.phase ?? "premarket";
+        if (
+          phase !== undefined &&
+          cfg.phase !== undefined &&
+          cutoff === runDay &&
+          labelRank(phase) > labelRank(cfg.phase)
+        )
+          throw new Error(
+            `ow_prior_brief: ${phase} is after this ${cfg.phase} run`,
+          );
         const earlier = (day: string, label: string): boolean =>
-          day < cutoff || (day === cutoff && phaseRank(label) < here);
+          isPriorRun({
+            candidateDay: day,
+            candidateLabel: label,
+            day: cutoff,
+            label: wanted,
+          });
         const stateDir = join(cfg.stateRoot, "option-wizard");
         // 1. The newest STATE RECORD strictly before this run. Calendar-aware
         //    for free: a closed day produced no run, so it wrote no file.
@@ -3354,7 +3366,7 @@ export function buildTools(cfg: {
                 best !== null &&
                 (day < best.day ||
                   (day === best.day &&
-                    phaseRank(label) < phaseRank(best.label)))
+                    labelRank(label) < labelRank(best.label)))
               )
                 continue;
               let parsed: unknown;
@@ -3392,7 +3404,7 @@ export function buildTools(cfg: {
             const byDay = b.match![1]!.localeCompare(a.match![1]!);
             return byDay !== 0
               ? byDay
-              : phaseRank(b.match![2]!) - phaseRank(a.match![2]!);
+              : labelRank(b.match![2]!) - labelRank(a.match![2]!);
           })[0];
         const byStep =
           found === undefined
@@ -4289,6 +4301,159 @@ export function buildTools(cfg: {
       },
     },
     {
+      // Verified 2026-09-08 against live AVGO: `/api/earnings/AVGO` supplied
+      // completed company rows with report_date, actual_eps and street_mean_est;
+      // `/api/stock/AVGO/income-statements` supplied quarterly reported figures.
+      // They are intentionally returned separately: their quarter labels and EPS
+      // basis are not a contract to join.
+      name: "ow_uw_earnings_report",
+      description:
+        "Completed earnings EPS rows and separately reported quarterly income-statement facts for one ticker from Unusual Whales. These are reported facts, not guidance, revenue consensus, calculated growth, or an EPS surprise.",
+      paramsSchema: UwEarningsReportParams,
+      mutating: false,
+      dshParams: {
+        ticker: {
+          type: "string",
+          required: true,
+          description: 'One ticker, e.g. "AVGO".',
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const tool = "ow_uw_earnings_report";
+        const ticker = symbolLiteral(UwEarningsReportParams.parse(args).ticker, tool);
+        const cutoff = asOf ?? new Date();
+        const cutoffDay = new Intl.DateTimeFormat("en-CA", {
+          timeZone: REPORT_ZONE,
+        }).format(cutoff);
+        const fetchedAt = new Date().toISOString();
+        const numericString = (value: unknown): string | undefined =>
+          typeof value === "string" && value.trim() !== "" &&
+          Number.isFinite(Number(value))
+            ? value
+            : undefined;
+        const getRows = async (path: string) => {
+          try {
+            const body = (await uwGet(env, tool, path, {}, ctx)) as {
+              data?: unknown;
+            };
+            return {
+              rows: Array.isArray(body.data)
+                ? (body.data as Array<Record<string, unknown>>)
+                : [],
+            };
+          } catch (error: unknown) {
+            return {
+              rows: [] as Array<Record<string, unknown>>,
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
+        };
+        const [earningsResult, statementsResult] = await Promise.all([
+          getRows(`/api/earnings/${encodeURIComponent(ticker)}`),
+          getRows(`/api/stock/${encodeURIComponent(ticker)}/income-statements`),
+        ]);
+        const earnings = earningsResult.rows.flatMap((row) => {
+          const reportDate = row.report_date;
+          const actualEps = numericString(row.actual_eps);
+          if (
+            row.source !== "company" ||
+            typeof reportDate !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
+            reportDate >= cutoffDay ||
+            actualEps === undefined
+          )
+            return [];
+          const estimate = numericString(row.street_mean_est);
+          return [
+            {
+              reportDate,
+              ...(typeof row.ending_fiscal_quarter === "string"
+                ? { endingFiscalQuarter: row.ending_fiscal_quarter }
+                : {}),
+              actualEps,
+              streetMeanEst: estimate ?? null,
+              source: "company",
+              reportTime:
+                typeof row.report_time === "string" ? row.report_time : null,
+              sourceUrl: `${UW_BASE}/api/earnings/${encodeURIComponent(ticker)}`,
+              fetchedAt,
+            },
+          ];
+        }).slice(0, 4);
+        const statements = statementsResult.rows.flatMap((row) => {
+          const periodEnd = row.fiscal_date_ending;
+          const updatedAt = row.updated_at;
+          const updatedTime =
+            typeof updatedAt === "string" ? Date.parse(updatedAt) : Number.NaN;
+          if (
+            row.ticker !== ticker ||
+            row.report_type !== "quarterly" ||
+            typeof periodEnd !== "string" ||
+            !/^\d{4}-\d{2}-\d{2}$/u.test(periodEnd) ||
+            periodEnd > cutoffDay ||
+            !Number.isFinite(updatedTime) ||
+            updatedTime > cutoff.getTime()
+          )
+            return [];
+          const revenue = numericString(row.total_revenue);
+          const grossProfit = numericString(row.gross_profit);
+          const operatingIncome = numericString(row.operating_income);
+          const netIncome = numericString(row.net_income);
+          return [
+            {
+              periodEnd,
+              updatedAt,
+              currency:
+                typeof row.reported_currency === "string" &&
+                row.reported_currency !== "" &&
+                row.reported_currency !== "None"
+                  ? row.reported_currency
+                  : null,
+              financials: {
+                ...(revenue === undefined ? {} : { revenue }),
+                ...(grossProfit === undefined ? {} : { grossProfit }),
+                ...(operatingIncome === undefined ? {} : { operatingIncome }),
+                ...(netIncome === undefined ? {} : { netIncome }),
+              },
+              sourceUrl: `${UW_BASE}/api/stock/${encodeURIComponent(ticker)}/income-statements`,
+              fetchedAt,
+            },
+          ];
+        }).slice(0, 4);
+        return JSON.stringify({
+          source: "unusual_whales",
+          ticker,
+          cutoff: cutoff.toISOString(),
+          earnings,
+          statements,
+          ...(earnings.length === 0 && statements.length === 0
+            ? { unavailable: "No completed earnings or current income statement available by cutoff." }
+            : {}),
+          ...(earningsResult.error === undefined && statementsResult.error === undefined
+            ? {}
+            : {
+                sourceErrors: {
+                  ...(earningsResult.error === undefined
+                    ? {}
+                    : { earnings: earningsResult.error }),
+                  ...(statementsResult.error === undefined
+                    ? {}
+                    : { incomeStatements: statementsResult.error }),
+                },
+              }),
+          limitations: [
+            "EPS basis is not provided; earnings and income statements are not joined.",
+            "Current-day earnings are excluded because report time is not an exact publication timestamp.",
+            "Provider history is current data, not a vintage archive.",
+            "Guidance and revenue street consensus are not provided.",
+          ],
+        });
+      },
+    },
+    {
       // 2026-09-06. The ranking, the coverage rows, the focus list and the
       // ledger citation rows are arithmetic and bookkeeping, so they are
       // computed ONCE, here, and read three times: the editor / weekly analyst
@@ -4412,12 +4577,16 @@ export function buildTools(cfg: {
           ?.ivRank ?? {}) as Record<string, number>;
 
         const focusNotes: string[] = [];
-        // Pinned first, then alphabetical, so WHICH names get the round trips
-        // is deterministic and the truncation says its own size.
+        // Important names and pins first, then alphabetical, so the round trips
+        // are deterministic and the truncation says its own size.
+        const priorityEarnings = [...new Set([
+          ...(review?.focus?.importantEarningsTickers ?? []),
+          ...ofInterest,
+        ])].filter((ticker) => universe.has(ticker));
         const ordered = [
-          ...ofInterest.filter((ticker) => universe.has(ticker)),
+          ...priorityEarnings,
           ...[...universe]
-            .filter((ticker) => !ofInterest.includes(ticker))
+            .filter((ticker) => !priorityEarnings.includes(ticker))
             .sort((a, b) => a.localeCompare(b, "en")),
         ];
         const cap = review?.focus?.maxEarningsLookups ?? ordered.length;
@@ -4570,11 +4739,9 @@ export function buildTools(cfg: {
           focusInputs,
           days: openDaysBack(day, MIN_HISTORY + 5, cfg.calendar),
           stateRoot: cfg.stateRoot,
-          // buildTools is not given the run's phase, so the newest record
-          // strictly before ANY known label on `day` is what the frame wants:
-          // `variant` is not a phase label and therefore ranks last, which
-          // reads as "the newest record written before this run".
-          label: cfg.variant ?? "live",
+          // A phase-aware host gives the frame the exact daily predecessor;
+          // older hosts retain their prior variant-based behavior.
+          label: cfg.phase ?? cfg.variant ?? "live",
           review,
           skipped,
           env,
@@ -5187,6 +5354,22 @@ export function buildTools(cfg: {
       },
     },
   ];
+  // Replay the WHOLE input surface, including the frame and historical tools.
+  // Re-fetching historical data beside saved quotes changes the experiment.
+  if (cfg.recordings !== undefined) {
+    const recordings = cfg.recordings;
+    return built.map((tool) => ({
+      ...tool,
+      description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
+      run: async (args: Record<string, unknown>): Promise<string> => {
+        const recorded = recordings.lookup(tool.name, args);
+        if (recorded !== undefined) return recorded;
+        const reason = "no recording for these arguments; live fallback disabled";
+        cfg.pit?.markUnavailable(tool.name, reason);
+        return JSON.stringify({ unavailable: "as-of", asOf: asOfIso, reason });
+      },
+    }));
+  }
   if (asOf === undefined) return built;
   // One place, not thirteen edits: a live-only tool in a replay is replaced by
   // its refusal wholesale, so there is no path through its body that could
@@ -5201,25 +5384,6 @@ export function buildTools(cfg: {
       asOf: asOfIso,
       reason,
     });
-    // A recording of one of our own earlier runs IS history for this tool.
-    // Marked unavailable LAZILY on this branch: a tool that never got called,
-    // or that got called with arguments the recording covers, is not a gap.
-    if (cfg.recordings?.has(tool.name) === true) {
-      const recordings = cfg.recordings;
-      return {
-        ...tool,
-        description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
-        run: async (args: Record<string, unknown>): Promise<string> => {
-          const recorded = recordings.lookup(tool.name, args);
-          if (recorded !== undefined) return recorded;
-          cfg.pit?.markUnavailable(
-            tool.name,
-            `${reason}, and no recording for these arguments`,
-          );
-          return payload;
-        },
-      };
-    }
     cfg.pit?.markUnavailable(tool.name, reason);
     return {
       ...tool,

@@ -15,8 +15,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildTools } from "../tools/index.js";
 
-function priorBriefTool(root: string) {
-  const found = buildTools({ stateRoot: root, env: {} }).find(
+function priorBriefTool(root: string, phase?: string, asOf?: Date) {
+  const found = buildTools({
+    stateRoot: root,
+    env: {},
+    ...(phase === undefined ? {} : { phase }),
+    ...(asOf === undefined ? {} : { asOf }),
+  }).find(
     (tool) => tool.name === "ow_prior_brief",
   );
   if (found === undefined) throw new Error("no tool ow_prior_brief");
@@ -242,6 +247,52 @@ describe("ow_prior_brief regime record", () => {
     );
     expect(out.prior.phase).toBe("intraday");
     expect(out.prior.regimeState.cause).toBe("mid");
+  });
+
+  it("uses the actual phase when the editor omits its optional argument", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    stateFile(stateRoot, "2026-09-03", "premarket", RECORD);
+    stateFile(stateRoot, "2026-09-03", "frank", {
+      ...RECORD,
+      cause: "supplement",
+    });
+    const out = JSON.parse(
+      await priorBriefTool(stateRoot, "intraday").run({ today: "2026-09-03" }),
+    );
+    expect(out.prior.phase).toBe("premarket");
+  });
+
+  it("refuses an explicit request for a phase after the current run", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    await expect(
+      priorBriefTool(
+        stateRoot,
+        "intraday",
+        new Date("2026-09-08T12:45:00.000Z"),
+      ).run({ phase: "close", today: "2026-09-08" }),
+    ).rejects.toThrow("after this intraday run");
+  });
+
+  it("does not let a phase-aware run look ahead by naming tomorrow", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    await expect(
+      priorBriefTool(
+        stateRoot,
+        "premarket",
+        new Date("2026-09-08T12:45:00.000Z"),
+      ).run({ today: "2026-09-09" }),
+    ).rejects.toThrow("after this run day 2026-09-08");
+  });
+
+  it("allows an explicit later phase for an earlier completed day", async () => {
+    const stateRoot = mkdtempSync(join(tmpdir(), "ow-prior-"));
+    await expect(
+      priorBriefTool(
+        stateRoot,
+        "premarket",
+        new Date("2026-09-08T12:45:00.000Z"),
+      ).run({ phase: "close", today: "2026-09-04" }),
+    ).resolves.toContain('"prior":null');
   });
 
   it("carries the prior report's headline beside the record", async () => {

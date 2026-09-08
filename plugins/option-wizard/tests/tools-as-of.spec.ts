@@ -247,11 +247,22 @@ describe("as-of tools with recordings", () => {
     expect(marked).toContain("ow_spot");
   });
 
-  it("leaves a tool that is not live-only alone", () => {
-    const tool = toolNamed("ow_macro_rates", {
-      asOf: AS_OF,
-      recordings: { has: () => true, lookup: () => "should not be used" },
-    });
-    expect(tool.description).not.toContain("Unavailable in an as-of replay");
+  it("replays historical and frame tools too, without a live fallback or an as-of flag", async () => {
+    const marked: string[] = [];
+    const recordings = {
+      has: () => true,
+      lookup: (_name: string, args: Record<string, unknown>) =>
+        Object.keys(args).length === 0 ? '{"saved":true}' : undefined,
+    };
+    for (const name of ["ow_macro_rates", "ow_session_frame", "ow_rotation"]) {
+      const tool = toolNamed(name, {
+        recordings,
+        pit: { markUnavailable: (missing) => marked.push(missing) },
+      });
+      expect(await tool.run({}, {} as never)).toBe('{"saved":true}');
+      expect(JSON.parse(await tool.run({ missing: true }, {} as never)))
+        .toMatchObject({ unavailable: "as-of", reason: expect.stringContaining("live fallback disabled") });
+    }
+    expect(marked).toEqual(["ow_macro_rates", "ow_session_frame", "ow_rotation"]);
   });
 });

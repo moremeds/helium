@@ -54,15 +54,17 @@ export type Cut = "none" | "sentence" | "word";
  *  a single 90-word sentence is a different authoring failure from five
  *  sentences that ran long. */
 export function trim(text: string, max: number): { text: string; cut: Cut } {
-  const parts = tokens(text);
+  const parts = [...text.matchAll(/\S+/g)];
   if (parts.length <= max) return { text, cut: "none" };
   let lastEnd = -1;
   for (let i = 0; i < max; i += 1) {
-    if (SENTENCE_END.test(parts[i] ?? "")) lastEnd = i;
+    if (SENTENCE_END.test(parts[i]?.[0] ?? "")) lastEnd = i;
   }
-  if (lastEnd >= 0)
-    return { text: parts.slice(0, lastEnd + 1).join(" "), cut: "sentence" };
-  return { text: `${parts.slice(0, max).join(" ")}…`, cut: "word" };
+  const end = parts[lastEnd >= 0 ? lastEnd : max - 1];
+  const kept = end ? text.slice(0, end.index + end[0].length).trim() : "";
+  return lastEnd >= 0
+    ? { text: kept, cut: "sentence" }
+    : { text: `${kept}…`, cut: "word" };
 }
 
 export interface Overage {
@@ -172,22 +174,22 @@ export const PERSISTENCE_BUDGET = {
  */
 export const REVIEW_BUDGET = {
   weekly: {
-    review: 300,
-    outlook: 400,
+    review: 900,
+    outlook: 450,
     catalysts: 150,
     rowWords: 15,
     focusWords: 40,
     themeWords: 25,
-    total: 900,
+    total: 2000,
   },
   daily: {
-    review: 120,
-    outlook: 180,
+    review: 300,
+    outlook: 120,
     catalysts: 60,
     rowWords: 10,
     focusWords: 40,
     themeWords: 25,
-    total: 300,
+    total: 800,
   },
 } as const;
 

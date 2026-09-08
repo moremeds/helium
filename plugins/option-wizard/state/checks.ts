@@ -17,7 +17,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Channel } from "../quality/channels.js";
-import { LABEL_ORDER } from "../quality/prior.js";
+import { isPriorRun, labelRank } from "../quality/prior.js";
 import { parseRegimeState, type Check, type RegimeState } from "./regime.js";
 
 export type CheckVerdict = "hit" | "miss" | "not-observed";
@@ -37,14 +37,6 @@ const DAY_DIR = /^\d{4}-\d{2}-\d{2}$/u;
  *  already reads that same path with this same literal. */
 const TENANT = "option-wizard";
 
-/** A label not listed sorts last within its day — the answer that cannot
- *  reorder a known pair. Imported rather than copied: two copies of an order is
- *  how two modules disagree about which run came first. */
-function rank(label: string): number {
-  const at = LABEL_ORDER.indexOf(label);
-  return at === -1 ? LABEL_ORDER.length : at;
-}
-
 /**
  * The newest regime record strictly before `(day, label)`, or `null`.
  *
@@ -62,7 +54,7 @@ export function priorRecord(args: {
   label: string;
 }): { day: string; label: string; state: RegimeState } | null {
   const root = join(args.stateRoot, TENANT);
-  const here = [args.day, rank(args.label)] as const;
+  const here = [args.day, labelRank(args.label)] as const;
   let best: { day: string; label: string; rank: number; file: string } | null =
     null;
   let days: string[];
@@ -84,8 +76,13 @@ export function priorRecord(args: {
       const match = STATE_FILE.exec(file);
       if (match === null) continue;
       const label = match[1]!;
-      const at = rank(label);
-      const earlier = day < here[0] || (day === here[0] && at < here[1]);
+      const at = labelRank(label);
+      const earlier = isPriorRun({
+        candidateDay: day,
+        candidateLabel: label,
+        day: here[0],
+        label: args.label,
+      });
       if (!earlier) continue;
       if (
         best === null ||

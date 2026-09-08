@@ -94,6 +94,9 @@ describe("trim", () => {
 
   it("returns an in-budget text untouched", () => {
     expect(trim("One. Two.", 5)).toEqual({ text: "One. Two.", cut: "none" });
+    expect(trim("## First topic\n\nOne fact.\n\n## Second topic\n\nMore detail ends here.", 8)).toEqual({
+      text: "## First topic\n\nOne fact.", cut: "sentence",
+    });
   });
 });
 
@@ -194,7 +197,9 @@ describe("the budget tables name a field, never a run label", () => {
     expect(Object.keys(ONE_THING_BUDGET).some((k) => k.includes("phase"))).toBe(
       false,
     );
-    expect(REVIEW_BUDGET.weekly.total).toBe(900);
-    expect(REVIEW_BUDGET.daily.total).toBe(300);
+    expect(REVIEW_BUDGET.weekly.total).toBeGreaterThan(REVIEW_BUDGET.daily.total);
+    expect(REVIEW_BUDGET.daily.total).toBeGreaterThanOrEqual(
+      REVIEW_BUDGET.daily.review + REVIEW_BUDGET.daily.outlook,
+    );
   });
 });

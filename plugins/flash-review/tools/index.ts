@@ -68,6 +68,7 @@ const EvidenceParams = z.object({
 const DatedEventsParams = z.object({
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u).optional(),
+  offset: z.number().int().nonnegative().optional(),
 });
 
 /** One `NNNNN-<tool>.json.gz` under a run's `tool-io/`, as the runner wrote it
@@ -196,26 +197,32 @@ export function datedEventsIn(
 }
 
 /**
- * Deduplicate to ONE row per (date, tool, spelling), then order by date so the
- * reviewer walks a calendar rather than a directory listing.
+ * Deduplicate only an identical occurrence, then order by date so the reviewer
+ * walks a calendar rather than a directory listing.
  *
- * The key deliberately excludes the snippet. Deduping on the snippet too was
- * the first version and it was useless: the weekly's session frame writes
- * `9/16` in six different surroundings, so 793 rows came back for 23 distinct
- * days, the 80-row cap fell on the earliest dates, and every forward event —
- * including the FOMC this whole pre-pass exists to surface — was cut off the
- * end. One row per spelling per tool is what a reviewer can actually walk.
+ * The snippet is part of the key. One date can carry distinct events in the
+ * same recording; collapsing those into a date/token row made a page that
+ * named one of them look complete. Repeated copies of the same occurrence
+ * still collapse. A capped result is explicitly incomplete, so a reviewer may
+ * not treat its returned prefix as an exhaustive calendar.
  */
 export function collateDatedEvents(
   events: readonly DatedEvent[],
   window: { from?: string; to?: string },
-): { events: DatedEvent[]; total: number; truncated: boolean } {
+  offset = 0,
+): {
+  events: DatedEvent[];
+  total: number;
+  offset: number;
+  nextOffset?: number;
+  truncated: boolean;
+} {
   const seen = new Set<string>();
   const kept: DatedEvent[] = [];
   for (const event of events) {
     if (window.from !== undefined && event.date < window.from) continue;
     if (window.to !== undefined && event.date > window.to) continue;
-    const key = `${event.date}|${event.tool}|${event.token}`;
+    const key = `${event.date}|${event.tool}|${event.file}|${event.token}|${event.snippet}`;
     if (seen.has(key)) continue;
     seen.add(key);
     kept.push(event);
@@ -226,10 +233,14 @@ export function collateDatedEvents(
       a.tool.localeCompare(b.tool) ||
       a.snippet.localeCompare(b.snippet),
   );
+  const page = kept.slice(offset, offset + MAX_DATED_EVENTS);
+  const nextOffset = offset + page.length;
   return {
-    events: kept.slice(0, MAX_DATED_EVENTS),
+    events: page,
     total: kept.length,
-    truncated: kept.length > MAX_DATED_EVENTS,
+    offset,
+    ...(nextOffset < kept.length ? { nextOffset } : {}),
+    truncated: nextOffset < kept.length,
   };
 }
 
@@ -359,7 +370,7 @@ export function buildTools(cfg: {
       // item a reader had to be told about.
       name: "fr_dated_events",
       description:
-        "Every dated token in the frozen recordings, extracted deterministically: date, the token as the recording wrote it (`2026-09-16` or `9/16`), the tool it came from and 160 chars of surrounding text. Narrow with `from`/`to`. This is the list to CHECK the page against; do not build your own.",
+        "Every dated token in the frozen recordings, extracted deterministically: date, the token as the recording wrote it (`2026-09-16` or `9/16`), the tool it came from and 160 chars of surrounding text. Narrow with `from`/`to`; when `nextOffset` is returned, call again with that offset and the identical window until it is absent. This is the list to CHECK the page against; do not build your own.",
       paramsSchema: DatedEventsParams,
       mutating: false,
       dshParams: {
@@ -373,9 +384,14 @@ export function buildTools(cfg: {
           description:
             "Latest date to return, YYYY-MM-DD. Omit for no upper bound.",
         },
+        offset: {
+          type: "number",
+          description:
+            "Event offset for the next page. Omit for the first page; use nextOffset with the same from/to window until no nextOffset is returned.",
+        },
       },
       async run(args: Record<string, unknown>): Promise<string> {
-        const window = DatedEventsParams.parse(args);
+        const { offset = 0, ...window } = DatedEventsParams.parse(args);
         const dir = requireEnv(cfg.env, "FR_EVIDENCE_DIR");
         const all: DatedEvent[] = [];
         const unreadable: Array<{ file: string; reason: string }> = [];
@@ -394,12 +410,16 @@ export function buildTools(cfg: {
             });
           }
         }
-        const collated = collateDatedEvents(all, window);
+        const collated = collateDatedEvents(all, window, offset);
         return JSON.stringify({
           window,
           total: collated.total,
+          offset: collated.offset,
           returned: collated.events.length,
           truncated: collated.truncated,
+          ...(collated.nextOffset === undefined
+            ? {}
+            : { nextOffset: collated.nextOffset }),
           ...(unreadable.length === 0 ? {} : { unreadable }),
           events: collated.events,
         });
