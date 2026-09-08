@@ -15,7 +15,9 @@ import {
   type RegisteredProviderTargets,
 } from "@helium/provider-sdk/registration";
 import { claudeSubscriptionCatalog } from "./catalog.js";
-import { invokeClaude, type ClaudeInvocationResult } from "./invoke.js";
+import { invokeClaude, type ClaudeInvocationResult,
+  REQUEST_TIMEOUT_MS,
+} from "./invoke.js";
 
 type ClaudeInvoker = typeof invokeClaude;
 
@@ -67,7 +69,10 @@ class ClaudeExecutor implements Executor {
         ? {}
         : { effort: this.native.effort as never }),
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
+      timeoutMs: work.constraints.maxLatencyMs ?? REQUEST_TIMEOUT_MS,
+      ...(work.constraints.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: work.constraints.maxOutputTokens }),
       env: context.env,
       signal,
     });

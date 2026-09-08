@@ -22,7 +22,9 @@ import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
 import { selectedTools } from "@helium/provider-sdk/tool-loop";
 import type { ClaudeEffort } from "./catalog.js";
-import { invokeClaude, turnEvents } from "./invoke.js";
+import { invokeClaude, turnEvents,
+  REQUEST_TIMEOUT_MS,
+} from "./invoke.js";
 
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
 
@@ -57,8 +59,12 @@ const POOL = "claude-subscription-session";
  * target — so it WON every tool-using step and then failed it at execution
  * with "performs inference only". The rule that came out of it is the one
  * being honoured now, not overturned: the tag goes back only together with a
- * tool loop. `invoke.ts` has one (`MAX_TOOL_TURNS` turns of the Messages API
- * tool protocol, tool spans folded into the audit), so the tag is true again.
+ * tool loop. `invoke.ts` has one (its OWN `MAX_TOOL_TURNS` turns of the
+ * Messages API tool protocol, tool spans folded into the audit), so the tag is
+ * true again. That ceiling is provider-local and no longer the shared
+ * `@helium/provider-sdk` 8: a role whose tools have to be read one recording
+ * at a time needs more turns than the option-wizard team ever did, and raising
+ * the shared constant would have moved the codex edge with it.
  *
  * `cheap.bulk` on haiku still does NOT claim it: a chore tier exists to be
  * chosen for extraction and formatting, and letting it win tool-using steps
@@ -214,7 +220,10 @@ export class ClaudeSubscriptionProvider implements Provider {
         ? {}
         : { effort: selection.effort as ClaudeEffort }),
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
+      timeoutMs: work.constraints.maxLatencyMs ?? REQUEST_TIMEOUT_MS,
+      ...(work.constraints.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: work.constraints.maxOutputTokens }),
       env: this.env as Record<string, string>,
       signal,
       ...(tools.length === 0 ? {} : { tools }),

@@ -4,7 +4,7 @@ import type { CurlRequest, CurlResponse } from "@helium/provider-sdk/curl";
 const curl = vi.hoisted(() => vi.fn<(r: CurlRequest) => Promise<CurlResponse>>());
 vi.mock("@helium/provider-sdk/curl", () => ({ curlPostJson: curl }));
 
-const { invokeClaude } = await import("./invoke.js");
+const { invokeClaude, MAX_TOOL_TURNS } = await import("./invoke.js");
 
 const ENV = { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-test" };
 const CALL = { model: "claude-sonnet-5", prompt: "hi", timeoutMs: 5_000, env: ENV };
@@ -171,7 +171,9 @@ describe("the tool loop", () => {
     const out = await invokeClaude({ ...CALL, tools: [echo] });
 
     expect(out).toMatchObject({ ok: true, turns: 2 });
-    expect(out.text).toBe("checking\ndone");
+    // The answer is the LAST turn. "checking" was narration on the way to a
+    // tool call, and it is not part of what the role returned.
+    expect(out.text).toBe("done");
     // Both turns are billed. Folding only the last would report a chatty tool
     // loop as the cost of one answer.
     expect(out.runtimeSnapshot.modelUsage).toEqual({
@@ -258,8 +260,54 @@ describe("the tool loop", () => {
 
     const out = await invokeClaude({ ...CALL, tools: [echo] });
 
-    expect(out.turns).toBe(8);
-    expect(curl).toHaveBeenCalledTimes(8);
-    expect(out.text).toContain("stopped after 8 tool turns");
+    expect(out.text).toContain(`stopped after ${String(MAX_TOOL_TURNS)} tool turns`);
+    // Asserted against the constant, not against a literal: the number moved
+    // once already (8 -> 64, when the flash-review reviewer needed more than
+    // 13 calls) and a hard-coded copy here would have had to move with it.
+    expect(out.turns).toBe(MAX_TOOL_TURNS);
+    expect(curl).toHaveBeenCalledTimes(MAX_TOOL_TURNS);
+  });
+
+  it("returns the LAST assistant turn only, not every turn's narration", async () => {
+    // The turns before the answer are the model talking its way to a tool
+    // call. Concatenating them in front of a structured reply is what made a
+    // valid verdict fail its own schema check.
+    curl
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          content: [
+            { type: "text", text: "I'll start by reading the rubric." },
+            { type: "tool_use", id: "toolu_01", name: "echo_args", input: { word: "helium" } },
+          ],
+          usage: { input_tokens: 5, output_tokens: 1 },
+        }),
+      })
+      .mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          content: [{ type: "text", text: '{"verdict":"fail"}' }],
+          usage: { input_tokens: 6, output_tokens: 2 },
+        }),
+      });
+
+    const out = await invokeClaude({ ...CALL, tools: [echo] });
+
+    expect(out.text).toBe('{"verdict":"fail"}');
+    expect(out.text).not.toContain("I'll start by reading");
+  });
+
+  it("spends the role's declared reply budget instead of this edge's default", async () => {
+    curl.mockResolvedValue({
+      status: 200,
+      body: JSON.stringify({
+        content: [{ type: "text", text: "ok" }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    });
+
+    await invokeClaude({ ...CALL, maxOutputTokens: 48_000 });
+
+    expect(JSON.parse(curl.mock.calls[0]![0].body).max_tokens).toBe(48_000);
   });
 });

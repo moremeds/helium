@@ -14,6 +14,14 @@ roles:
       # reviewer must not be able to look up who wrote it, which variant it
       # was, or what the author said about its own output.
       tools: [fr_rubric, fr_page, fr_evidence, fr_dated_events]
+    # The reply is ONE JSON object carrying a findings array AND one
+    # events_checked row per dated item the pre-pass returned — 52-65 rows on
+    # the weekly sample. Measured 2026-09-08: three verdicts truncated
+    # mid-string inside events_checked under this edge's 4,096-token default,
+    # at 24-33k output tokens for the whole run. 48,000 is the budget that
+    # covers the largest of those with room, and it is a NUMBER: no model, no
+    # vendor, no edge is named here or anywhere else in this file.
+    maxOutputTokens: 48000
     persona: >-
       You are the acceptance reader for a daily markets briefing. You read one
       page the way its reader would — someone who has five minutes before the

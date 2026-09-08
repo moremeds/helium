@@ -18,6 +18,7 @@ import { codexSubscriptionCatalog } from "./catalog.js";
 import {
   invokeCodex,
   type CodexInvocationResult,
+  REQUEST_TIMEOUT_MS,
 } from "./invoke.js";
 
 type CodexInvoker = typeof invokeCodex;
@@ -67,7 +68,10 @@ class CodexExecutor implements Executor {
       model: this.native.model,
       effort: this.native.effort as never,
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
-      timeoutMs: work.constraints.maxLatencyMs ?? 300_000,
+      timeoutMs: work.constraints.maxLatencyMs ?? REQUEST_TIMEOUT_MS,
+      ...(work.constraints.maxOutputTokens === undefined
+        ? {}
+        : { maxOutputTokens: work.constraints.maxOutputTokens }),
       env: context.env,
       signal,
     });
