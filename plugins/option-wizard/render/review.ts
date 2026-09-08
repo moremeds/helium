@@ -1192,7 +1192,7 @@ export function reviewHeadline(args: {
 }): string {
   const review = (args.review ?? "").trim();
   const firstLine = review.split(/\r?\n/u)[0]?.trim() ?? "";
-  if (firstLine !== "") return firstLine;
+  if (firstLine !== "") return firstLine.replace(/^## /u, "");
   if (args.period === WEEKLY) return "Weekly market review";
   const lead = (args.oneThing ?? "").trim();
   if (lead !== "") {

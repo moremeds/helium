@@ -148,6 +148,20 @@ describe("focusEvents", () => {
     missing: [],
   };
 
+  it("uses seven calendar days, or fourteen for pinned important names", () => {
+    const admitted = (day: string, pinned: string[] = []) =>
+      focusEvents(base({ day, pinned, earnings }), { ...focusCfg, importantEarningsTickers: [] })
+        .some((event) => event.kind === "earnings");
+    expect(admitted("2026-11-11")).toBe(true);
+    expect(admitted("2026-11-10")).toBe(false);
+    expect(admitted("2026-11-04", ["NVDA"])).toBe(true);
+    expect(admitted("2026-11-03", ["NVDA"])).toBe(false);
+    expect(admitted("2026-11-19", ["NVDA"])).toBe(false);
+    expect(admitted("2026-09-07", ["NVDA"])).toBe(false);
+    expect(focusEvents(base({ day: "2026-11-04", earnings }), focusCfg)
+      .some((event) => event.kind === "earnings")).toBe(true);
+  });
+
   it("reads a real earnings date and refuses to invent a report time", () => {
     const events = focusEvents(base({ day: "2026-11-13", earnings }), focusCfg);
     const nvda = events.find((event) => event.ticker === "NVDA");
@@ -167,7 +181,7 @@ describe("focusEvents", () => {
     expect(
       nvda.parts.find((part: { kind: string }) => part.kind === "earnings")
         ?.points,
-    ).toBe(0);
+    ).toBeUndefined();
   });
 
   it("drops an event from a source nobody verified", () => {

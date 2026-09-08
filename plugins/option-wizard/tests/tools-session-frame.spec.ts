@@ -132,9 +132,10 @@ describe("ow_session_frame", () => {
   // stopped batching would ask for zero tickers, not for fourteen.
   it("batches the earnings lookup at the tool's own cap", async () => {
     const members = Array.from(
-      { length: EARNINGS_PER_CALL + 2 },
+      { length: EARNINGS_PER_CALL + 1 },
       (_, index) => `TT${String(index)}`,
     );
+    members.push("NVDA");
     const asked: string[] = [];
     const json = (body: unknown): Response =>
       new Response(JSON.stringify(body), {
@@ -187,6 +188,7 @@ describe("ow_session_frame", () => {
       focus: { weekly: Array<{ nearest?: { day?: string } }> };
     };
     expect([...asked].sort()).toEqual([...members].sort());
+    expect(asked[0]).toBe("NVDA");
     const earnings = frame.coverage.find((row) => row.layer === "earnings")!;
     expect(earnings.state).toBe("ok");
     expect(earnings.reason).toBeUndefined();

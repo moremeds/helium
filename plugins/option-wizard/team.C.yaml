@@ -313,7 +313,7 @@ roles:
     requires: [tool.use, reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_reports, ow_session_frame, ow_rotation, ow_uw_headlines, ow_uw_earnings, ow_uw_earnings_report]
+      tools: [ow_reports, ow_session_frame, ow_rotation, ow_uw_headlines, ow_uw_earnings_report]
     persona: |-
       You write a MARKET WEEK newsletter: what changed in markets, why it matters,
       the evidence and counterevidence, and the conditions for next week.
@@ -690,6 +690,8 @@ tasks:
       priced in from low VIX and tight credit alone. Keep these as observations.
       Prefer two or three developed topics to many short headings. Keep theme
       entry dates and our since-entry performance out of the market article.
+      A declared trigger is not its latest observation: do not claim a condition
+      is met or not met without dated evidence for every required input.
       GEX levels do not prove that dips will be bought or rallies capped. Options
       flow is a transaction proxy, not evidence of new institutional positions;
       do not compare raw cross-ticker flow magnitudes as conviction or quality.
@@ -707,6 +709,9 @@ tasks:
       an earnings date, IV rank, a headline alone or an older financial statement.
       Keep missing-data explanations local to the conclusion they limit; do not
       lead a market article with report execution or repeat a technical outage.
+      Upcoming earnings are seven calendar days ahead, or fourteen for declared
+      important names and Argon pins. Do not discuss farther earnings in the
+      article or focus rows; completed reports remain usable historical evidence.
       The word limits are ceilings, never targets. Leave unused space on quiet days.
 
       2 — THEN THE JOB OF THIS PHASE. Write what THIS run owes its reader, and stop.
@@ -861,10 +866,11 @@ tasks:
       Call ow_session_frame once and ow_rotation once. Call ow_reports with days:7
       phase:close steps:["edit"] for dated observations across the week. If reports
       were dropped, state the limitation briefly in coverage; never reconstruct them.
-      When available, use ow_uw_headlines and ow_uw_earnings for current news and
-      upcoming earnings. NEITHER COVERS A WEEK: headlines return the newest rows
-      without a date filter; earnings returns the NEXT scheduled date. They cannot
-      prove what happened earlier in the week. Cite the source's actual timestamp.
+      When available, use ow_uw_headlines for current news. Headlines return
+      the newest rows without a date filter, not a whole week. Cite their actual
+      timestamps. Use the session frame for upcoming earnings: ordinary names
+      are limited to seven calendar days, declared important names and Argon pins to fourteen.
+      Do not fetch or discuss farther scheduled earnings as upcoming catalysts.
       With incomplete weekly evidence, limit the synthesis to what is supported.
 
       Reply as ONE JSON object and nothing else:
@@ -889,6 +895,8 @@ tasks:
       priced in from low VIX and tight credit alone. Keep these as observations.
       Prefer two or three developed topics to many short headings. Keep theme
       entry dates and our since-entry performance out of the market article.
+      A declared trigger is not its latest observation: do not claim a condition
+      is met or not met without dated evidence for every required input.
       GEX levels do not prove that dips will be bought or rallies capped. Options
       flow is a transaction proxy, not evidence of new institutional positions;
       do not compare raw cross-ticker flow magnitudes as conviction or quality.
@@ -906,7 +914,15 @@ tasks:
       an earnings date, IV rank, a headline alone or an older financial statement.
       Keep missing-data explanations local to the conclusion they limit; do not
       lead a market article with report execution or repeat a technical outage.
+      Upcoming earnings are seven calendar days ahead, or fourteen for declared
+      important names and Argon pins. Do not discuss farther earnings in the
+      article or focus rows; completed reports remain usable historical evidence.
       The word limits are ceilings, never targets. Leave unused space on quiet days.
+
+      UPCOMING EARNINGS. Follow the frame's admitted events: seven calendar days
+      for ordinary names, fourteen for declared important names and Argon pins.
+      Do not bring October or other out-of-window earnings into prose or focus
+      explanations. Completed earnings facts remain usable as historical evidence.
 
       TIME WINDOWS. State the review's actual dated window. Separate completed-week
       observations from updates since the last close; a latest snapshot or daily

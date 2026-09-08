@@ -323,6 +323,8 @@ extensions:
       # argon chains plus the TV flag lists and can exceed 80 names, so the
       # lookup is capped and the truncation is REPORTED (pinned first, then
       # alphabetical, so which 60 is deterministic).
+      # Fourteen calendar days for these names and Argon pins; seven otherwise.
+      importantEarningsTickers: [NVDA]
       maxEarningsLookups: 60
       # ow_uw_iv_term takes at most 3 tickers per call: 15 names = 5 calls.
       maxIvTermCalls: 5

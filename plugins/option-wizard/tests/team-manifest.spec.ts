@@ -614,7 +614,7 @@ describe("the review authors, rewritten", () => {
       const tools = variant.roles["weekly-analyst"]!.permissions.tools;
       expect(tools).toEqual(name === "team.C-nonews.yaml"
         ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_earnings_report"]
-        : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings", "ow_uw_earnings_report"]);
+        : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings_report"]);
       const internal = variant.tasks.find((task) => task.id === "week-review");
       expect(internal?.phases).toEqual(["weekly"]);
       expect(internal?.prompt).toContain("ow_review_window");

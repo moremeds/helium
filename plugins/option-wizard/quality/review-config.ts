@@ -73,6 +73,8 @@ export interface FocusConfig {
     assignmentRisk: number;
   };
   tieBreak: readonly ["score", "daysToNearestEvent", "ticker"];
+  /** Additional important earnings names; Argon pinned names also qualify. */
+  importantEarningsTickers?: string[];
   maxEarningsLookups: number;
   maxIvTermCalls: number;
   calendarPins: Array<{
@@ -342,6 +344,8 @@ function parseFocus(raw: unknown): FocusConfig | undefined {
     weights,
     windows,
     tieBreak: ["score", "daysToNearestEvent", "ticker"] as const,
+    importantEarningsTickers: z.array(z.string().regex(/^[A-Z][A-Z0-9.-]{0,23}$/u))
+      .parse(focus.importantEarningsTickers ?? []),
     maxEarningsLookups: maxEarningsLookups as number,
     maxIvTermCalls: maxIvTermCalls as number,
     calendarPins,

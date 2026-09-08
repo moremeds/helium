@@ -1524,6 +1524,8 @@ describe("the masthead a review document carries", () => {
   it("the weekly masthead is the market review lead", () => {
     const built = view(REVIEW_PERIODS[0]);
     expect(built.headline).toBe("We read the front end wrong.");
+    expect(reviewHeadline({ period: REVIEW_PERIODS[0], scorecard: "",
+      review: "## Hardware leads\nDated evidence follows." })).toBe("Hardware leads");
   });
 
   it("keeps decimal figures intact in a weekly market-review headline", () => {

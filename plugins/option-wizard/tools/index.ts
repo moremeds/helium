@@ -4577,12 +4577,16 @@ export function buildTools(cfg: {
           ?.ivRank ?? {}) as Record<string, number>;
 
         const focusNotes: string[] = [];
-        // Pinned first, then alphabetical, so WHICH names get the round trips
-        // is deterministic and the truncation says its own size.
+        // Important names and pins first, then alphabetical, so the round trips
+        // are deterministic and the truncation says its own size.
+        const priorityEarnings = [...new Set([
+          ...(review?.focus?.importantEarningsTickers ?? []),
+          ...ofInterest,
+        ])].filter((ticker) => universe.has(ticker));
         const ordered = [
-          ...ofInterest.filter((ticker) => universe.has(ticker)),
+          ...priorityEarnings,
           ...[...universe]
-            .filter((ticker) => !ofInterest.includes(ticker))
+            .filter((ticker) => !priorityEarnings.includes(ticker))
             .sort((a, b) => a.localeCompare(b, "en")),
         ];
         const cap = review?.focus?.maxEarningsLookups ?? ordered.length;
