@@ -1,0 +1,30 @@
+{
+  "id": "2026-09-08-weekly-coverage-calls",
+  "kind": "option-wizard-coverage",
+  "repo": "helium",
+  "hypothesis": "The weekly review's supporting-coverage table is a call register that has never carried a call. The 2026-09-08 W37-v2 final sample printed 22 rows and marked all 22 UNTESTED, so the run minted zero `coverage-verdict` commitments and the scorecard had nothing to score five sessions later. The prompt and gate work landing before 2026-09-13 should make the author call at least six of those rows while the 复盘 prose stays written — a table with calls in it is worth more than a table with more rows in it.",
+  "change": "helium plugins/option-wizard: whatever lands on master before the 2026-09-13 weekly run. This commitment is minted BEFORE any W37-v2 candidate run exists, so the bar cannot be set to fit a result already seen.",
+  "baseline": {
+    "source": "docs/evidence/flash-depth/2026-09-08/final/payload.json — the W36 (week_key 2026-W37, run_day 2026-09-07) final sample, run_id run-90bf475f-6686-4219-8f29-903dc9a2b5d5, code_sha 3e48937",
+    "coverageRows": 22,
+    "untestedRows": 22,
+    "calls": 0,
+    "reviewNonEmpty": true
+  },
+  "target": {
+    "tenant": "option-wizard",
+    "phase": "weekly",
+    "deployment": "production"
+  },
+  "window": {
+    "startsAt": "2026-09-13T00:00:00Z",
+    "rule": "The FIRST production `weekly` run of option-wizard whose evidence header `startedAt` is at or after 2026-09-13T00:00:00Z, and no later one. The weekly trigger is cron `0 20 * * 0` in Asia/Hong_Kong (plugins/option-wizard/tenant.yaml:142-146), i.e. Sunday 20:00 HKT = 12:00 UTC = 08:00 America/New_York; 2026-09-13 is a Sunday, so the expected header is startedAt ≈ 2026-09-13T12:00:00Z with reportTimezone day 2026-09-13. A run that fires late, is re-kicked, or is replayed by hand still counts as long as it is the earliest production weekly at or after the window start — the window names an instant, never a launchd invocation.",
+    "artifact": "<HELIUM_STATE_ROOT>/evidence/option-wizard-<day>-weekly-<runId>.json (packages/cli/src/evidence.ts:66-73)"
+  },
+  "metrics": {
+    "calls": { "improveIfAtLeast": 6, "regressIfAtMost": 0 },
+    "review": { "requireNonEmpty": true }
+  },
+  "reviewSectionTitles": ["2 · 上周复盘", "Market review"],
+  "rule": "A CALL is one `coverage-verdict` commitment in the option-wizard ledger carrying the target run's `runId`. The renderer mints exactly one per supporting-coverage row the author called with a scorable, non-`untested` token on a row that has a datum and is not renderer-filled (plugins/option-wizard/render/review.ts:1227-1253), so the count is the register's own, not a re-parse of the printed table. A row the author called but marked unscorable mints nothing and is deliberately not counted: what is not settleable is not a call. 复盘 is NON-EMPTY when the run's rendered view carries a section whose title is one of `reviewSectionTitles` and whose body is not blank after trimming — the internal seven-title name is `2 · 上周复盘` and the flash-page name for the same prose is `Market review` (plugins/option-wizard/render/review.ts:203-220). improved if calls >= 6 AND 复盘 non-empty; regressed if calls == 0; flat otherwise. pending until a run inside the window exists on disk. Settled from the ledger and the evidence file under HELIUM_STATE_ROOT only — no network, no database. Thresholds fixed at mint time; never edited after."
+}
