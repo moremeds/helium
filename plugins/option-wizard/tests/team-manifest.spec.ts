@@ -643,8 +643,12 @@ describe("the review authors, rewritten", () => {
     for (const id of ["weekly", "edit"]) {
       const prompt =
         manifest.tasks.find((task) => task.id === id)?.prompt ?? "";
-      expect(prompt, id).toContain("at most 20 words");
-      expect(prompt, id).toContain("never a direction");
+      expect(prompt, id).toContain("at most 40 words");
+      // The rule is no longer "never a direction" — a focus line is the
+      // analyst's judgment of the setup, and "no view yet" is a stance. What
+      // stays forbidden is deriving one mechanically from the IV column.
+      expect(prompt, id).toContain("NEVER MAP IV TO A DIRECTION");
+      expect(prompt, id).toContain("never a price target");
       expect(prompt, id).toContain("PROPOSED:");
     }
   });

@@ -44,6 +44,7 @@ import {
   reviewSections,
   verdictCommitments,
   type CalendarRow,
+  type CoverageDetail,
   type FocusViewRow,
   type ReviewDoc,
   type RotationResult,
@@ -387,6 +388,13 @@ export interface BriefView {
   themes?: ThemeViewRow[];
   /** §H.4. Weekly only. */
   rotation?: { asOf: string; benchmark: string; rows: RotationRow[] };
+  /** §3's row data, structured: the band, the observable, the member list and
+   *  the left-out reason the printed bullet no longer carries. Data, not
+   *  prose — nothing here is rendered. */
+  coverageDetail?: CoverageDetail[];
+  /** Sections a step wrote that a review document does not render — the
+   *  week-reviewer's three windows. Carried, not printed. */
+  otherSections?: Section[];
 }
 
 const RIGHTS = new Set(["call", "put"]);
@@ -1810,6 +1818,7 @@ function calendarRowsFrom(report: RunReport): CalendarRow[] {
 function reviewOf(
   report: RunReport,
   frame: SessionFrame | null,
+  calendar?: TenantSpec["calendar"],
 ): {
   sections: Section[];
   faults: string[];
@@ -1823,6 +1832,7 @@ function reviewOf(
     focus?: BriefView["focus"];
     themes?: ThemeViewRow[];
     rotation?: BriefView["rotation"];
+    coverageDetail?: CoverageDetail[];
   };
   doc: ReviewDoc | null;
   period: ReviewPeriod;
@@ -1843,6 +1853,7 @@ function reviewOf(
     frame,
     rotation,
     doc,
+    ...(calendar === undefined ? {} : { calendar }),
     caps: period === REVIEW_PERIODS[0] ? frame.caps.weekly : frame.caps.daily,
     period,
     // The FRAME's rows first. `ow_uw_calendar` and `ow_argon_policy_path` are
@@ -1894,7 +1905,7 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     body: base.oneThing?.body ?? "",
     problems: doc?.problems ?? [],
   });
-  const review = reviewOf(report, frame);
+  const review = reviewOf(report, frame, cfg.calendar);
   const faults = [...(lead.faults ?? []), ...(review?.faults ?? [])];
   const fromScenarios = scenarioSectionTitles(report);
   return {
@@ -1910,19 +1921,22 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
     ...(review === null
       ? {}
       : {
-          // THE SEVEN ARE THE DOCUMENT, AND THEY COME FIRST. On 2026-09-06 the
-          // delivered weekly opened with the scenario step's own
+          // THE SEVEN ARE THE DOCUMENT, AND THEY ARE THE WHOLE DOCUMENT. On
+          // 2026-09-06 the delivered weekly opened with the scenario step's own
           // "Section 5 — Dated Catalysts" and the week-reviewer's three window
-          // sections, and only then reached "1 · Scorecard". The scenario
-          // step's block is dropped outright — §5 is the same content, built
-          // from the admitted calendar rows — and everything else a step wrote
-          // (the three windows) follows §7 unchanged.
-          sections: [
-            ...review.sections,
-            ...base.sections.filter(
+          // sections, and only then reached "1 · Scorecard". Putting the seven
+          // first fixed the order and not the length: the page still ended in
+          // three regime essays ("5 sessions…", "10 sessions…", "21 sessions…")
+          // that repeat §1's counters back at the reader in prose. They are
+          // still computed and still carried — on `otherSections`, below — so
+          // nothing that reads them loses them; they simply do not render.
+          sections: review.sections,
+          ...(() => {
+            const rest = base.sections.filter(
               (section) => !fromScenarios.has(section.title),
-            ),
-          ],
+            );
+            return rest.length === 0 ? {} : { otherSections: rest };
+          })(),
           // A review run has no `regime` step, so nothing upstream fills the
           // masthead and the 2026-09-06 weekly reached argon with an empty
           // one. Renderer-computed, never empty, never a model sentence.
@@ -1946,6 +1960,9 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
           ...(review.view.rotation === undefined
             ? {}
             : { rotation: review.view.rotation }),
+          ...(review.view.coverageDetail === undefined
+            ? {}
+            : { coverageDetail: review.view.coverageDetail }),
         }),
   };
 }
@@ -1961,7 +1978,7 @@ export default function renderReport(
   // the payloads; it never stamps the run context, because the runner already
   // holds it.
   const label = report.phase;
-  const review = reviewOf(report, frame);
+  const review = reviewOf(report, frame, cfg.calendar);
   const commitments = [
     ...forecastCommitments(view, label),
     ...(review === null || frame === null
