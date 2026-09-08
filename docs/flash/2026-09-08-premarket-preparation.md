@@ -44,6 +44,26 @@ probe is at `/tmp/flash-sep8-readiness.mjs`; it is optional and may be recreated
 from the three tool names above. Pass `phase: 'premarket'`, `variant: 'live'`,
 the isolated state and tenant calendar/extensions when checking the factory.
 
+## Source/depth update at 08:56 Hong Kong
+
+UW recovered and the local weekly completed with real inputs. Apex's apparent
+HTTP502 was the CLI ignoring NO_PROXY; the installed Undici environment proxy
+now respects it. The command below explicitly bypasses the configured private
+Apex host. Fifty basket symbols answered, but some bars are stale; 60 of 161
+universe names were checked for earnings. Do not call either count full freshness.
+
+Upcoming earnings now use seven calendar days, or fourteen for Argon pinned names
+plus declared NVDA. Important names are queried first. The actual final weekly
+calendar contains ADBE September 10 and no October/December earnings. Weekly is
+longer; daily remains shorter. UW completed financials and topic headings are wired.
+
+See `../evidence/flash-depth/2026-09-08/README.md`: actual pages and frozen replays
+are archived, but editorial acceptance remains open. Focus-word overage, catalyst
+paragraph admission and unsupported causal/time-window wording remain in the final
+sample. Preserve those findings and check whether the live premarket improves them;
+do not manually fix saved model text or call this sample accepted. PR105 and PR425
+remain unmerged and undeployed.
+
 ## Live run at 20:00 Hong Kong (12:00 UTC)
 
 Read this task's latest progress and existing evidence first to avoid duplicate

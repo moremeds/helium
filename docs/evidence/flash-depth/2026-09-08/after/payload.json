@@ -1,0 +1,575 @@
+{
+  "tenant": "option-wizard",
+  "kind": "weekly",
+  "run_day": "2026-09-07",
+  "week_key": "2026-W37",
+  "run_id": "run-0a2ef363-cc5b-40a5-9ba0-f159ec2d04b3",
+  "code_sha": "de50708",
+  "schema_version": 3,
+  "outcome": "completed",
+  "headline": "**Window: the trading week ending 2026-09-04 (the newest SPY bar in every basket and rotation table); cross-asset levels below are the 2026-09-07/08 snapshot noted as such.** The tape this week was quiet at the index but loud underneath: SPY returned essentially flat (+0.1% for the week to 2026-09-04), while rotation ran hard toward hard assets and the physical semiconductor supply chain, and away from software and cybersecurity.",
+  "view": {
+    "schemaVersion": 3,
+    "date": "2026-09-07",
+    "tenant": "option-wizard",
+    "outcome": "completed",
+    "headline": "**Window: the trading week ending 2026-09-04 (the newest SPY bar in every basket and rotation table); cross-asset levels below are the 2026-09-07/08 snapshot noted as such.** The tape this week was quiet at the index but loud underneath: SPY returned essentially flat (+0.1% for the week to 2026-09-04), while rotation ran hard toward hard assets and the physical semiconductor supply chain, and away from software and cybersecurity.",
+    "tape": [],
+    "schedule": [],
+    "overnight": [],
+    "sections": [
+      {
+        "title": "Market review",
+        "body": "**Window: the trading week ending 2026-09-04 (the newest SPY bar in every basket and rotation table); cross-asset levels below are the 2026-09-07/08 snapshot noted as such.** The tape this week was quiet at the index but loud underneath: SPY returned essentially flat (+0.1% for the week to 2026-09-04), while rotation ran hard toward hard assets and the physical semiconductor supply chain, and away from software and cybersecurity.\n\n## Ag inputs led everything, on a supply thesis that is not yet confirmed by the price data alone\nThe El Niño ag basket (DBA, MOS, NTR, DE) was the week's outright leader, +6.6% versus SPY's +0.1% — a +6.5-point one-week excess, on top of +13.3 over four weeks and +11.6 over twelve. That is a real, dated move, not a single-day spike. The mechanism is judgement: an El Niño that tightens grain and soft supply would bid ag inputs, and the theme's stated evidence (NOAA ONI ≥ +0.5 for three consecutive months; CBOT front-month vs 20-day) is operator-checked, not something the return series proves. Counterevidence to keep honest: the theme was only entered 2026-09-06, so its since-entry excess is 0.0% — the 6.5-point number is trailing beta into the position, not performance of the call. Relative strength alone does not identify weather as the cause.\n\n## The semi supply chain split cleanly by layer\nWithin our own sector map the dispersion was the story. Memory/Storage led at +7.6% (STX, WDC, MU, SNDK, 4 of 4 higher vs SPY) and Foundry +5.4% (INTC, TSEM, TSM, UMC, 4 of 4). Computer/GPU added +3.4% and Semi-Logic/ASIC +1.8%. But Semi-Cap/EDA lagged at −1.5% (8 of 8 below SPY) — the tools-and-design layer did not participate. That divergence — physical capacity and memory bid, capital-equipment fading — is the notable internal fact; I won't assign it a single cause without the order and utilization data that would support one. XLK itself was only +0.9% for the week (+0.7 excess), so the semiconductor strength was concentrated, not a broad tech bid.\n\n## Software and cyber were the funding source\nThe other side of the rotation: Cybersecurity −6.9% (NET, S, CRWD, PANW, 4 of 4 below SPY) and Software/SaaS −4.7% (6 of 6) were the worst sector rows on the board. Cloud/Hyperscaler was roughly flat-to-down at −1.3%. At the ETF level XLY (−2.0%, −2.1 excess) and XLI (−1.1%, and −5.0 over four weeks) were the laggards; XLV (+0.2% week, +7.9% over twelve) and XLF (+9.3% over twelve) hold the longer-horizon leadership. This is a market rotating out of long-duration growth and into value/defensive and physical assets.\n\n## Rates and vol were calm; the Fed is the live variable\nCross-asset confirmation was muted. The 10-year sat at 4.788% and the 2-year at 4.375% (both 2026-09-07/08 snapshots, ~flat on the day); the 2s10s curve at 41.3 bp. High-yield spreads tightened a touch to 2.65% (as of 2026-09-03) — no stress signal. VIX at 14.52 is low. The one genuinely unusual macro fact: the 9/16 FOMC path prices a 57.9% HIKE probability (as of 2026-09-07), with 12/9 at 54% HIKE. A market pricing a coin-flip-plus toward a September hike, while equities sit flat and vol sits at 14, is the tension worth watching. Unusual Whales' 2026-09-08T00:03:48Z wire noted markets pricing \"~60% odds of a Fed hike next week\" alongside gold near $4,400 and Mideast supply risk — consistent with the hike-and-inflation read, though a headline is a citation, not evidence of positioning.\n\n## Commodities backdrop\nGold held ~$4,421 (−0.19% snapshot) and WTI crude firmed toward $92 (+0.83% snapshot), with the oil bid tied in the same-day wire (2026-09-08T00:23:19Z) to reported strikes on a Saudi Aramco refinery and Hormuz shipping tension. Firm crude plus a firm hike bet is the inflationary combination that keeps the front end pinned.\n\nLimitation: the reports feed carried no close-phase market observations for most of this week (only 2026-09-03 held a candidate; 2026-09-04 close was empty), so the dated narrative rests on the rotation and frame tables rather than day-by-day notes."
+      },
+      {
+        "title": "Outlook",
+        "body": "The coming week's single pivot is the 2026-09-16 FOMC, which prices a 57.9% hike probability. That is close enough to a coin flip that either outcome moves rates and, by extension, the growth-vs-value rotation that defined this week. The observable that matters is the front end: the 2-year (4.375%) and the hike odds themselves. If the odds firm above ~60%, expect the software/cyber underperformance and the value/defensive bid to persist, since a hike is the direct headwind to long-duration multiples. If the odds fade toward a hold, the reverse risk is a sharp mean-reversion snapback in the beaten-down Software/SaaS and Cybersecurity rows — the two worst sectors this week are also the most rate-sensitive to reprice.\n\nThe ag-input leadership is the week's most extended move and therefore the most exposed. It can persist only if the supply thesis keeps getting confirmed — the theme's own kill condition is ONI < +0.5 two months running, or a 10% underperformance over 60 sessions; neither is met. But a +6.5-point weekly excess after +13.3 over four weeks invites a pullback on any grain-price reversal or a risk-on rotation back into growth. Watch CBOT corn/wheat front-month versus the 20-day as the confirming tell; a break below would remove the mechanism.\n\nThe semiconductor supply-chain split is the structural theme to track. The question is whether Memory/Storage (+7.6%) and Foundry (+5.4%) leadership broadens back into Semi-Cap/EDA (−1.5%), or whether the tools layer keeps lagging — the latter would argue the memory/foundry move is a pricing/utilization event rather than a new capex cycle. The nearest scheduled read-through is distant (ASML 2026-10-14, CDNS 2026-10-26), so this resolves on price and any interim orders/utilization data, not on an earnings print next week.\n\nADBE reports post-market 2026-09-10, the only single-name catalyst inside seven days, with a 6.93% implied move and IV rank 68.84 — the market is pricing a real event. Software/SaaS is the week's second-worst sector, so ADBE prints into a weak tape and a stretched policy backdrop; the read there will color sentiment on the whole SaaS complex.\n\nReverse risk to the whole framing: rates are calm (VIX 14.52, HY 2.65%, curve 41.3 bp), so the market is not braced for a hawkish surprise. A hike delivered into that complacency is the asymmetric risk; a dovish hold into this rotation is the mirror-image squeeze."
+      },
+      {
+        "title": "Dated catalysts",
+        "body": "- 2026-09-10 · ADBE earnings (post) · fcst implied move 6.9%\n- 2026-09-16 · FOMC 9/16 · fcst HIKE 57.9% · prev 3.75-4.0%\n- 2026-09-24 · COST earnings (post) · fcst implied move 4.0%\n- 2026-09-30 · FDS earnings (pre) · fcst implied move 11.6%\n- 2026-10-08 · DAL earnings · fcst implied move 8.1%\n- 2026-10-13 · GS earnings (pre) · fcst implied move 7.7%\n- 2026-10-14 · ASML earnings (pre) · fcst implied move 10.2%\n- 2026-10-22 · DECK earnings · fcst implied move 11.4%\n- 2026-10-22 · F earnings · fcst implied move 8.8%\n- 2026-10-26 · CDNS earnings · fcst implied move 13.2%\n- 2026-10-27 · BE earnings · fcst implied move 29.1%\n- 2026-10-27 · GLW earnings · fcst implied move 19.8%\n- 2026-10-28 · FOMC 10/28 · fcst HOLD 69.9% · prev 3.50-3.8%\n- 2026-10-28 · TSLA earnings · fcst implied move 13.6%\n- 2026-10-29 · AAPL earnings · fcst implied move 8.4%\n- 2026-10-29 · AMZN earnings · fcst implied move 11.3%\n- 2026-12-09 · FOMC 12/9 · fcst HIKE 54% · prev 3.75-4.0%\n- 2026-12-10 · AVGO earnings · fcst implied move 15.1%"
+      },
+      {
+        "title": "Supporting coverage",
+        "body": "3a macro\n- rates.front · 4.375 → +0 bp · CONTINUE · 9/16 hike priced 57.9%; front end pinned by hike bet and firm crude\n- rates.long · 4.788 → +0 bp · UNTESTED · 10Y flat at 4.788%; direction hinges on 9/16 outcome, not yet supported\n- curve.shape · 41.3 → — · UNTESTED · 2s10s 41.3 bp with no prior observation to measure change against\n- policy.path · 57.9 → — · UNTESTED · 57.9% hike is a coin-flip-plus; no directional edge either way\n- credit · 2.65 → -1 bp · CONTINUE · HY 2.65% tightening; no stress signal into the Fed\n- vol · 14.52 → +0.21 pts · UNTESTED · VIX 14.52 low but a hike into calm is the asymmetric risk; no edge\n- dealer.positioning · 768.35 → +1.84 pts · UNTESTED · gamma flip 768.35 is a level, not a directional signal on its own\n- flow · 39758465 → — · UNTESTED · market tide net premium a transaction proxy, not evidence of positioning\n- commodities · 4422.68 → gold 4422.68 (-0.16%) · WTI crude 92.34 (+0.94%) · CONTINUE · crude firm on Mideast supply risk per 2026-09-08 wire; gold safe-haven bid\n- fx · 118.7 → +0.4 index pts · UNTESTED · broad dollar index as of 2026-08-28 is stale for a weekly read\n- equity.internals · 770.19 → SPY -2.98 · QQQ +1.29 · IWM +0.82 · UNTESTED · SPY flat; rotation is the story, not index direction\n3b sectors\n- sector:Computer/GPU · 3.4 → +3.3% vs SPY (6 of 6) · UNTESTED · not called this period\n- sector:Semi-Logic/ASIC · 1.8 → +1.7% vs SPY (6 of 6) · UNTESTED · not called this period\n- sector:Foundry · 5.4 → +5.3% vs SPY (4 of 4) · UNTESTED · not called this period\n- sector:Semi-Cap/EDA · -1.5 → -1.6% vs SPY (8 of 8) · UNTESTED · not called this period\n- sector:Memory/Storage · 7.6 → +7.5% vs SPY (4 of 4) · UNTESTED · not called this period\n- sector:Cybersecurity · -6.9 → -7.0% vs SPY (4 of 4) · UNTESTED · not called this period\n- sector:Software/SaaS · -4.7 → -4.8% vs SPY (6 of 6) · UNTESTED · not called this period\n- sector:Cloud/Hyperscaler · -1.3 → -1.4% vs SPY (6 of 6) · UNTESTED · not called this period\n- sector:Foundation-Model-Proxy · 0.9 → +0.8% vs SPY (5 of 5) · UNTESTED · not called this period\n- sector:Devices/Endpoint · 0.8 → +0.7% vs SPY (2 of 2) · UNTESTED · not called this period\n3c themes\n- theme:el-nino-ag-2026 · +6.5% (1w) · +0.0% (since 2026-09-06) · UNTESTED · not called this period\n  kill armed: ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions\n  evidence: operator-checked\n3d rotation\n  theme:el-nino-ag-2026 · 1w +6.6% · 4w +12.9% · 12w +15.7% · excess 1w +6.5%\n  XLK · 1w +0.9% · 4w -0.4% · 12w +1.5% · excess 1w +0.7%\n  XLU · 1w +0.8% · 4w -1.2% · 12w -2.6% · excess 1w +0.7%\n  XLV · 1w +0.2% · 4w +3.5% · 12w +12.0% · excess 1w +0.1%\n  XLF · 1w +0.0% · 4w +0.9% · 12w +9.3% · excess 1w -0.1%\n  XLC · 1w -0.8% · 4w +0.7% · 12w +0.6% · excess 1w -1.0%\n  XLP · 1w -1.0% · 4w -0.6% · 12w -0.8% · excess 1w -1.1%\n  XLI · 1w -1.1% · 4w -5.4% · 12w -0.3% · excess 1w -1.2%\n  XLRE · 1w -1.2% · 4w -2.3% · 12w -2.3% · excess 1w -1.3%\n  XLB · 1w -1.4% · 4w -0.8% · 12w +0.9% · excess 1w -1.5%\n  XLY · 1w -2.0% · 4w -4.1% · 12w -1.3% · excess 1w -2.1%\n  XLE · untested — no bar on 2026-09-04; newest 2026-07-13\n  benchmark SPY · 1w +0.1% · 4w -0.4% · 12w +4.1% · as of 2026-09-04\nleft out: 19 rows — rates.long, curve.shape, policy.path, vol, dealer.positioning, flow, fx, equity.internals, sector:Computer/GPU, sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA, sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint, theme:el-nino-ag-2026"
+      }
+    ],
+    "regime": {
+      "paragraph": ""
+    },
+    "candidates": [],
+    "riskList": [],
+    "charts": {
+      "gex": []
+    },
+    "degradation": "Data degraded: gate flash-budget refused (focusWords ADBE 47 of 40)",
+    "spyForecast": {
+      "scorable": false,
+      "reason": "the scenarios step wrote no spyForecast object"
+    },
+    "runLabel": "weekly",
+    "appBase": "http://127.0.0.1:3001",
+    "footer": {
+      "coverage": [
+        "macro — ow_macro_rates",
+        "policy — ow_argon_policy_path",
+        "gex — ow_uw_gex",
+        "spot — ow_spot",
+        "tide — ow_uw_market_state",
+        "calendar — ow_uw_calendar",
+        "commodities — ow_tv_commodities",
+        "watchlist — ow_argon_watchlist",
+        "earnings — ow_uw_earnings",
+        "ivTerm — ow_uw_iv_term",
+        "actions — ow_massive_actions"
+      ],
+      "asOf": [
+        "ow_argon_policy_path — 2026-09-07",
+        "ow_spot — 2026-09-08T00:39:13.486Z",
+        "ow_uw_calendar — 2026-09-08T00:39:11.058Z",
+        "ow_tv_commodities — 2026-09-08T00:39:15.387Z",
+        "ow_argon_watchlist — 2026-09-08T00:37:33.596719+08:00",
+        "ow_uw_earnings — 2026-09-08T00:39:36.159Z"
+      ],
+      "notes": [
+        "earnings: 60 of 161 universe members looked up (maxEarningsLookups)",
+        "bars: 50 of 50 basket symbols answered",
+        "bars: SPY's newest bar is 2026-09-04, so every basket row is as of 2026-09-04 rather than 2026-09-07"
+      ]
+    },
+    "faults": [
+      "dated catalysts names NOT, CPI, which the admitted rows do not carry — the paragraph is dropped"
+    ],
+    "otherSections": [
+      {
+        "title": "5 sessions, 2026-08-31 to 2026-09-04",
+        "body": "Sessions with a report: 2 of 5. Checks scored: 0 (hit 0, miss 0, not-observed 0). With no scored checks across the window, there is no channel I can name as over-read and none I can name as missed — the tally is empty, not lopsided."
+      },
+      {
+        "title": "10 sessions, 2026-08-24 to 2026-09-04",
+        "body": "Sessions with a regime record: 0 of 10. Mode histogram: ratio 0, persistence 0, invalidation 0, no-data 0. Two sessions carry regime blocks on file — 2026-09-03 and 2026-09-04 — and both read regime: unavailable; the record is missing for those days, but the sessions ran. The other eight sessions carry no regime block at all."
+      },
+      {
+        "title": "21 sessions, 2026-08-07 to 2026-09-04",
+        "body": "Process statistics first. Sessions with a report: 2 of 21. Checks scored 0 (hit 0, miss 0, not-observed 0). Focus churn 0; focus hit rate null. Calls scored 0, outstanding 0. Verdicts settled 0, mean Brier null. Mode histogram all zero; budget violations 0; coverage gaps 0."
+      },
+      {
+        "title": "1 · Scorecard",
+        "body": "Nothing settled yet — no call has come due · calibration n=0, not yet scorable\n0 open calls\nFocus: 0 of 0 moved ≥ implied · 0 open\nCoverage gaps: 19 rows (rates.long, curve.shape, policy.path, vol, dealer.positioning, flow, fx, equity.internals, sector:Computer/GPU, sector:Semi-Logic/ASIC, sector:Foundry, sector:Semi-Cap/EDA, sector:Memory/Storage, sector:Cybersecurity, sector:Software/SaaS, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint, theme:el-nino-ag-2026)"
+      },
+      {
+        "title": "6 · Focus",
+        "body": "rank · ticker · event · IV rank · implied move · open call · why\n| 1 | ADBE | earnings (post) 2026-09-10 | 69 | 6.9% | — | On the list for 2026-09-10 post-market earnings; IV rank 68.84 and 6.93% implied move say the market prices a genuine event. Reported FY25 quarters ran below street EPS estimates repeatedly (basis unknown, no surprise inferred). |\n| 2 | TSLA | earnings 2026-10-28 | 11 | 13.6% | — | Pinned watchlist name; earnings 2026-10-28 is far out, so IV rank 10.91 is distance not complacency. Devices/Endpoint +0.8% this week. Nothing to act on before its own catalyst. |\n| 3 | AVGO | earnings 2026-12-10 | 1 | 15.1% | — | Pinned; earnings 2026-12-10 is ~67 sessions away, so IV rank 1.31 reflects distance. Semi-Logic/ASIC +1.8% this week is the live tell, not the print. No view yet. |\n| 4 | COST | earnings (post) 2026-09-24 | — | 4.0% | — | Earnings 2026-09-24 (post), implied 3.98% — modest, consistent with a defensive staple. XLP lagged (−1.0%) this week. Watching for the consumer read; nothing before its date. |\n| 5 | FDS | earnings (pre) 2026-09-30 | — | 11.6% | — | Earnings 2026-09-30 (pre), implied 11.6% — the market prices a wide move for a data name. Far enough out that IV isn't yet event-loaded. No view. |\n| 6 | DAL | earnings 2026-10-08 | — | 8.1% | — | Earnings 2026-10-08; firm crude ($92, +0.83% snapshot) is the nearer input than the print — a fuel-cost tell for airlines. Watch WTI, not IV, for now. |\n| 7 | GS | earnings (pre) 2026-10-13 | — | 7.7% | — | Earnings 2026-10-13 (pre); XLF holds +9.3% 12-week leadership. Distance keeps IV quiet; the sector trend is the signal until the print. No view. |\n| 8 | ASML | earnings (pre) 2026-10-14 | 28 | 10.2% | — | Earnings 2026-10-14 (pre), IV rank 28.23. The key Semi-Cap/EDA read-through — and that sector fell −1.5% this week. Watch whether the tools-layer lag persists into the print. |\n| 9 | DECK | earnings 2026-10-22 | — | 11.4% | — | Earnings 2026-10-22; XLY worst ETF this week (−2.0%). Discretionary weakness is the backdrop; distance keeps IV muted. No view yet. |\n| 10 | F | earnings 2026-10-22 | — | 8.8% | — | Earnings 2026-10-22; Devices/Endpoint autos flat. Far out, no event premium. Nothing actionable now. |\n| 11 | CDNS | earnings 2026-10-26 | 31 | 13.2% | — | Earnings 2026-10-26, IV rank 31.1. Design/EDA name inside the lagging Semi-Cap/EDA row (−1.5%); the sector fade is the current tell, not the distant print. |\n| 12 | BE | earnings 2026-10-27 | — | 29.1% | — | Earnings 2026-10-27; implied 29.1% is the widest on the board — a high-vol single name, distance not yet the driver. No view. |\n| 13 | GLW | earnings 2026-10-27 | — | 19.8% | — | Earnings 2026-10-27, implied 19.8%. Far out; nothing lands before it. Watching Memory/Storage and glass-supply demand as the nearer context. |\n| 14 | AAPL | earnings 2026-10-29 | 44 | 8.4% | — | Earnings 2026-10-29, IV rank 44.47 already elevated for the distance. Devices/Endpoint +0.8%. No pre-print catalyst; watch the AI-device narrative. |\n| 15 | AMZN | earnings 2026-10-29 | 22 | 11.3% | — | Earnings 2026-10-29, IV rank 21.92. Cloud/Hyperscaler lagged (−1.3%) this week. Distant print; the hyperscaler-capex read is the tell, not IV. |\nweights: declared prior 2026-09-06"
+      },
+      {
+        "title": "7 · Open calls",
+        "body": "nothing outstanding"
+      }
+    ],
+    "focus": {
+      "period": "weekly",
+      "rows": [
+        {
+          "ticker": "ADBE",
+          "event": "earnings (post) 2026-09-10",
+          "why": "On the list for 2026-09-10 post-market earnings; IV rank 68.84 and 6.93% implied move say the market prices a genuine event. Reported FY25 quarters ran below street EPS estimates repeatedly (basis unknown, no surprise inferred).",
+          "ivRank": 68.84
+        },
+        {
+          "ticker": "TSLA",
+          "event": "earnings 2026-10-28",
+          "why": "Pinned watchlist name; earnings 2026-10-28 is far out, so IV rank 10.91 is distance not complacency. Devices/Endpoint +0.8% this week. Nothing to act on before its own catalyst.",
+          "ivRank": 10.91
+        },
+        {
+          "ticker": "AVGO",
+          "event": "earnings 2026-12-10",
+          "why": "Pinned; earnings 2026-12-10 is ~67 sessions away, so IV rank 1.31 reflects distance. Semi-Logic/ASIC +1.8% this week is the live tell, not the print. No view yet.",
+          "ivRank": 1.31
+        },
+        {
+          "ticker": "COST",
+          "event": "earnings (post) 2026-09-24",
+          "why": "Earnings 2026-09-24 (post), implied 3.98% — modest, consistent with a defensive staple. XLP lagged (−1.0%) this week. Watching for the consumer read; nothing before its date."
+        },
+        {
+          "ticker": "FDS",
+          "event": "earnings (pre) 2026-09-30",
+          "why": "Earnings 2026-09-30 (pre), implied 11.6% — the market prices a wide move for a data name. Far enough out that IV isn't yet event-loaded. No view."
+        },
+        {
+          "ticker": "DAL",
+          "event": "earnings 2026-10-08",
+          "why": "Earnings 2026-10-08; firm crude ($92, +0.83% snapshot) is the nearer input than the print — a fuel-cost tell for airlines. Watch WTI, not IV, for now."
+        },
+        {
+          "ticker": "GS",
+          "event": "earnings (pre) 2026-10-13",
+          "why": "Earnings 2026-10-13 (pre); XLF holds +9.3% 12-week leadership. Distance keeps IV quiet; the sector trend is the signal until the print. No view."
+        },
+        {
+          "ticker": "ASML",
+          "event": "earnings (pre) 2026-10-14",
+          "why": "Earnings 2026-10-14 (pre), IV rank 28.23. The key Semi-Cap/EDA read-through — and that sector fell −1.5% this week. Watch whether the tools-layer lag persists into the print.",
+          "ivRank": 28.23
+        },
+        {
+          "ticker": "DECK",
+          "event": "earnings 2026-10-22",
+          "why": "Earnings 2026-10-22; XLY worst ETF this week (−2.0%). Discretionary weakness is the backdrop; distance keeps IV muted. No view yet."
+        },
+        {
+          "ticker": "F",
+          "event": "earnings 2026-10-22",
+          "why": "Earnings 2026-10-22; Devices/Endpoint autos flat. Far out, no event premium. Nothing actionable now."
+        },
+        {
+          "ticker": "CDNS",
+          "event": "earnings 2026-10-26",
+          "why": "Earnings 2026-10-26, IV rank 31.1. Design/EDA name inside the lagging Semi-Cap/EDA row (−1.5%); the sector fade is the current tell, not the distant print.",
+          "ivRank": 31.1
+        },
+        {
+          "ticker": "BE",
+          "event": "earnings 2026-10-27",
+          "why": "Earnings 2026-10-27; implied 29.1% is the widest on the board — a high-vol single name, distance not yet the driver. No view."
+        },
+        {
+          "ticker": "GLW",
+          "event": "earnings 2026-10-27",
+          "why": "Earnings 2026-10-27, implied 19.8%. Far out; nothing lands before it. Watching Memory/Storage and glass-supply demand as the nearer context."
+        },
+        {
+          "ticker": "AAPL",
+          "event": "earnings 2026-10-29",
+          "why": "Earnings 2026-10-29, IV rank 44.47 already elevated for the distance. Devices/Endpoint +0.8%. No pre-print catalyst; watch the AI-device narrative.",
+          "ivRank": 44.47
+        },
+        {
+          "ticker": "AMZN",
+          "event": "earnings 2026-10-29",
+          "why": "Earnings 2026-10-29, IV rank 21.92. Cloud/Hyperscaler lagged (−1.3%) this week. Distant print; the hyperscaler-capex read is the tell, not IV.",
+          "ivRank": 21.92
+        }
+      ],
+      "churn": 0
+    },
+    "themes": [
+      {
+        "id": "el-nino-ag-2026",
+        "token": "untested",
+        "excess1w": "+6.5%",
+        "excessSinceEntered": "+0.0%",
+        "leadership": "confirms",
+        "why": "Ag basket +6.6% led the board (+6.5 excess), 4-week +12.9. But entered 2026-09-06, so since-entry excess is 0.0%; trailing beta, not the call itself.",
+        "kill": "ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions",
+        "killMet": false
+      }
+    ],
+    "rotation": {
+      "asOf": "2026-09-04",
+      "benchmark": "SPY",
+      "rows": [
+        {
+          "symbol": "theme:el-nino-ag-2026",
+          "label": "el-nino-ag-2026",
+          "w1": 6.6,
+          "w4": 12.9,
+          "w12": 15.7,
+          "excess1w": 6.5,
+          "excess4w": 13.3,
+          "excess12w": 11.6
+        },
+        {
+          "symbol": "XLK",
+          "label": "XLK",
+          "w1": 0.9,
+          "w4": -0.4,
+          "w12": 1.5,
+          "excess1w": 0.7,
+          "excess4w": 0,
+          "excess12w": -2.6
+        },
+        {
+          "symbol": "XLU",
+          "label": "XLU",
+          "w1": 0.8,
+          "w4": -1.2,
+          "w12": -2.6,
+          "excess1w": 0.7,
+          "excess4w": -0.8,
+          "excess12w": -6.7
+        },
+        {
+          "symbol": "XLV",
+          "label": "XLV",
+          "w1": 0.2,
+          "w4": 3.5,
+          "w12": 12,
+          "excess1w": 0.1,
+          "excess4w": 3.9,
+          "excess12w": 7.9
+        },
+        {
+          "symbol": "XLF",
+          "label": "XLF",
+          "w1": 0,
+          "w4": 0.9,
+          "w12": 9.3,
+          "excess1w": -0.1,
+          "excess4w": 1.3,
+          "excess12w": 5.2
+        },
+        {
+          "symbol": "XLC",
+          "label": "XLC",
+          "w1": -0.8,
+          "w4": 0.7,
+          "w12": 0.6,
+          "excess1w": -1,
+          "excess4w": 1.1,
+          "excess12w": -3.5
+        },
+        {
+          "symbol": "XLP",
+          "label": "XLP",
+          "w1": -1,
+          "w4": -0.6,
+          "w12": -0.8,
+          "excess1w": -1.1,
+          "excess4w": -0.2,
+          "excess12w": -4.9
+        },
+        {
+          "symbol": "XLI",
+          "label": "XLI",
+          "w1": -1.1,
+          "w4": -5.4,
+          "w12": -0.3,
+          "excess1w": -1.2,
+          "excess4w": -5,
+          "excess12w": -4.4
+        },
+        {
+          "symbol": "XLRE",
+          "label": "XLRE",
+          "w1": -1.2,
+          "w4": -2.3,
+          "w12": -2.3,
+          "excess1w": -1.3,
+          "excess4w": -1.9,
+          "excess12w": -6.4
+        },
+        {
+          "symbol": "XLB",
+          "label": "XLB",
+          "w1": -1.4,
+          "w4": -0.8,
+          "w12": 0.9,
+          "excess1w": -1.5,
+          "excess4w": -0.4,
+          "excess12w": -3.2
+        },
+        {
+          "symbol": "XLY",
+          "label": "XLY",
+          "w1": -2,
+          "w4": -4.1,
+          "w12": -1.3,
+          "excess1w": -2.1,
+          "excess4w": -3.7,
+          "excess12w": -5.4
+        },
+        {
+          "symbol": "XLE",
+          "label": "XLE",
+          "w1": null,
+          "w4": null,
+          "w12": null,
+          "excess1w": null,
+          "excess4w": null,
+          "excess12w": null,
+          "untested": "no bar on 2026-09-04; newest 2026-07-13"
+        }
+      ]
+    },
+    "coverageDetail": [
+      {
+        "id": "rates.front",
+        "level": "4.375",
+        "move": "+0 bp",
+        "prior": "4.374",
+        "asOf": "2026-09-08T00:39:15.895Z",
+        "band": "(0bp..0bp)",
+        "observable": "DGS2 breaks below 4.30% on a dovish repricing"
+      },
+      {
+        "id": "rates.long",
+        "level": "4.788",
+        "move": "+0 bp",
+        "prior": "4.784",
+        "asOf": "2026-09-08T00:39:15.895Z",
+        "leftOut": "10Y flat at 4.788%; direction hinges on 9/16 outcome, not yet supported"
+      },
+      {
+        "id": "curve.shape",
+        "level": "41.3",
+        "leftOut": "2s10s 41.3 bp with no prior observation to measure change against"
+      },
+      {
+        "id": "policy.path",
+        "level": "57.9",
+        "asOf": "2026-09-07",
+        "leftOut": "57.9% hike is a coin-flip-plus; no directional edge either way"
+      },
+      {
+        "id": "credit",
+        "level": "2.65",
+        "move": "-1 bp",
+        "prior": "2.66",
+        "asOf": "2026-09-03",
+        "band": "(1bp..2bp)",
+        "observable": "BAMLH0A0HYM2 widens above 2.85%"
+      },
+      {
+        "id": "vol",
+        "level": "14.52",
+        "move": "+0.21 pts",
+        "prior": "14.31",
+        "asOf": "2026-09-08T00:39:15.895Z",
+        "leftOut": "VIX 14.52 low but a hike into calm is the asymmetric risk; no edge"
+      },
+      {
+        "id": "dealer.positioning",
+        "level": "768.35",
+        "move": "+1.84 pts",
+        "prior": "770.19",
+        "asOf": "2026-09-04T20:14:28.094000Z",
+        "leftOut": "gamma flip 768.35 is a level, not a directional signal on its own"
+      },
+      {
+        "id": "flow",
+        "level": "39758465",
+        "asOf": "2026-09-04T16:10:00-04:00",
+        "leftOut": "market tide net premium a transaction proxy, not evidence of positioning"
+      },
+      {
+        "id": "commodities",
+        "level": "4422.68",
+        "move": "gold 4422.68 (-0.16%) · WTI crude 92.34 (+0.94%)",
+        "asOf": "2026-09-08T00:39:15.387Z",
+        "observable": "WTI falls back below $88 on de-escalation"
+      },
+      {
+        "id": "fx",
+        "level": "118.7",
+        "move": "+0.4 index pts",
+        "prior": "118.4",
+        "asOf": "2026-08-28",
+        "leftOut": "broad dollar index as of 2026-08-28 is stale for a weekly read"
+      },
+      {
+        "id": "equity.internals",
+        "level": "770.19",
+        "move": "SPY -2.98 · QQQ +1.29 · IWM +0.82",
+        "asOf": "2026-09-08T00:39:13.486Z",
+        "leftOut": "SPY flat; rotation is the story, not index direction"
+      },
+      {
+        "id": "sector:Computer/GPU",
+        "level": "3.4",
+        "move": "+3.3% vs SPY (6 of 6)",
+        "asOf": "2026-09-04",
+        "members": [
+          "NVDA",
+          "AMD",
+          "ARM",
+          "DELL",
+          "HPE",
+          "HPQ"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Semi-Logic/ASIC",
+        "level": "1.8",
+        "move": "+1.7% vs SPY (6 of 6)",
+        "asOf": "2026-09-04",
+        "members": [
+          "AVGO",
+          "ARM",
+          "MCHP",
+          "MRVL",
+          "QCOM",
+          "TXN"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Foundry",
+        "level": "5.4",
+        "move": "+5.3% vs SPY (4 of 4)",
+        "asOf": "2026-09-04",
+        "members": [
+          "INTC",
+          "TSEM",
+          "TSM",
+          "UMC"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Semi-Cap/EDA",
+        "level": "-1.5",
+        "move": "-1.6% vs SPY (8 of 8)",
+        "asOf": "2026-09-04",
+        "members": [
+          "AMAT",
+          "ARM",
+          "ASML",
+          "CDNS",
+          "KLAC",
+          "LRCX",
+          "SNPS",
+          "TER"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Memory/Storage",
+        "level": "7.6",
+        "move": "+7.5% vs SPY (4 of 4)",
+        "asOf": "2026-09-04",
+        "members": [
+          "STX",
+          "WDC",
+          "MU",
+          "SNDK"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Cybersecurity",
+        "level": "-6.9",
+        "move": "-7.0% vs SPY (4 of 4)",
+        "asOf": "2026-09-04",
+        "members": [
+          "NET",
+          "S",
+          "CRWD",
+          "PANW"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Software/SaaS",
+        "level": "-4.7",
+        "move": "-4.8% vs SPY (6 of 6)",
+        "asOf": "2026-09-04",
+        "members": [
+          "ADBE",
+          "FIG",
+          "NOW",
+          "SHOP",
+          "ZM",
+          "CRM"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Cloud/Hyperscaler",
+        "level": "-1.3",
+        "move": "-1.4% vs SPY (6 of 6)",
+        "asOf": "2026-09-04",
+        "members": [
+          "GOOGL",
+          "AMZN",
+          "BABA",
+          "IBM",
+          "MSFT",
+          "ORCL"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Foundation-Model-Proxy",
+        "level": "0.9",
+        "move": "+0.8% vs SPY (5 of 5)",
+        "asOf": "2026-09-04",
+        "members": [
+          "GOOGL",
+          "AMZN",
+          "NVDA",
+          "MSFT",
+          "META"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "sector:Devices/Endpoint",
+        "level": "0.8",
+        "move": "+0.7% vs SPY (2 of 2)",
+        "asOf": "2026-09-04",
+        "members": [
+          "TSLA",
+          "AAPL"
+        ],
+        "leftOut": "no verdict token for this row"
+      },
+      {
+        "id": "theme:el-nino-ag-2026",
+        "level": "+6.5",
+        "move": "+6.5% (1w) · +0.0% (since 2026-09-06)",
+        "prior": "+0.0",
+        "asOf": "2026-09-04",
+        "leftOut": "no verdict token for this row"
+      }
+    ]
+  },
+  "report": {
+    "subject": "",
+    "body": "",
+    "artifacts": []
+  }
+}
