@@ -72,3 +72,56 @@ set hits the recording and another does not.
 `2026-09-02-close-holdout` is not shown to the author or the reviewer during
 tuning. It exists to be run once, at the end, against a framework that was
 never fitted to it.
+
+## The weekly replays now (2026-09-08)
+
+The 2026-09-07 table row above and `2026-09-06-weekly/MISSING.md` both say the
+weekly cannot be `--replay-from`'ed. **That is no longer true, and no code was
+changed to make it true** — two commits after those notes were written already
+fixed it, and nobody re-ran the sample to notice:
+
+1. `18a953a` moved the recordings-first branch in
+   `plugins/option-wizard/tools/index.ts` ABOVE `if (asOf === undefined) return
+   built;`. A replay now replaces the WHOLE tool surface with a recording
+   lookup — not only the `AS_OF_BLIND` list — so a tool that reads a dated
+   store is served from the frozen response like any other, and a call with no
+   recording returns `{"unavailable":"as-of",...}` instead of reaching the
+   network. There is no live fallback on this path.
+2. `pit-replay.sh replay` falls back to `steps.json`'s `run.startedAt` when
+   `run.json` has no `asOf`. The weekly's is `2026-09-06T21:26:55.076Z`, so the
+   run gets the recorded clock the live run had, and `pit coverage:` is printed
+   (it is gated on the run having an as-of at all).
+
+Verified by running it twice from one sample, changing only the prompt file:
+
+```bash
+# A — team.yaml as it stands
+HELIUM_ENV_FILE=~/.config/helium/helium.env \
+  scripts/pit-replay.sh replay docs/evidence/flash-samples/2026-09-06-weekly <state root A>
+
+# B — the same replay with a different prompt manifest swapped in
+FLASH_DRAFTS_DIR=<scratch> HELIUM_ENV_FILE=~/.config/helium/helium.env \
+  scripts/flash-abc.sh 2026-09-06-weekly B <state root B>
+```
+
+| run | manifest      | `teamYamlSha256` | run id                                  | exit | wall | pit coverage                                                                                          |
+| --- | ------------- | ---------------- | --------------------------------------- | ---- | ---- | ----------------------------------------------------------------------------------------------------- |
+| A   | `team.yaml`   | `3221618c…a9a9d8` | `run-1b5e867d-52ca-4a07-9672-dfbed9494efd` | 0    | 106s | 29/30 — served `ow_reports, ow_review_window, ow_rotation, ow_session_frame`; unavailable `ow_uw_headlines` |
+| B   | `team.B.yaml` | `2499b3dd…e7046`  | `run-d8acb771-e092-4055-b9c2-4038ff4b2a5e` | 0    | 96s  | 30/30 — served `ow_macro_rates, ow_reports, ow_review_window, ow_rotation, ow_session_frame, ow_uw_market_state` |
+
+Both rendered a weekly page, and the two differ:
+
+    cf48ec44d973aef8b87e1b8e4f16569eb1b11b5e8cf39dc4dd4f7777b1647d18  A render-dump/option-wizard-2026-09-06-weekly.html (5180 B)
+    e901f9a7e9d1917fc8a7ede8dccfd4bcab3b1b3bbff23adc52896ac23499ffb0  B render-dump/option-wizard-2026-09-06-weekly.html (4945 B)
+
+Read this for exactly what it proves: **one recorded weekly input can be
+re-authored under a different prompt in under two minutes, offline.** It is NOT
+a controlled A/B — one run each, and a model re-run of the SAME manifest would
+also differ. What is controlled is the input: both runs read the same nine
+recordings under the same recorded clock.
+
+`ow_uw_headlines` in run A is the honest half of the mechanism. The recorded
+weekly never called that tool, so there is nothing to serve and the replay
+refuses rather than fetching today's headlines into a 2026-09-06 page. A tool
+whose arguments differ from the recorded ones refuses the same way — which is
+why A and B, having chosen different arguments, have different coverage.

@@ -22,7 +22,8 @@ usage() {
 usage: flash-review.sh <page-path> <evidence-dir> <state-root> [label]
 
 Needs HELIUM_ENV_FILE in the environment (path to the provider env file; its
-contents are never printed).
+contents are never printed). Optional: FR_MODEL_PIN, a <provider>:<model>
+target id the reviewer is pinned to.
 EOF
   exit 2
 }
@@ -51,9 +52,16 @@ export HELIUM_AUDIT_DB="$state_root/audit.db"
 export HELIUM_TENANT_DELIVERY=1
 mkdir -p "$state_root/logs"
 
+# FR_MODEL_PIN pins the reviewer to one target id (<provider>:<model>), so a
+# page is never graded by the model that wrote it. Unset, the router picks as
+# it always did; set to a target that is not registered, the run is refused
+# before it starts.
+pin_args=()
+if [ -n "${FR_MODEL_PIN:-}" ]; then pin_args=(--model-pin "$FR_MODEL_PIN"); fi
+
 log="$state_root/logs/$label.log"
 status=0
-( cd "$REPO_ROOT" && node "$CLI" run flash-review --phase review --variant "$label" ) >"$log" 2>&1 || status=$?
+( cd "$REPO_ROOT" && node "$CLI" run flash-review --phase review --variant "$label" "${pin_args[@]+"${pin_args[@]}"}" ) >"$log" 2>&1 || status=$?
 run_id="$(sed -n 's/^run \(run-[0-9a-f-]*\) .*/\1/p' "$log" | head -1)"
 echo "log: $log"
 echo "runId: ${run_id:-UNKNOWN}"

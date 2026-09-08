@@ -6,16 +6,19 @@ weekly phase has no point-in-time instant. `weekend-2026-09-06` also recorded
 this phase; `review-v7` is frozen because its rendered page and step JSON are
 already in the repo at `docs/evidence/pit-replays/2026-09-06/review-v7/`.
 
-**`--replay-from` cannot serve this sample, and that is structural, not a gap.**
-The recordings-first branch in `plugins/option-wizard/tools/index.ts` opens with
-`if (asOf === undefined) return built;` and then only substitutes tools listed in
-`AS_OF_BLIND`. The weekly called six tools —
-`ow_macro_rates`, `ow_reports`, `ow_review_window`, `ow_rotation`,
-`ow_session_frame`, `ow_uw_market_state` — and **none of them is as-of blind**:
-every one reads a dated store and can answer for a past day on its own. So
-`replay` here is a live re-run, `served` is empty, and no `pit coverage:` line is
-printed. Reproduction of the frozen INPUTS is by reading `tool-io/` directly;
-the six recordings are the whole input set.
+**`--replay-from` serves this sample.** It did not when this file was written,
+and the sentence that said so was structural at the time: the recordings-first
+branch in `plugins/option-wizard/tools/index.ts` sat BELOW
+`if (asOf === undefined) return built;` and substituted only the `AS_OF_BLIND`
+tools, none of which the weekly calls. Commit `18a953a` moved that branch above
+the as-of check, so a replay now substitutes the whole tool surface; and
+`pit-replay.sh replay` takes the weekly's clock from `steps.json`'s
+`run.startedAt` (`2026-09-06T21:26:55.076Z`) when `run.json` has no `asOf`.
+Re-verified 2026-09-08, exit 0 in ~100s with a `pit coverage:` line — see the
+"weekly replays now" section of `../README.md` for the two runs and their
+hashes. The weekly called six tools — `ow_macro_rates`, `ow_reports`,
+`ow_review_window`, `ow_rotation`, `ow_session_frame`, `ow_uw_market_state` —
+and those six recordings are still the whole input set.
 
 **Not recorded anywhere.** News: the weekly team calls no news tool
 (`ow_frank`, `ow_uw_headlines`, `ow_x_posts` were never invoked). This matches

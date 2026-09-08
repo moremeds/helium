@@ -66,8 +66,9 @@ Done 2026-09-07 on `feat/flash-step0` (`docs/evidence/flash-samples/`,
   sample is not yet proven on production inputs; Step 4 is where that is
   judged. The 2026-09-03/04 production runs predate the recorder, so their
   full inputs cannot be recovered.
-- The weekly runs with no as-of and cannot be `--replay-from`ed; its six
-  recordings are read directly.
+- The weekly sample's `run.json` carries no as-of. Superseded 2026-09-08: the
+  replay takes its clock from `steps.json`'s `run.startedAt` and serves all six
+  recordings, so the weekly IS `--replay-from`able.
 
 ## Step 1 — candidate drafts from the frozen inputs (1–2 days)
 

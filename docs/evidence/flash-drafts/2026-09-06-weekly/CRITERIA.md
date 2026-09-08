@@ -37,9 +37,11 @@ The weekly-analyst role has **no news tool at all** under variants A and B —
 `tools: [ow_reports, ow_session_frame, ow_rotation]`. That is the condition
 this sample was written under and it is the thing variant C changes.
 
-The weekly cannot be replayed: it runs with no `--as-of`, so `--replay-from`
-is inert (see `docs/evidence/flash-samples/2026-09-06-weekly/MISSING.md`). All
-weekly variants are LIVE runs. Two consequences: the numbers differ between
+The weekly drafts recorded here were LIVE runs: at the time they were made the
+weekly ran with no `--as-of`, so `--replay-from` was inert. That is no longer
+true of the sample — since `18a953a` a weekly replays from its recordings under
+its recorded clock (see `docs/evidence/flash-samples/README.md`, "the weekly
+replays now") — but it is still true of THESE drafts, which were never re-made. Two consequences: the numbers differ between
 variants by however much the world moved between the runs, and any news the C
 variant sees is 2026-09-07 news, not week-of-2026-09-06 news. Both are
 recorded per run in `docs/evidence/flash-drafts/README.md`.
