@@ -347,7 +347,7 @@ describe("ow_event_day", () => {
     const windowed = await eventDay(
       {
         date: "2026-09-04",
-        window: { start: "2026-09-04T12:25:00Z", end: "2026-09-04T12:35:00Z" },
+        windowStart: "2026-09-04T12:25:00Z", windowEnd: "2026-09-04T12:35:00Z",
       },
       { minuteBars: 11 },
     );
@@ -361,7 +361,7 @@ describe("ow_event_day", () => {
     const table = await eventDay(
       {
         date: "2026-09-04",
-        window: { start: "2026-09-04T12:25:00Z", end: "2026-09-04T12:35:00Z" },
+        windowStart: "2026-09-04T12:25:00Z", windowEnd: "2026-09-04T12:35:00Z",
       },
       { minuteBars: 0 },
     );

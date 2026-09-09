@@ -1433,12 +1433,13 @@ const EventDayParams = z.object({
   /** The 1m event window, both ends INCLUSIVE at apex (verified 2026-09-08:
    *  12:25:00Z..12:35:00Z answers 11 bars, not 10). ISO-8601 with an offset —
    *  a bare YYYY-MM-DD makes apex answer 500, exactly as `ow_apex_bars` says. */
-  window: z
-    .object({
-      start: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u),
-      end: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u),
-    })
-    .optional(),
+  // Two flat strings, not a nested object: the provider tool schema carries
+  // only `type` + `description` per parameter, so a bare `type: "object"`
+  // reaches Anthropic without `properties`/`additionalProperties` and the
+  // whole role is refused ("parameters.window.additionalProperties must be
+  // explicitly true or false") — weekly died on this from 3c3d9ae to here.
+  windowStart: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u).optional(),
+  windowEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u).optional(),
   symbolsExtra: z.array(z.string().min(1).max(8)).max(40).optional(),
 });
 
@@ -4385,10 +4386,15 @@ export function buildTools(cfg: {
           description:
             "The session, YYYY-MM-DD. Omit to let the tool pick the widest-dispersion day of the last five sessions.",
         },
-        window: {
-          type: "object",
+        windowStart: {
+          type: "string",
           description:
-            'The 1m event window, e.g. {"start":"2026-09-04T12:25:00Z","end":"2026-09-04T12:35:00Z"}. Both ends inclusive. Omit for no intraday slice.',
+            "Start of the 1m event window, ISO-8601 with offset, e.g. 2026-09-04T12:25:00Z. Give windowEnd too. Omit both for no intraday slice.",
+        },
+        windowEnd: {
+          type: "string",
+          description:
+            "End of the 1m event window, inclusive, e.g. 2026-09-04T12:35:00Z.",
         },
         symbolsExtra: {
           type: "array",
@@ -4512,7 +4518,11 @@ export function buildTools(cfg: {
         // eleven bars for a ten-minute window, first 12:25:00+00:00 close
         // 773.4109, last 12:35:00+00:00 close 771.72.
         let intraday: Record<string, unknown> | undefined;
-        if (parsed.window !== undefined) {
+        const window =
+          parsed.windowStart !== undefined && parsed.windowEnd !== undefined
+            ? { start: parsed.windowStart, end: parsed.windowEnd }
+            : undefined;
+        if (window !== undefined) {
           const symbol = "SPY";
           const base = need(env, "OW_APEX_API_BASE", tool);
           const url = new URL(
@@ -4521,8 +4531,8 @@ export function buildTools(cfg: {
           );
           url.searchParams.set("timeframe", "1m");
           url.searchParams.set("price_mode", "adjusted");
-          url.searchParams.set("start", parsed.window.start);
-          url.searchParams.set("end", parsed.window.end);
+          url.searchParams.set("start", window.start);
+          url.searchParams.set("end", window.end);
           const doFetch = ctx?.fetchImpl ?? fetch;
           try {
             const response = await doFetch(url);
@@ -4533,14 +4543,14 @@ export function buildTools(cfg: {
             const body = (await response.json()) as { bars?: unknown };
             intraday = {
               symbol,
-              start: parsed.window.start,
-              end: parsed.window.end,
+              start: window.start,
+              end: window.end,
               note: "1m bars, both ends inclusive",
               bars: Array.isArray(body.bars) ? body.bars : [],
             };
             if (!Array.isArray(body.bars) || body.bars.length === 0)
               table.notes.push(
-                `no 1m bar for ${symbol} between ${parsed.window.start} and ${parsed.window.end}`,
+                `no 1m bar for ${symbol} between ${window.start} and ${window.end}`,
               );
           } catch (error: unknown) {
             // The window is an extra, not the answer: its absence is a note,
