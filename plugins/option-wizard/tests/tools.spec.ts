@@ -63,6 +63,18 @@ describe("vocabulary", () => {
     }
   });
 
+  it("declares no object-typed dsh parameter, which reaches the provider without a shape", () => {
+    // toolSpecs (packages/provider-sdk) forwards only `type` + `description`,
+    // so a nested object arrives at Anthropic with no `properties` and no
+    // `additionalProperties` and the whole ROLE is refused. The 2026-09-09
+    // weekly died on ow_event_day.window this way. Flatten instead.
+    for (const t of buildTools({ stateRoot: "/nonexistent", env: EMPTY_ENV })) {
+      for (const [name, spec] of Object.entries(t.dshParams ?? {})) {
+        expect(spec.type, `${t.name}.${name}`).not.toBe("object");
+      }
+    }
+  });
+
   it("registers no tool with order semantics", () => {
     for (const name of VOCABULARY.keys()) {
       expect(name).not.toMatch(/order|place|submit|cancel|amend/u);
