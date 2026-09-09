@@ -363,7 +363,7 @@ describe("coverage rows priced from the same bars as the rotation table", () => 
     expect(row.untested).toBeUndefined();
     expect(row.members).toEqual(["XLK", "XLF"]);
     expect(row.asOf).toBe(BARS_AS_OF);
-    expect(row.move).toContain("% vs SPY (2 of 2)");
+    expect(row.move).toContain("% vs SPY (2 of 2 priced)");
     const expected = basketExcess({
       members: ["XLK", "XLF"],
       benchmark: "SPY",

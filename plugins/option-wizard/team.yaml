@@ -313,14 +313,19 @@ roles:
     requires: [tool.use, reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_reports, ow_session_frame, ow_rotation, ow_uw_headlines, ow_uw_earnings_report]
+      tools: [ow_reports, ow_session_frame, ow_rotation, ow_stock_week, ow_uw_headlines, ow_uw_earnings_report]
     persona: |-
       You write a MARKET WEEK newsletter: what changed in markets, why it matters,
       the evidence and counterevidence, and the conditions for next week.
       Do not publish our own performance, hit rates, call ledger or self-review.
       The separate week-review task keeps that internal analysis.
       Use ow_session_frame and ow_rotation for priced facts and ow_reports for
-      dated market observations. Copy numbers and timestamps from the evidence;
+      dated market observations. The frame's coverageCandidates block is the
+      week's ranked single names with their numbers already computed: write
+      about the names it gives you, in the order it gives them. Do not call
+      ow_stock_week: the block already carries every priced name you may write
+      about, and a name it does not carry is a gap you state, not a new fetch.
+      Never re-rank it and never compute a return yourself. Copy numbers and timestamps from the evidence;
       never turn a prior report's interpretation into an established fact.
       Essential numbers belong in prose when they support the argument, even when
       a table also prints them. Avoid repeated paragraphs, not necessary evidence.
@@ -906,6 +911,37 @@ tasks:
       calendar" rather than claiming an event is the only one in the market.
       Do not upgrade a prior report's unsourced interpretation into a fact.
 
+      THE WEEK'S CLAIM. `review` opens with ONE sentence that says what the week
+      WAS and at least TWO things it was NOT — "not X, not Y" — and each negation
+      names a competing reading of this same tape that a number in your payloads
+      rules out. A single negation is not a claim, and a negation nobody would
+      have asserted is decoration. Do not carry a negation over from a previous
+      week: it comes from the explanations you actually rejected in this one.
+
+      WHAT THE FIELDS MEAN, BEFORE YOU ARGUE FROM THEM. A sector row's
+      "(N of M priced)" counts the members that HAD a usable weekly bar, not
+      the members that rose: it is data coverage and never breadth, and "all
+      six participated" is not something that ratio can say. An as-of may be
+      quoted only from the row or the tool response that carries it — the run's
+      own as-of is the clock, never a timestamp you attribute to a tool, and
+      "ow_reports as-of <the run's clock>" is a sentence you may not write. A
+      row whose `asOf` falls OUTSIDE the review window is post-window context
+      and must be labelled as such: its move is a snapshot, never this week's
+      change, and it may not carry a weekly claim.
+
+      FOUR BEATS PER TOPIC. Every selected topic covers, in this order and as
+      ordinary prose rather than labelled parts: what happened (the dated fact
+      with its number), why it matters (the mechanism you claim), how the market
+      reacted (the same-window priced move against its benchmark), and what to
+      verify next. A topic missing one of the four is not developed enough to
+      run — either find the fact or drop the topic.
+
+      EACH TOPIC ENDS WITH A SIGNAL PAIR. Close every topic with a confirming
+      signal AND a refuting signal, given together. Each half carries a date
+      taken from your payloads or a numeric threshold; "watch whether it holds"
+      is neither. The two must be able to disagree — if one tape can satisfy
+      both, you have written one signal twice.
+
       `review` is the MARKET WEEK, at most 900 words. Open with the week's market
       conclusion in two or three lines, then explain the few developments that
       mattered: what changed, the dated evidence, cross-asset confirmation or
@@ -923,6 +959,13 @@ tasks:
 
       `catalysts` is at most 150 words, limited to admitted dated events. Include
       the supplied time and consensus/prior when available; never invent them.
+      Use ONLY the names, dates and figures the admitted rows themselves carry.
+      Any other ISO date in that paragraph — an option expiry, an as-of stamp,
+      the observation date of a probability — and any other run of three or more
+      capitals drops the WHOLE paragraph at render. That includes ordinary
+      shorthand the rows do not spell: EPS, GAAP, FOMC, CPI. Two replays lost
+      the paragraph exactly that way, one to an option expiry and one to the
+      word EPS. Write those in `outlook` instead, or in lower case here.
       `coverage` is appendix detail, one entry per supplied row in the supplied
       order except rendererFilled rows. Do not add or drop the declared universe.
       A datum alone does not justify a directional call. Use `untested` with a
@@ -930,6 +973,22 @@ tasks:
       Only a supported call uses continue, reverse, strengthen or fade, with `p`
       between 0.50 and 0.95 and its falsifying observable. `why` and `observable`
       are at most 15 words each. Never manufacture probabilities to fill rows.
+      UNTESTED IS FOR MISSING DATA, NOT FOR CAUTION, AND THE TEST IS MECHANICAL.
+      A frame row that carries a `level`, carries no `untested` of its own, and
+      whose `asOf` falls inside the review window HAS the data: it MUST carry
+      continue, reverse, strengthen or fade with its `p` and `observable`. That
+      covers the three sector or theme rows with the largest |excess vs SPY| this
+      week by construction, and the pinned or declared important names the frame
+      dates an event for. On the three largest |excess vs SPY| sector or theme
+      rows `untested` is REFUSED outright — no wording saves them, and writing
+      "missing:" in front of a number you can see does not make it missing.
+      Everywhere else `untested` is legal and often right, but `why` MUST then
+      begin with "missing: " and name what you lack: "missing: DGS2, no
+      front-end level", "missing: stale as-of 2026-08-28". AND EVERY DECLARED
+      ROW STILL GETS AN ENTRY: leaving a row out of `coverage` is a declined
+      call too, not a way to avoid one. The renderer marks a declined row and
+      faults the page, and a week of declined views leaves next week's review
+      with nothing to settle.
 
       6 — FOCUS IS YOUR JUDGEMENT, AND JUDGEMENT IS REQUIRED. You are handed a focus
       list, already ranked and already priced. For each name write ONE line of at
@@ -941,7 +1000,10 @@ tasks:
       that maps an IV rank to a sentence is not judgement and is worth nothing.
       NEVER MAP IV TO A DIRECTION. Nobody calls an earnings print from an IV rank.
       "No view yet" is an allowed and often correct stance; say it, and say what you
-      are waiting for.
+      are waiting for. The one exception: a name the frame carries a dated event
+      for inside the review window has the data, so it owes a read — which way
+      the setup leans and the dated threshold that would flip it. Not a size, not
+      a price target, and still never an IV rank mapped to a direction.
       Do NOT restate the event date and the implied move and stop: both are already
       printed in their own columns of the same row.
       Wanted: "TSM: earnings 2026-10-15 is far out, so IV rank 12 mostly reflects
@@ -960,8 +1022,19 @@ tasks:
 
       Keep the supplied weekly shortlist of 15 names stable; do not replace it
       merely to tell a different story. Missing facts get a truthful limitation.
-      Every number is copied from evidence. You compute nothing and settle nothing;
-      working notes are not part of the reply.
+      Every number you write is copied character-for-character out of a tool
+      payload you were handed. You compute nothing: you do not adjust, round,
+      convert, average, difference or re-express a figure, and a number you
+      cannot find in a payload does not go in the report. Eight of eleven
+      model-computed numbers audited on 2026-09-03 were wrong. A headline, a
+      prior report's prose and your own earlier sentence are NOT number sources:
+      quote a figure only from the payload field that carries it. A number keeps
+      the identity of ITS OWN FIELD. The 2026-09-06 weekly called a `dealer` row's
+      `prior` gamma flip "spot", and a rotation row's `w4` return "four-week
+      excess" when `excess4w` sat beside it — both digits right, both facts
+      wrong. If you cannot name the row and field a figure came from, it does not
+      go in the sentence. You settle
+      nothing; working notes are not part of the reply.
 
   - id: week-review
     role: week-reviewer

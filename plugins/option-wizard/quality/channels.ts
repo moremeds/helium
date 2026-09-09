@@ -496,7 +496,12 @@ function dealerChannel(inputs: ChannelInputs): Channel {
       excluded: "no spot to measure the distance from",
     };
   }
-  const delta = round4(spot - flipNumber);
+  // LEVEL MINUS PRIOR, LIKE EVERY OTHER ROW. This one printed `spot - flip`
+  // while the row prints `level → move` with the flip as the level, so
+  // `768.35 → +1.84 pts` said the flip rose when spot sat 1.84 above it. The
+  // distance is unchanged; only its sign now agrees with the two numbers
+  // beside it, which is what a reader differences.
+  const delta = round4(flipNumber - spot);
   return {
     ...base,
     series: `${ticker} gamma flip`,
@@ -789,8 +794,17 @@ function fxRow(inputs: ChannelInputs, order: number): CoverageRow {
       : {
           prior: fmt(broad[1].value, "indexPts"),
           // `118.7479 → +0.3896 index pts` was four decimals of an index that
-          // is quoted to one.
-          move: signed(round4(broad[0]!.value - broad[1].value), "index pts"),
+          // is quoted to one. And the difference is taken between the numbers
+          // the row PRINTS, not the raw ones: 118.7479 - 118.3583 rounds to
+          // +0.4 while the printed `118.7 → 118.4` differences to +0.3, and a
+          // row a reader cannot subtract is a row that reads as an error.
+          move: signed(
+            round4(
+              Number(fmt(broad[0]!.value, "indexPts")) -
+                Number(fmt(broad[1].value, "indexPts")),
+            ),
+            "index pts",
+          ),
         }),
     asOf: broad[0]!.obs_date,
   };
@@ -907,7 +921,11 @@ function sectorRow(
     ...row,
     asOf: toDay,
     level: fmt(excess.week.basketPct, "pct"),
-    move: `${signedPct(excess.week.excessPct)}% vs ${inputs.benchmark ?? "SPY"} (${excess.week.used.length} of ${members.length})`,
+    // `used` counts the members that had usable BARS, not the members that
+    // rose. The 2026-09-08 replay read "6 of 6" as breadth and offered it as
+    // evidence against single-name noise while DELL's +14.8% sat inside that
+    // six. The word `priced` is the whole fix: it names what the ratio counts.
+    move: `${signedPct(excess.week.excessPct)}% vs ${inputs.benchmark ?? "SPY"} (${excess.week.used.length} of ${members.length} priced)`,
     delta: excess.week.excessPct,
   };
 }

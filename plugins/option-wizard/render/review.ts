@@ -219,6 +219,8 @@ export const MARKET_REPORT_TITLES = [
   "Supporting coverage",
 ] as const;
 
+import { reportedWeek } from "../quality/coverage-candidates.js";
+
 export type { CalendarRow } from "../quality/frame.js";
 
 export interface RotationResult {
@@ -759,6 +761,74 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   // it did, the call, and why. Everything cut is kept — structured, not
   // sentenced — on `view.coverageDetail`, which is where argon can build a real
   // table from it.
+  // #108 RULE 4 — THE UNTESTED ESCAPE, CLOSED DETERMINISTICALLY. On the
+  // 2026-09-06 weekly 21 of 22 rows printed UNTESTED and the ledger got one
+  // call, so nothing settled the week after. `untested` is the honest answer
+  // to MISSING DATA and nothing else: a row the frame priced (it carries a
+  // `level`, it carries no `untested` of its own, and its as-of falls inside
+  // the review window) owes a call. The renderer does not write the call and
+  // does not rewrite the author's words — it marks the row and faults the
+  // page, which is what a gate is for.
+  //
+  // The exception is the FRAME's, not the author's. Run 2 of the same replay
+  // showed why: given a `"missing: "` prefix as the way out, the author wrote
+  // `missing: stale as-of 2026-09-03, predates window close` on a row inside
+  // the window and `missing: not among three largest |excess|`, and made four
+  // calls where run 1 made eleven. A free-text prefix a model writes is not a
+  // test. A row the frame priced, dated inside the window, has nothing left
+  // to be missing.
+  const inWindow = (row: CoverageRow): boolean => {
+    const window = frame.coverageCandidates?.window;
+    if (window === undefined) return true;
+    if (row.asOf === undefined || row.asOf === "") return true;
+    const day = row.asOf.slice(0, 10);
+    return day >= window.start && day <= window.end;
+  };
+  // THE THREE THE WEEK IS ABOUT. `delta` on a sector or theme row IS its
+  // excess over the benchmark, so the three largest by magnitude are the
+  // week's biggest divergences and the rows a reader came for. On those,
+  // `untested` is refused outright: no wording saves them, because run 2 of
+  // the 2026-09-06 replay showed a `"missing: "` prefix is something a model
+  // will write in front of a number it can see.
+  const mandated = new Set(
+    publicRows
+      .filter(
+        (row) =>
+          (row.id.startsWith("sector:") || row.id.startsWith("theme:")) &&
+          row.untested === undefined &&
+          row.delta !== undefined,
+      )
+      .sort((a, b) => Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0))
+      .slice(0, 3)
+      .map((row) => row.id),
+  );
+  const declined = new Set<string>();
+  if (period === WEEKLY)
+    for (const row of publicRows) {
+      if (row.untested !== undefined) continue;
+      if (row.rendererFilled === true) continue;
+      if (row.level === undefined || row.level === "") continue;
+      if (!inWindow(row)) continue;
+      const entry = entries.get(row.id);
+      if (entry !== undefined && entry.token !== "untested") continue;
+      // Outside the mandated three, naming the data you lack is still the
+      // declared way out — the honest `untested` the frame cannot detect for
+      // you. Inside them there is no way out, and a row with no entry at all
+      // is a declined call wherever it sits.
+      if (
+        !mandated.has(row.id) &&
+        entry !== undefined &&
+        entry.why.startsWith("missing: ")
+      )
+        continue;
+      declined.add(row.id);
+    }
+  if (declined.size > 0)
+    faults.push(
+      `coverage declined a call on ${String(declined.size)} priced rows ` +
+        `(${[...declined].join(", ")}) — the week's three largest |excess| rows ` +
+        `owe a call, and every other priced row owes one or a "missing: <data>" reason`,
+    );
   const detail: CoverageDetail[] = [];
   const rowLine = (row: CoverageRow): string => {
     const entry = entries.get(row.id);
@@ -811,7 +881,10 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     if (entry === undefined)
       return `- ${row.id} · ${shown} · UNTESTED · ${NOT_CALLED}`;
     if (entry.token === "untested")
-      return `- ${row.id} · ${shown} · UNTESTED · ${entry.why || "—"}`;
+      return (
+        `- ${row.id} · ${shown} · UNTESTED · ${entry.why || "—"}` +
+        (declined.has(row.id) ? " · call declined on priced data" : "")
+      );
     return `- ${row.id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
   };
 
@@ -823,7 +896,24 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const publicUntested = publicRows.filter(
     (row) => untestedReason(row) !== undefined,
   );
-  const coverageLines: string[] = ["3a macro", ...macroRows.map(rowLine)];
+  // ---- the caliber line, renderer-owned (#107 item 5) ---------------------
+  // WHAT THE NUMBERS ON THIS PAGE ARE, in the renderer, where no model can
+  // rewrite it. It says PRIOR FRIDAY CLOSE -> FRIDAY CLOSE because that is
+  // what the week return measures (verified 2026-09-08 against apex: SOXX is
+  // +2.21% on that basis and +1.73% Monday-close to Friday-close); a preamble
+  // that names the wrong two closes is worse than none. The precedent is
+  // "Rates are the first cause" — a fixed sentence in the PROMPT, which the
+  // model copied every week whether or not it was true.
+  const coverageLines: string[] = [];
+  if (period === WEEKLY) {
+    const week = frame.coverageCandidates?.window ?? reportedWeek(frame.day);
+    coverageLines.push(
+      `Daily close, apex/livewire, week ${week.start}→${week.end} ` +
+        "(prior Friday close → Friday close); intraday windows are 1m bars in ET; " +
+        "macro releases per argon published_at",
+    );
+  }
+  coverageLines.push("3a macro", ...macroRows.map(rowLine));
   coverageLines.push("3b sectors", ...sectorRows.map(rowLine));
   coverageLines.push("3c themes");
   for (const row of themeRows) {

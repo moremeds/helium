@@ -383,6 +383,67 @@ describe("section 3 — the coverage list never shrinks", () => {
     ).toBe("DGS2 not ingested");
   });
 
+  // #108 rule 4. `untested` is the answer to MISSING DATA; on a row the frame
+  // priced it is a declined call, and the renderer says so rather than
+  // rewriting the author's words.
+  it("faults and marks an untested call on a row the frame priced", () => {
+    const out = render({
+      period: "weekly",
+      frame: frame({ rows: fullRows() }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "sector:Computer/GPU",
+            token: "untested",
+            why: "no directional read supported",
+            observable: "",
+            scorable: false,
+          },
+        ],
+      },
+    });
+    expect(
+      out.faults.some(
+        (fault) =>
+          fault.includes("coverage declined a call") &&
+          fault.includes("sector:Computer/GPU"),
+      ),
+    ).toBe(true);
+    expect(legacySections(out).map((s) => s.body).join("\n")).toContain(
+      "call declined on priced data",
+    );
+  });
+
+  it("accepts untested on a row the frame itself marked untested", () => {
+    const rows = fullRows().map((row) =>
+      row.id === "sector:Computer/GPU"
+        ? { ...row, untested: "no weekly bars for the chain members" }
+        : row,
+    );
+    const out = render({
+      period: "weekly",
+      frame: frame({ rows }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: [
+          {
+            id: "sector:Computer/GPU",
+            token: "untested",
+            why: "missing: no member returns this week",
+            observable: "",
+            scorable: false,
+          },
+        ],
+      },
+    });
+    expect(
+      out.faults
+        .filter((fault) => fault.includes("coverage declined a call"))
+        .join(" "),
+    ).not.toContain("sector:Computer/GPU");
+  });
+
   it("a sector row prints its members and a theme row its excess triple", () => {
     const out = render({
       frame: frame({ rows: fullRows() }),
