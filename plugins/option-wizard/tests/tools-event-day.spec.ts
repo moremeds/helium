@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseTenantYaml } from "@helium/core";
-import { buildTools } from "../tools/index.js";
+import { buildTools, eventDayArgsFor } from "../tools/index.js";
 
 const FIX = join(__dirname, "fixtures", "review");
 const read = (name: string): unknown =>
@@ -367,5 +367,29 @@ describe("ow_event_day", () => {
     );
     expect(four(basketOf(table, "Computer/GPU").ret)).toBe(0.0189);
     expect(table.notes.some((note) => note.includes("no 1m bar"))).toBe(true);
+  });
+});
+
+describe("eventDayArgsFor", () => {
+  // 2026-09-07 is Labor Day (closed); 09-08 is the next open session.
+  const calendar = { weekdaysOnly: true, closed: ["2026-09-07"] };
+  it("weekly leaves the pick to the tool", () => {
+    expect(eventDayArgsFor("weekly", "2026-09-08", calendar)).toEqual({});
+  });
+  it("premarket and intraday name the last completed session", () => {
+    expect(eventDayArgsFor("premarket", "2026-09-08", calendar)).toEqual({
+      date: "2026-09-04",
+    });
+    expect(eventDayArgsFor("intraday", "2026-09-08", calendar)).toEqual({
+      date: "2026-09-04",
+    });
+  });
+  it("close names today on an open day, the prior session on a closed one", () => {
+    expect(eventDayArgsFor("close", "2026-09-08", calendar)).toEqual({
+      date: "2026-09-08",
+    });
+    expect(eventDayArgsFor("close", "2026-09-07", calendar)).toEqual({
+      date: "2026-09-04",
+    });
   });
 });
