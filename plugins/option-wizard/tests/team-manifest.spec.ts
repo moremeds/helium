@@ -624,7 +624,7 @@ describe("the review authors, rewritten", () => {
           ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_earnings_report"]
           : name === "team.C.yaml"
             ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings_report"]
-            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_event_day", "ow_uw_headlines", "ow_uw_earnings_report"],
+            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_event_day", "ow_uw_headlines", "ow_tv_news", "ow_uw_earnings_report"],
       );
       const internal = variant.tasks.find((task) => task.id === "week-review");
       expect(internal?.phases).toEqual(["weekly"]);
