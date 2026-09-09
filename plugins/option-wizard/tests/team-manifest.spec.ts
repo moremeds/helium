@@ -520,6 +520,10 @@ describe("the flash page is public — no role reads the book", () => {
       // week's macro calendar (or the fact that it could not be read) so no
       // author has to ask for it, and none of them may invent what prints.
       "ow_macro_releases",
+      // #113 item 1. The frame calls it directly on the premarket and
+      // intraday runs; it is named here because a role may not call a tool its
+      // permissions do not carry.
+      "ow_premarket_movers",
     ]);
     expect(manifest.tasks.find((e) => e.id === "weekly")?.dependsOn).toContain(
       "rotation",

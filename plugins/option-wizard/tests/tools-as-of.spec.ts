@@ -115,12 +115,18 @@ describe("as-of, live-only tools", () => {
       "ow_spot",
       "the live quote route has no history",
     ]);
-    // 16 since ow_tv_news joined the list (#113): the TradingView news route
-    // serves the current feed and takes no date, so a replay would be handed
-    // today's headlines under last week's dateline. ow_argon_watchlist is on
-    // the list for the same shape of reason — argon keeps no dated snapshot of
-    // chain membership.
-    expect(marked).toHaveLength(16);
+    // 17 since ow_premarket_movers joined the list (#113 item 1), which is on
+    // it for the same reason ow_tv_news is: the TradingView news route serves
+    // the current feed and takes no date, and the screener's
+    // `premarket_change` is this morning's session and nothing else, so a
+    // replay would be handed today under last week's dateline.
+    // ow_argon_watchlist is on the list for the same shape of reason — argon
+    // keeps no dated snapshot of chain membership.
+    expect(marked).toHaveLength(17);
+    expect(marked).toContainEqual([
+      "ow_premarket_movers",
+      "the TradingView screener (current session only) has no history",
+    ]);
     expect(marked).toContainEqual([
       "ow_argon_watchlist",
       "argon's live watchlist rail has no history",

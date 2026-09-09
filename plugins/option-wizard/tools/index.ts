@@ -38,6 +38,7 @@ import {
   attachFocusCalendar,
   attachThresholds,
   buildFrame,
+  type PremarketMoversSummary,
 } from "../quality/frame.js";
 import {
   candidateLimit,
@@ -54,6 +55,7 @@ import {
 } from "../quality/event-day.js";
 import { summariseMacroReleases } from "../quality/macro-releases.js";
 import {
+  NEWS_VENUES,
   buildNewsOverview,
   newsCapsFor,
   noVenueReason,
@@ -108,6 +110,10 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // #113. The tape and the headlines behind the ranked names, each with a
   // link. Last, and serial: it is opencli subprocesses against one local app.
   "ow_tv_news",
+  // #113 item 1. ONE opencli call over the whole universe, so it runs BEFORE
+  // the news pass and costs a fraction of it: the movers are the importance
+  // signal the recency-ordered tape could not see.
+  "ow_premarket_movers",
 ];
 
 /**
@@ -196,6 +202,10 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_x_posts", { mutating: false }],
   ["ow_tv_commodities", { mutating: false }],
   ["ow_tv_news", { mutating: false }],
+  // Same reasoning as ow_tv_news: gated on OW_TV_ENABLED, which is not a
+  // `requiresEnv` key here because OPENCLI_BIN has a working default and
+  // naming one key would report a working machine as broken.
+  ["ow_premarket_movers", { mutating: false }],
   ["ow_ib_preflight", { mutating: false }],
   // Pure arithmetic over numbers the caller already has: no env, no network.
   ["ow_price_structure", { mutating: false }],
@@ -1531,6 +1541,17 @@ const TvNewsParams = z.object({
   limit: z.number().int().positive().max(25).optional(),
   id: z.string().min(1).max(128).optional(),
 });
+/** The screener's own clamp on `--tickers`, from `opencli tradingview screener
+ *  --help` (2026-09-09): "Max rows (clamped 1..500)". A longer list would be
+ *  cut server-side and the cut names would look like names that did not move. */
+const TV_SCREENER_MAX_TICKERS = 500;
+/** #113 item 1. Flat params only: `tests/tools.spec.ts` refuses an
+ *  object-typed dsh parameter, which reaches the provider without a shape. */
+const PremarketMoversParams = z.object({
+  symbols: z.string().min(1).max(8192),
+  top: z.number().int().positive().max(50).optional(),
+  session: z.enum(["premarket", "postmarket"]).optional(),
+});
 /**
  * The only handles this tool will read. Free-form handles are forbidden
  * because a wrong one answers confidently: `@gregip` (verified 2026-09-03)
@@ -1658,6 +1679,11 @@ const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
   // asking about last Tuesday would be handed today's headlines with a past
   // date on them, which is exactly the falsehood this map exists to prevent.
   ["ow_tv_news", "the TradingView news route (no dated archive)"],
+  // #113 item 1. `premarket_change` is THIS morning's session against last
+  // night's close, computed server-side and served in current-value form
+  // only. A replay would be handed today's overnight move under a past
+  // dateline, which is the exact falsehood this map prevents.
+  ["ow_premarket_movers", "the TradingView screener (current session only)"],
   // 2026-09-05: moved here after the first replay. GET
   // /api/market/economic-calendar carries a SHORT FORWARD window and nothing
   // behind it — it answered with 0 rows on 2026-09-05 — so a past instant gets
@@ -6034,6 +6060,39 @@ export function buildTools(cfg: {
           { asOf: day, phase: cfg.phase },
         );
 
+        // ---- #113 item 1: the overnight movers ------------------------------
+        // BEFORE the news overview, and for a reason: the movers are what the
+        // news pass should be steered by. On 2026-09-09 the premarket ran with
+        // META up 5.8 % on the Muse launch and said nothing about it, because
+        // `newsOverview` sees only the most RECENT global rows plus the ranked
+        // candidates' own feeds, and META was neither. A move is the
+        // importance signal that ordering does not carry.
+        //
+        // PREMARKET AND INTRADAY ONLY. `close` reports a session that has
+        // already happened and the weekly is not a session at all; asking for
+        // an overnight move there would spend a call on a column whose meaning
+        // does not match the phase. The field is simply absent, not empty — an
+        // empty movers list would read as "nothing moved overnight".
+        //
+        // Cost: ONE opencli call for the whole universe whatever its size (up
+        // to the screener's own 500-ticker clamp), which is why the universe
+        // rather than the five candidates is what is asked about.
+        if (cfg.phase === "premarket" || cfg.phase === "intraday") {
+          const movers = await answer("premarketMovers", "ow_premarket_movers", {
+            symbols: [...universe].join(","),
+            top: 8,
+          });
+          const moversWhy = skipped.premarketMovers;
+          delete skipped.premarketMovers; // not a declared coverage layer
+          if (movers !== undefined && movers !== null)
+            frame.premarketMovers = movers as PremarketMoversSummary;
+          else
+            frame.notes = [
+              ...(frame.notes ?? []),
+              `ow_premarket_movers did not answer: ${moversWhy ?? "no reason recorded"}`,
+            ];
+        }
+
         // ---- #113: the news overview ---------------------------------------
         // LAST, and not through `answer()`. Every other sibling's failure is a
         // skipped layer; here a failure has to reach `buildNewsOverview`, which
@@ -6543,6 +6602,178 @@ export function buildTools(cfg: {
             note: noVenueReason(asked.toUpperCase()),
           });
         return JSON.stringify({ tvSymbol: hit.tvSymbol, rows: hit.rows });
+      },
+    },
+    {
+      // #113 item 1: the IMPORTANCE selector the news pass never had.
+      //
+      // 2026-09-09 premarket (run-f9b8b903) carried no mention of META while
+      // it was up 5.8 % on the Muse launch: `newsOverview` picks the four most
+      // RECENT global rows and the per-stock feeds of the five ranked
+      // candidates, and META was neither. A move is an importance signal that
+      // recency is not, so this tool supplies the names and the headline pass
+      // explains them.
+      //
+      // `opencli tradingview screener`, verified live on this laptop
+      // 2026-09-09 ~13:25Z and again ~13:40Z. ONE call covers the whole list
+      // (`--tickers` bypasses the filter; `--limit` clamps at 500), which is
+      // what makes an importance sweep over the full universe affordable next
+      // to a per-symbol news route that costs up to three subprocesses a name.
+      //
+      // Rows are exactly these seven columns, verbatim (13:40Z probe):
+      //   {"symbol":"NASDAQ:META","name":"META","close":613.48,
+      //    "change":-0.5334241289297411,"premarket_change":5.843809089130858,
+      //    "premarket_close":649.3306,"premarket_volume":1609854,
+      //    "postmarket_change":null}
+      // `close` is the PRIOR REGULAR-SESSION close and `change` that session's
+      // percent move; `premarket_change` is TradingView's own percent of
+      // `premarket_close` against `close`. It is carried through untouched —
+      // nothing here recomputes it, and `ret` is the raw double, not a
+      // rounded one (LLM-never-does-arithmetic applies to this file too).
+      // `postmarket_change` was null on every row in a premarket probe, which
+      // is why a null lands in `missing` rather than reading as a flat 0.00 %.
+      //
+      // A WRONG VENUE IS SILENT, exactly as on the news route: bare `META`
+      // and `NYSE:META` both answered `[]` in the same call where
+      // `NASDAQ:META` answered a row. The frame's universe is BARE tickers
+      // (ow_tv_watchlist strips the venue), so a bare ask is expanded across
+      // NEWS_VENUES and the three candidates ride in the SAME one call — the
+      // wrong two cost nothing but a row that is never returned. `tvSymbol`
+      // reports which one answered, so a caller feeding these names into the
+      // news pass does not have to resolve the venue a second time.
+      name: "ow_premarket_movers",
+      description:
+        "The biggest overnight movers in a list of symbols, from TradingView's screener: each name's premarket (or postmarket) percent change as TradingView computed it, sorted by absolute size. This is the IMPORTANCE signal behind a name — it says which symbol moved, never why; the headline that explains it comes from ow_tv_news. Every percent printed is copied from this payload; do not recompute one from a close and a premarket price.",
+      paramsSchema: PremarketMoversParams,
+      mutating: false,
+      dshParams: {
+        symbols: {
+          type: "string",
+          required: true,
+          description:
+            'Comma-separated symbols. "EXCH:SYM" (NASDAQ:META) is used verbatim; a bare ticker is resolved against the US venues in the same call.',
+        },
+        top: {
+          type: "number",
+          description:
+            "Rows to return, largest absolute move first. Default 8.",
+        },
+        session: {
+          type: "string",
+          description: '"premarket" (default) or "postmarket"',
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const parsed = PremarketMoversParams.parse(args);
+        const tool = "ow_premarket_movers";
+        if (env.OW_TV_ENABLED !== "1") {
+          throw new Error(
+            `${tool}: OW_TV_ENABLED is not "1"; this machine has no TradingView route`,
+          );
+        }
+        const bin = env.OPENCLI_BIN;
+        if (bin === undefined || bin.trim() === "") {
+          throw new Error(
+            `${tool}: OPENCLI_BIN is unset; there is no route to the screener`,
+          );
+        }
+        const asked = [
+          ...new Set(
+            parsed.symbols
+              .split(",")
+              .map((entry) => entry.trim().toUpperCase())
+              .filter((entry) => entry !== ""),
+          ),
+        ];
+        if (asked.length === 0)
+          throw new Error(`${tool}: symbols named no ticker`);
+        // What is sent, and which ask each candidate belongs to. A qualified
+        // ask is one candidate; a bare one is three.
+        const candidates: Array<{ ask: string; tvSymbol: string }> = [];
+        for (const ask of asked) {
+          if (ask.includes(":")) candidates.push({ ask, tvSymbol: ask });
+          else
+            for (const venue of NEWS_VENUES)
+              candidates.push({ ask, tvSymbol: `${venue}:${ask}` });
+        }
+        // 500 is the screener's own clamp, and a truncated request would drop
+        // names silently. They go to `missing` instead.
+        const sent = candidates.slice(0, TV_SCREENER_MAX_TICKERS);
+        const argv = [
+          "tradingview",
+          "screener",
+          "--tickers",
+          sent.map((entry) => entry.tvSymbol).join(","),
+          "--columns",
+          "name,close,change,premarket_change,premarket_close,premarket_volume,postmarket_change",
+          "--limit",
+          String(sent.length),
+          "-f",
+          "json",
+        ];
+        let stdout: string;
+        try {
+          ({ stdout } = await execFileAsync(bin, argv, { timeout: 60_000 }));
+        } catch (error: unknown) {
+          throw new Error(
+            `${tool}: ${bin} tradingview screener failed — ` +
+              (error instanceof Error
+                ? (error.message.split("\n")[0] ?? error.message)
+                : String(error)),
+          );
+        }
+        // stdout ONLY: opencli writes UNDICI warnings and its update notice to
+        // stderr, and an empty stdout is a real (if unhelpful) answer.
+        const out: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
+        const answered = new Map<string, Record<string, unknown>>();
+        for (const row of Array.isArray(out) ? out : []) {
+          const symbol = (row as { symbol?: unknown }).symbol;
+          if (typeof symbol === "string")
+            answered.set(symbol.toUpperCase(), row as Record<string, unknown>);
+        }
+        const column =
+          parsed.session === "postmarket"
+            ? "postmarket_change"
+            : "premarket_change";
+        const rows: Array<{
+          symbol: string;
+          tvSymbol: string;
+          ret: number;
+          source: string;
+        }> = [];
+        const missing: string[] = [];
+        for (const ask of asked) {
+          const hit = sent
+            .filter((entry) => entry.ask === ask)
+            .map((entry) => answered.get(entry.tvSymbol))
+            .find((row) => row !== undefined);
+          const value = hit?.[column];
+          // A row that answered without a number for THIS session is missing,
+          // not flat: `postmarket_change` is null on every row of a premarket
+          // probe, and a 0.00 % printed against a mega-cap is a quotable
+          // falsehood.
+          if (
+            hit === undefined ||
+            typeof value !== "number" ||
+            !Number.isFinite(value)
+          ) {
+            missing.push(ask);
+            continue;
+          }
+          rows.push({
+            symbol: ask,
+            tvSymbol: String(hit.symbol),
+            ret: value,
+            source: "tradingview:screener",
+          });
+        }
+        rows.sort((a, b) => Math.abs(b.ret) - Math.abs(a.ret));
+        return JSON.stringify({
+          asOf: new Date().toISOString(),
+          session: parsed.session ?? "premarket",
+          rows: rows.slice(0, parsed.top ?? 8),
+          missing,
+        });
       },
     },
     {
