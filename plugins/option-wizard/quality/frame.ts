@@ -39,6 +39,7 @@ import {
 } from "./channels.js";
 import type { CoverageCandidates } from "./coverage-candidates.js";
 import type { EventDaySummary } from "./event-day.js";
+import type { MacroReleasesSummary } from "./macro-releases.js";
 import type { NewsOverview } from "./news-overview.js";
 import { channelHistory } from "./history.js";
 import { LABEL_ORDER } from "./prior.js";
@@ -272,6 +273,11 @@ export interface SessionFrame {
    *  block at a smaller scale (`newsCapsFor`). Quotable ONLY as a citation: a
    *  headline is never where a number comes from. */
   newsOverview?: NewsOverview;
+  /** #107, the data layer for #106. The week's macro calendar, split into what
+   *  is still scheduled and what has already printed, cut to the session on a
+   *  daily phase and left whole on the weekly. `unavailable` is the difference
+   *  between a quiet week and an unread calendar, and is always carried. */
+  macroReleases?: MacroReleasesSummary;
   notes?: string[];
 }
 
