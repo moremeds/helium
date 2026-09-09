@@ -1,0 +1,11 @@
+{
+  "url": "http://localhost:3107/flash/2026-W36",
+  "runId": "run-5b3e8ede-3937-4a1f-b939-f6936c8db827",
+  "capturedAt": "2026-09-08T10:03:38.742Z",
+  "argonSha": "63fa2cd996063e25e2cb9a3974f85cb26ec8fc9a",
+  "argonDirty": false,
+  "sourceSha256": "636366f7cdf450b973b5c4f6b0080e165e218e8fbd3d5d57018c6aa57a099406",
+  "viewSha256": "4a0e56bfca896edffc080e476d1490f9da117c2d395028b63569e14b7b94ddab",
+  "pageSha256": "5f162e18185c451409b360b8d9be13cbaff463e12eb11cd3323586397e30695d",
+  "mobileOverflow": 0
+}
