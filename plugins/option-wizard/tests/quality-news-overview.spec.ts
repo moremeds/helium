@@ -321,7 +321,7 @@ describe("buildNewsOverview", () => {
     expect(overview.stocks).toHaveLength(NEWS_CAPS.daily.stocks);
     for (const stock of overview.stocks)
       expect(stock.headlines).toHaveLength(NEWS_CAPS.daily.perStock);
-    expect(overview.notes.join(" ")).toContain("asked 8 of 20 symbols");
+    expect(overview.notes.join(" ")).toContain("asked 5 of 20 symbols");
     // The cap is pushed DOWN to opencli too, not just applied after the fact:
     // a smaller `--limit` is a smaller fetch.
     expect(asked.slice(0, 2)).toEqual([

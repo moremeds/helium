@@ -90,7 +90,7 @@ export interface NewsCaps {
 
 export const NEWS_CAPS: Readonly<Record<"weekly" | "daily", NewsCaps>> = {
   weekly: { global: 8, perStock: 3, stocks: 12 },
-  daily: { global: 4, perStock: 2, stocks: 8 },
+  daily: { global: 4, perStock: 2, stocks: 5 }, // 2 + 5 calls ≈ 10 s on the mini; matches the daily candidate cap of 5
 };
 
 /** The caps a phase gets. Anything that is not the weekly run is daily —
