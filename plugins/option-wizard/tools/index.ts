@@ -6064,9 +6064,12 @@ export function buildTools(cfg: {
         // BEFORE the news overview, and for a reason: the movers are what the
         // news pass should be steered by. On 2026-09-09 the premarket ran with
         // META up 5.8 % on the Muse launch and said nothing about it, because
-        // `newsOverview` sees only the most RECENT global rows plus the ranked
-        // candidates' own feeds, and META was neither. A move is the
-        // importance signal that ordering does not carry.
+        // `newsOverview`'s global feeds are capped and its per-stock feeds
+        // follow the ranked candidates, and META was neither a candidate nor
+        // guaranteed a global row. #113 item 2 made those global feeds
+        // deduped and importance-ordered rather than recency-sliced; this is
+        // item 1, and the two are complements — a move is an importance
+        // signal no news ordering can carry, because it is not in the tape.
         //
         // PREMARKET AND INTRADAY ONLY. `close` reports a session that has
         // already happened and the weekly is not a session at all; asking for
@@ -6123,6 +6126,12 @@ export function buildTools(cfg: {
               ...frame.coverageCandidates.stocks.map((row) => row.symbol),
               ...ofInterest,
             ],
+            // The tracked universe is the global feeds' second ranking key:
+            // a headline whose `related_symbols` name names this run already
+            // follows outranks one that names none. On 2026-09-09 that is the
+            // difference between the Muse headline (related NASDAQ:META) and
+            // the Baltic dry index.
+            universe: [...universe],
             caps: newsCapsFor(cfg.phase),
             read: async (ask) =>
               JSON.parse(await newsTool.run(ask, ctx)) as unknown,
