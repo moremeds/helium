@@ -19,3 +19,14 @@ Set by the user on 2026-09-07 after the first three loops:
   (origin=reconstructed) q05 ratio is not worse than the baseline run's.
 
 The three 2026-09-06 files keep their 0.03 bar; their receipts stand.
+
+## Kinds
+
+`kind` in the file picks the settler branch; a file that names none defaults to
+`argon-sweep-compare` (argon's Postgres sweep tables).
+
+- `argon-sweep-compare` — two sweep runs compared on a holdout cell.
+- `option-wizard-coverage` — a named future option-wizard run, settled from
+  files only: `coverage-verdict` commitments in that run's ledger rows are the
+  call count, and the run's own rendered `sections` supply the 复盘 prose.
+- `helium-run-metric` — declared, no settler yet; mints and stays outstanding.

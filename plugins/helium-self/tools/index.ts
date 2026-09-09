@@ -1,8 +1,9 @@
 /**
- * The check half of the loop: settle an experiment commitment from argon's own
- * Postgres, deterministically. No model is involved in settlement, and no
- * threshold is hardcoded here — every number the verdict turns on is read back
- * out of the payload that was written at mint time.
+ * The check half of the loop: settle an experiment commitment deterministically
+ * from ground truth — argon's own Postgres for a sweep comparison, the ledger
+ * and evidence files under the state root for an option-wizard run. No model is
+ * involved in settlement, and no threshold is hardcoded here — every number the
+ * verdict turns on is read back out of the payload written at mint time.
  *
  * This tenant ships no tools: its one model step has `tools: []`, because a
  * step that could reach the database could also talk itself into a verdict.
@@ -10,7 +11,10 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
+import { readLedger } from "@helium/core";
 import type {
   Commitment,
   Receipt,
@@ -273,9 +277,155 @@ function psqlQuery(env: Record<string, string | undefined>): Query {
   };
 }
 
-/** The experiment kind this settler knows. Anything else in the ledger belongs
+// --- the option-wizard coverage-call branch ---------------------------------
+
+/**
+ * What option-wizard's review renderer mints for a supporting-coverage row the
+ * author actually called: one commitment per scorable, non-`untested` token on
+ * a row that has a datum and is not renderer-filled
+ * (`plugins/option-wizard/render/review.ts:1227-1253`). Counting the ledger
+ * rather than re-parsing the printed table is what keeps this settler from
+ * having a second opinion about what a call is.
+ */
+const CALL_KIND = "coverage-verdict";
+
+function text(raw: unknown, field: string): string {
+  if (typeof raw !== "string" || raw === "")
+    throw new Error(`${field}: ${JSON.stringify(raw)} is not a non-empty string`);
+  return raw;
+}
+
+interface TargetRun {
+  runId: string;
+  startedAt: string;
+  view: { sections?: { title?: unknown; body?: unknown }[] };
+}
+
+/**
+ * The EARLIEST run inside the window, not the latest: the commitment names one
+ * run and a later weekly must not be able to replace a verdict already earned.
+ * `<stateRoot>/evidence/<tenant>-<day>-<phase>-<runId>.json`, header shape from
+ * `packages/cli/src/evidence.ts:66-73`.
+ */
+function targetRun(
+  stateRoot: string,
+  target: { tenant: string; phase: string; deployment: string },
+  startsAt: string,
+): TargetRun | undefined {
+  const dir = join(stateRoot, "evidence");
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return undefined;
+  }
+  let best: TargetRun | undefined;
+  for (const name of names) {
+    if (!name.startsWith(`${target.tenant}-`) || !name.endsWith(".json")) continue;
+    let doc: { run?: Record<string, unknown>; view?: unknown };
+    try {
+      doc = JSON.parse(readFileSync(join(dir, name), "utf8")) as typeof doc;
+    } catch {
+      continue;
+    }
+    const run = doc.run ?? {};
+    if (
+      run.tenant !== target.tenant ||
+      run.phase !== target.phase ||
+      run.deployment !== target.deployment
+    )
+      continue;
+    const startedAt = typeof run.startedAt === "string" ? run.startedAt : "";
+    if (startedAt < startsAt) continue;
+    if (best !== undefined && best.startedAt <= startedAt) continue;
+    best = {
+      runId: text(run.runId, "evidence run.runId"),
+      startedAt,
+      view: (doc.view ?? {}) as TargetRun["view"],
+    };
+  }
+  return best;
+}
+
+/**
+ * calls >= the payload's bar AND the 复盘 prose still written -> improved;
+ * nobody called anything -> regressed; anything between -> flat. Every number
+ * and every section title is read out of the commitment, never out of this file.
+ */
+export function settleCoverage(
+  commitment: Commitment,
+  now: Date,
+  stateRoot: string,
+): Receipt {
+  const payload = commitment.payload as Record<string, unknown>;
+  const target = (payload.target ?? {}) as Record<string, unknown>;
+  const window = (payload.window ?? {}) as Record<string, unknown>;
+  const metrics = (payload.metrics ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const minCalls = integer(metrics.calls?.improveIfAtLeast, "metrics.calls.improveIfAtLeast");
+  const requireReview = metrics.review?.requireNonEmpty === true;
+  const titles = payload.reviewSectionTitles;
+  if (!Array.isArray(titles) || titles.length === 0)
+    throw new Error("reviewSectionTitles: expected a non-empty list");
+  const wanted = new Set(titles.map((title, i) => text(title, `reviewSectionTitles[${String(i)}]`)));
+  const spec = {
+    tenant: text(target.tenant, "target.tenant"),
+    phase: text(target.phase, "target.phase"),
+    deployment: text(target.deployment, "target.deployment"),
+  };
+  const run = targetRun(stateRoot, spec, text(window.startsAt, "window.startsAt"));
+  if (run === undefined)
+    return pending(
+      commitment.id,
+      now,
+      `no ${spec.deployment} ${spec.phase} run of ${spec.tenant} at or after ${String(window.startsAt)} yet`,
+    );
+
+  const callIds = readLedger(stateRoot, spec.tenant)
+    .commitments.filter(
+      (row) =>
+        row.runId === run.runId &&
+        (row.payload as { kind?: unknown } | null)?.kind === CALL_KIND,
+    )
+    .map((row) => row.id)
+    .sort();
+  const section = (run.view.sections ?? []).find((entry) =>
+    wanted.has(typeof entry.title === "string" ? entry.title : ""),
+  );
+  const review = typeof section?.body === "string" ? section.body.trim() : "";
+  const calls = callIds.length;
+  const reviewOk = !requireReview || review !== "";
+  return {
+    commitmentId: commitment.id,
+    runId: "",
+    settledAt: now.toISOString(),
+    status:
+      calls >= minCalls && reviewOk
+        ? "improved"
+        : calls === 0
+          ? "regressed"
+          : "flat",
+    scores: { calls, reviewChars: review.length },
+    // Over the ids counted and the prose read, so a ledger line appended or a
+    // section rewritten after the fact is visible from the receipt alone.
+    evidenceHash: createHash("sha256")
+      .update(JSON.stringify({ callIds, review, runId: run.runId }))
+      .digest("hex"),
+    detail: {
+      runId: run.runId,
+      startedAt: run.startedAt,
+      reviewSection: section?.title ?? null,
+      callIds,
+    },
+  };
+}
+
+/** The experiment kinds this settler knows. Anything else in the ledger belongs
  *  to a different promise and is left outstanding untouched. */
 const KIND = "argon-sweep-compare";
+const COVERAGE_KIND = "option-wizard-coverage";
 
 export function buildSettler(
   cfg: {
@@ -292,9 +442,15 @@ export function buildSettler(
       const receipts: Receipt[] = [];
       for (const commitment of open) {
         const payload = commitment.payload as Record<string, unknown> | null;
-        if (payload === null || payload.kind !== KIND) continue;
+        const settle =
+          payload?.kind === KIND
+            ? async () => settleCommitment(commitment, now, query)
+            : payload?.kind === COVERAGE_KIND
+              ? async () => settleCoverage(commitment, now, cfg.stateRoot)
+              : undefined;
+        if (settle === undefined) continue;
         try {
-          receipts.push(await settleCommitment(commitment, now, query));
+          receipts.push(await settle());
         } catch (error: unknown) {
           // One unsettleable promise must not cost the others their turn: the
           // runner records a thrown settler as a skipped settlement for the
