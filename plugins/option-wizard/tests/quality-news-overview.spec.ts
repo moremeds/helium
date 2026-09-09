@@ -327,9 +327,9 @@ describe("the global feeds are deduped and importance-ordered (#113 item 2)", ()
  * The two Dow Jones rows are what a two-row cap on the provider's order kept;
  * the Benzinga row — the only one of the three tagged META and nothing else —
  * is what fell below it, on a morning META was moving on exactly that story.
- * Their `link` values follow the TradingView DJN news route the other
- * captured DJN rows in this file use (`/news/<id>/`); the Benzinga row's link
- * is verbatim.
+ * All three `link` values are as captured from
+ * `opencli tradingview news --symbol NASDAQ:META --limit 6` on the laptop at
+ * ~13:20Z the same day.
  */
 const META_FEED_0909 = [
   {
