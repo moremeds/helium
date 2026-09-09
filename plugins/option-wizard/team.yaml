@@ -68,7 +68,7 @@ roles:
     requires: [tool.use, structured.output]
     permissions:
       mutations: forbidden
-      tools: [ow_uw_headlines, ow_uw_earnings]
+      tools: [ow_uw_headlines, ow_tv_news, ow_uw_earnings]
     persona: >-
       You report what happened from the previous regular session's 16:00 ET
       close through now, in English, at most five items: earnings prints and
@@ -110,6 +110,7 @@ roles:
           ow_argon_policy_path,
           ow_tv_commodities,
           ow_uw_headlines,
+          ow_tv_news,
           ow_x_posts,
         ]
     persona: |-
@@ -313,7 +314,7 @@ roles:
     requires: [tool.use, reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_reports, ow_session_frame, ow_rotation, ow_stock_week, ow_event_day, ow_uw_headlines, ow_uw_earnings_report]
+      tools: [ow_reports, ow_session_frame, ow_rotation, ow_stock_week, ow_event_day, ow_uw_headlines, ow_tv_news, ow_uw_earnings_report]
     persona: |-
       You write a MARKET WEEK newsletter: what changed in markets, why it matters,
       the evidence and counterevidence, and the conditions for next week.

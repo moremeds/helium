@@ -39,6 +39,7 @@ import {
 } from "./channels.js";
 import type { CoverageCandidates } from "./coverage-candidates.js";
 import type { EventDaySummary } from "./event-day.js";
+import type { NewsOverview } from "./news-overview.js";
 import { channelHistory } from "./history.js";
 import { LABEL_ORDER } from "./prior.js";
 import {
@@ -266,6 +267,10 @@ export interface SessionFrame {
    *  basket's two ends. The member-level table stays in `ow_event_day`'s own
    *  payload: this block points at it, it does not replace it. */
   eventDay?: EventDaySummary;
+  /** #113. The week's tape and the headlines behind each ranked stock, each
+   *  row carrying its link. Quotable ONLY as a citation — a headline is never
+   *  where a number comes from. Absent when TradingView is not reachable. */
+  newsOverview?: NewsOverview;
   notes?: string[];
 }
 

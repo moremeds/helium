@@ -50,6 +50,11 @@ import {
   type DayPoint,
   type EventDayTable,
 } from "../quality/event-day.js";
+import {
+  buildNewsOverview,
+  noVenueReason,
+  resolveVenue,
+} from "../quality/news-overview.js";
 import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
@@ -86,6 +91,9 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // #107 item 2. The frame carries the event day's SUMMARY; the member-level
   // table stays in the tool's own payload.
   "ow_event_day",
+  // #113. The tape and the headlines behind the ranked names, each with a
+  // link. Last, and serial: it is opencli subprocesses against one local app.
+  "ow_tv_news",
 ];
 
 /**
@@ -168,6 +176,7 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // key would report a working machine as broken.
   ["ow_x_posts", { mutating: false }],
   ["ow_tv_commodities", { mutating: false }],
+  ["ow_tv_news", { mutating: false }],
   ["ow_ib_preflight", { mutating: false }],
   // Pure arithmetic over numbers the caller already has: no env, no network.
   ["ow_price_structure", { mutating: false }],
@@ -1452,6 +1461,48 @@ const HeadlinesParams = z.object({
   limit: z.number().int().positive().max(25).optional(),
   majorOnly: z.boolean().optional(),
 });
+
+/**
+ * #113. `symbol` accepts either "NASDAQ:NVDA" (used verbatim) or a bare
+ * "NVDA" (resolved by TRYING the US venues, exactly as `tvLast` does). The
+ * enums are opencli's own, copied from `opencli tradingview news --help` on
+ * 2026-09-09; a value outside them is refused here rather than sent, because
+ * TradingView answers an unknown filter with an empty list and an empty list
+ * reads as "no news".
+ */
+const TvNewsParams = z.object({
+  symbol: z.string().min(1).max(24).optional(),
+  category: z
+    .enum([
+      "base",
+      "stock",
+      "etf",
+      "futures",
+      "forex",
+      "crypto",
+      "index",
+      "bond",
+      "economic",
+    ])
+    .optional(),
+  section: z
+    .enum([
+      "press_release",
+      "financial_statement",
+      "insider_trading",
+      "esg",
+      "corp_activity",
+      "analysis",
+      "recommendation",
+      "prediction",
+      "markets_today",
+      "survey",
+    ])
+    .optional(),
+  provider: z.string().min(1).max(32).optional(),
+  limit: z.number().int().positive().max(25).optional(),
+  id: z.string().min(1).max(128).optional(),
+});
 /**
  * The only handles this tool will read. Free-form handles are forbidden
  * because a wrong one answers confidently: `@gregip` (verified 2026-09-03)
@@ -1575,6 +1626,10 @@ const AS_OF_BLIND: ReadonlyMap<string, string> = new Map([
   ["ow_uw_iv_term", "the Unusual Whales IV-term endpoint"],
   ["ow_uw_headlines", "the Unusual Whales news endpoint"],
   ["ow_tv_commodities", "TradingView"],
+  // #113. The news route serves the CURRENT feed and takes no date: a replay
+  // asking about last Tuesday would be handed today's headlines with a past
+  // date on them, which is exactly the falsehood this map exists to prevent.
+  ["ow_tv_news", "the TradingView news route (no dated archive)"],
   // 2026-09-05: moved here after the first replay. GET
   // /api/market/economic-calendar carries a SHORT FORWARD window and nothing
   // behind it — it answered with 0 rows on 2026-09-05 — so a past instant gets
@@ -5605,6 +5660,36 @@ export function buildTools(cfg: {
             `ow_event_day did not answer: ${eventDayWhy ?? "no reason recorded"}`,
           ];
 
+        // ---- #113: the news overview ---------------------------------------
+        // LAST, and not through `answer()`. Every other sibling's failure is a
+        // skipped layer; here a failure has to reach `buildNewsOverview`, which
+        // turns it into a named `missing` row or a note. `answer()` swallows the
+        // error and returns undefined, and an undefined payload would read as
+        // "no news", which is a quotable falsehood about a real trading day.
+        //
+        // The symbol order is the cap's meaning: the ranked candidates first,
+        // then the operator's pinned names. Cost is up to three opencli calls
+        // per symbol on a miss, all serial — see the module header.
+        const newsTool = SESSION_FRAME_SIBLINGS.includes("ow_tv_news")
+          ? built.find((entry) => entry.name === "ow_tv_news")
+          : undefined;
+        if (newsTool === undefined) {
+          frame.notes = [
+            ...(frame.notes ?? []),
+            "ow_tv_news is not a declared, built sibling; the frame carries no news overview",
+          ];
+        } else {
+          frame.newsOverview = await buildNewsOverview({
+            asOf: new Date().toISOString(),
+            symbols: [
+              ...frame.coverageCandidates.stocks.map((row) => row.symbol),
+              ...ofInterest,
+            ],
+            read: async (ask) =>
+              JSON.parse(await newsTool.run(ask, ctx)) as unknown,
+          });
+        }
+
         return JSON.stringify(frame);
       },
     },
@@ -5919,6 +6004,141 @@ export function buildTools(cfg: {
           });
         }
         return JSON.stringify({ asOf: asOfIso, rows });
+      },
+    },
+    {
+      // #113. `opencli tradingview news`, verified live on the mini 2026-09-09
+      // (login PATH, /usr/local/bin/opencli, OW_TV_ENABLED=1). No browser: the
+      // adapter reads TradingView's own news route.
+      //
+      // LIST rows are exactly these seven fields, returned VERBATIM:
+      //   {"id":"gurufocus:d29c92119094b:0",
+      //    "published":"2026-09-08T21:25:13.000Z","provider":"GuruFocus",
+      //    "title":"Nvidia Falls as Its Firmus Bet Lands OpenAI","urgency":2,
+      //    "related_symbols":"NASDAQ:NVDA",
+      //    "link":"https://www.gurufocus.com/news/9070840/..."}
+      // `related_symbols` is a COMMA-SEPARATED STRING, not an array, and
+      // `urgency` is a number. Nothing is renamed or reshaped here — a
+      // citation the reader can check is the whole point of this source.
+      //
+      // `--id` returns ONE story with a different shape: `body` and `tags`
+      // replace `urgency` and `related_symbols` (same probe, same id).
+      //
+      // A WRONG EXCHANGE IS SILENT: `--symbol NYSE:NVDA` and
+      // `--symbol "NYSE Arca:SPY"` both answered `[]` on 2026-09-09, while
+      // `AMEX:SPY` answered rows. That is why a bare ticker is RESOLVED by
+      // trying (`resolveVenue`) and never guessed, and why the payload names
+      // the `tvSymbol` that actually answered.
+      //
+      // 25 rows of these fields is ~7 KB, the same order as ow_uw_headlines
+      // and well under core's `SUMMARISE_OVER_BYTES` — which is why 25 is a
+      // hard maximum rather than a page size.
+      name: "ow_tv_news",
+      description:
+        "TradingView news: the global tape (category/section/provider filters) or one symbol's headlines, each with its publish time, provider and LINK, or one full story by id. Quotable ONLY as a citation (timestamp, provider, headline verbatim, link). It is never evidence of what the market expects and never a source of numbers — a figure inside a headline is not a measurement, and every number you print comes from the tool payload that measured it.",
+      paramsSchema: TvNewsParams,
+      mutating: false,
+      dshParams: {
+        symbol: {
+          type: "string",
+          description:
+            '"EXCH:SYM" (e.g. NASDAQ:NVDA, AMEX:SPY). A bare ticker is resolved against the US venues and the answering symbol is reported back.',
+        },
+        category: {
+          type: "string",
+          description:
+            "base, stock, etf, futures, forex, crypto, index, bond, economic",
+        },
+        section: {
+          type: "string",
+          description:
+            "markets_today, analysis, press_release, financial_statement, insider_trading, esg, corp_activity, recommendation, prediction, survey",
+        },
+        provider: {
+          type: "string",
+          description: "One source, e.g. reuters or dow_jones",
+        },
+        limit: {
+          type: "number",
+          description: "Rows to return, default 15, max 25",
+        },
+        id: {
+          type: "string",
+          description:
+            "A story id from a previous call. Returns that story's full body instead of a list.",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        const parsed = TvNewsParams.parse(args);
+        const tool = "ow_tv_news";
+        if (env.OW_TV_ENABLED !== "1") {
+          throw new Error(
+            `${tool}: OW_TV_ENABLED is not "1"; this machine has no TradingView route`,
+          );
+        }
+        const bin = env.OPENCLI_BIN;
+        if (bin === undefined || bin.trim() === "") {
+          throw new Error(`${tool}: OPENCLI_BIN is unset; there is no route to news`);
+        }
+        const limit = Math.min(parsed.limit ?? 15, 25);
+        // One opencli call. Serial by construction: every caller awaits this
+        // before starting the next one, because concurrent opencli web reads
+        // fail on the mini (2026-09-06).
+        const call = async (symbol?: string): Promise<unknown[]> => {
+          const argv = ["tradingview", "news"];
+          if (parsed.id !== undefined) argv.push("--id", parsed.id);
+          if (symbol !== undefined) argv.push("--symbol", symbol);
+          if (parsed.category !== undefined)
+            argv.push("--category", parsed.category);
+          if (parsed.section !== undefined)
+            argv.push("--section", parsed.section);
+          if (parsed.provider !== undefined)
+            argv.push("--provider", parsed.provider);
+          if (parsed.id === undefined) argv.push("--limit", String(limit));
+          argv.push("-f", "json");
+          let stdout: string;
+          try {
+            ({ stdout } = await execFileAsync(bin, argv, { timeout: 60_000 }));
+          } catch (error: unknown) {
+            throw new Error(
+              `${tool}: ${bin} ${argv.join(" ")} failed — ` +
+                (error instanceof Error
+                  ? (error.message.split("\n")[0] ?? error.message)
+                  : String(error)),
+            );
+          }
+          const out: unknown = JSON.parse(stdout.trim() === "" ? "[]" : stdout);
+          return Array.isArray(out) ? out : [out];
+        };
+
+        if (parsed.id !== undefined) {
+          const rows = await call();
+          if (rows.length === 0)
+            throw new Error(
+              `${tool}: no story with id ${parsed.id}; the id must come from a previous list call`,
+            );
+          return JSON.stringify({ story: rows[0] });
+        }
+        if (parsed.symbol === undefined)
+          return JSON.stringify({ rows: (await call()).slice(0, limit) });
+
+        const asked = parsed.symbol.trim();
+        if (asked.includes(":")) {
+          // An explicit venue is used verbatim: the caller knows the listing,
+          // and an empty answer is that symbol's real answer.
+          const rows = (await call(asked)).slice(0, limit);
+          return JSON.stringify({ tvSymbol: asked, rows });
+        }
+        const hit = await resolveVenue(asked.toUpperCase(), async (tvSymbol) =>
+          (await call(tvSymbol)).slice(0, limit),
+        );
+        if (hit === undefined)
+          return JSON.stringify({
+            symbol: asked.toUpperCase(),
+            rows: [],
+            note: noVenueReason(asked.toUpperCase()),
+          });
+        return JSON.stringify({ tvSymbol: hit.tvSymbol, rows: hit.rows });
       },
     },
     {
