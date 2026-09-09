@@ -1736,6 +1736,24 @@ export function priorOpenDay(
   return out;
 }
 
+/** Which day `ow_session_frame` asks `ow_event_day` about. Weekly leaves it to
+ *  the tool (widest |basket − SPY| day of the week). A daily phase names the
+ *  session it reports on: today for `close` on an open day, otherwise the last
+ *  completed session — today's daily bar does not exist at premarket. */
+export function eventDayArgsFor(
+  phase: string | undefined,
+  day: string,
+  calendar?: { weekdaysOnly: boolean; closed: string[] },
+): { date?: string } {
+  if (phase === "weekly") return {};
+  return {
+    date:
+      phase === "close" && !isClosedDay(day, calendar)
+        ? day
+        : priorOpenDay(day, calendar),
+  };
+}
+
 /**
  * The last `count` OPEN days ending at `from`, oldest first.
  *
@@ -5650,7 +5668,13 @@ export function buildTools(cfg: {
         // The SUMMARY only. The member-level cross-section is `ow_event_day`'s
         // own payload, which the author reads directly; carrying all of it
         // here would put the same hundred rows in the context twice.
-        const eventDay = await answer("eventDay", "ow_event_day");
+        // Weekly lets the tool pick the week's widest |basket − SPY| day. A
+        // daily phase wants THE session it reports on: the last completed one
+        // for premarket/intraday (today's daily bar does not exist yet), today
+        // for close. Left unnamed, the 2026-09-08 production premarket picked
+        // 09-04 out of the trailing five sessions (run-9fa9f332).
+        const eventDayArgs = eventDayArgsFor(cfg.phase, day, cfg.calendar);
+        const eventDay = await answer("eventDay", "ow_event_day", eventDayArgs);
         const eventDayWhy = skipped.eventDay;
         delete skipped.eventDay; // not a declared coverage layer
         if (eventDay !== undefined && eventDay !== null)
