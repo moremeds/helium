@@ -21,6 +21,20 @@ import type { CalendarRow } from "./frame.js";
  *  still more than the five names the 2026-09-06 weekly managed to discuss. */
 export const COVERAGE_CANDIDATE_LIMIT = 8;
 
+/** The same list on a daily run. Same mechanism, smaller: a daily brief is
+ *  300 words of market prose against the weekly's 900, so eight ranked names
+ *  would be a table nobody could call. Five is what fits. */
+export const DAILY_COVERAGE_CANDIDATE_LIMIT = 5;
+
+/** The cap for a run of this phase. An unphased host — a test, an older
+ *  runner — keeps the eight it had before this function existed, because a
+ *  silent cut is worse than a cadence this code cannot see. */
+export function candidateLimit(phase: string | undefined): number {
+  return phase === undefined || phase === "weekly"
+    ? COVERAGE_CANDIDATE_LIMIT
+    : DAILY_COVERAGE_CANDIDATE_LIMIT;
+}
+
 /** One row of `ow_stock_week`'s `results`, in the apex 0.1.6 field spelling. */
 export interface StockWeekRow {
   symbol: string;
@@ -43,7 +57,43 @@ export interface StockWeekPayload {
   notes?: unknown;
 }
 
+/** The completed earnings a candidate reported INSIDE the reported week, as
+ *  `ow_uw_earnings_report` wrote them.
+ *
+ *  Every field is the tool's own string, copied — `actualEps` and
+ *  `streetMeanEst` are strings in the UW response and stay strings here, so
+ *  the surprise is never computed by anyone who is not asked to. There is no
+ *  `surprise` field for that reason: the tool's own `limitations` say EPS
+ *  basis is not provided, and a difference of two numbers whose basis is
+ *  unstated is a number nobody can settle. */
+export interface CandidateEarnings {
+  reportDate: string;
+  endingFiscalQuarter?: string;
+  actualEps: string;
+  streetMeanEst: string | null;
+  reportTime: string | null;
+  sourceUrl: string;
+}
+
+/** A headline, as a CITATION and nothing else (#106 Loop 2 item 3). Left empty
+ *  by this build; helium #113 fills it. Never a number source: a figure inside
+ *  a headline is the publisher's arithmetic, not a payload the settler can
+ *  re-read. `link` is optional because the UW news feed carries no URL (see
+ *  `ow_uw_headlines`, verified 2026-09-03) — an invented one is a citation the
+ *  reader cannot check. */
+export interface CandidateHeadline {
+  title: string;
+  published: string;
+  provider: string;
+  link?: string;
+}
+
 export interface CandidateRow {
+  /** The LEDGER row id for this name, `stock:<SYMBOL>`. It exists so a weekly
+   *  call on a single name mints a commitment through the same path a macro,
+   *  sector or theme row does (`render/review.ts:verdictCommitments`) — before
+   *  this, a call on SNDK printed and settled against nothing. */
+  id: string;
   rank: number;
   symbol: string;
   window_return: number | null;
@@ -52,6 +102,17 @@ export interface CandidateRow {
   /** WHICH number ordered this row. A reader must be able to see that a row
    *  ranked on its own return had no benchmark, not that we hid one. */
   rankedOn: "excess_vs_spy" | "window_return";
+  /** Set only when this name REPORTED inside the reported week. */
+  earnings?: CandidateEarnings;
+  /** Citations only; empty until #113. */
+  headlines?: CandidateHeadline[];
+}
+
+/** The ledger row id of a single name. One function, two readers — the ranker
+ *  writes it and `render/review.ts` mints against it — so the id scheme can
+ *  never drift into two spellings. */
+export function stockRowId(symbol: string): string {
+  return `stock:${symbol}`;
 }
 
 export interface CoverageCandidates {
@@ -163,6 +224,7 @@ export function rankCoverageCandidates(args: {
   );
 
   const stocks: CandidateRow[] = scored.slice(0, limit).map((entry, index) => ({
+    id: stockRowId(entry.row.symbol),
     rank: index + 1,
     symbol: entry.row.symbol,
     window_return: entry.row.window_return,
@@ -197,6 +259,53 @@ export function rankCoverageCandidates(args: {
     missing,
     notes,
   };
+}
+
+/**
+ * The one row of an `ow_uw_earnings_report` payload that falls INSIDE the
+ * reported week, or `null`.
+ *
+ * Pure, and here rather than in the clerk step, because the window test is the
+ * whole point: SNDK's newest completed report on 2026-09-08 was 2026-08-05,
+ * three weeks before the reported window, and printing it beside a
+ * 2026-08-31..09-04 week return would read as this week's cause. `statements`
+ * is deliberately not read — the tool's own `limitations` say the quarter
+ * labels and EPS basis are not a contract to join.
+ *
+ * Every field is copied as the source spelled it. `actualEps` and
+ * `streetMeanEst` are strings in the UW response and stay strings: nobody here
+ * subtracts them.
+ */
+export function inWindowEarnings(
+  payload: unknown,
+  window: { start: string; end: string },
+): CandidateEarnings | null {
+  const rows = (payload as { earnings?: unknown } | null)?.earnings;
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const date = row.reportDate;
+    const eps = row.actualEps;
+    if (
+      typeof date !== "string" ||
+      date < window.start ||
+      date > window.end ||
+      typeof eps !== "string"
+    )
+      continue;
+    return {
+      reportDate: date,
+      ...(typeof row.endingFiscalQuarter === "string"
+        ? { endingFiscalQuarter: row.endingFiscalQuarter }
+        : {}),
+      actualEps: eps,
+      streetMeanEst:
+        typeof row.streetMeanEst === "string" ? row.streetMeanEst : null,
+      reportTime: typeof row.reportTime === "string" ? row.reportTime : null,
+      sourceUrl: typeof row.sourceUrl === "string" ? row.sourceUrl : "",
+    };
+  }
+  return null;
 }
 
 const DAY_MS = 86_400_000;

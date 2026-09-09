@@ -40,6 +40,8 @@ import {
   buildFrame,
 } from "../quality/frame.js";
 import {
+  candidateLimit,
+  inWindowEarnings,
   rankCoverageCandidates,
   reportedWeek,
 } from "../quality/coverage-candidates.js";
@@ -89,6 +91,11 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // #107 item 1. The frame ranks its payload into `coverageCandidates`, so the
   // author is handed a ranked list rather than a basket to choose from.
   "ow_stock_week",
+  // #106 Loop 2. The clerk attaches the week's COMPLETED earnings to the
+  // ranked names, and records one headlines call so the frozen sample carries
+  // one. Both are third-pass reads: they need the ranked list to exist first.
+  "ow_uw_earnings_report",
+  "ow_uw_headlines",
   // #107 item 2. The frame carries the event day's SUMMARY; the member-level
   // table stays in the tool's own payload.
   "ow_event_day",
@@ -140,8 +147,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // one.
   ["ow_rotation", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
-  // One ow_apex_bars round trip per symbol on the fallback path; apex is the
-  // only source, so a machine without it reports every symbol as missing.
+  // One /v1/equity/returns call on apex 0.1.6, or one ow_apex_bars round trip
+  // per symbol on the fallback; apex is the only source, so a machine without
+  // it reports every symbol as missing.
   ["ow_stock_week", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   // Same single source as ow_stock_week: one /v1/equity/returns call where apex
   // serves it, one bars round trip per symbol where it does not.
@@ -1938,7 +1946,103 @@ export function buildTools(cfg: {
   }
 
   /**
-   * `ow_stock_week`'s table, computed from adjusted daily closes.
+   * `ow_stock_week`'s table when apex 0.1.6 served `/v1/equity/returns`.
+   *
+   * A COPY, not a computation. The route computes every number itself and this
+   * function's whole job is to hand them over unchanged — the tenant rule that
+   * derived numbers come from the tool payload applies to the tool as much as
+   * to the author, and a second implementation of `window_return` here would be
+   * a number that could disagree with apex's.
+   *
+   * VERIFIED 2026-09-09 against apex 0.1.6
+   * (`src/api/routes/returns.py:97-220`). The response is
+   * `{start, end, price_mode, generated_at,
+   *   benchmarks: {SPY: {window_return}, QQQ: {window_return}},
+   *   results: [{symbol, daily: [{date, close, return}], window_return,
+   *              ytd_return, pct_from_52w_high, excess_vs_spy, excess_vs_qqq}],
+   *   missing: [{symbol, reason}]}`.
+   * Every one of those numbers may legitimately be `null` — `_pct` returns
+   * None on a missing base close, and `pct_from_52w_high` is None when the
+   * year holds no bar — so a null is copied as a null and never read as a
+   * zero. helium1 verified the live route for 2026-08-31..2026-09-04: SMH
+   * +2.51%, SPY +0.11%, `missing` empty.
+   *
+   * Only the fallback below computes anything, and only because it has to.
+   */
+  function stockWeekFromSeries(args: {
+    start: string;
+    end: string;
+    wanted: readonly string[];
+    served: {
+      source: string;
+      series: Map<string, DayPoint[]>;
+      missing: Array<{ symbol: string; reason: string }>;
+      notes: string[];
+      rows: Map<string, Record<string, unknown>>;
+      benchmarks: Record<string, { window_return: number | null }>;
+    };
+    until: number;
+  }): Record<string, unknown> {
+    const BENCH = ["SPY", "QQQ"] as const;
+    const missing = [...args.served.missing];
+    /** A number the payload carries, or null. `undefined` — the field absent
+     *  altogether — is a null too: the row prints a gap, never a zero. */
+    const cell = (row: Record<string, unknown>, key: string): number | null =>
+      numeric(row[key]) ?? null;
+
+    const benchmarks: Record<string, { window_return: number | null }> = {};
+    for (const symbol of BENCH) {
+      const served = args.served.benchmarks[symbol];
+      benchmarks[symbol] = {
+        window_return: served?.window_return ?? null,
+      };
+      if (served === undefined && !missing.some((row) => row.symbol === symbol))
+        missing.push({
+          symbol,
+          reason: "apex /returns carried no benchmark row for this symbol",
+        });
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const symbol of args.wanted) {
+      const row = args.served.rows.get(symbol);
+      if (row === undefined) {
+        if (!missing.some((entry) => entry.symbol === symbol))
+          missing.push({
+            symbol,
+            reason: "apex /returns neither priced this symbol nor listed it",
+          });
+        continue;
+      }
+      results.push({
+        symbol,
+        daily: args.served.series.get(symbol) ?? [],
+        window_return: cell(row, "window_return"),
+        ytd_return: cell(row, "ytd_return"),
+        pct_from_52w_high: cell(row, "pct_from_52w_high"),
+        excess_vs_spy: cell(row, "excess_vs_spy"),
+        excess_vs_qqq: cell(row, "excess_vs_qqq"),
+      });
+    }
+    return {
+      start: args.start,
+      end: args.end,
+      price_mode: "adjusted",
+      generated_at: new Date(args.until).toISOString(),
+      source: args.served.source,
+      benchmarks,
+      results,
+      missing,
+      notes: [
+        "window_return, ytd_return, pct_from_52w_high and both excesses are copied verbatim from apex /v1/equity/returns; nothing is computed here",
+        ...args.served.notes,
+      ],
+    };
+  }
+
+  /**
+   * `ow_stock_week`'s table, computed from adjusted daily closes — the
+   * FALLBACK, taken only when `/v1/equity/returns` answers non-200.
    *
    * The base close is the last one STRICTLY BEFORE `start` — the prior
    * Friday's — so the window return is the same quantity apex 0.1.6's
@@ -1969,6 +2073,26 @@ export function buildTools(cfg: {
       3650,
       Math.max(20, Math.ceil((until - startMs) / 86_400_000) + 14),
     );
+    // ---- apex 0.1.6's own table first (#107 item 1, switched 2026-09-09) ---
+    // `apexDaySeries` is the ONE client for `GET /v1/equity/returns?symbols=
+    // <comma list>&start=&end=` (a `symbol=` singular is a 400) and it already
+    // falls back to daily bars on any non-200 — so this call is the switch, and
+    // there is no second HTTP path to keep in step. helium1 verified the live
+    // endpoint on the mini for 2026-08-31..2026-09-04: SMH +2.51%, SPY +0.11%,
+    // `missing` empty. The fields read are the ones that client's own comment
+    // records, plus the per-row metrics the route computes itself
+    // (`window_return`, `ytd_return`, `pct_from_52w_high`, `excess_vs_spy`,
+    // `excess_vs_qqq`) and the `benchmarks` block — all copied verbatim by
+    // `stockWeekFromSeries`, which does no arithmetic at all.
+    const served = await apexDaySeries({
+      symbols: fetchSet,
+      start: args.start,
+      end: args.end,
+      ...(args.ctx === undefined ? {} : { ctx: args.ctx }),
+      tool: "ow_stock_week",
+    });
+    if (served.source === "apex-returns")
+      return stockWeekFromSeries({ ...args, wanted, served, until });
     const fetched = await dailyBars(fetchSet, lookbackDays, args.ctx);
     const why = new Map<string, string>();
     for (const note of fetched.notes) {
@@ -2104,13 +2228,24 @@ export function buildTools(cfg: {
     start: string;
     end: string;
     ctx?: ToolRunContext;
+    /** The caller's own name, for the unreachable-apex message. Defaults to
+     *  `ow_event_day`, the first caller. */
+    tool?: string;
   }): Promise<{
     source: string;
     series: Map<string, DayPoint[]>;
     missing: Array<{ symbol: string; reason: string }>;
     notes: string[];
+    /** The endpoint's own `results` rows, VERBATIM and keyed by symbol, so a
+     *  caller that wants the metrics apex computed can copy them instead of
+     *  recomputing them. Empty on the bars fallback, which computes none of
+     *  them. */
+    rows: Map<string, Record<string, unknown>>;
+    /** The endpoint's own `benchmarks` block, verbatim. Empty on the
+     *  fallback. */
+    benchmarks: Record<string, { window_return: number | null }>;
   }> {
-    const tool = "ow_event_day";
+    const tool = args.tool ?? "ow_event_day";
     const base = need(env, "OW_APEX_API_BASE", tool);
     const wanted = [
       ...new Set(
@@ -2129,6 +2264,8 @@ export function buildTools(cfg: {
       );
     const series = new Map<string, DayPoint[]>();
     const missing: Array<{ symbol: string; reason: string }> = [];
+    const rows = new Map<string, Record<string, unknown>>();
+    const benchmarks: Record<string, { window_return: number | null }> = {};
 
     const url = new URL("/v1/equity/returns", base);
     url.searchParams.set("symbols", asked.join(","));
@@ -2150,10 +2287,22 @@ export function buildTools(cfg: {
       const body = (await response.json()) as {
         results?: unknown;
         missing?: unknown;
+        benchmarks?: unknown;
       };
+      const bench = body.benchmarks;
+      if (bench !== null && typeof bench === "object")
+        for (const [name, cell] of Object.entries(
+          bench as Record<string, unknown>,
+        ))
+          benchmarks[name] = {
+            window_return:
+              numeric((cell as { window_return?: unknown } | null)
+                ?.window_return) ?? null,
+          };
       for (const raw of Array.isArray(body.results) ? body.results : []) {
         const row = raw as { symbol?: unknown; daily?: unknown };
         if (typeof row.symbol !== "string") continue;
+        rows.set(row.symbol, raw as Record<string, unknown>);
         series.set(
           row.symbol,
           (Array.isArray(row.daily) ? row.daily : []).flatMap((entry) => {
@@ -2190,7 +2339,7 @@ export function buildTools(cfg: {
             symbol,
             reason: "apex /returns neither priced this symbol nor listed it",
           });
-      return { source: "apex-returns", series, missing, notes };
+      return { source: "apex-returns", series, missing, notes, rows, benchmarks };
     }
     notes.push(
       `/v1/equity/returns answered ${String(response.status)}; priced from daily bars instead`,
@@ -2246,7 +2395,7 @@ export function buildTools(cfg: {
         }),
       );
     }
-    return { source: "apex-bars-fallback", series, missing, notes };
+    return { source: "apex-bars-fallback", series, missing, notes, rows, benchmarks };
   }
 
   /** `ow_stock_week`'s default universe when the caller names no symbols: the
@@ -5664,6 +5813,10 @@ export function buildTools(cfg: {
               ? {}
               : (stockWeek as Record<string, unknown>),
           events: frame.calendar,
+          // Eight on the weekly, five on a daily run. Same block, same rules,
+          // fewer rows — a daily brief is 300 words of market prose and eight
+          // ranked names is a table nobody calls.
+          limit: candidateLimit(cfg.phase),
         });
         if (stockWeek === undefined)
           frame.coverageCandidates.notes.push(
@@ -5674,6 +5827,74 @@ export function buildTools(cfg: {
             `no universe name has an earnings date inside ${week.start}..${week.end}`,
           );
 
+        // ---- #106 Loop 2: what the in-window reporters actually reported ---
+        // The candidate table says a name moved; it does not say WHY. For a
+        // name that reported inside the window the why is on the tape, and
+        // asking the model to remember an EPS number is exactly the failure
+        // "LLM never does arithmetic" was written about. So the figures are
+        // fetched here and copied onto the row.
+        //
+        // Verified 2026-09-08 against the live `ow_uw_earnings_report`
+        // response for DELL (recorded in
+        // docs/evidence/flash-samples/2026-09-06-weekly-v2/tool-io):
+        // `{source:"unusual_whales", ticker, cutoff, earnings:[{reportDate,
+        // endingFiscalQuarter, actualEps, streetMeanEst, source:"company",
+        // reportTime, sourceUrl, fetchedAt}], statements:[...], limitations:[]}`
+        // — DELL's real row that day was `{reportDate "2026-09-01",
+        // endingFiscalQuarter "2026-07-31", actualEps "6.76", streetMeanEst
+        // "4.95", reportTime "postmarket"}`. `statements` is deliberately NOT
+        // read here: its quarter labels and EPS basis are not a contract to
+        // join, and the tool's own `limitations` say so.
+        //
+        // BOUNDED BY THE CANDIDATE LIST ITSELF. One round trip per ranked name
+        // that reported, and the ranked list is already capped at this phase's
+        // `candidateLimit` — eight weekly, five daily. A wide universe cannot
+        // turn one frame into forty UW calls, and no second cap is needed to
+        // say so.
+        const reporters = frame.coverageCandidates.stocks.filter((row) =>
+          earningsInWeek.includes(row.symbol),
+        );
+        await Promise.all(
+          reporters.map(async (row) => {
+            const report = await answer("earningsReport", "ow_uw_earnings_report", {
+              ticker: row.symbol,
+            });
+            delete skipped.earningsReport; // not a declared coverage layer
+            const reported = inWindowEarnings(report ?? null, week);
+            if (reported === null) {
+              // SILENT SKIP, LOUD RECORD. A replay with no recording for this
+              // ticker answers `{unavailable:"as-of"}` and lands here, and so
+              // does a name whose report fell outside the window after all.
+              // Either way the row keeps its numbers and the gap says its own
+              // name.
+              frame.coverageCandidates?.missing.push({
+                symbol: row.symbol,
+                reason: `ow_uw_earnings_report: no completed report inside ${week.start}..${week.end}`,
+              });
+              return;
+            }
+            row.earnings = reported;
+          }),
+        );
+
+        // ---- #106 Loop 2: one recorded headlines read ----------------------
+        // The weekly's frozen samples carried no headlines call unless the
+        // AUTHOR happened to make one, so a replay could not serve citations
+        // it never recorded (docs/evidence/flash-samples/README.md, run A).
+        // Recording it in the clerk step makes every weekly sample carry one.
+        // The rows are NOT parsed into numbers and never will be:
+        // `CandidateHeadline` is citation-only and helium #113 fills it.
+        const headlines = await answer("headlines", "ow_uw_headlines", {
+          limit: 20,
+        });
+        const headlineWhy = skipped.headlines;
+        delete skipped.headlines; // not a declared coverage layer
+        const headlineRows = (headlines as { rows?: unknown } | undefined)?.rows;
+        frame.coverageCandidates.notes.push(
+          Array.isArray(headlineRows)
+            ? `ow_uw_headlines: ${String(headlineRows.length)} rows recorded, citation only`
+            : `ow_uw_headlines: no rows — ${headlineWhy ?? (headlines as { reason?: unknown } | undefined)?.reason ?? "no reason recorded"}`,
+        );
         // ---- #107 item 2: the event day -----------------------------------
         // The SUMMARY only. The member-level cross-section is `ow_event_day`'s
         // own payload, which the author reads directly; carrying all of it
@@ -5729,6 +5950,30 @@ export function buildTools(cfg: {
             read: async (ask) =>
               JSON.parse(await newsTool.run(ask, ctx)) as unknown,
           });
+        }
+
+        // ---- #106 Loop 2 item 3: the citations, from #113's overview -------
+        // CITATION ONLY. `buildNewsOverview` already fetched and capped the
+        // tape behind these exact names, so the candidate row copies its
+        // headlines rather than opening a second route to the same source. A
+        // figure inside a headline is the publisher's arithmetic and is never
+        // read as a number here — that is what `CandidateHeadline` is for and
+        // why it carries a `link` instead of a value.
+        const newsBySymbol = new Map(
+          (frame.newsOverview?.stocks ?? []).map((row) => [row.symbol, row]),
+        );
+        for (const row of frame.coverageCandidates.stocks) {
+          const news = newsBySymbol.get(row.symbol);
+          if (news === undefined) continue;
+          const cites = (news.headlines ?? []).map((item) => ({
+            title: item.title,
+            published: item.published,
+            provider: item.provider,
+            ...(item.link === undefined || item.link === ""
+              ? {}
+              : { link: item.link }),
+          }));
+          if (cites.length > 0) row.headlines = cites;
         }
 
         return JSON.stringify(frame);
