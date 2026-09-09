@@ -1948,11 +1948,26 @@ export function buildTools(cfg: {
   /**
    * `ow_stock_week`'s table when apex 0.1.6 served `/v1/equity/returns`.
    *
-   * The window return is the day returns compounded, because the first day's
-   * return is measured off the close BEFORE the window — the same prior-Friday
-   * base the bars path uses, which is why the two paths agree to rounding. No
-   * field is read that `apexDaySeries` has not verified; `ytd_return` and
-   * `pct_from_52w_high` stay null on both paths for the same reason.
+   * A COPY, not a computation. The route computes every number itself and this
+   * function's whole job is to hand them over unchanged — the tenant rule that
+   * derived numbers come from the tool payload applies to the tool as much as
+   * to the author, and a second implementation of `window_return` here would be
+   * a number that could disagree with apex's.
+   *
+   * VERIFIED 2026-09-09 against apex 0.1.6
+   * (`src/api/routes/returns.py:97-220`). The response is
+   * `{start, end, price_mode, generated_at,
+   *   benchmarks: {SPY: {window_return}, QQQ: {window_return}},
+   *   results: [{symbol, daily: [{date, close, return}], window_return,
+   *              ytd_return, pct_from_52w_high, excess_vs_spy, excess_vs_qqq}],
+   *   missing: [{symbol, reason}]}`.
+   * Every one of those numbers may legitimately be `null` — `_pct` returns
+   * None on a missing base close, and `pct_from_52w_high` is None when the
+   * year holds no bar — so a null is copied as a null and never read as a
+   * zero. helium1 verified the live route for 2026-08-31..2026-09-04: SMH
+   * +2.51%, SPY +0.11%, `missing` empty.
+   *
+   * Only the fallback below computes anything, and only because it has to.
    */
   function stockWeekFromSeries(args: {
     start: string;
@@ -1963,56 +1978,50 @@ export function buildTools(cfg: {
       series: Map<string, DayPoint[]>;
       missing: Array<{ symbol: string; reason: string }>;
       notes: string[];
+      rows: Map<string, Record<string, unknown>>;
+      benchmarks: Record<string, { window_return: number | null }>;
     };
     until: number;
   }): Record<string, unknown> {
     const BENCH = ["SPY", "QQQ"] as const;
     const missing = [...args.served.missing];
-    const compound = (symbol: string): number | null => {
-      const rows = args.served.series.get(symbol);
-      if (rows === undefined || rows.length === 0) return null;
-      let factor = 1;
-      let seen = 0;
-      for (const row of rows) {
-        if (row.return === null) continue;
-        factor *= 1 + row.return;
-        seen += 1;
-      }
-      return seen === 0 ? null : factor - 1;
-    };
+    /** A number the payload carries, or null. `undefined` — the field absent
+     *  altogether — is a null too: the row prints a gap, never a zero. */
+    const cell = (row: Record<string, unknown>, key: string): number | null =>
+      numeric(row[key]) ?? null;
+
     const benchmarks: Record<string, { window_return: number | null }> = {};
-    const benchReturn = new Map<string, number>();
     for (const symbol of BENCH) {
-      const value = compound(symbol);
-      benchmarks[symbol] = { window_return: value };
-      if (value !== null) benchReturn.set(symbol, value);
-      else if (!missing.some((row) => row.symbol === symbol))
+      const served = args.served.benchmarks[symbol];
+      benchmarks[symbol] = {
+        window_return: served?.window_return ?? null,
+      };
+      if (served === undefined && !missing.some((row) => row.symbol === symbol))
         missing.push({
           symbol,
-          reason: "apex /returns served no day return for this benchmark",
+          reason: "apex /returns carried no benchmark row for this symbol",
         });
     }
+
     const results: Array<Record<string, unknown>> = [];
     for (const symbol of args.wanted) {
-      const value = compound(symbol);
-      if (value === null) {
-        if (!missing.some((row) => row.symbol === symbol))
+      const row = args.served.rows.get(symbol);
+      if (row === undefined) {
+        if (!missing.some((entry) => entry.symbol === symbol))
           missing.push({
             symbol,
-            reason: "apex /returns served no day return for this symbol",
+            reason: "apex /returns neither priced this symbol nor listed it",
           });
         continue;
       }
-      const spy = benchReturn.get("SPY");
-      const qqq = benchReturn.get("QQQ");
       results.push({
         symbol,
         daily: args.served.series.get(symbol) ?? [],
-        window_return: value,
-        ytd_return: null,
-        pct_from_52w_high: null,
-        excess_vs_spy: spy === undefined ? null : value - spy,
-        excess_vs_qqq: qqq === undefined ? null : value - qqq,
+        window_return: cell(row, "window_return"),
+        ytd_return: cell(row, "ytd_return"),
+        pct_from_52w_high: cell(row, "pct_from_52w_high"),
+        excess_vs_spy: cell(row, "excess_vs_spy"),
+        excess_vs_qqq: cell(row, "excess_vs_qqq"),
       });
     }
     return {
@@ -2025,8 +2034,7 @@ export function buildTools(cfg: {
       results,
       missing,
       notes: [
-        "window_return is the prior trading day's close (the prior Friday) to the last close in the window",
-        "ytd_return and pct_from_52w_high are not served by /v1/equity/returns and are null",
+        "window_return, ytd_return, pct_from_52w_high and both excesses are copied verbatim from apex /v1/equity/returns; nothing is computed here",
         ...args.served.notes,
       ],
     };
@@ -2072,11 +2080,10 @@ export function buildTools(cfg: {
     // there is no second HTTP path to keep in step. helium1 verified the live
     // endpoint on the mini for 2026-08-31..2026-09-04: SMH +2.51%, SPY +0.11%,
     // `missing` empty. The fields read are the ones that client's own comment
-    // records — `results[].symbol`, `results[].daily[{date, close, return}]`,
-    // `missing[{symbol, reason}]` — and no others: a window-return field this
-    // repo has not seen would be an invented one, so the window return is
-    // compounded from the day returns, which is the same quantity the bars path
-    // measures (SPY +0.11% either way).
+    // records, plus the per-row metrics the route computes itself
+    // (`window_return`, `ytd_return`, `pct_from_52w_high`, `excess_vs_spy`,
+    // `excess_vs_qqq`) and the `benchmarks` block — all copied verbatim by
+    // `stockWeekFromSeries`, which does no arithmetic at all.
     const served = await apexDaySeries({
       symbols: fetchSet,
       start: args.start,
@@ -2229,6 +2236,14 @@ export function buildTools(cfg: {
     series: Map<string, DayPoint[]>;
     missing: Array<{ symbol: string; reason: string }>;
     notes: string[];
+    /** The endpoint's own `results` rows, VERBATIM and keyed by symbol, so a
+     *  caller that wants the metrics apex computed can copy them instead of
+     *  recomputing them. Empty on the bars fallback, which computes none of
+     *  them. */
+    rows: Map<string, Record<string, unknown>>;
+    /** The endpoint's own `benchmarks` block, verbatim. Empty on the
+     *  fallback. */
+    benchmarks: Record<string, { window_return: number | null }>;
   }> {
     const tool = args.tool ?? "ow_event_day";
     const base = need(env, "OW_APEX_API_BASE", tool);
@@ -2249,6 +2264,8 @@ export function buildTools(cfg: {
       );
     const series = new Map<string, DayPoint[]>();
     const missing: Array<{ symbol: string; reason: string }> = [];
+    const rows = new Map<string, Record<string, unknown>>();
+    const benchmarks: Record<string, { window_return: number | null }> = {};
 
     const url = new URL("/v1/equity/returns", base);
     url.searchParams.set("symbols", asked.join(","));
@@ -2270,10 +2287,22 @@ export function buildTools(cfg: {
       const body = (await response.json()) as {
         results?: unknown;
         missing?: unknown;
+        benchmarks?: unknown;
       };
+      const bench = body.benchmarks;
+      if (bench !== null && typeof bench === "object")
+        for (const [name, cell] of Object.entries(
+          bench as Record<string, unknown>,
+        ))
+          benchmarks[name] = {
+            window_return:
+              numeric((cell as { window_return?: unknown } | null)
+                ?.window_return) ?? null,
+          };
       for (const raw of Array.isArray(body.results) ? body.results : []) {
         const row = raw as { symbol?: unknown; daily?: unknown };
         if (typeof row.symbol !== "string") continue;
+        rows.set(row.symbol, raw as Record<string, unknown>);
         series.set(
           row.symbol,
           (Array.isArray(row.daily) ? row.daily : []).flatMap((entry) => {
@@ -2310,7 +2339,7 @@ export function buildTools(cfg: {
             symbol,
             reason: "apex /returns neither priced this symbol nor listed it",
           });
-      return { source: "apex-returns", series, missing, notes };
+      return { source: "apex-returns", series, missing, notes, rows, benchmarks };
     }
     notes.push(
       `/v1/equity/returns answered ${String(response.status)}; priced from daily bars instead`,
@@ -2366,7 +2395,7 @@ export function buildTools(cfg: {
         }),
       );
     }
-    return { source: "apex-bars-fallback", series, missing, notes };
+    return { source: "apex-bars-fallback", series, missing, notes, rows, benchmarks };
   }
 
   /** `ow_stock_week`'s default universe when the caller names no symbols: the

@@ -199,12 +199,14 @@ describe("ow_stock_week", () => {
 /**
  * The PREFERRED path, live on the mini since apex 0.1.6 (switched 2026-09-09).
  *
- * The day returns served here are computed from the same frozen adjusted
- * closes above — real prices, real arithmetic, no invented figure — and the
- * first day is measured off the 2026-08-28 close, which is what makes the
- * compounded window return the prior-Friday-to-Friday quantity the fallback
- * also reports. apex's own published check values for this week are SPY
- * +0.0011 and SNDK +0.1717.
+ * The route computes every metric itself (`src/api/routes/returns.py:97-220`,
+ * read 2026-09-09), so the tool's job here is to COPY. The exact live payload
+ * text is not in this repo, so this fixture is built from the same frozen
+ * adjusted closes above — real prices — and the assertions are pass-through:
+ * each field comes out of the tool byte-identical to the field that went in,
+ * including the nulls. apex's own published check values for this week are SPY
+ * +0.0011 and SNDK +0.1717, and helium1 verified the live route for the same
+ * window (SMH +2.51%, SPY +0.11%, `missing` empty).
  */
 describe("ow_stock_week on apex /v1/equity/returns", () => {
   const dailyFor = (symbol: string) => {
@@ -220,6 +222,54 @@ describe("ow_stock_week on apex /v1/equity/returns", () => {
     return out;
   };
 
+  /** The whole payload the stub serves, so a test can assert against the very
+   *  object the tool was handed. */
+  const SERVED = (() => {
+    const windowReturn = (symbol: string) => {
+      const dates = Object.keys(CLOSES[symbol] ?? {}).sort();
+      const inside = dates.filter((d) => d >= "2026-08-31" && d <= "2026-09-04");
+      const base = dates.filter((d) => d < "2026-08-31").pop();
+      if (base === undefined || inside.length === 0) return null;
+      return (
+        CLOSES[symbol]![inside[inside.length - 1]!]! / CLOSES[symbol]![base]! - 1
+      );
+    };
+    const spy = windowReturn("SPY");
+    const qqq = windowReturn("QQQ");
+    const row = (symbol: string) => {
+      const value = windowReturn(symbol);
+      return {
+        symbol,
+        daily: dailyFor(symbol),
+        window_return: value,
+        // The route serves these two; the bars fallback cannot. A null here is
+        // a real answer (`_pct` returns None on a missing base close), never a
+        // zero.
+        ytd_return: 0.4213,
+        pct_from_52w_high: null,
+        excess_vs_spy: value === null || spy === null ? null : value - spy,
+        excess_vs_qqq: value === null || qqq === null ? null : value - qqq,
+      };
+    };
+    return {
+      start: "2026-08-31",
+      end: "2026-09-04",
+      price_mode: "adjusted",
+      benchmarks: {
+        SPY: { window_return: spy },
+        QQQ: { window_return: qqq },
+      },
+      // The tool asks for the benchmarks as ordinary symbols too, and the
+      // route answers a row for every symbol in `symbols=` — so the stub does.
+      rows: {
+        SPY: row("SPY"),
+        QQQ: row("QQQ"),
+        SNDK: row("SNDK"),
+        MU: row("MU"),
+      },
+    };
+  })();
+
   const returnsFetch: typeof fetch = (async (input: URL | RequestInfo) => {
     const url = new URL(String(input));
     if (url.pathname !== "/v1/equity/returns")
@@ -232,12 +282,17 @@ describe("ow_stock_week on apex /v1/equity/returns", () => {
     expect(url.searchParams.get("end")).toBe("2026-09-04");
     return new Response(
       JSON.stringify({
-        results: asked
-          .filter((symbol) => (CLOSES[symbol]?.["2026-09-04"] ?? 0) > 0)
-          .map((symbol) => ({ symbol, daily: dailyFor(symbol) })),
-        missing: asked
-          .filter((symbol) => (CLOSES[symbol]?.["2026-09-04"] ?? 0) === 0)
-          .map((symbol) => ({ symbol, reason: "no artifact for this symbol" })),
+        start: SERVED.start,
+        end: SERVED.end,
+        price_mode: SERVED.price_mode,
+        generated_at: "2026-09-09T00:00:00+00:00",
+        benchmarks: SERVED.benchmarks,
+        results: asked.flatMap((symbol) =>
+          symbol in SERVED.rows
+            ? [SERVED.rows[symbol as keyof typeof SERVED.rows]]
+            : [],
+        ),
+        missing: [],
       }),
       { status: 200 },
     );
@@ -257,24 +312,34 @@ describe("ow_stock_week on apex /v1/equity/returns", () => {
       ),
     ) as Table;
     expect(table.source).toBe("apex-returns");
-    // The SAME value the bars path produced on 2026-09-08 and froze into
-    // docs/evidence/flash-samples/2026-09-06-weekly-v2 — the two paths agree
-    // to the last bit, which is what makes the switch a source change and not
-    // a number change.
+    // BENCHMARKS COME FROM THE PAYLOAD'S OWN BLOCK, not from a row the tool
+    // re-derived. The value is the one the bars path produced on 2026-09-08 and
+    // froze into docs/evidence/flash-samples/2026-09-06-weekly-v2, so the
+    // switch is a source change and not a number change.
+    expect(table.benchmarks.SPY?.window_return).toBe(
+      SERVED.benchmarks.SPY.window_return,
+    );
     expect(table.benchmarks.SPY?.window_return).toBe(0.0010918307662313165);
     const sndk = table.results.find((row) => row.symbol === "SNDK");
-    expect(sndk?.window_return).toBeCloseTo(0.1717, 4);
-    expect(sndk?.excess_vs_spy).toBeCloseTo(0.1706, 4);
-    // Not served by this endpoint, and never guessed.
-    expect(sndk?.ytd_return).toBeNull();
+    const served = SERVED.rows.SNDK;
+    // PASS-THROUGH, field for field, including the null. Nothing is rounded,
+    // recomputed or filled in.
+    expect(sndk?.window_return).toBe(served.window_return);
+    expect(sndk?.excess_vs_spy).toBe(served.excess_vs_spy);
+    expect(sndk?.excess_vs_qqq).toBe(served.excess_vs_qqq);
+    expect(sndk?.ytd_return).toBe(0.4213);
+    expect(sndk?.pct_from_52w_high).toBeNull();
     expect(table.missing).toEqual([]);
   });
 
   it("falls back to daily bars on a non-200, and marks the source", async () => {
     const table = await week(["SNDK"]);
     expect(table.source).toBe("apex-bars-fallback");
-    expect(
-      table.results.find((row) => row.symbol === "SNDK")?.window_return,
-    ).toBeCloseTo(0.1717, 4);
+    const sndk = table.results.find((row) => row.symbol === "SNDK");
+    expect(sndk?.window_return).toBeCloseTo(0.1717, 4);
+    // The fallback computes no YTD and no 52-week high, and says so rather
+    // than serving a zero.
+    expect(sndk?.ytd_return).toBeNull();
+    expect(sndk?.pct_from_52w_high).toBeNull();
   });
 });
