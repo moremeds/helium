@@ -1,9 +1,11 @@
 /**
  * The news overview block (#113).
  *
- * #106 asked for one screen that says "what is happening this week" BEFORE the
- * author picks a subject, plus the headlines behind each stock row it will
- * write about. This module is the assembly: it decides what to ask for, in
+ * #106 asked for one screen that says "what is happening" BEFORE the author
+ * picks a subject, plus the headlines behind each stock row it will write
+ * about. Every phase gets it: the weekly author is choosing a subject from a
+ * week of tape, the daily author is dating the cause it already has, so the
+ * caps differ (`newsCapsFor`) and nothing else does. This module is the assembly: it decides what to ask for, in
  * what order, and what an unanswered symbol looks like. It does not fetch —
  * `read` is handed in, which is what lets the ordering, the venue fallback and
  * the missing guard be tested against frozen real rows.
@@ -63,22 +65,40 @@ export interface NewsOverview {
  */
 export const NEWS_VENUES: readonly string[] = ["NASDAQ", "AMEX", "NYSE"];
 
-/** Rows kept per global feed. A FULL block — two feeds x 8 plus 12 stocks x 3
- *  — measured 17 KB of JSON with every row carrying the longest real link in
- *  the fixtures (the test asserts it),
- *  against core's 128 KiB `SUMMARISE_OVER_BYTES`. The frame carries plenty
- *  besides this block, which is why the caps are small and measured rather
- *  than "as many as fit". */
-export const NEWS_GLOBAL_LIMIT = 8;
+/**
+ * The caps, per phase. Daily is the same block at a smaller scale, not a
+ * different block: the weekly author is choosing a subject from a week of
+ * tape, while a daily author already knows the day's cause and needs the
+ * headline that dates it. Both are measured, not tasteful — a FULL weekly
+ * block is 17 KB of JSON with every row carrying the longest real link in the
+ * fixtures (the test asserts it) against core's 128 KiB
+ * `SUMMARISE_OVER_BYTES`, and the frame carries plenty besides this block.
+ *
+ * `stocks` is a COST cap as much as a context one: each symbol is up to three
+ * opencli subprocesses on a miss, and a daily run has a 4-times-a-day budget
+ * the weekly does not. It is the ranked candidates plus room for the
+ * operator's pinned names; truncation is a note, never silence.
+ */
+export interface NewsCaps {
+  /** Rows kept from each of the two global feeds. */
+  global: number;
+  /** Headlines per stock. */
+  perStock: number;
+  /** How many stocks are asked for headlines at all. */
+  stocks: number;
+}
 
-/** Headlines per stock. Three is what #113 asks for: enough to see whether a
- *  week's move had a story, short enough that eight of them still fit. */
-export const NEWS_PER_STOCK = 3;
+export const NEWS_CAPS: Readonly<Record<"weekly" | "daily", NewsCaps>> = {
+  weekly: { global: 8, perStock: 3, stocks: 12 },
+  daily: { global: 4, perStock: 2, stocks: 8 },
+};
 
-/** How many stocks get headlines: the eight ranked coverage candidates plus up
- *  to four pinned names. The cap is a COST cap — each symbol is up to three
- *  opencli subprocesses on a miss — and the truncation is a note, not silence. */
-export const NEWS_STOCK_LIMIT = 12;
+/** The caps a phase gets. Anything that is not the weekly run is daily —
+ *  premarket, intraday, close, and an unnamed phase alike. A host that
+ *  forgets to pass a phase must get the CHEAPER block, never the larger one. */
+export function newsCapsFor(phase: string | undefined): NewsCaps {
+  return phase === "weekly" ? NEWS_CAPS.weekly : NEWS_CAPS.daily;
+}
 
 /** What `buildNewsOverview` is handed: run one news read and give back the
  *  parsed payload. Anything it throws is recorded, never swallowed. */
@@ -179,9 +199,10 @@ export async function buildNewsOverview(args: {
   asOf: string;
   symbols: readonly string[];
   read: NewsRead;
-  limit?: number;
+  caps: NewsCaps;
 }): Promise<NewsOverview> {
-  const limit = args.limit ?? NEWS_STOCK_LIMIT;
+  const { caps } = args;
+  const limit = caps.stocks;
   const notes: string[] = [];
   const missing: Array<{ symbol: string; reason: string }> = [];
 
@@ -191,14 +212,14 @@ export async function buildNewsOverview(args: {
     ask: { section?: string; category?: string },
   ): Promise<NewsRow[]> => {
     try {
-      const payload = await args.read({ ...ask, limit: NEWS_GLOBAL_LIMIT });
+      const payload = await args.read({ ...ask, limit: caps.global });
       const refused = refusalOf(payload);
       if (refused !== undefined) {
         failures.push(refused);
         notes.push(`${label} did not answer: ${refused}`);
         return [];
       }
-      return newsRowsOf(payload, NEWS_GLOBAL_LIMIT);
+      return newsRowsOf(payload, caps.global);
     } catch (error: unknown) {
       const reason = why(error);
       failures.push(reason);
@@ -250,8 +271,8 @@ export async function buildNewsOverview(args: {
     try {
       hit = await resolveVenue(symbol, async (tvSymbol) =>
         newsRowsOf(
-          await args.read({ symbol: tvSymbol, limit: NEWS_PER_STOCK }),
-          NEWS_PER_STOCK,
+          await args.read({ symbol: tvSymbol, limit: caps.perStock }),
+          caps.perStock,
         ),
       );
     } catch (error: unknown) {

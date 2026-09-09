@@ -267,9 +267,10 @@ export interface SessionFrame {
    *  basket's two ends. The member-level table stays in `ow_event_day`'s own
    *  payload: this block points at it, it does not replace it. */
   eventDay?: EventDaySummary;
-  /** #113. The week's tape and the headlines behind each ranked stock, each
-   *  row carrying its link. Quotable ONLY as a citation — a headline is never
-   *  where a number comes from. Absent when TradingView is not reachable. */
+  /** #113. The tape and the headlines behind each ranked stock, each row
+   *  carrying its link. Every phase gets it — the daily runs get the same
+   *  block at a smaller scale (`newsCapsFor`). Quotable ONLY as a citation: a
+   *  headline is never where a number comes from. */
   newsOverview?: NewsOverview;
   notes?: string[];
 }

@@ -8,10 +8,9 @@
 import { describe, expect, it } from "vitest";
 import { SUMMARISE_OVER_BYTES } from "@helium/core";
 import {
-  NEWS_GLOBAL_LIMIT,
-  NEWS_PER_STOCK,
-  NEWS_STOCK_LIMIT,
+  NEWS_CAPS,
   buildNewsOverview,
+  newsCapsFor,
 } from "../quality/news-overview.js";
 
 const MARKETS_TODAY = [
@@ -105,6 +104,7 @@ describe("buildNewsOverview", () => {
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA", "SPY"],
       read: reader(state),
+      caps: NEWS_CAPS.weekly,
     });
     expect(overview.marketsToday.map((row) => row.title)).toEqual(
       MARKETS_TODAY.map((row) => row.title),
@@ -158,6 +158,7 @@ describe("buildNewsOverview", () => {
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA", "ZZZZ"],
       read: reader(state),
+      caps: NEWS_CAPS.weekly,
     });
     expect(overview.stocks.map((row) => row.symbol)).toEqual(["NVDA"]);
     expect(overview.missing).toHaveLength(1);
@@ -178,6 +179,7 @@ describe("buildNewsOverview", () => {
     const overview = await buildNewsOverview({
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA", "SPY"],
+      caps: NEWS_CAPS.weekly,
       read: async () => {
         reads += 1;
         throw new Error('ow_tv_news: OW_TV_ENABLED is not "1"');
@@ -195,6 +197,7 @@ describe("buildNewsOverview", () => {
     const overview = await buildNewsOverview({
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA"],
+      caps: NEWS_CAPS.weekly,
       read: async (args) => {
         if (args.symbol === undefined) return { rows: MARKETS_TODAY };
         throw new Error("opencli tradingview news failed — CDP port closed");
@@ -217,7 +220,7 @@ describe("buildNewsOverview", () => {
       // cap counts distinct names.
       symbols: ["NVDA", "nvda", "SPY", "ZZZZ"],
       read: reader(state),
-      limit: 2,
+      caps: { ...NEWS_CAPS.weekly, stocks: 2 },
     });
     expect(overview.stocks.map((row) => row.symbol)).toEqual(["NVDA", "SPY"]);
     expect(overview.notes.join(" ")).toContain("asked 2 of 3 symbols");
@@ -233,16 +236,20 @@ describe("buildNewsOverview", () => {
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA"],
       read: async () => ({ rows: many }),
+      caps: NEWS_CAPS.weekly,
     });
-    expect(overview.marketsToday).toHaveLength(NEWS_GLOBAL_LIMIT);
-    expect(overview.economic).toHaveLength(NEWS_GLOBAL_LIMIT);
-    expect(overview.stocks[0]!.headlines).toHaveLength(NEWS_PER_STOCK);
+    expect(overview.marketsToday).toHaveLength(NEWS_CAPS.weekly.global);
+    expect(overview.economic).toHaveLength(NEWS_CAPS.weekly.global);
+    expect(overview.stocks[0]!.headlines).toHaveLength(
+      NEWS_CAPS.weekly.perStock,
+    );
   });
 
   it("reads a refusal payload as no rows, never as a quiet news day", async () => {
     const overview = await buildNewsOverview({
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: ["NVDA"],
+      caps: NEWS_CAPS.weekly,
       read: async () => ({
         unavailable: "as-of",
         asOf: "2026-09-02T12:45:00.000Z",
@@ -266,7 +273,8 @@ describe("buildNewsOverview", () => {
     // whose numbers are no longer verbatim.
     const overview = await buildNewsOverview({
       asOf: "2026-09-09T02:00:00.000Z",
-      symbols: Array.from({ length: NEWS_STOCK_LIMIT }, (_, index) =>
+      caps: NEWS_CAPS.weekly,
+      symbols: Array.from({ length: NEWS_CAPS.weekly.stocks }, (_, index) =>
         index === 0 ? "NVDA" : `SY${String(index)}`,
       ),
       read: async () => ({
@@ -276,17 +284,64 @@ describe("buildNewsOverview", () => {
         })),
       }),
     });
-    expect(overview.stocks).toHaveLength(NEWS_STOCK_LIMIT);
+    expect(overview.stocks).toHaveLength(NEWS_CAPS.weekly.stocks);
     const bytes = Buffer.byteLength(JSON.stringify(overview), "utf8");
     // 17 KB measured, against a 131 KB ceiling — and this is the WORST case:
     // every one of the 52 rows carries the longest real link in the fixtures.
     expect(bytes).toBeLessThan(SUMMARISE_OVER_BYTES / 4);
   });
 
+  it("gives a daily run the same block at a smaller scale", async () => {
+    // The daily author already knows the day's cause and wants the headline
+    // that dates it; it also pays this cost four times a day. Same shape,
+    // fewer rows — and an unnamed phase gets the CHEAPER caps, never the
+    // larger ones.
+    expect(newsCapsFor("premarket")).toEqual(NEWS_CAPS.daily);
+    expect(newsCapsFor("intraday")).toEqual(NEWS_CAPS.daily);
+    expect(newsCapsFor("close")).toEqual(NEWS_CAPS.daily);
+    expect(newsCapsFor(undefined)).toEqual(NEWS_CAPS.daily);
+    expect(newsCapsFor("weekly")).toEqual(NEWS_CAPS.weekly);
+
+    const many = Array.from({ length: 30 }, (_, index) => ({
+      ...NVDA[0]!,
+      id: `row:${String(index)}`,
+    }));
+    const asked: number[] = [];
+    const overview = await buildNewsOverview({
+      asOf: "2026-09-09T02:00:00.000Z",
+      symbols: Array.from({ length: 20 }, (_, index) => `SY${String(index)}`),
+      caps: newsCapsFor("premarket"),
+      read: async (args) => {
+        asked.push(args.limit);
+        return { rows: many };
+      },
+    });
+    expect(overview.marketsToday).toHaveLength(NEWS_CAPS.daily.global);
+    expect(overview.economic).toHaveLength(NEWS_CAPS.daily.global);
+    expect(overview.stocks).toHaveLength(NEWS_CAPS.daily.stocks);
+    for (const stock of overview.stocks)
+      expect(stock.headlines).toHaveLength(NEWS_CAPS.daily.perStock);
+    expect(overview.notes.join(" ")).toContain("asked 8 of 20 symbols");
+    // The cap is pushed DOWN to opencli too, not just applied after the fact:
+    // a smaller `--limit` is a smaller fetch.
+    expect(asked.slice(0, 2)).toEqual([
+      NEWS_CAPS.daily.global,
+      NEWS_CAPS.daily.global,
+    ]);
+    expect(asked.slice(2)).toEqual(
+      asked.slice(2).map(() => NEWS_CAPS.daily.perStock),
+    );
+    // Strictly smaller than weekly on every axis — "daily 就是规模小一些".
+    expect(NEWS_CAPS.daily.global).toBeLessThan(NEWS_CAPS.weekly.global);
+    expect(NEWS_CAPS.daily.perStock).toBeLessThan(NEWS_CAPS.weekly.perStock);
+    expect(NEWS_CAPS.daily.stocks).toBeLessThan(NEWS_CAPS.weekly.stocks);
+  });
+
   it("drops a row with no link: a citation nobody can open is not a citation", async () => {
     const overview = await buildNewsOverview({
       asOf: "2026-09-09T02:00:00.000Z",
       symbols: [],
+      caps: NEWS_CAPS.weekly,
       read: async () => ({
         rows: [{ ...MARKETS_TODAY[0], link: "" }, MARKETS_TODAY[1]],
       }),

@@ -52,6 +52,7 @@ import {
 } from "../quality/event-day.js";
 import {
   buildNewsOverview,
+  newsCapsFor,
   noVenueReason,
   resolveVenue,
 } from "../quality/news-overview.js";
@@ -5670,6 +5671,11 @@ export function buildTools(cfg: {
         // The symbol order is the cap's meaning: the ranked candidates first,
         // then the operator's pinned names. Cost is up to three opencli calls
         // per symbol on a miss, all serial — see the module header.
+        //
+        // The CAPS come from the phase. A daily run gets the same block at a
+        // smaller scale (four rows a feed, five stocks, two headlines each):
+        // the daily author already knows the day's cause and wants the
+        // headline that dates it, and it pays this cost four times a day.
         const newsTool = SESSION_FRAME_SIBLINGS.includes("ow_tv_news")
           ? built.find((entry) => entry.name === "ow_tv_news")
           : undefined;
@@ -5685,6 +5691,7 @@ export function buildTools(cfg: {
               ...frame.coverageCandidates.stocks.map((row) => row.symbol),
               ...ofInterest,
             ],
+            caps: newsCapsFor(cfg.phase),
             read: async (ask) =>
               JSON.parse(await newsTool.run(ask, ctx)) as unknown,
           });
