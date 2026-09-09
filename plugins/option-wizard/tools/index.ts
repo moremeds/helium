@@ -39,6 +39,10 @@ import {
   attachThresholds,
   buildFrame,
 } from "../quality/frame.js";
+import {
+  rankCoverageCandidates,
+  reportedWeek,
+} from "../quality/coverage-candidates.js";
 import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
@@ -69,6 +73,9 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // those names — so it is a second pass, not one of the parallel reads above.
   "ow_uw_iv_term",
   "ow_apex_bars",
+  // #107 item 1. The frame ranks its payload into `coverageCandidates`, so the
+  // author is handed a ranked list rather than a basket to choose from.
+  "ow_stock_week",
 ];
 
 /**
@@ -114,6 +121,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // one.
   ["ow_rotation", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_apex_bars", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
+  // One ow_apex_bars round trip per symbol on the fallback path; apex is the
+  // only source, so a machine without it reports every symbol as missing.
+  ["ow_stock_week", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -1380,6 +1390,29 @@ const BarsParams = z.object({
   lookbackDays: z.number().int().positive().max(3650).optional(),
 });
 
+const StockWeekParams = z.object({
+  symbols: z.array(z.string().min(1).max(8)).min(1).max(200).optional(),
+  start: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  end: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+});
+
+/** #107 item 4. `asOf` pins the snapshot day, so the weekly can ask for
+ *  Monday's path and Friday's path and read the CHANGE off two payloads
+ *  instead of describing one. YYYY-MM-DD only — the value is interpolated into
+ *  a DATE literal and the pattern is what keeps it a date. */
+const PolicyPathParams = z.object({
+  asOf: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+});
+
 const IvTermParams = z.object({
   tickers: z.array(z.string().min(1).max(8)).min(1).max(3),
 });
@@ -1797,6 +1830,163 @@ export function buildTools(cfg: {
       );
     });
     return { bars, notes };
+  }
+
+  /**
+   * `ow_stock_week`'s table, computed from adjusted daily closes.
+   *
+   * The base close is the last one STRICTLY BEFORE `start` — the prior
+   * Friday's — so the window return is the same quantity apex 0.1.6's
+   * `/v1/equity/returns` serves. `excess_vs_*` is the arithmetic difference
+   * against the benchmark's own window return over the same two closes.
+   */
+  async function stockWeekTable(args: {
+    symbols: readonly string[];
+    start: string;
+    end: string;
+    ctx?: ToolRunContext;
+  }): Promise<Record<string, unknown>> {
+    const BENCH = ["SPY", "QQQ"] as const;
+    const wanted = [
+      ...new Set(
+        args.symbols
+          .map((symbol) => symbol.trim().toUpperCase())
+          .filter((symbol) => /^[A-Z][A-Z.-]{0,7}$/u.test(symbol)),
+      ),
+    ].sort((a, b) => a.localeCompare(b, "en"));
+    const fetchSet = [...new Set([...BENCH, ...wanted])];
+    // Enough calendar depth to reach the close BEFORE the window from
+    // whatever instant `ow_apex_bars` measures its lookback from, plus a
+    // fortnight of slack for holidays.
+    const until = asOf?.getTime() ?? Date.now();
+    const startMs = Date.parse(`${args.start}T00:00:00Z`);
+    const lookbackDays = Math.min(
+      3650,
+      Math.max(20, Math.ceil((until - startMs) / 86_400_000) + 14),
+    );
+    const fetched = await dailyBars(fetchSet, lookbackDays, args.ctx);
+    const why = new Map<string, string>();
+    for (const note of fetched.notes) {
+      const cut = note.indexOf(": ");
+      if (cut > 0) why.set(note.slice(0, cut), note.slice(cut + 2));
+    }
+
+    type Priced = {
+      window_return: number;
+      daily: Array<{
+        date: string;
+        close: number | null;
+        return: number | null;
+      }>;
+    };
+    const price = (symbol: string): Priced | string => {
+      const rows = fetched.bars.get(symbol);
+      if (rows === undefined || rows.length === 0)
+        return why.get(symbol) ?? "apex served no daily bars for this symbol";
+      const dated = rows
+        .map((bar) => ({ date: bar.time.slice(0, 10), close: bar.close }))
+        .filter((bar) => /^\d{4}-\d{2}-\d{2}$/u.test(bar.date))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const before = dated.filter((bar) => bar.date < args.start);
+      const inside = dated.filter(
+        (bar) => bar.date >= args.start && bar.date <= args.end,
+      );
+      const base = before[before.length - 1];
+      if (base === undefined || !Number.isFinite(base.close))
+        return `no close before ${args.start} to measure the week from`;
+      if (inside.length === 0)
+        return `no closes between ${args.start} and ${args.end}`;
+      let prior = base.close;
+      const daily = inside.map((bar) => {
+        const close = Number.isFinite(bar.close) ? bar.close : null;
+        const ret = close === null || prior <= 0 ? null : close / prior - 1;
+        if (close !== null) prior = close;
+        return { date: bar.date, close, return: ret };
+      });
+      const last = [...daily].reverse().find((bar) => bar.close !== null);
+      if (last === undefined || base.close <= 0)
+        return `no usable close between ${args.start} and ${args.end}`;
+      return { window_return: last.close! / base.close - 1, daily };
+    };
+
+    const missing: Array<{ symbol: string; reason: string }> = [];
+    const benchmarks: Record<string, { window_return: number | null }> = {};
+    const benchReturn = new Map<string, number>();
+    for (const symbol of BENCH) {
+      const priced = price(symbol);
+      if (typeof priced === "string") {
+        benchmarks[symbol] = { window_return: null };
+        missing.push({ symbol, reason: priced });
+        continue;
+      }
+      benchmarks[symbol] = { window_return: priced.window_return };
+      benchReturn.set(symbol, priced.window_return);
+    }
+
+    const results: Array<Record<string, unknown>> = [];
+    for (const symbol of wanted) {
+      const priced = price(symbol);
+      if (typeof priced === "string") {
+        if (!missing.some((row) => row.symbol === symbol))
+          missing.push({ symbol, reason: priced });
+        continue;
+      }
+      const spy = benchReturn.get("SPY");
+      const qqq = benchReturn.get("QQQ");
+      results.push({
+        symbol,
+        daily: priced.daily,
+        window_return: priced.window_return,
+        // Not computed on this path; see the tool's own comment.
+        ytd_return: null,
+        pct_from_52w_high: null,
+        excess_vs_spy: spy === undefined ? null : priced.window_return - spy,
+        excess_vs_qqq: qqq === undefined ? null : priced.window_return - qqq,
+      });
+    }
+    return {
+      start: args.start,
+      end: args.end,
+      price_mode: "adjusted",
+      generated_at: new Date(until).toISOString(),
+      source: "apex-bars-fallback",
+      benchmarks,
+      results,
+      missing,
+      notes: [
+        "window_return is the prior trading day's close (the prior Friday) to the last close in the window",
+        "ytd_return and pct_from_52w_high are null on the apex-bars fallback; apex 0.1.6 /v1/equity/returns serves them",
+      ],
+    };
+  }
+
+  /** `ow_stock_week`'s default universe when the caller names no symbols: the
+   *  watchlist chains' members plus the operator's pinned names, read from
+   *  `ow_argon_watchlist` — the tool this run already calls for both. The
+   *  week's EARNINGS names are not added here: `ow_uw_earnings` answers per
+   *  ticker and needs a universe of its own, so the union with the earnings
+   *  names is done by `ow_session_frame`, which already holds that payload,
+   *  and is passed in explicitly. */
+  async function defaultWeekSymbols(ctx?: ToolRunContext): Promise<string[]> {
+    const tool = built.find((entry) => entry.name === "ow_argon_watchlist");
+    if (tool === undefined) return [];
+    let watchlist: Record<string, unknown>;
+    try {
+      watchlist = JSON.parse(await tool.run({}, ctx)) as Record<string, unknown>;
+    } catch {
+      return [];
+    }
+    const out = new Set<string>();
+    const chains = watchlist.chains;
+    for (const chain of Array.isArray(chains) ? chains : []) {
+      const members = (chain as { members?: unknown }).members;
+      for (const member of Array.isArray(members) ? members : [])
+        if (typeof member === "string") out.add(member);
+    }
+    const pinned = watchlist.ofInterest;
+    for (const ticker of Array.isArray(pinned) ? pinned : [])
+      if (typeof ticker === "string") out.add(ticker);
+    return [...out];
   }
 
   /** The newest bar day a symbol reaches at or before `day`. The local apex
@@ -3786,6 +3976,87 @@ export function buildTools(cfg: {
       },
     },
     {
+      // #107 item 1. The per-symbol week table the weekly author ranks from.
+      //
+      // THE CONTRACT IS apex 0.1.6's `GET /v1/equity/returns?symbols=…&start=…
+      // &end=…`, which answers `{start, end, price_mode, generated_at,
+      // benchmarks:{SPY:{window_return},QQQ:{…}}, results:[{symbol, daily:
+      // [{date, close, return}], window_return, ytd_return,
+      // pct_from_52w_high, excess_vs_spy, excess_vs_qqq}], missing:[{symbol,
+      // reason}]}`. VERIFIED 2026-09-08 that the mini is NOT on 0.1.6 yet:
+      //   GET http://<apex>/v1/equity/returns?symbols=SOXX,SPY&start=…&end=…
+      //   -> HTTP 404 {"error":{"code":"unknown_symbol","message":"no artifact
+      //      for returns under asset_class=equity","symbol":"returns",
+      //      "asset_class":"equity"}}   (health: version 0.1.5)
+      // so this runs #107's explicitly allowed temporary path: the same shape,
+      // computed here from `ow_apex_bars` daily closes, stamped
+      // `source: "apex-bars-fallback"`. Switching to the endpoint is one
+      // branch; the output shape does not move.
+      //
+      // VERIFIED 2026-09-08 against the live bars the fallback reads (adjusted,
+      // adjustment_revision 40, `GET /v1/equity/{sym}/bars?timeframe=1d&
+      // price_mode=adjusted&start=…Z&end=…Z` -> `{symbol, asset_class,
+      // timeframe, price_mode, listing_status, adjustment_revision, contract,
+      // count, generated_at, bars:[{time, open, high, low, close, volume}]}`):
+      //   SPY  2026-08-28 close 769.35 -> 2026-09-04 close 770.19
+      //   SOXX 2026-08-28 close 508.62 -> 2026-09-04 close 519.86
+      // which reproduce apex's own 2026-08-31..09-04 check values (SOXX
+      // +0.0221, SPY +0.0011, QQQ +0.0035, MU +0.0898, SNDK +0.1717).
+      //
+      // THE WINDOW IS PRIOR-FRIDAY CLOSE -> FRIDAY CLOSE. The base is the last
+      // close STRICTLY BEFORE `start`, exactly as helium1 verified against the
+      // endpoint; measuring Monday-close -> Friday-close instead makes SOXX
+      // +1.73% rather than +2.21%.
+      //
+      // The fallback does NOT compute `ytd_return` or `pct_from_52w_high`:
+      // both need a year of bars per symbol and a corporate-action basis this
+      // tool does not own. They stay `null` with the reason on the payload —
+      // a null the reader can see beats a number nobody checked.
+      //
+      // GUARD: a symbol apex cannot serve, or that has no close before the
+      // window, goes to `missing` with its reason. It is never zero, and a
+      // non-finite close leaves that day's `return` null.
+      name: "ow_stock_week",
+      description:
+        "The week's per-symbol return table: for each symbol the window return (prior Friday close to Friday close), each day's close and return, and the excess over SPY and QQQ, plus the two benchmark returns. Every number is computed from adjusted daily closes before you see it — quote it, never recompute it. A symbol the source cannot price is in `missing` with a reason and has no number at all.",
+      paramsSchema: StockWeekParams,
+      mutating: false,
+      dshParams: {
+        symbols: {
+          type: "array",
+          description:
+            "Tickers. Defaults to the watchlist basket, the pinned names and the week's earnings names.",
+        },
+        start: {
+          type: "string",
+          description: "Monday of the week, YYYY-MM-DD (default: last week)",
+        },
+        end: {
+          type: "string",
+          description: "Friday of the week, YYYY-MM-DD (default: last week)",
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const parsed = StockWeekParams.parse(args);
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const week = reportedWeek(day);
+        const start = parsed.start ?? week.start;
+        const end = parsed.end ?? week.end;
+        const symbols =
+          parsed.symbols ?? (await defaultWeekSymbols(ctx));
+        return JSON.stringify(
+          await stockWeekTable({ symbols, start, end, ctx }),
+        );
+      },
+    },
+    {
       // Verified 2026-09-03 against the live response: GET
       // /api/market/economic-calendar takes NO parameters and answers
       // { data: [{ type, time (ISO Z), event, forecast, prev,
@@ -3855,11 +4126,25 @@ export function buildTools(cfg: {
       // silently become "CME says".
       name: "ow_argon_policy_path",
       description:
-        "The market-implied Fed path from argon: for each upcoming FOMC meeting, the implied rate, the target range and the full probability distribution over hold/cut/hike, with the snapshot date they were computed on. Futures-implied via Frenzy Capital — not CME FedWatch — and any citation must say so and carry the snapshot date.",
-      paramsSchema: NoParams,
+        "The market-implied Fed path from argon: for each upcoming FOMC meeting, the implied rate, the target range and the full probability distribution over hold/cut/hike, with the snapshot date they were computed on. Futures-implied via Frenzy Capital — not CME FedWatch — and any citation must say so and carry the snapshot date. Pass `asOf` to read the path as it stood on an earlier day: two calls, one per end of the week, is how you report a change in pricing rather than a level.",
+      paramsSchema: PolicyPathParams,
       mutating: false,
-      dshParams: {},
-      async run(): Promise<string> {
+      dshParams: {
+        asOf: {
+          type: "string",
+          description:
+            "Read the path as it stood on this day, YYYY-MM-DD (default: the run's own day)",
+        },
+      },
+      async run(args: Record<string, unknown>): Promise<string> {
+        // #107 item 4. VERIFIED 2026-09-08 by reading the query this tool
+        // already runs: `uw_scan.rates_policy_path` is a dated table
+        // (`snapshot_date`, `meeting_date`), and the as-of cut this tool has
+        // used since 2026-09-05 is the same one — so a caller-supplied day
+        // needs no new argon surface, only the same two filters moved to it.
+        // There is no argon HTTP endpoint involved on this path.
+        const asked = PolicyPathParams.parse(args).asOf;
+        const pinned = asked ?? asOfDay;
         const rows = await pgJson(
           env,
           "ow_argon_policy_path",
@@ -3879,8 +4164,8 @@ export function buildTools(cfg: {
                   payload
              FROM uw_scan.rates_policy_path
             WHERE snapshot_date = (SELECT max(snapshot_date) FROM uw_scan.rates_policy_path
-                                    WHERE true${dateCut("snapshot_date")})
-              AND meeting_date >= ${asOfDay === undefined ? "current_date" : `DATE '${asOfDay}'`}
+                                    WHERE true${dateCutSql("snapshot_date", pinned)})
+              AND meeting_date >= ${pinned === undefined ? "current_date" : `DATE '${pinned}'`}
             ORDER BY meeting_date, last_seen_at DESC`,
         );
         if (rows.length === 0) {
@@ -3893,6 +4178,7 @@ export function buildTools(cfg: {
         return JSON.stringify({
           source: "frenzy_capital fed-funds futures via argon",
           snapshotDate: first.snapshot_date,
+          ...(asked === undefined ? {} : { askedAsOf: asked }),
           meetings: rows,
         });
       },
@@ -4323,14 +4609,18 @@ export function buildTools(cfg: {
         ctx?: ToolRunContext,
       ): Promise<string> {
         const tool = "ow_uw_earnings_report";
-        const ticker = symbolLiteral(UwEarningsReportParams.parse(args).ticker, tool);
+        const ticker = symbolLiteral(
+          UwEarningsReportParams.parse(args).ticker,
+          tool,
+        );
         const cutoff = asOf ?? new Date();
         const cutoffDay = new Intl.DateTimeFormat("en-CA", {
           timeZone: REPORT_ZONE,
         }).format(cutoff);
         const fetchedAt = new Date().toISOString();
         const numericString = (value: unknown): string | undefined =>
-          typeof value === "string" && value.trim() !== "" &&
+          typeof value === "string" &&
+          value.trim() !== "" &&
           Number.isFinite(Number(value))
             ? value
             : undefined;
@@ -4355,74 +4645,80 @@ export function buildTools(cfg: {
           getRows(`/api/earnings/${encodeURIComponent(ticker)}`),
           getRows(`/api/stock/${encodeURIComponent(ticker)}/income-statements`),
         ]);
-        const earnings = earningsResult.rows.flatMap((row) => {
-          const reportDate = row.report_date;
-          const actualEps = numericString(row.actual_eps);
-          if (
-            row.source !== "company" ||
-            typeof reportDate !== "string" ||
-            !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
-            reportDate >= cutoffDay ||
-            actualEps === undefined
-          )
-            return [];
-          const estimate = numericString(row.street_mean_est);
-          return [
-            {
-              reportDate,
-              ...(typeof row.ending_fiscal_quarter === "string"
-                ? { endingFiscalQuarter: row.ending_fiscal_quarter }
-                : {}),
-              actualEps,
-              streetMeanEst: estimate ?? null,
-              source: "company",
-              reportTime:
-                typeof row.report_time === "string" ? row.report_time : null,
-              sourceUrl: `${UW_BASE}/api/earnings/${encodeURIComponent(ticker)}`,
-              fetchedAt,
-            },
-          ];
-        }).slice(0, 4);
-        const statements = statementsResult.rows.flatMap((row) => {
-          const periodEnd = row.fiscal_date_ending;
-          const updatedAt = row.updated_at;
-          const updatedTime =
-            typeof updatedAt === "string" ? Date.parse(updatedAt) : Number.NaN;
-          if (
-            row.ticker !== ticker ||
-            row.report_type !== "quarterly" ||
-            typeof periodEnd !== "string" ||
-            !/^\d{4}-\d{2}-\d{2}$/u.test(periodEnd) ||
-            periodEnd > cutoffDay ||
-            !Number.isFinite(updatedTime) ||
-            updatedTime > cutoff.getTime()
-          )
-            return [];
-          const revenue = numericString(row.total_revenue);
-          const grossProfit = numericString(row.gross_profit);
-          const operatingIncome = numericString(row.operating_income);
-          const netIncome = numericString(row.net_income);
-          return [
-            {
-              periodEnd,
-              updatedAt,
-              currency:
-                typeof row.reported_currency === "string" &&
-                row.reported_currency !== "" &&
-                row.reported_currency !== "None"
-                  ? row.reported_currency
-                  : null,
-              financials: {
-                ...(revenue === undefined ? {} : { revenue }),
-                ...(grossProfit === undefined ? {} : { grossProfit }),
-                ...(operatingIncome === undefined ? {} : { operatingIncome }),
-                ...(netIncome === undefined ? {} : { netIncome }),
+        const earnings = earningsResult.rows
+          .flatMap((row) => {
+            const reportDate = row.report_date;
+            const actualEps = numericString(row.actual_eps);
+            if (
+              row.source !== "company" ||
+              typeof reportDate !== "string" ||
+              !/^\d{4}-\d{2}-\d{2}$/u.test(reportDate) ||
+              reportDate >= cutoffDay ||
+              actualEps === undefined
+            )
+              return [];
+            const estimate = numericString(row.street_mean_est);
+            return [
+              {
+                reportDate,
+                ...(typeof row.ending_fiscal_quarter === "string"
+                  ? { endingFiscalQuarter: row.ending_fiscal_quarter }
+                  : {}),
+                actualEps,
+                streetMeanEst: estimate ?? null,
+                source: "company",
+                reportTime:
+                  typeof row.report_time === "string" ? row.report_time : null,
+                sourceUrl: `${UW_BASE}/api/earnings/${encodeURIComponent(ticker)}`,
+                fetchedAt,
               },
-              sourceUrl: `${UW_BASE}/api/stock/${encodeURIComponent(ticker)}/income-statements`,
-              fetchedAt,
-            },
-          ];
-        }).slice(0, 4);
+            ];
+          })
+          .slice(0, 4);
+        const statements = statementsResult.rows
+          .flatMap((row) => {
+            const periodEnd = row.fiscal_date_ending;
+            const updatedAt = row.updated_at;
+            const updatedTime =
+              typeof updatedAt === "string"
+                ? Date.parse(updatedAt)
+                : Number.NaN;
+            if (
+              row.ticker !== ticker ||
+              row.report_type !== "quarterly" ||
+              typeof periodEnd !== "string" ||
+              !/^\d{4}-\d{2}-\d{2}$/u.test(periodEnd) ||
+              periodEnd > cutoffDay ||
+              !Number.isFinite(updatedTime) ||
+              updatedTime > cutoff.getTime()
+            )
+              return [];
+            const revenue = numericString(row.total_revenue);
+            const grossProfit = numericString(row.gross_profit);
+            const operatingIncome = numericString(row.operating_income);
+            const netIncome = numericString(row.net_income);
+            return [
+              {
+                periodEnd,
+                updatedAt,
+                currency:
+                  typeof row.reported_currency === "string" &&
+                  row.reported_currency !== "" &&
+                  row.reported_currency !== "None"
+                    ? row.reported_currency
+                    : null,
+                financials: {
+                  ...(revenue === undefined ? {} : { revenue }),
+                  ...(grossProfit === undefined ? {} : { grossProfit }),
+                  ...(operatingIncome === undefined ? {} : { operatingIncome }),
+                  ...(netIncome === undefined ? {} : { netIncome }),
+                },
+                sourceUrl: `${UW_BASE}/api/stock/${encodeURIComponent(ticker)}/income-statements`,
+                fetchedAt,
+              },
+            ];
+          })
+          .slice(0, 4);
         return JSON.stringify({
           source: "unusual_whales",
           ticker,
@@ -4430,9 +4726,13 @@ export function buildTools(cfg: {
           earnings,
           statements,
           ...(earnings.length === 0 && statements.length === 0
-            ? { unavailable: "No completed earnings or current income statement available by cutoff." }
+            ? {
+                unavailable:
+                  "No completed earnings or current income statement available by cutoff.",
+              }
             : {}),
-          ...(earningsResult.error === undefined && statementsResult.error === undefined
+          ...(earningsResult.error === undefined &&
+          statementsResult.error === undefined
             ? {}
             : {
                 sourceErrors: {
@@ -4579,10 +4879,12 @@ export function buildTools(cfg: {
         const focusNotes: string[] = [];
         // Important names and pins first, then alphabetical, so the round trips
         // are deterministic and the truncation says its own size.
-        const priorityEarnings = [...new Set([
-          ...(review?.focus?.importantEarningsTickers ?? []),
-          ...ofInterest,
-        ])].filter((ticker) => universe.has(ticker));
+        const priorityEarnings = [
+          ...new Set([
+            ...(review?.focus?.importantEarningsTickers ?? []),
+            ...ofInterest,
+          ]),
+        ].filter((ticker) => universe.has(ticker));
         const ordered = [
           ...priorityEarnings,
           ...[...universe]
@@ -4816,6 +5118,48 @@ export function buildTools(cfg: {
         // because the forecast on each one is the threshold the two passes
         // above just filled in.
         attachFocusCalendar(frame);
+
+        // ---- #107 item 2: the coverage-selection pre-pass ------------------
+        // The author is handed a RANKED list, not a basket. The union is the
+        // one #107 names — chain members, the operator's pinned names, and the
+        // names whose earnings landed inside the reported week — and every one
+        // of the three is already in hand: no read is added for this block.
+        const week = reportedWeek(day);
+        const earningsInWeek = (
+          Array.isArray(earnings?.rows) ? earnings.rows : []
+        ).flatMap((row) => {
+          const entry = row as { ticker?: unknown; nextEarningsDate?: unknown };
+          const date = entry.nextEarningsDate;
+          if (typeof entry.ticker !== "string" || typeof date !== "string")
+            return [];
+          return date >= week.start && date <= week.end ? [entry.ticker] : [];
+        });
+        const weekSymbols = [
+          ...new Set([...basketSymbols, ...ofInterest, ...earningsInWeek]),
+        ];
+        const stockWeek = await answer("stockWeek", "ow_stock_week", {
+          symbols: weekSymbols,
+          start: week.start,
+          end: week.end,
+        });
+        const stockWeekWhy = skipped.stockWeek;
+        delete skipped.stockWeek; // not a declared coverage layer
+        frame.coverageCandidates = rankCoverageCandidates({
+          payload:
+            stockWeek === null || typeof stockWeek !== "object"
+              ? {}
+              : (stockWeek as Record<string, unknown>),
+          events: frame.calendar,
+        });
+        if (stockWeek === undefined)
+          frame.coverageCandidates.notes.push(
+            `ow_stock_week did not answer: ${stockWeekWhy ?? "no reason recorded"}`,
+          );
+        if (earningsInWeek.length === 0)
+          frame.coverageCandidates.notes.push(
+            `no universe name has an earnings date inside ${week.start}..${week.end}`,
+          );
+
         return JSON.stringify(frame);
       },
     },
@@ -5364,7 +5708,8 @@ export function buildTools(cfg: {
       run: async (args: Record<string, unknown>): Promise<string> => {
         const recorded = recordings.lookup(tool.name, args);
         if (recorded !== undefined) return recorded;
-        const reason = "no recording for these arguments; live fallback disabled";
+        const reason =
+          "no recording for these arguments; live fallback disabled";
         cfg.pit?.markUnavailable(tool.name, reason);
         return JSON.stringify({ unavailable: "as-of", asOf: asOfIso, reason });
       },

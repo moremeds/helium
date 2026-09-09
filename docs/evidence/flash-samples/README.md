@@ -1,6 +1,6 @@
 # Frozen inputs for the Flash recovery (Step 0)
 
-Eight samples. Each directory holds everything a fresh session needs to
+Nine samples. Each directory holds everything a fresh session needs to
 re-produce one option-wizard run from this repo alone:
 
 | file           | what it is                                                                 |
@@ -52,6 +52,7 @@ frozen recording.
 | `2026-09-04-close`         | `review-v7` / `run-e7abdf17…5450bea282`        | `2026-09-04T20:15:00.000Z` | 5      | 10          | yes     |
 | `2026-09-06-weekly`        | `review-v7` / `run-bf4b1795…4b311f12`          | none (live weekly)         | n/a    | n/a         | n/a     |
 | `2026-09-02-close-holdout` | live record 2026-09-07 / `run-d2f22b4b…c0e481` | `2026-09-02T20:15:00.000Z` | 5      | 10          | yes     |
+| `2026-09-06-weekly-v2`     | live record 2026-09-08 / `run-7d888bb3…1a895a` | `2026-09-06T12:00:00.000Z` | 5      | 2           | yes     |
 
 Served / unavailable in full, per sample:
 
@@ -125,3 +126,14 @@ weekly never called that tool, so there is nothing to serve and the replay
 refuses rather than fetching today's headlines into a 2026-09-06 page. A tool
 whose arguments differ from the recorded ones refuses the same way — which is
 why A and B, having chosen different arguments, have different coverage.
+
+## `2026-09-06-weekly-v2` (added 2026-09-08)
+
+The ninth sample. It exists because the older `2026-09-06-weekly` recording
+predates `ow_stock_week` (#106 Loop 1a / #107 item 1), so a replay of the
+current tenant against it refuses that tool for want of a recording. Replayed
+once from the repo: exit 0, `run-3818ab81-bdbe-4d0d-adbe-5161acc3a1dd`, 29/31 —
+served `ow_reports, ow_review_window, ow_rotation, ow_session_frame,
+ow_uw_earnings_report`; unavailable `ow_stock_week, ow_uw_headlines` (both
+argument mismatches, the mechanism described above). Its own README records the
+apex version, which data path the tool took, and the UW vintage limit.

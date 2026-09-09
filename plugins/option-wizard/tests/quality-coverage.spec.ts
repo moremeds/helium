@@ -45,6 +45,22 @@ describe("coverageRows over the shipped declaration", () => {
     declared,
   );
 
+  // A ROW A READER CAN SUBTRACT. The fx row printed `118.7 → +0.4 index pts`
+  // beside a prior of `118.4`, because the move differenced the RAW observations
+  // (118.7479 - 118.3583) while the level and prior print to one decimal. The
+  // move is now taken between the two numbers the row shows.
+  it("differences the fx row between the values it prints", () => {
+    // No DXY quote, so the row falls to the Fed broad index — the path the
+    // 2026-09-06 weekly took.
+    const fx = coverageRows(
+      { macro, policy, gex, tide, day: DAY, openCalls: 4 },
+      declared,
+    ).find((row) => row.id === "fx");
+    expect(fx?.level).toBe("118.7");
+    expect(fx?.prior).toBe("118.4");
+    expect(fx?.move).toBe("+0.3 index pts");
+  });
+
   it("prints every declared row, in declared order", () => {
     expect(rows).toHaveLength(expectedLength);
     expect(rows.map((r) => r.id)).toEqual([
