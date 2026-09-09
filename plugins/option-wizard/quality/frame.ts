@@ -278,9 +278,9 @@ export interface SessionFrame {
    *  daily phase and left whole on the weekly. `unavailable` is the difference
    *  between a quiet week and an unread calendar, and is always carried. */
   macroReleases?: MacroReleasesSummary;
-  /** #113 item 1. The overnight movers in the tracked universe — the
-   *  IMPORTANCE selector `newsOverview` lacks, since that block is recency
-   *  ordered and per-candidate. Premarket and intraday only: after the close
+  /** #113 item 1. The overnight movers in the tracked universe — a PRICE
+   *  importance signal `newsOverview` cannot carry however it is ordered,
+   *  because a move is not in the tape. Premarket and intraday only: after the close
    *  there is no overnight session to report, and the weekly is not a
    *  session. Absent when the phase does not carry it or the tool did not
    *  answer. */
