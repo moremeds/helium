@@ -752,6 +752,36 @@ tasks:
         continue, reverse, strengthen or fade with `p` between 0.50 and 0.95
         and a falsifying observable. `why` and `observable` are at most 10 words.
 
+      EVERY RANKED SINGLE NAME OWES A COVERAGE ENTRY. The frame's
+      `coverageCandidates.stocks` is the ranked single-name table — five rows on
+      a daily run, eight on the weekly — and each row carries an `id` spelled
+      `stock:<SYMBOL>`. `coverage` MUST carry one entry per ranked row under THAT
+      id, with the same five fields a declared row uses; leaving one out is a
+      declined call, not a way to avoid one. On the THREE ranked rows with the
+      largest |excess vs SPY| `untested` is REFUSED outright — they carry
+      continue, reverse, strengthen or fade with `p` and `observable`. On the
+      others `untested` is legal when `why` begins with "missing: ". A call made
+      only in prose mints no ledger row: nothing comes due, and the next review
+      has nothing to settle it against. The renderer faults a declined ranked row
+      and faults a scorable entry whose id is neither a declared row nor one of
+      these. Never invent an id for a name the block does not carry, never
+      re-rank the block, and never compute a return yourself — its numbers are
+      final and are copied character-for-character.
+      UNTESTED IS FOR MISSING DATA, NOT FOR CAUTION. A row that carries a datum
+      dated inside this phase's window HAS the data and owes continue, reverse,
+      strengthen or fade with its `p` and `observable`. Wherever `untested` is
+      right, `why` begins with "missing: " and names what you lack.
+      EACH SELECTED TOPIC ENDS WITH A SIGNAL PAIR — one confirming and one
+      refuting, given together, each carrying a date from your payloads or a
+      numeric threshold. If one tape can satisfy both, you wrote one signal twice.
+      A BASKET IS A DISTRIBUTION, NOT A PAIR. When you discuss a basket AND the
+      frame carries an `eventDay` block, describe it from the whole per-member
+      table: which members led, which lagged, the median when the payload prints
+      one, and its `priced` count. The block's own `strongest`, `weakest` and
+      `priced` fields are the ones to read; two hand-picked names are not a
+      description of a basket. When the frame carries no `eventDay`, this
+      paragraph does not apply and you write nothing in its place.
+
       FOCUS. You are handed a focus list, already ranked and already priced. For each name write ONE line of at most 40 words that is YOUR OWN JUDGMENT of the setup, and answers three things in one breath: why this name is on the list at all; what its IV rank and implied move say about how the market is PRICING the event; and whether anything else lands before the event — another dated catalyst from the frame's `calendar`, a sector row that is already moving, a split or ex-dividend, an index event — that changes the read.
       NEVER MAP IV TO A DIRECTION. Nobody calls an earnings print from an IV rank, and a line that tries to is worse than no line. "No view yet" is an allowed and often correct stance; say it and say what you are waiting for.
       Do NOT restate the event date and the implied move and stop: both are already printed in their own columns of the same row. A line shaped `Earnings <date>; <n>% IV expects <noun>` is recorded as a fault against you.
@@ -929,6 +959,15 @@ tasks:
       row whose `asOf` falls OUTSIDE the review window is post-window context
       and must be labelled as such: its move is a snapshot, never this week's
       change, and it may not carry a weekly claim.
+      A BASKET IS A DISTRIBUTION, NOT A PAIR. When you discuss a basket AND the
+      frame carries an `eventDay` block, describe that basket from its whole
+      per-member table: which members led, which lagged, the median when the
+      payload prints one, and how many members were priced. The block's own
+      `strongest`, `weakest` and `priced` fields are the ones to read. Two
+      hand-picked names are not a description of a basket, and the two you
+      would pick are the two the reader can already see. When the frame carries
+      no `eventDay`, this paragraph does not apply and you write nothing in its
+      place.
 
       FOUR BEATS PER TOPIC. Every selected topic covers, in this order and as
       ordinary prose rather than labelled parts: what happened (the dated fact
@@ -990,6 +1029,19 @@ tasks:
       call too, not a way to avoid one. The renderer marks a declined row and
       faults the page, and a week of declined views leaves next week's review
       with nothing to settle.
+      EVERY RANKED SINGLE NAME OWES A COVERAGE ENTRY. Each row of the frame's
+      `coverageCandidates.stocks` carries an `id` spelled `stock:<SYMBOL>`, and
+      `coverage` MUST carry one entry per ranked row under THAT id, with the same
+      five fields a declared row uses. Leaving a ranked row out of `coverage` is
+      a declined call, not a way to avoid one. On the THREE ranked rows with the
+      largest |excess vs SPY| `untested` is REFUSED outright — they carry
+      continue, reverse, strengthen or fade with `p` and `observable`, and no
+      wording saves them. On the others `untested` is legal when `why` begins
+      with "missing: " and names what you lack. A call made only in prose mints
+      no ledger row: nothing comes due, and next week's review has nothing to
+      settle it against. The renderer faults a declined ranked row, and faults a
+      scorable entry whose id is neither a declared row nor one of these — never
+      invent an id for a name the block does not carry.
 
       6 — FOCUS IS YOUR JUDGEMENT, AND JUDGEMENT IS REQUIRED. You are handed a focus
       list, already ranked and already priced. For each name write ONE line of at

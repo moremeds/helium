@@ -34,6 +34,10 @@ import type {
 } from "../quality/frame.js";
 import type { RotationRow } from "../quality/themes.js";
 import { REVIEW_PERIODS, type ReviewPeriod } from "../quality/review-config.js";
+import {
+  stockRowId,
+  type CandidateRow,
+} from "../quality/coverage-candidates.js";
 import type { Section } from "./index.js";
 import { trim, words, type ReviewCaps } from "./budget.js";
 import { fmt, fmtSigned, unitFromToken, type Unit } from "../quality/units.js";
@@ -829,7 +833,97 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         `(${[...declined].join(", ")}) — the week's three largest |excess| rows ` +
         `owe a call, and every other priced row owes one or a "missing: <data>" reason`,
     );
+  // #106 LOOP 2 — A PRINTED CALL THAT MINTS NOTHING IS A FAULT.
+  // The 2026-09-06 weekly could write a paragraph about SNDK and there was no
+  // row id to hang it on, so nothing entered the ledger and nothing came due:
+  // the §4 复盘 had zero single-name receipts to read. The renderer does not
+  // invent an id — it faults the page when a scorable call names something
+  // neither the fixed list nor the week's ranked names carry, which is the
+  // same shape as the declined-call gate above.
+  const stockRows = mintableStocks(frame);
+  const unmintable = (doc?.coverage ?? []).filter(
+    (entry) =>
+      entry.scorable &&
+      entry.token !== "untested" &&
+      !stockRows.has(entry.id) &&
+      !rows.some(
+        (row) =>
+          row.id === entry.id &&
+          row.untested === undefined &&
+          row.rendererFilled !== true,
+      ),
+  );
+  if (unmintable.length > 0)
+    faults.push(
+      `coverage called ${unmintable.map((entry) => entry.id).join(", ")} — ` +
+        "no ledger commitment id, so the call can never be settled; a call " +
+        "names a row from the fixed list or a ranked stock:<SYMBOL>",
+    );
+  // #106 LOOP 2 — THE SAME OBLIGATION, ON THE STOCK ROWS.
+  // Run 2 of the W37 replay printed all eight ranked names as
+  // `UNTESTED · not called this period` and the page passed: the ids were
+  // mintable and nothing made the author use one, so the ledger got zero
+  // single-name rows and next period's 复盘 had nothing to settle. The rule is
+  // the one Loop 1 already applies to sectors and themes, word for word: the
+  // three largest |excess vs SPY| owe a call and no wording excuses them, every
+  // other ranked row owes a call or a `"missing: "` reason, and leaving a row
+  // out of `coverage` is a decline, not a way to avoid one.
+  //
+  // NOT WEEKLY-ONLY, for the same reason §3e is not: the daily frame carries
+  // five of these rows and a gate that slept on four runs a week would leave
+  // most of the cadence unaccountable.
+  const rankedStocks = [...stockRows.values()];
+  const mandatedStocks = new Set(
+    rankedStocks
+      .filter((row) => row.excess_vs_spy !== null)
+      .sort(
+        (a, b) =>
+          Math.abs(b.excess_vs_spy ?? 0) - Math.abs(a.excess_vs_spy ?? 0) ||
+          a.symbol.localeCompare(b.symbol, "en"),
+      )
+      .slice(0, 3)
+      .map((row) => stockRowId(row.symbol)),
+  );
+  const stockDeclined = new Set<string>();
+  for (const row of rankedStocks) {
+    const id = stockRowId(row.symbol);
+    const entry = entries.get(id);
+    if (entry !== undefined && entry.token !== "untested") continue;
+    if (
+      !mandatedStocks.has(id) &&
+      entry !== undefined &&
+      entry.why.startsWith("missing: ")
+    )
+      continue;
+    stockDeclined.add(id);
+  }
+  if (stockDeclined.size > 0)
+    faults.push(
+      `coverage declined a call on ${String(stockDeclined.size)} ranked stock rows ` +
+        `(${[...stockDeclined].join(", ")}) — the three largest |excess vs SPY| ` +
+        'owe a call, and every other ranked row owes one or a "missing: <data>" reason',
+    );
   const detail: CoverageDetail[] = [];
+  /** A fraction as a signed percentage, or an em dash. The candidate payload
+   *  carries `0.1717`; a reader wants `+17.2%`. */
+  const asPct = (value: number | null): string =>
+    value === null ? "—" : `${fmtSigned(value * 100, "pct")}%`;
+  const stockLine = (row: CandidateRow): string => {
+    const id = stockRowId(row.symbol);
+    const entry = entries.get(id);
+    const shown =
+      `${asPct(row.window_return)} week · excess vs SPY ${asPct(row.excess_vs_spy)}` +
+      (row.earnings === undefined
+        ? ""
+        : ` · reported ${row.earnings.reportDate} EPS ${row.earnings.actualEps}` +
+          ` vs est ${row.earnings.streetMeanEst ?? "—"}`);
+    const mark = stockDeclined.has(id) ? " · call declined on priced data" : "";
+    if (entry === undefined)
+      return `- ${id} · ${shown} · UNTESTED · ${NOT_CALLED}${mark}`;
+    if (entry.token === "untested")
+      return `- ${id} · ${shown} · UNTESTED · ${entry.why || "—"}${mark}`;
+    return `- ${id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
+  };
   const rowLine = (row: CoverageRow): string => {
     const entry = entries.get(row.id);
     // Staleness is a property of the DATUM, not of whether the model gave the
@@ -944,6 +1038,30 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
         `  benchmark ${args.rotation.benchmark} · 1w ${showSigned(bench.w1, "pct")}% · 4w ${showSigned(bench.w4, "pct")}% · 12w ${showSigned(bench.w12, "pct")}% · as of ${args.rotation.asOf}`,
       );
     }
+  }
+  // ---- 3e, the ranked single names (#106 Loop 2) ------------------------
+  // PRINTED WITH THEIR ROW IDS, because the id is what makes the call
+  // settleable: `stock:SNDK` is the same string `verdictCommitments` mints
+  // against and the same string the next observation will carry. The returns
+  // arrive as fractions and are printed as percentages here — renderer
+  // arithmetic, never the author's.
+  //
+  // NOT WEEKLY-ONLY. The daily frame carries the same block with five rows
+  // instead of eight (`candidateLimit`), and a gate that printed a name only
+  // on Sundays would leave four runs a week able to write about a stock with
+  // no row to hang the call on — the exact defect this section closes.
+  const candidates = frame.coverageCandidates;
+  if (candidates !== undefined) {
+    coverageLines.push("3e stocks");
+    if (candidates.stocks.length === 0)
+      coverageLines.push(
+        `  no ranked single name — ${candidates.notes.join("; ") || "no reason recorded"}`,
+      );
+    for (const row of candidates.stocks) coverageLines.push(stockLine(row));
+    if (candidates.missing.length > 0)
+      coverageLines.push(
+        `  left out: ${candidates.missing.map((row) => `${row.symbol} (${row.reason})`).join("; ")}`,
+      );
   }
   // ONE LINE, NOT EIGHTEEN. The per-row reason is still recorded — it is on
   // `coverageDetail[].leftOut` — but eighteen copies of "no verdict token for
@@ -1302,6 +1420,82 @@ const SETTLE_AFTER = { [WEEKLY]: 5, [DAILY]: 1 } as const;
  *  after it. */
 const FOCUS_SETTLE_AFTER = 2;
 
+/**
+ * The ranked single names this run can mint a commitment FOR (#106 Loop 2).
+ *
+ * A candidate with neither a week return nor an excess carries no `delta`, so
+ * a verdict on it could never be settled against the next week's observation
+ * — `eval/verdict.ts` needs a number to classify. Such a row prints and mints
+ * nothing, exactly like a coverage row the frame could not price.
+ *
+ * One function, two readers: the §3e gate below asks it what a printed call
+ * may name, and `verdictCommitments` asks it what to mint. A call the gate
+ * accepts and the minter drops would be the very defect the gate exists to
+ * catch.
+ */
+function mintableStocks(frame: SessionFrame): Map<string, CandidateRow> {
+  const out = new Map<string, CandidateRow>();
+  for (const row of frame.coverageCandidates?.stocks ?? [])
+    if (row.excess_vs_spy !== null || row.window_return !== null)
+      // `stockRowId`, not `row.id`: a frame recorded before the field existed
+      // (every sample under docs/evidence/flash-samples) still has to key the
+      // same way a live one does, and the id IS a function of the symbol.
+      out.set(stockRowId(row.symbol), row);
+  return out;
+}
+
+/**
+ * A single name's verdict, in the SAME id scheme and the same payload kind as
+ * a macro, sector or theme row's.
+ *
+ * `delta` is the excess over SPY in percentage points — the theme rows' own
+ * convention (`excessPct`) — because that is what the next week's observation
+ * of the same row will carry, and `settleVerdict` compares the two. The week
+ * return is the fallback for a row the source could not benchmark, and
+ * `rankedOn` already told the reader which of the two ordered it.
+ *
+ * A name that drops out of the next week's ranked list mints no later
+ * observation, so its verdict PENDS rather than resolving — the same outcome
+ * as a coverage row the frame could not price that week, and visible as such
+ * in the ledger.
+ */
+function stockDraft(args: {
+  day: string;
+  phase: string;
+  entry: CoverageEntry;
+  stock: CandidateRow;
+  asOf?: string;
+  settleAfterOpenDays: number;
+}): CommitmentDraft {
+  const { stock } = args;
+  const delta =
+    stock.excess_vs_spy === null
+      ? (stock.window_return ?? 0) * 100
+      : stock.excess_vs_spy * 100;
+  return {
+    id: `${args.day}-${args.phase}-verdict-${args.entry.id}`,
+    payload: {
+      kind: "coverage-verdict",
+      evaluator: "verdict-v0",
+      rowId: args.entry.id,
+      series: `${stock.symbol} week return vs SPY, excess %`,
+      unit: "%",
+      token: args.entry.token,
+      p: args.entry.p,
+      observed: {
+        ...(stock.window_return === null
+          ? {}
+          : { level: fmtSigned(stock.window_return * 100, "pct") }),
+        delta,
+        ...(args.asOf === undefined || args.asOf === ""
+          ? {}
+          : { asOf: args.asOf }),
+      },
+      settleAfterOpenDays: args.settleAfterOpenDays,
+    },
+  };
+}
+
 export function verdictCommitments(args: {
   frame: SessionFrame;
   doc: ReviewDoc | null;
@@ -1314,12 +1508,35 @@ export function verdictCommitments(args: {
   const period = args.period ?? WEEKLY;
   const drafts: CommitmentDraft[] = [];
   const rows = new Map(args.frame.rows.map((row) => [row.id, row]));
+  const stocks = mintableStocks(args.frame);
   for (const entry of args.doc?.coverage ?? []) {
     if (!entry.scorable || entry.token === "untested") continue;
     const row = rows.get(entry.id);
+    // #106 LOOP 2. A call on a ranked single name is not in `frame.rows` — the
+    // fixed list is macro, sectors and themes — so it used to fall through
+    // this `continue` and mint nothing at all. It now mints through the same
+    // id scheme; only the source of the observation differs.
+    if (row === undefined) {
+      const stock = stocks.get(entry.id);
+      if (stock === undefined) continue;
+      const window = args.frame.coverageCandidates?.window;
+      drafts.push(
+        stockDraft({
+          day: args.day,
+          phase: args.phase,
+          entry,
+          stock,
+          ...(window?.end === undefined || window.end === ""
+            ? {}
+            : { asOf: window.end }),
+          settleAfterOpenDays: SETTLE_AFTER[period],
+        }),
+      );
+      continue;
+    }
     // A row with no observation is not a forecast, and a row the RENDERER
     // fills is not the model's to forecast either.
-    if (row === undefined || row.untested !== undefined) continue;
+    if (row.untested !== undefined) continue;
     if (row.rendererFilled === true) continue;
     drafts.push({
       id: `${args.day}-${args.phase}-verdict-${entry.id}`,

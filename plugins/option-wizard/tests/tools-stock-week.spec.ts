@@ -195,3 +195,86 @@ describe("ow_stock_week", () => {
     ]);
   });
 });
+
+/**
+ * The PREFERRED path, live on the mini since apex 0.1.6 (switched 2026-09-09).
+ *
+ * The day returns served here are computed from the same frozen adjusted
+ * closes above — real prices, real arithmetic, no invented figure — and the
+ * first day is measured off the 2026-08-28 close, which is what makes the
+ * compounded window return the prior-Friday-to-Friday quantity the fallback
+ * also reports. apex's own published check values for this week are SPY
+ * +0.0011 and SNDK +0.1717.
+ */
+describe("ow_stock_week on apex /v1/equity/returns", () => {
+  const dailyFor = (symbol: string) => {
+    const dates = Object.keys(CLOSES[symbol] ?? {}).sort();
+    const out: Array<{ date: string; close: number; return: number }> = [];
+    for (let i = 1; i < dates.length; i += 1) {
+      const date = dates[i]!;
+      if (date < "2026-08-31" || date > "2026-09-04") continue;
+      const close = CLOSES[symbol]![date]!;
+      const prior = CLOSES[symbol]![dates[i - 1]!]!;
+      out.push({ date, close, return: close / prior - 1 });
+    }
+    return out;
+  };
+
+  const returnsFetch: typeof fetch = (async (input: URL | RequestInfo) => {
+    const url = new URL(String(input));
+    if (url.pathname !== "/v1/equity/returns")
+      return new Response("nope", { status: 404, statusText: "Not Found" });
+    // `symbols` is a comma list; a singular `symbol=` is a 400 on the live
+    // endpoint, which is why the client never sends one.
+    expect(url.searchParams.get("symbol")).toBeNull();
+    const asked = (url.searchParams.get("symbols") ?? "").split(",");
+    expect(url.searchParams.get("start")).toBe("2026-08-31");
+    expect(url.searchParams.get("end")).toBe("2026-09-04");
+    return new Response(
+      JSON.stringify({
+        results: asked
+          .filter((symbol) => (CLOSES[symbol]?.["2026-09-04"] ?? 0) > 0)
+          .map((symbol) => ({ symbol, daily: dailyFor(symbol) })),
+        missing: asked
+          .filter((symbol) => (CLOSES[symbol]?.["2026-09-04"] ?? 0) === 0)
+          .map((symbol) => ({ symbol, reason: "no artifact for this symbol" })),
+      }),
+      { status: 200 },
+    );
+  }) as unknown as typeof fetch;
+
+  it("prices from the endpoint and says so in `source`", async () => {
+    const tool = buildTools({
+      stateRoot: "/tmp/ow-stock-week",
+      env: { OW_APEX_API_BASE: "http://apex.invalid:8322" },
+      asOf: new Date("2026-09-05T00:15:00.000Z"),
+    }).find((entry) => entry.name === "ow_stock_week");
+    if (tool === undefined) throw new Error("ow_stock_week is not built");
+    const table = JSON.parse(
+      await tool.run(
+        { symbols: ["SNDK", "MU"], start: "2026-08-31", end: "2026-09-04" },
+        { fetchImpl: returnsFetch } as never,
+      ),
+    ) as Table;
+    expect(table.source).toBe("apex-returns");
+    // The SAME value the bars path produced on 2026-09-08 and froze into
+    // docs/evidence/flash-samples/2026-09-06-weekly-v2 — the two paths agree
+    // to the last bit, which is what makes the switch a source change and not
+    // a number change.
+    expect(table.benchmarks.SPY?.window_return).toBe(0.0010918307662313165);
+    const sndk = table.results.find((row) => row.symbol === "SNDK");
+    expect(sndk?.window_return).toBeCloseTo(0.1717, 4);
+    expect(sndk?.excess_vs_spy).toBeCloseTo(0.1706, 4);
+    // Not served by this endpoint, and never guessed.
+    expect(sndk?.ytd_return).toBeNull();
+    expect(table.missing).toEqual([]);
+  });
+
+  it("falls back to daily bars on a non-200, and marks the source", async () => {
+    const table = await week(["SNDK"]);
+    expect(table.source).toBe("apex-bars-fallback");
+    expect(
+      table.results.find((row) => row.symbol === "SNDK")?.window_return,
+    ).toBeCloseTo(0.1717, 4);
+  });
+});
