@@ -278,7 +278,40 @@ export interface SessionFrame {
    *  daily phase and left whole on the weekly. `unavailable` is the difference
    *  between a quiet week and an unread calendar, and is always carried. */
   macroReleases?: MacroReleasesSummary;
+  /** #113 item 1. The overnight movers in the tracked universe — the
+   *  IMPORTANCE selector `newsOverview` lacks, since that block is recency
+   *  ordered and per-candidate. Premarket and intraday only: after the close
+   *  there is no overnight session to report, and the weekly is not a
+   *  session. Absent when the phase does not carry it or the tool did not
+   *  answer. */
+  premarketMovers?: PremarketMoversSummary;
   notes?: string[];
+}
+
+/**
+ * `ow_premarket_movers`'s payload, carried on the frame verbatim.
+ *
+ * `ret` is TradingView's OWN percent (`premarket_change`), copied through as a
+ * raw double. Nothing here rounds it and nothing recomputes it from a close
+ * and a premarket price — the renderer formats, the frame carries.
+ */
+export interface PremarketMoversSummary {
+  /** When the movers were read, ISO. */
+  asOf: string;
+  /** Which session the percent is measured over. */
+  session: string;
+  /** Largest absolute move first, truncated to the caller's `top`. */
+  rows: Array<{
+    /** The ticker as it was asked for — bare where the universe is bare. */
+    symbol: string;
+    /** The venue-qualified symbol that actually answered. */
+    tvSymbol: string;
+    ret: number;
+    source: string;
+  }>;
+  /** Every asked symbol with no number for this session. NEVER silently
+   *  dropped: an absent name reads as "it did not move". */
+  missing: string[];
 }
 
 /**

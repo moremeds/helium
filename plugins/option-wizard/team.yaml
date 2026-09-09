@@ -28,7 +28,7 @@ roles:
     requires: []
     permissions:
       mutations: forbidden
-      tools: [ow_session_frame, ow_rotation, ow_event_day, ow_macro_releases]
+      tools: [ow_session_frame, ow_rotation, ow_event_day, ow_macro_releases, ow_premarket_movers]
 
   gex-reporter:
     requires: [structured.output, tool.use]
