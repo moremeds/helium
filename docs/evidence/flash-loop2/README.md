@@ -4,6 +4,16 @@ Three replays of the frozen `docs/evidence/flash-samples/2026-09-06-weekly-v2`
 sample against `feat/flash-loop2`. No live model input, no delivery, no
 production write, nothing touched on the mini.
 
+**All three runs predate the rebase onto `470d471` (#114 `ow_event_day`, #115
+`ow_tv_news`) and the apex 0.1.6 switch, so run3 priced from
+`source: "apex-bars-fallback"`.** The v2 recording carries no
+`/v1/equity/returns` call, so a replay cannot exercise the new path and none was
+attempted; `tools-stock-week.spec.ts` covers it instead, and its assertion is
+that the endpoint reproduces the bars path's SPY window return
+`0.0010918307662313165` to the last bit — the switch changes the source, not the
+numbers. The per-row `headlines` citations (filled from `frame.newsOverview`)
+are likewise absent from run3: #113's overview did not exist when it ran.
+
 ```bash
 HELIUM_ENV_FILE=~/.config/helium/helium.env NO_PROXY=100.66.147.98,localhost,127.0.0.1 \
   scripts/pit-replay.sh replay docs/evidence/flash-samples/2026-09-06-weekly-v2 <state root>
