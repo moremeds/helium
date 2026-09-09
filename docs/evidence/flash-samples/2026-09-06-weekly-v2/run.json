@@ -1,0 +1,7 @@
+{
+  "runId": "run-7d888bb3-9db7-457a-8ed4-43fbe91a895a",
+  "date": "2026-09-06",
+  "phase": "weekly",
+  "asOf": "2026-09-06T12:00:00.000Z",
+  "source": "live record 2026-09-08 on feat/flash-loop1 (scripts/pit-replay.sh record 2026-09-06 weekly)"
+}

@@ -142,7 +142,38 @@ describe("the `unavailable` key is a KIND, never a per-ticker list", () => {
     expect(dealer.excluded).toBeUndefined();
     expect(dealer.series).toBe("SPY gamma flip");
     expect(dealer.level).toBe("766.0");
-    expect(dealer.move).toBe("+2.86 pts");
+    expect(dealer.move).toBe("-2.86 pts");
+  });
+
+  // THE 2026-09-06 FRAME'S OWN NUMBERS. It printed `768.35 → +1.84 pts` with
+  // spot at 770.19, so the row said the flip ROSE while spot sat above it.
+  // Every other row's move is level minus prior; this one now is too.
+  it("signs the gamma-flip move as level minus prior, on the W37 values", () => {
+    const dealer = byId(
+      extractChannels({
+        ...inputs,
+        gex: {
+          levels: [
+            {
+              ticker: "SPY",
+              gammaFlip: "768.35",
+              callWall: "775.0",
+              putWall: "760.0",
+              asOf: "2026-09-04T20:14:28.094000Z",
+            },
+          ],
+          unavailable: [],
+        },
+        spot: {
+          fetchedAt: "2026-09-04T20:15:00.000Z",
+          quotes: [{ ticker: "SPY", last: 770.19, changeAbs: "-2.98" }],
+        },
+      }),
+      "dealer",
+    );
+    expect(dealer.level).toBe("768.35");
+    expect(dealer.prior).toBe("770.19");
+    expect(dealer.move).toBe("-1.84 pts");
   });
 
   it("still honours the string marker a source sets on itself", () => {

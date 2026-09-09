@@ -37,6 +37,7 @@ import {
   type ChannelInputs,
   type CoverageRow,
 } from "./channels.js";
+import type { CoverageCandidates } from "./coverage-candidates.js";
 import { channelHistory } from "./history.js";
 import { LABEL_ORDER } from "./prior.js";
 import {
@@ -256,6 +257,10 @@ export interface SessionFrame {
    * payload is a rule it can misapply.
    */
   noRestate: Array<{ id: string; level: string }>;
+  /** #107 item 2. The ranked week table and the week's dated events, computed
+   *  from `ow_stock_week` AFTER the frame is built. The author reads this list
+   *  and may not re-rank it; absent when the frame ran without the tool. */
+  coverageCandidates?: CoverageCandidates;
   notes?: string[];
 }
 
