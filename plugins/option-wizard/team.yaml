@@ -28,7 +28,7 @@ roles:
     requires: []
     permissions:
       mutations: forbidden
-      tools: [ow_session_frame, ow_rotation, ow_event_day]
+      tools: [ow_session_frame, ow_rotation, ow_event_day, ow_macro_releases]
 
   gex-reporter:
     requires: [structured.output, tool.use]
@@ -314,7 +314,7 @@ roles:
     requires: [tool.use, reason.deep, long.context]
     permissions:
       mutations: forbidden
-      tools: [ow_reports, ow_session_frame, ow_rotation, ow_stock_week, ow_event_day, ow_uw_headlines, ow_tv_news, ow_uw_earnings_report]
+      tools: [ow_reports, ow_session_frame, ow_rotation, ow_stock_week, ow_event_day, ow_macro_releases, ow_uw_headlines, ow_tv_news, ow_uw_earnings_report]
     persona: |-
       You write a MARKET WEEK newsletter: what changed in markets, why it matters,
       the evidence and counterevidence, and the conditions for next week.

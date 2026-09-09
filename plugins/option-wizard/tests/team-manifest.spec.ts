@@ -516,6 +516,10 @@ describe("the flash page is public — no role reads the book", () => {
       // step already prices it and hangs the summary on the frame, so every
       // daily author sees the cross-section without a persona edit.
       "ow_event_day",
+      // #107, the data layer for #106. Same reason: the frame attaches the
+      // week's macro calendar (or the fact that it could not be read) so no
+      // author has to ask for it, and none of them may invent what prints.
+      "ow_macro_releases",
     ]);
     expect(manifest.tasks.find((e) => e.id === "weekly")?.dependsOn).toContain(
       "rotation",
@@ -616,15 +620,16 @@ describe("the review authors, rewritten", () => {
       expect(weekly.prompt).not.toContain("noRestate");
       expect(weekly.prompt).toContain("shortlist of 15 names stable");
       const tools = variant.roles["weekly-analyst"]!.permissions.tools;
-      // `ow_stock_week` (#107 item 1) is on the LIVE manifest only. The two C
-      // variants are frozen comparison prompts: giving them a tool the runs
-      // they are compared against never had would break the comparison.
+      // `ow_stock_week` (#107 item 1) and `ow_macro_releases` (#107, the data
+      // layer for #106) are on the LIVE manifest only. The two C variants are
+      // frozen comparison prompts: giving them a tool the runs they are
+      // compared against never had would break the comparison.
       expect(tools).toEqual(
         name === "team.C-nonews.yaml"
           ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_earnings_report"]
           : name === "team.C.yaml"
             ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings_report"]
-            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_event_day", "ow_uw_headlines", "ow_tv_news", "ow_uw_earnings_report"],
+            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_event_day", "ow_macro_releases", "ow_uw_headlines", "ow_tv_news", "ow_uw_earnings_report"],
       );
       const internal = variant.tasks.find((task) => task.id === "week-review");
       expect(internal?.phases).toEqual(["weekly"]);

@@ -52,6 +52,7 @@ import {
   type DayPoint,
   type EventDayTable,
 } from "../quality/event-day.js";
+import { summariseMacroReleases } from "../quality/macro-releases.js";
 import {
   buildNewsOverview,
   newsCapsFor,
@@ -99,6 +100,11 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // #107 item 2. The frame carries the event day's SUMMARY; the member-level
   // table stays in the tool's own payload.
   "ow_event_day",
+  // #107, the data layer for #106. What prints this week, and which of those
+  // prints already exists. Cheap (one argon call) and independent of every
+  // other read, but placed after them because a missing calendar must not cost
+  // the frame — it degrades to `unavailable`, never to silence.
+  "ow_macro_releases",
   // #113. The tape and the headlines behind the ranked names, each with a
   // link. Last, and serial: it is opencli subprocesses against one local app.
   "ow_tv_news",
@@ -180,6 +186,10 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   ["ow_uw_iv_term", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_headlines", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_argon_policy_path", { mutating: false, requiresEnv: "OW_ARGON_PG_URL" }],
+  // argon's HTTP API, like ow_argon_levels. A machine without argon reports
+  // the gap at the top of the run report rather than printing a week with no
+  // events in it, which reads as a quiet calendar rather than as an unread one.
+  ["ow_macro_releases", { mutating: false, requiresEnv: "OW_ARGON_API_BASE" }],
   // No `requiresEnv`: like ow_tv_watchlist these ride the local TradingView /
   // Browser Bridge app through opencli, gated on OW_TV_ENABLED, and naming one
   // key would report a working machine as broken.
@@ -1457,6 +1467,14 @@ const EventDayParams = z.object({
  *  a DATE literal and the pattern is what keeps it a date. */
 const PolicyPathParams = z.object({
   asOf: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+});
+/** Any date inside the ISO week (Mon–Sun, UTC) wanted; argon widens it to the
+ *  week itself. One flat string, for the reason `EventDayParams` records. */
+const MacroReleasesParams = z.object({
+  week: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/u)
     .optional(),
@@ -4847,6 +4865,87 @@ export function buildTools(cfg: {
       },
     },
     {
+      // #107, the data layer for #106. argon's HTTP API, not its Postgres:
+      // `/api/macro/releases` is a computed view — the Unusual Whales calendar
+      // joined to the FRED actuals argon has hand-verified — not a table a
+      // SELECT here could reproduce.
+      //
+      // NOT VERIFIED LIVE. argon PR #428 is open and undeployed, and the flag
+      // `UW_SCAN_MACRO_RELEASE_CALENDAR_ENABLED` is off by default, so the mini
+      // answers 404 today and this laptop has no argon at all. What IS verified
+      // (2026-09-09, read out of argon's own `feat/macro-release-calendar`
+      // checkout rather than recalled):
+      //   - `tests/integration/api/openapi.snapshot.json` mounts the route at
+      //     `/api/macro/releases`; `api/routers/macro.py` has the `/macro`
+      //     prefix and no flag guard, so a deployed argon serves the week even
+      //     with the scraper off — an empty week, which is a real answer.
+      //   - response `MacroReleaseCalendarResponse`
+      //     { week_start: date, week_end: date, releases: [MacroReleaseRow] }
+      //   - `MacroReleaseRow` { event, type, reported_period, scheduled_at
+      //     (date-time), forecast: str|null, prior: str|null,
+      //     series_id: str|null, actual: DECIMAL STRING|null, revision: bool,
+      //     published_at: date-time|null }.
+      //     `actual` is a string on the wire, where helium #107's written
+      //     contract said number. Both are accepted and NEITHER is converted —
+      //     see the note on `MacroRelease.actual`.
+      //   - query `week`: any date in the target Mon–Sun UTC week, optional.
+      // The one thing a live call could still change is the wire spelling of a
+      // NULL group, and every field above is read defensively for exactly that.
+      //
+      // It does not throw on a missing endpoint. Every other argon tool does,
+      // because a missing level or a missing rate is a gap in a number the page
+      // was going to print; here the whole point is the DIFFERENCE between "no
+      // release is scheduled" and "the calendar was unread", and an exception
+      // that becomes a skipped frame layer erases it.
+      name: "ow_macro_releases",
+      description:
+        "This week's US macro release calendar from argon: for each event the scheduled time, the reported period, the UW forecast and prior AS TEXT, and — only where argon has hand-verified the event against a FRED series — the actual it printed and when. A release has printed only when `actual` is present; anything with `actual: null` is still ahead, including events argon has deliberately not mapped (`series_id: null`), which is a coverage statement and not a missing number. Never derive a print from forecast and prior, never turn forecast or prior into a number, and never call an event a beat or a miss on this payload alone. `unavailable` means the calendar could not be read at all — say so rather than reporting an empty week.",
+      paramsSchema: MacroReleasesParams,
+      mutating: false,
+      dshParams: {
+        week: {
+          type: "string",
+          description:
+            "Any date inside the wanted Mon–Sun UTC week, YYYY-MM-DD (default: the run's own week).",
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const tool = "ow_macro_releases";
+        const asked = MacroReleasesParams.parse(args).week;
+        const base = need(env, "OW_ARGON_API_BASE", tool);
+        const week = asked ?? asOfDay;
+        const path =
+          week === undefined
+            ? "/api/macro/releases"
+            : `/api/macro/releases?week=${encodeURIComponent(week)}`;
+        let body: unknown;
+        try {
+          body = await argonGet(tool, base, path, ctx);
+        } catch (error: unknown) {
+          return JSON.stringify({
+            releases: [],
+            unavailable: error instanceof Error ? error.message : String(error),
+          });
+        }
+        const row = (body ?? {}) as Record<string, unknown>;
+        if (!Array.isArray(row.releases)) {
+          return JSON.stringify({
+            releases: [],
+            unavailable: `${tool}: /api/macro/releases answered without a \`releases\` array`,
+          });
+        }
+        return JSON.stringify({
+          source: "argon /api/macro/releases — UW calendar, FRED actuals",
+          week_start: row.week_start ?? null,
+          week_end: row.week_end ?? null,
+          releases: row.releases,
+        });
+      },
+    },
+    {
       // argon's HTTP API, not its Postgres — these four responses are
       // computed views (dealer regime, options-implied levels, the
       // technical-support/resistance model, live technicals), not table rows
@@ -5915,6 +6014,25 @@ export function buildTools(cfg: {
             ...(frame.notes ?? []),
             `ow_event_day did not answer: ${eventDayWhy ?? "no reason recorded"}`,
           ];
+
+        // ---- #107: the week's macro releases -------------------------------
+        // ALWAYS attached, including when it could not be read: the summary's
+        // `unavailable` is what stops "no events" and "no calendar" reading the
+        // same on the page. `day` is the run's own day, which is both the week
+        // argon is asked for and the session the daily cut keeps — premarket
+        // wants TODAY's 12:30Z prints, not the prior session's, which is why
+        // this does not go through `eventDayArgsFor`.
+        const macroReleases = await answer("macroReleases", "ow_macro_releases", {
+          week: day,
+        });
+        const macroReleasesWhy = skipped.macroReleases;
+        delete skipped.macroReleases; // not a declared coverage layer
+        frame.macroReleases = summariseMacroReleases(
+          macroReleases ?? {
+            unavailable: `ow_macro_releases did not answer: ${macroReleasesWhy ?? "no reason recorded"}`,
+          },
+          { asOf: day, phase: cfg.phase },
+        );
 
         // ---- #113: the news overview ---------------------------------------
         // LAST, and not through `answer()`. Every other sibling's failure is a
