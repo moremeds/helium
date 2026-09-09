@@ -165,7 +165,6 @@ type Member = {
 };
 type Basket = {
   id: string;
-  kind: string;
   ret: number | null;
   excess_vs_spy: number | null;
   members: Member[];

@@ -4371,12 +4371,10 @@ export function buildTools(cfg: {
         const baskets: BasketSpec[] = [
           ...chains.map((chain) => ({
             id: chain.chain,
-            kind: "chain" as const,
             members: chain.members,
           })),
           ...themes.map((theme) => ({
             id: `theme:${theme.id}`,
-            kind: "theme" as const,
             members: theme.instruments,
           })),
         ];
@@ -4385,7 +4383,9 @@ export function buildTools(cfg: {
             "no basket is declared: this tenant has neither watchlist chains nor themes to price",
           );
 
-        const benchmark = review?.rotation?.benchmark ?? "SPY";
+        // SPY and QQQ by name. The output field is `excess_vs_spy`, so this is
+        // not the tenant's configurable rotation benchmark: a swap there would
+        // make the field name lie.
         const crossSection = [
           ...new Set([
             ...(review?.rotation?.sectorEtfs ?? []),
@@ -4408,7 +4408,7 @@ export function buildTools(cfg: {
 
         const priced = await apexDaySeries({
           symbols: [
-            benchmark,
+            "SPY",
             "QQQ",
             ...baskets.flatMap((basket) => basket.members),
             ...crossSection,
@@ -4424,7 +4424,6 @@ export function buildTools(cfg: {
           crossSection,
           days,
           ...(parsed.date === undefined ? {} : { date: parsed.date }),
-          benchmarks: [benchmark, "QQQ"],
           missing: priced.missing,
           notes: [...notes, ...priced.notes],
         });
@@ -4440,7 +4439,7 @@ export function buildTools(cfg: {
         // 773.4109, last 12:35:00+00:00 close 771.72.
         let intraday: Record<string, unknown> | undefined;
         if (parsed.window !== undefined) {
-          const symbol = symbolLiteral(benchmark, tool);
+          const symbol = "SPY";
           const base = need(env, "OW_APEX_API_BASE", tool);
           const url = new URL(
             `/v1/equity/${encodeURIComponent(symbol)}/bars`,

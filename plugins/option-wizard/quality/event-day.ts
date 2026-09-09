@@ -28,10 +28,11 @@ export interface DayPoint {
 }
 
 /** A basket the report speaks about as a unit: an argon watchlist chain, or a
- *  declared theme. `id` is what the reader sees. */
+ *  declared theme. `id` is what the reader sees, and a theme's id carries the
+ *  `theme:` prefix the coverage rows already use — which is why there is no
+ *  separate `kind` field to keep in step with it. */
 export interface BasketSpec {
   id: string;
-  kind: "chain" | "theme";
   members: readonly string[];
 }
 
@@ -46,7 +47,6 @@ export interface EventDayMember {
 
 export interface EventDayBasket {
   id: string;
-  kind: "chain" | "theme";
   /** Equal-weight mean of the priced members' day returns — the mean of
    *  RETURNS, never the return of a price sum, exactly as `basketExcess`
    *  computes a theme basket. Null when no member priced. */
@@ -174,7 +174,6 @@ export function eventDayTable(args: {
   /** The candidate days, ascending. Ignored when `date` is given. */
   days: readonly string[];
   date?: string;
-  benchmarks?: readonly string[];
   missing?: ReadonlyArray<{ symbol: string; reason: string }>;
   notes?: readonly string[];
 }): EventDayTable {
@@ -186,9 +185,11 @@ export function eventDayTable(args: {
   const date = picked.date ?? args.days[args.days.length - 1] ?? "";
   if (picked.date === null) notes.push(picked.pickedBy);
 
-  const benchNames = args.benchmarks ?? [BENCHMARK, "QQQ"];
+  // SPY and QQQ by name, not by a configurable list: every excess field here
+  // is spelled `excess_vs_spy`, so a benchmark the caller could swap would
+  // make the field name lie.
   const benchmarks: Record<string, number | null> = {};
-  for (const name of benchNames)
+  for (const name of [BENCHMARK, "QQQ"])
     benchmarks[name] = dayReturn(args.series, name, date);
   const spy = benchmarks[BENCHMARK] ?? null;
 
@@ -224,7 +225,6 @@ export function eventDayTable(args: {
       );
     return {
       id: spec.id,
-      kind: spec.kind,
       ret,
       excess_vs_spy: ret === null || spy === null ? null : ret - spy,
       members,
