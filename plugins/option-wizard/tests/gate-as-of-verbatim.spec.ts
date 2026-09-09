@@ -109,68 +109,73 @@ describe("referenceClose", () => {
     bars: [{ time: "2026-09-03T20:00:00Z", close: 770.19 }],
   });
 
+  // The real run-7cf66c8d (production premarket 2026-09-09, code 13632b1)
+  // shapes, quoted from that run's tool-io. SPY's 09-08 close is 765.96: it
+  // reaches the run as ow_spot's live `last`, and the pending ledger row
+  // inside ow_session_frame is the only place it carries a session DATE.
+  // The market-tide print carries the same digits as an intraday
+  // `underlying_price`, which is the near-miss the field check must reject.
+  const spot = JSON.stringify({
+    source: "tradingview",
+    quotes: [
+      {
+        ticker: "SPY",
+        source: "tradingview",
+        last: 765.96,
+        marketTime: "2026-09-09T12:46:27Z",
+      },
+    ],
+  });
+  const frame = JSON.stringify({
+    ledger: {
+      pending: [
+        {
+          id: "2026-09-08-premarket-spy-t1",
+          referenceClose: { date: "2026-09-08", value: 765.96 },
+          t1Down: 0.42,
+        },
+      ],
+    },
+  });
+  const tide = JSON.stringify({
+    data: [{ timestamp: "2026-09-09T12:47:00Z", underlying_price: "765.96" }],
+  });
+  const forecast = (date: string, value: number): { text: string } => ({
+    text: JSON.stringify({
+      spyForecast: { referenceClose: { date, value }, t1Down: 0.4, t5Down: 0.5 },
+    }),
+  });
+
   it("passes a referenceClose value that appears verbatim in this step's tool output", async () => {
-    const verdict = await gate.check(
-      {
-        text: JSON.stringify({
-          spyForecast: {
-            referenceClose: { date: "2026-09-03", value: 770.19 },
-            t1Down: 0.4,
-            t5Down: 0.5,
-          },
-        }),
-      },
-      {
-        runId: "r",
-        role: "scenario-analyst",
-        toolOutputs: [tape],
-        stepToolOutputs: [tape],
-      },
-    );
+    const verdict = await gate.check(forecast("2026-09-03", 770.19), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [tape],
+      stepToolOutputs: [tape],
+    });
     expect(verdict.pass).toBe(true);
   });
 
-  it("refuses a referenceClose value no tool in this step returned", async () => {
-    const verdict = await gate.check(
-      {
-        text: JSON.stringify({
-          spyForecast: {
-            referenceClose: { date: "2026-09-03", value: 770.2 },
-            t1Down: 0.4,
-            t5Down: 0.5,
-          },
-        }),
-      },
-      {
-        runId: "r",
-        role: "scenario-analyst",
-        toolOutputs: [tape],
-        stepToolOutputs: [tape],
-      },
-    );
+  it("refuses a referenceClose value no tool in this run returned", async () => {
+    const verdict = await gate.check(forecast("2026-09-03", 770.2), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [tape],
+      stepToolOutputs: [tape],
+    });
     expect(verdict.pass).toBe(false);
     expect(verdict.reason).toContain("770.2");
   });
 
-  it("refuses when the step called no tool at all", async () => {
-    const verdict = await gate.check(
-      {
-        text: JSON.stringify({
-          spyForecast: {
-            referenceClose: { date: "2026-09-03", value: 770.19 },
-            t1Down: 0.4,
-            t5Down: 0.5,
-          },
-        }),
-      },
-      {
-        runId: "r",
-        role: "scenario-analyst",
-        toolOutputs: [tape],
-        stepToolOutputs: [],
-      },
-    );
+  it("refuses when the run called no tool at all", async () => {
+    const verdict = await gate.check(forecast("2026-09-03", 770.19), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [],
+      stepToolOutputs: [],
+    });
     expect(verdict.pass).toBe(false);
+    expect(verdict.reason).toContain("no tool");
   });
 
   it("says nothing about a step that wrote no referenceClose", async () => {
@@ -184,5 +189,82 @@ describe("referenceClose", () => {
       },
     );
     expect(verdict.pass).toBe(true);
+  });
+
+  it("accepts a close an EARLIER step's tool returned — the run-7cf66c8d failure", async () => {
+    // The production refusal: scenario-analyst may call only
+    // ow_uw_market_state and ow_macro_rates, and on this run it called only
+    // ow_macro_rates. 765.96 came from ow_spot two steps earlier, through the
+    // handoff text. Step-scoped, this failed three runs on 2026-09-09; the
+    // whole-run scan must accept it.
+    const verdict = await gate.check(forecast("2026-09-09", 765.96), {
+      runId: "run-7cf66c8d",
+      role: "scenario-analyst",
+      toolOutputs: [spot],
+      stepToolOutputs: ['{"quotes":[{"name":"US 10Y","last":4.09}]}'],
+    });
+    expect(verdict.pass).toBe(true);
+  });
+
+  it("refuses a close whose only source is an intraday underlying_price", async () => {
+    // run-9fa9f332 "passed" on exactly this: the last tide print's
+    // underlying_price happened to equal the close. A bare substring is not a
+    // close; the field name has to say so.
+    const verdict = await gate.check(forecast("2026-09-09", 765.96), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [tide],
+      stepToolOutputs: [tide],
+    });
+    expect(verdict.pass).toBe(false);
+    expect(verdict.reason).toContain("765.96");
+  });
+
+  it("refuses a referenceClose dated one session after the tool's own label", async () => {
+    // The second defect in #122: the failing run still committed
+    // `2026-09-09-premarket-spy-t1` with referenceClose {2026-09-09, 765.96}.
+    // 765.96 is the 09-08 close, so every Brier settlement was one session off.
+    const verdict = await gate.check(forecast("2026-09-09", 765.96), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [frame, spot],
+      stepToolOutputs: [],
+    });
+    expect(verdict.pass).toBe(false);
+    expect(verdict.reason).toContain("2026-09-09");
+    expect(verdict.reason).toContain("2026-09-08");
+  });
+
+  it("passes when the date matches the tool's label", async () => {
+    const verdict = await gate.check(forecast("2026-09-08", 765.96), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [frame, spot],
+      stepToolOutputs: [],
+    });
+    expect(verdict.pass).toBe(true);
+  });
+
+  it("leaves the date unchecked when no tool labelled a {date, value} pair", async () => {
+    // ow_spot carries a timestamp, not a session date. Refusing here would be
+    // guessing which session a live quote belongs to, so the date passes.
+    const verdict = await gate.check(forecast("2026-09-09", 765.96), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [spot, tide],
+      stepToolOutputs: [],
+    });
+    expect(verdict.pass).toBe(true);
+  });
+
+  it("refuses a value that is in no tool output at all", async () => {
+    const verdict = await gate.check(forecast("2026-09-08", 999.99), {
+      runId: "r",
+      role: "scenario-analyst",
+      toolOutputs: [frame, spot, tide],
+      stepToolOutputs: [],
+    });
+    expect(verdict.pass).toBe(false);
+    expect(verdict.reason).toContain("999.99");
   });
 });
