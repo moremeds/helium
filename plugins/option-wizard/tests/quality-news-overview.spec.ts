@@ -318,6 +318,112 @@ describe("the global feeds are deduped and importance-ordered (#113 item 2)", ()
   });
 });
 
+/**
+ * META's own symbol feed on 2026-09-09, as of 12:13Z — `opencli tradingview
+ * news --symbol NASDAQ:META`, captured from helium-b4's live run that
+ * morning, newest first. All three rows carry urgency 2, which is why
+ * urgency cannot be the key that separates them.
+ *
+ * The two Dow Jones rows are what a two-row cap on the provider's order kept;
+ * the Benzinga row — the only one of the three tagged META and nothing else —
+ * is what fell below it, on a morning META was moving on exactly that story.
+ * Their `link` values follow the TradingView DJN news route the other
+ * captured DJN rows in this file use (`/news/<id>/`); the Benzinga row's link
+ * is verbatim.
+ */
+const META_FEED_0909 = [
+  {
+    id: "DJN_DN20260909002948:0",
+    published: "2026-09-09T12:13:00.000Z",
+    provider: "Dow Jones Newswires",
+    title:
+      "Google Has a Cool $15 Billion Fix to the AI Energy Problem — Barrons.com",
+    urgency: 2,
+    related_symbols: "NASDAQ:GOOG,NASDAQ:AMZN,NASDAQ:META,NASDAQ:MSFT",
+    link: "https://www.tradingview.com/news/DJN_DN20260909002948:0/",
+  },
+  {
+    id: "DJN_DN20260909004165:0",
+    published: "2026-09-09T12:13:00.000Z",
+    provider: "Dow Jones Newswires",
+    title: "Investors See Lessons in Hugging Face's Pivot — WSJ",
+    urgency: 2,
+    related_symbols: "NASDAQ:ANTHROPIC,NASDAQ:META",
+    link: "https://www.tradingview.com/news/DJN_DN20260909004165:0-investors-see-lessons-in-hugging-face-s-pivot-wsj/",
+  },
+  MUSE,
+];
+
+/** The block over one symbol's feed: both global feeds answer empty, META
+ *  answers with `rows` on the first venue tried. */
+async function metaHeadlines(rows: readonly unknown[], perStock = 2) {
+  const overview = await buildNewsOverview({
+    asOf: "2026-09-09T13:07:00.000Z",
+    symbols: ["META"],
+    universe: ["META"],
+    caps: { ...NEWS_CAPS.daily, perStock },
+    read: async (args) =>
+      args.symbol === "NASDAQ:META" ? { rows: [...rows] } : { rows: [] },
+  });
+  return overview.stocks[0]!.headlines;
+}
+
+describe("a stock's own feed is ranked by specificity (#113 item 2)", () => {
+  it("keeps the row that is about META over two AI stories that merely tag it", async () => {
+    // The same miss as the global feeds had, one level down. Every row here
+    // already names META — it came back from META's feed — so the count of
+    // related symbols is a count of the OTHER names, and fewer of them means
+    // more of the row is about this symbol. Under the provider's order the
+    // 11:44:22Z Muse row was the third of three and a perStock of 2 dropped
+    // it; ranked, it is first.
+    const kept = await metaHeadlines(META_FEED_0909);
+    expect(kept.map((row) => row.id)).toEqual([
+      MUSE.id, // 1 name: META
+      "DJN_DN20260909004165:0", // 2 names: ANTHROPIC, META
+    ]);
+    // 4 names — a general AI story, not a META story.
+    expect(kept.map((row) => row.id)).not.toContain("DJN_DN20260909002948:0");
+    // Ranking fields never reach the frame: a citation is id, time, provider,
+    // title, link and nothing else.
+    expect(Object.keys(kept[0]!).sort()).toEqual([
+      "id",
+      "link",
+      "provider",
+      "published",
+      "title",
+    ]);
+  });
+
+  it("gives the same answer whatever order the symbol feed listed the rows in", async () => {
+    const forward = await metaHeadlines(META_FEED_0909, 3);
+    const reversed = await metaHeadlines([...META_FEED_0909].reverse(), 3);
+    const rotated = await metaHeadlines(
+      [META_FEED_0909[1]!, META_FEED_0909[2]!, META_FEED_0909[0]!],
+      3,
+    );
+    expect(reversed).toEqual(forward);
+    expect(rotated).toEqual(forward);
+    // The full order, once: specificity 1, 2, 4.
+    expect(forward.map((row) => row.id)).toEqual([
+      MUSE.id,
+      "DJN_DN20260909004165:0",
+      "DJN_DN20260909002948:0",
+    ]);
+  });
+
+  it("spends a two-row cap on two stories, not on one story filed twice", async () => {
+    // A per-stock cap of 2 is the tightest budget in the block, so the same
+    // wire story under two provider suffixes is the one dedupe that matters
+    // most. Both Fortum filings are 2 names; only the earlier survives.
+    const kept = await metaHeadlines([
+      FORTUM,
+      PREMARKET_0909[5]!, // the same story, " — WSJ", 12:52:00Z
+      MUSE,
+    ]);
+    expect(kept.map((row) => row.id)).toEqual([MUSE.id, FORTUM.id]);
+  });
+});
+
 describe("buildNewsOverview", () => {
   it("assembles both feeds and the per-stock headlines, one read at a time", async () => {
     const state = fresh();
@@ -548,14 +654,12 @@ describe("buildNewsOverview", () => {
     for (const stock of overview.stocks)
       expect(stock.headlines).toHaveLength(NEWS_CAPS.daily.perStock);
     expect(overview.notes.join(" ")).toContain("asked 5 of 20 symbols");
-    // The two GLOBAL feeds are fetched deep whatever the phase's cap is —
-    // same number of calls, more rows to choose from — and the phase cap is
-    // applied after dedupe and ranking. Per-stock feeds still push the cap
-    // down to opencli, because there is nothing to rank inside one symbol.
-    expect(asked.slice(0, 2)).toEqual([NEWS_FETCH_LIMIT, NEWS_FETCH_LIMIT]);
-    expect(asked.slice(2)).toEqual(
-      asked.slice(2).map(() => NEWS_CAPS.daily.perStock),
-    );
+    // EVERY feed is fetched deep whatever the phase's cap is — the same
+    // number of calls, more rows to choose from — and the phase cap is
+    // applied after dedupe and ranking. A symbol's feed is one opencli
+    // subprocess whether it answers with 2 rows or 25, so asking shallow
+    // there bought nothing but a provider-ordered window.
+    expect(asked).toEqual(asked.map(() => NEWS_FETCH_LIMIT));
     // Strictly smaller than weekly on every axis — "daily 就是规模小一些".
     expect(NEWS_CAPS.daily.global).toBeLessThan(NEWS_CAPS.weekly.global);
     expect(NEWS_CAPS.daily.perStock).toBeLessThan(NEWS_CAPS.weekly.perStock);

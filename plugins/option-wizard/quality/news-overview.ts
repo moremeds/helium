@@ -20,7 +20,7 @@
  *    figure out of a title. The rows carry `link` so a reader can check the
  *    quote — which is why TradingView is the source at all: the Unusual Whales
  *    feed carries no URL.
- * 3. **The global feeds are ranked, not sliced.** Until 2026-09-09 the two
+ * 3. **The feeds are ranked, not sliced.** Until 2026-09-09 the two
  *    global feeds were the N most RECENT rows the feed returned, which is a
  *    time filter wearing an editor's hat. That morning's premarket kept a
  *    Saputo tariff market-talk, an oil headline, a Fortum/Google power deal
@@ -32,6 +32,18 @@
  *    calls, deduped by story, and ordered by `rankGlobalNews` before the cap
  *    is applied. The cap still bounds what enters the frame; it no longer
  *    decides what is important.
+ *
+ *    The per-stock feeds went the same way on the same morning's evidence.
+ *    META's own feed at 12:13Z led with two AI stories tagged four and two
+ *    names — "Google Has a Cool $15 Billion Fix to the AI Energy Problem"
+ *    (GOOG, AMZN, META, MSFT) and "Investors See Lessons in Hugging Face's
+ *    Pivot" (ANTHROPIC, META) — so a two-row cap on the provider's order kept
+ *    both and dropped the Benzinga Muse row, the only one of the three that
+ *    was about META and nothing else. Inside one symbol's feed the first key
+ *    is therefore SPECIFICITY: every row already names the symbol, so the
+ *    fewer OTHER names it carries, the more it is about this one. Universe
+ *    breadth, which is the global feeds' second key, is meaningless here —
+ *    the symbol is the universe.
  *
  * @module dsh-plugin-tenant-option-wizard/quality/news-overview
  */
@@ -122,10 +134,13 @@ export interface NewsCaps {
  * ~7 KB, the same order as `ow_uw_headlines`. The task's "e.g. 30" is above
  * that clamp, so 25 is what a deeper fetch can actually mean today.
  *
- * This changes the DEPTH of each call, never the NUMBER of calls: still one
- * `markets_today` read and one `economic` read, still serial. Per-stock feeds
- * are untouched — they are already scoped to one symbol, so a deeper fetch
- * there would buy ranking nothing and would cost real subprocess time.
+ * This changes the DEPTH of each call, never the NUMBER of calls: one
+ * `markets_today` read, one `economic` read and one read per symbol — up to
+ * three while a venue is being resolved, exactly as before — all serial. The
+ * per-stock feeds ask for the same depth since 2026-09-09: one symbol's feed
+ * is one opencli subprocess whether it answers with 2 rows or 25, so a
+ * shallow ask buys nothing and ranking a 2-row window is just ranking
+ * whatever the provider listed first.
  */
 export const NEWS_FETCH_LIMIT = 25;
 
@@ -231,17 +246,6 @@ function parseRankRows(payload: unknown): {
 }
 
 /**
- * The rows of a news payload, trimmed to a citation and capped. Unchanged
- * behaviour for the per-stock feeds, which are already scoped to one symbol
- * and arrive in the provider's order.
- */
-export function newsRowsOf(payload: unknown, limit: number): NewsRow[] {
-  return parseRankRows(payload)
-    .rows.slice(0, limit)
-    .map((entry) => entry.row);
-}
-
-/**
  * A title with the provider suffix removed, for dedupe only. The same wire
  * story reaches the tape as "… — Barrons.com", "… — WSJ" and "… — Market
  * Talk"; keeping all three spends the cap on one story. Everything after the
@@ -268,36 +272,20 @@ function earlier(a: RankRow, b: RankRow): RankRow {
   return a.row.title <= b.row.title ? a : b;
 }
 
-/** Missing urgency sorts as if it were the least urgent value there is, so a
- *  row that carries the signal always outranks a row that does not. */
-const URGENCY_ABSENT = Number.MAX_SAFE_INTEGER;
-
 /**
- * Dedupe by story, then order by importance, then cap. Deterministic and
- * total: no model, no clock, and no arithmetic beyond counting how many of a
- * row's related symbols are in the tracked universe.
+ * One row per story: group by id, then by story key, keeping the earliest
+ * filing of each group. Grouping rather than "skip the second one seen" is
+ * what makes the result independent of the order the feed listed rows in.
  *
- * The order is `urgency` ascending (TradingView: 1 is more urgent than 2),
- * then universe hits descending, then `published` descending, then `id` and
- * `title` ascending. The last two keys are what make it a total order — with
- * them the same rows in a different order give the same output, which is the
- * property that keeps a run reproducible against a frozen recording.
- *
- * Rule 4 of #113: nothing is dropped for being OLD. The window is whatever the
- * feed returned; an 11:44Z story is still the day's story at 13:07Z.
+ * Shared by the global and the per-stock passes deliberately. The same wire
+ * story reaches a symbol's own feed under two provider suffixes exactly as it
+ * reaches `markets_today`, and a per-stock cap of 2 is the tightest budget in
+ * the block — spending both slots on one story is the failure this prevents.
  */
-function rankGlobalNews(
-  payload: unknown,
-  args: { universe: ReadonlySet<string>; cap: number },
-): { rows: NewsRow[]; counts: NewsSelectionCounts } {
-  const parsed = parseRankRows(payload);
-
-  // Two grouping passes, id first then story key, each keeping the earliest
-  // row of its group. Grouping rather than "skip the second one seen" is what
-  // makes the result independent of the feed's order.
+function dedupeByStory(rows: readonly RankRow[]): RankRow[] {
   const byId = new Map<string, RankRow>();
   const anonymous: RankRow[] = [];
-  for (const entry of parsed.rows) {
+  for (const entry of rows) {
     if (entry.row.id === "") {
       anonymous.push(entry);
       continue;
@@ -311,8 +299,74 @@ function rankGlobalNews(
     const seen = byStory.get(key);
     byStory.set(key, seen === undefined ? entry : earlier(seen, entry));
   }
+  return [...byStory.values()];
+}
 
-  const unique = [...byStory.values()];
+/** Missing urgency sorts as if it were the least urgent value there is, so a
+ *  row that carries the signal always outranks a row that does not. */
+const URGENCY_ABSENT = Number.MAX_SAFE_INTEGER;
+
+/** The tail both rankings share: `published` descending, then `id` and
+ *  `title` ascending. The last two keys are what make either order TOTAL —
+ *  with them the same rows in a different order give the same output, which
+ *  is the property that keeps a run reproducible against a frozen recording.
+ *  They are not editorial; they are the tie-break of last resort. */
+function byRecencyThenId(a: RankRow, b: RankRow): number {
+  if (a.row.published !== b.row.published)
+    return a.row.published < b.row.published ? 1 : -1;
+  if (a.row.id !== b.row.id) return a.row.id < b.row.id ? -1 : 1;
+  if (a.row.title === b.row.title) return 0;
+  return a.row.title < b.row.title ? -1 : 1;
+}
+
+/**
+ * One symbol's own feed, deduped by story and ordered by SPECIFICITY before
+ * `caps.perStock` cuts it. Deterministic and total: no model, no clock, and
+ * no arithmetic beyond counting a row's related symbols.
+ *
+ * The first key is how many names a row is tagged with, ASCENDING. Every row
+ * here came back from this symbol's feed, so it already names the symbol; the
+ * count is therefore a count of the OTHER names, and a row tagged
+ * GOOG,AMZN,META,MSFT is a general AI story that happens to mention META
+ * while a row tagged META alone is about META. A row carrying no
+ * `related_symbols` at all sorts first for the same reason — the feed it came
+ * from is the only symbol it is filed under.
+ *
+ * Then urgency ascending (TradingView: 1 is more urgent than 2, absent last),
+ * then the shared recency/id tail. No universe key: the symbol IS the
+ * universe, so every row would score the same.
+ */
+function rankStockNews(payload: unknown, cap: number): NewsRow[] {
+  const unique = dedupeByStory(parseRankRows(payload).rows);
+  unique.sort((a, b) => {
+    const specificity = a.symbols.length - b.symbols.length;
+    if (specificity !== 0) return specificity;
+    const urgency =
+      (a.urgency ?? URGENCY_ABSENT) - (b.urgency ?? URGENCY_ABSENT);
+    if (urgency !== 0) return urgency;
+    return byRecencyThenId(a, b);
+  });
+  return unique.slice(0, Math.max(cap, 0)).map((entry) => entry.row);
+}
+
+/**
+ * Dedupe by story, then order by importance, then cap. Deterministic and
+ * total: no model, no clock, and no arithmetic beyond counting how many of a
+ * row's related symbols are in the tracked universe.
+ *
+ * The order is `urgency` ascending (TradingView: 1 is more urgent than 2),
+ * then universe hits descending, then the shared `byRecencyThenId` tail that
+ * makes it total.
+ *
+ * Rule 4 of #113: nothing is dropped for being OLD. The window is whatever the
+ * feed returned; an 11:44Z story is still the day's story at 13:07Z.
+ */
+function rankGlobalNews(
+  payload: unknown,
+  args: { universe: ReadonlySet<string>; cap: number },
+): { rows: NewsRow[]; counts: NewsSelectionCounts } {
+  const parsed = parseRankRows(payload);
+  const unique = dedupeByStory(parsed.rows);
   const duplicate = parsed.rows.length - unique.length;
   const hits = new Map<RankRow, number>();
   for (const entry of unique)
@@ -326,11 +380,7 @@ function rankGlobalNews(
     if (urgency !== 0) return urgency;
     const breadth = (hits.get(b) ?? 0) - (hits.get(a) ?? 0);
     if (breadth !== 0) return breadth;
-    if (a.row.published !== b.row.published)
-      return a.row.published < b.row.published ? 1 : -1;
-    if (a.row.id !== b.row.id) return a.row.id < b.row.id ? -1 : 1;
-    if (a.row.title === b.row.title) return 0;
-    return a.row.title < b.row.title ? -1 : 1;
+    return byRecencyThenId(a, b);
   });
 
   const kept = unique.slice(0, Math.max(args.cap, 0));
@@ -499,9 +549,12 @@ export async function buildNewsOverview(args: {
   for (const symbol of asked) {
     let hit: { tvSymbol: string; rows: NewsRow[] } | undefined;
     try {
+      // Same one call per venue as before, asked deep and capped late: an
+      // empty answer still means "wrong venue, try the next one", because a
+      // symbol's feed that returns rows returns ranked rows.
       hit = await resolveVenue(symbol, async (tvSymbol) =>
-        newsRowsOf(
-          await args.read({ symbol: tvSymbol, limit: caps.perStock }),
+        rankStockNews(
+          await args.read({ symbol: tvSymbol, limit: NEWS_FETCH_LIMIT }),
           caps.perStock,
         ),
       );
