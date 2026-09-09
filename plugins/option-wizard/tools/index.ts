@@ -43,6 +43,13 @@ import {
   rankCoverageCandidates,
   reportedWeek,
 } from "../quality/coverage-candidates.js";
+import {
+  eventDayTable,
+  summariseEventDay,
+  type BasketSpec,
+  type DayPoint,
+  type EventDayTable,
+} from "../quality/event-day.js";
 import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
@@ -76,6 +83,9 @@ export const SESSION_FRAME_SIBLINGS: readonly string[] = [
   // #107 item 1. The frame ranks its payload into `coverageCandidates`, so the
   // author is handed a ranked list rather than a basket to choose from.
   "ow_stock_week",
+  // #107 item 2. The frame carries the event day's SUMMARY; the member-level
+  // table stays in the tool's own payload.
+  "ow_event_day",
 ];
 
 /**
@@ -124,6 +134,9 @@ export const VOCABULARY: ReadonlyMap<string, ToolVocabularyEntry> = new Map([
   // One ow_apex_bars round trip per symbol on the fallback path; apex is the
   // only source, so a machine without it reports every symbol as missing.
   ["ow_stock_week", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
+  // Same single source as ow_stock_week: one /v1/equity/returns call where apex
+  // serves it, one bars round trip per symbol where it does not.
+  ["ow_event_day", { mutating: false, requiresEnv: "OW_APEX_API_BASE" }],
   ["ow_ib_positions", { mutating: false, requiresEnv: "OW_IB_API_BASE" }],
   ["ow_uw_chain", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
   ["ow_uw_ticker_metrics", { mutating: false, requiresEnv: "OW_UW_API_KEY" }],
@@ -1402,6 +1415,23 @@ const StockWeekParams = z.object({
     .optional(),
 });
 
+const EventDayParams = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
+  /** The 1m event window, both ends INCLUSIVE at apex (verified 2026-09-08:
+   *  12:25:00Z..12:35:00Z answers 11 bars, not 10). ISO-8601 with an offset —
+   *  a bare YYYY-MM-DD makes apex answer 500, exactly as `ow_apex_bars` says. */
+  window: z
+    .object({
+      start: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u),
+      end: z.string().regex(/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/u),
+    })
+    .optional(),
+  symbolsExtra: z.array(z.string().min(1).max(8)).max(40).optional(),
+});
+
 /** #107 item 4. `asOf` pins the snapshot day, so the weekly can ask for
  *  Monday's path and Friday's path and read the CHANGE off two payloads
  *  instead of describing one. YYYY-MM-DD only — the value is interpolated into
@@ -1958,6 +1988,190 @@ export function buildTools(cfg: {
         "ytd_return and pct_from_52w_high are null on the apex-bars fallback; apex 0.1.6 /v1/equity/returns serves them",
       ],
     };
+  }
+
+  /**
+   * One day-return series per symbol over `[start, end]`, from apex.
+   *
+   * PREFERRED PATH: apex 0.1.6's `GET /v1/equity/returns?symbols=…&start=…
+   * &end=…`, whose `results[].daily` is `[{date, close, return}]` — the same
+   * three fields this function hands back, so the endpoint's arrival changes
+   * the `source` string and nothing else.
+   *
+   * FALLBACK: one `ow_apex_bars` round trip per symbol, with the day return
+   * measured off the previous close exactly as `stockWeekTable` measures it —
+   * including the close STRICTLY BEFORE `start`, so the window's first day has
+   * a return rather than a null.
+   *
+   * VERIFIED 2026-09-09 against the mini (apex health `version 0.1.5`,
+   * `silver_revision.observed_revision` 41) that the endpoint is still absent:
+   *   GET /v1/equity/returns?symbols=SOXX,SPY,QQQ,NVDA,AVGO&start=2026-08-31
+   *       &end=2026-09-04
+   *   -> HTTP 404 {"error":{"code":"unknown_symbol","message":"no artifact for
+   *      returns under asset_class=equity","symbol":"returns",
+   *      "asset_class":"equity"}}
+   * so the fallback is the live path today. The daily closes it reads were
+   * re-verified the same day (`GET /v1/equity/{sym}/bars?timeframe=1d&
+   * price_mode=adjusted&start=2026-08-26T00:00:00Z&end=2026-09-05T00:00:00Z`,
+   * adjustment_revision 41): SPY 2026-09-04 770.19, QQQ 718.96, NVDA 230.36,
+   * AVGO 357.895, MU 1016.59 — the same closes revision 40 served on 09-08.
+   *
+   * UNVERIFIED, and stated as an assumption rather than a fact: that the
+   * endpoint returns a benchmark named in `symbols` as an ordinary row in
+   * `results`. It 404s here, so it could not be checked; the benchmarks are
+   * asked for as ordinary symbols and a benchmark absent from `results` comes
+   * back as a null return, never as a zero.
+   *
+   * A symbol either side cannot serve goes to `missing` with its reason.
+   */
+  async function apexDaySeries(args: {
+    symbols: readonly string[];
+    start: string;
+    end: string;
+    ctx?: ToolRunContext;
+  }): Promise<{
+    source: string;
+    series: Map<string, DayPoint[]>;
+    missing: Array<{ symbol: string; reason: string }>;
+    notes: string[];
+  }> {
+    const tool = "ow_event_day";
+    const base = need(env, "OW_APEX_API_BASE", tool);
+    const wanted = [
+      ...new Set(
+        args.symbols
+          .map((symbol) => symbol.trim().toUpperCase())
+          .filter((symbol) => /^[A-Z][A-Z.-]{0,7}$/u.test(symbol)),
+      ),
+    ].sort((a, b) => a.localeCompare(b, "en"));
+    const notes: string[] = [];
+    // The endpoint's own cap. Slicing beats a 4xx that costs the whole table,
+    // and the truncation says its own size rather than shortening in silence.
+    const asked = wanted.slice(0, 200);
+    if (asked.length < wanted.length)
+      notes.push(
+        `${String(wanted.length)} symbols requested, ${String(asked.length)} priced (apex caps /returns at 200)`,
+      );
+    const series = new Map<string, DayPoint[]>();
+    const missing: Array<{ symbol: string; reason: string }> = [];
+
+    const url = new URL("/v1/equity/returns", base);
+    url.searchParams.set("symbols", asked.join(","));
+    url.searchParams.set("start", args.start);
+    url.searchParams.set("end", args.end);
+    const doFetch = args.ctx?.fetchImpl ?? fetch;
+    let response: Response | undefined;
+    try {
+      response = await doFetch(url);
+    } catch (error: unknown) {
+      // Unreachable is not "route absent": there is nothing to fall back to.
+      throw new Error(
+        `${tool}: apex unreachable at ${url.host} — ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (response.ok) {
+      const body = (await response.json()) as {
+        results?: unknown;
+        missing?: unknown;
+      };
+      for (const raw of Array.isArray(body.results) ? body.results : []) {
+        const row = raw as { symbol?: unknown; daily?: unknown };
+        if (typeof row.symbol !== "string") continue;
+        series.set(
+          row.symbol,
+          (Array.isArray(row.daily) ? row.daily : []).flatMap((entry) => {
+            const point = entry as Record<string, unknown>;
+            if (typeof point.date !== "string") return [];
+            return [
+              {
+                date: point.date,
+                close: numeric(point.close) ?? null,
+                return: numeric(point.return) ?? null,
+              },
+            ];
+          }),
+        );
+      }
+      for (const raw of Array.isArray(body.missing) ? body.missing : []) {
+        const row = raw as { symbol?: unknown; reason?: unknown };
+        if (typeof row.symbol !== "string") continue;
+        missing.push({
+          symbol: row.symbol,
+          reason:
+            typeof row.reason === "string" ? row.reason : "no reason given",
+        });
+      }
+      // A symbol the endpoint neither priced NOR listed as missing would be a
+      // silent gap: absent from `results`, absent from `missing`, and read by
+      // the table as a name with no move. It gets its own row instead.
+      for (const symbol of asked)
+        if (
+          !series.has(symbol) &&
+          !missing.some((row) => row.symbol === symbol)
+        )
+          missing.push({
+            symbol,
+            reason: "apex /returns neither priced this symbol nor listed it",
+          });
+      return { source: "apex-returns", series, missing, notes };
+    }
+    notes.push(
+      `/v1/equity/returns answered ${String(response.status)}; priced from daily bars instead`,
+    );
+
+    const until = asOf?.getTime() ?? Date.now();
+    const startMs = Date.parse(`${args.start}T00:00:00Z`);
+    const lookbackDays = Math.min(
+      3650,
+      Math.max(20, Math.ceil((until - startMs) / 86_400_000) + 14),
+    );
+    const fetched = await dailyBars(asked, lookbackDays, args.ctx);
+    const why = new Map<string, string>();
+    for (const note of fetched.notes) {
+      const cut = note.indexOf(": ");
+      if (cut > 0) why.set(note.slice(0, cut), note.slice(cut + 2));
+    }
+    for (const symbol of asked) {
+      const rows = fetched.bars.get(symbol);
+      if (rows === undefined || rows.length === 0) {
+        missing.push({
+          symbol,
+          reason: why.get(symbol) ?? "apex served no daily bars for this symbol",
+        });
+        continue;
+      }
+      const dated = rows
+        .map((bar) => ({ date: bar.time.slice(0, 10), close: bar.close }))
+        .filter((bar) => /^\d{4}-\d{2}-\d{2}$/u.test(bar.date))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const before = dated.filter((bar) => bar.date < args.start);
+      const inside = dated.filter(
+        (bar) => bar.date >= args.start && bar.date <= args.end,
+      );
+      if (inside.length === 0) {
+        missing.push({
+          symbol,
+          reason: `no closes between ${args.start} and ${args.end}`,
+        });
+        continue;
+      }
+      let prior = before[before.length - 1]?.close;
+      series.set(
+        symbol,
+        inside.map((bar) => {
+          const close = Number.isFinite(bar.close) ? bar.close : null;
+          const ret =
+            close === null || prior === undefined || prior <= 0
+              ? null
+              : close / prior - 1;
+          if (close !== null) prior = close;
+          return { date: bar.date, close, return: ret };
+        }),
+      );
+    }
+    return { source: "apex-bars-fallback", series, missing, notes };
   }
 
   /** `ow_stock_week`'s default universe when the caller names no symbols: the
@@ -4057,6 +4271,223 @@ export function buildTools(cfg: {
       },
     },
     {
+      // #107 item 2. The event day's cross-section, MEMBER BY MEMBER.
+      //
+      // WHY MEMBER-LEVEL: on 2026-09-08 the premarket page wrote "hardware
+      // rallies into the market" and then named two semis, and printed
+      // "NVDA +230.36 (+0.84%)" — a CLOSE printed as a change. The user's
+      // correction was "问题不是弱，而是你不能只说这两个": the report may not
+      // pick two names out of a basket. So every member of every basket gets a
+      // row with its own day return, its excess over its own basket and its
+      // rank, and `weakest`/`strongest` are a SUMMARY of that table rather
+      // than a licence to write two names. Phase-agnostic on purpose — the
+      // daily runs need the same cross-section the weekly does.
+      //
+      // WHICH DAY: the one where some basket moved furthest from SPY, over the
+      // last five OPEN sessions (the tenant's own `calendar` block does the
+      // session arithmetic, never a subtraction from a date). Picked here, not
+      // by the model, for the reason #107 gives: a model asked for "the
+      // interesting day" picks the one its story needs. `date` overrides it.
+      //
+      // THE BASKETS are the argon watchlist chains this tenant declares in
+      // `extensions.review.sectors` plus its declared themes; the
+      // CROSS-SECTION is `extensions.review.rotation.sectorEtfs` plus the
+      // theme instruments. No ticker is invented here — a metals or high-beta
+      // list this tenant has not declared is `symbolsExtra`'s job, which is
+      // the operator's seam, not this tool's guess.
+      //
+      // Cost: one `/v1/equity/returns` call where apex serves it (0.1.6), one
+      // bars round trip per distinct symbol where it does not (0.1.5, which is
+      // what the mini runs on 2026-09-09) — see `apexDaySeries` for the live
+      // 404 and the closes it was verified against.
+      name: "ow_event_day",
+      description:
+        "One session's cross-section: for every member of every basket that day's return, the basket's own return, the member's excess over its basket and its rank, plus the benchmarks' returns and the sector-ETF cross-section. The day is chosen arithmetically (the largest |basket − SPY| in the last five sessions) unless you name one, and `pickedBy` says which. When a basket comes up, describe the DISTRIBUTION this table gives you — leaders, laggards, the middle — never two names picked out of it. `weakest` and `strongest` summarise the rows; they do not replace them. Every number is a fraction computed before you see it: quote it, never recompute it, and never print a close as a change.",
+      paramsSchema: EventDayParams,
+      mutating: false,
+      dshParams: {
+        date: {
+          type: "string",
+          description:
+            "The session, YYYY-MM-DD. Omit to let the tool pick the widest-dispersion day of the last five sessions.",
+        },
+        window: {
+          type: "object",
+          description:
+            'The 1m event window, e.g. {"start":"2026-09-04T12:25:00Z","end":"2026-09-04T12:35:00Z"}. Both ends inclusive. Omit for no intraday slice.',
+        },
+        symbolsExtra: {
+          type: "array",
+          description:
+            "Extra tickers for the cross-section, beyond the declared sector ETFs and theme instruments.",
+        },
+      },
+      async run(
+        args: Record<string, unknown>,
+        ctx?: ToolRunContext,
+      ): Promise<string> {
+        const parsed = EventDayParams.parse(args);
+        const tool = "ow_event_day";
+        const day =
+          asOfDay ??
+          new Intl.DateTimeFormat("en-CA", { timeZone: REPORT_ZONE }).format(
+            new Date(),
+          );
+        const notes: string[] = [];
+
+        // The baskets. One failing watchlist read costs the chains and nothing
+        // else: the declared themes are still baskets, and the note says which
+        // half is missing rather than printing a short table as a full one.
+        const chains: Array<{ chain: string; members: string[] }> = [];
+        const watchTool = built.find(
+          (entry) => entry.name === "ow_argon_watchlist",
+        );
+        if (watchTool === undefined) {
+          notes.push(
+            "ow_argon_watchlist is not built; the baskets are the declared themes only",
+          );
+        } else {
+          try {
+            const body = JSON.parse(await watchTool.run({}, ctx)) as {
+              chains?: unknown;
+            };
+            for (const raw of Array.isArray(body.chains) ? body.chains : []) {
+              const row = raw as { chain?: unknown; members?: unknown };
+              if (typeof row.chain !== "string") continue;
+              const members = (
+                Array.isArray(row.members) ? row.members : []
+              ).filter((member): member is string => typeof member === "string");
+              if (members.length > 0) chains.push({ chain: row.chain, members });
+            }
+          } catch (error: unknown) {
+            notes.push(
+              `ow_argon_watchlist did not answer (${
+                error instanceof Error ? error.message : String(error)
+              }); the baskets are the declared themes only`,
+            );
+          }
+        }
+        const themes = review?.themes ?? [];
+        const baskets: BasketSpec[] = [
+          ...chains.map((chain) => ({
+            id: chain.chain,
+            kind: "chain" as const,
+            members: chain.members,
+          })),
+          ...themes.map((theme) => ({
+            id: `theme:${theme.id}`,
+            kind: "theme" as const,
+            members: theme.instruments,
+          })),
+        ];
+        if (baskets.length === 0)
+          notes.push(
+            "no basket is declared: this tenant has neither watchlist chains nor themes to price",
+          );
+
+        const benchmark = review?.rotation?.benchmark ?? "SPY";
+        const crossSection = [
+          ...new Set([
+            ...(review?.rotation?.sectorEtfs ?? []),
+            ...themes.flatMap((theme) => theme.instruments),
+            ...(parsed.symbolsExtra ?? []).map((symbol) =>
+              symbol.trim().toUpperCase(),
+            ),
+          ]),
+        ];
+
+        // Five OPEN sessions ending at the run day, counted with the tenant's
+        // calendar. A day the lake has no bar for simply has no benchmark
+        // return and is skipped by the pick — never priced as a calm session.
+        const days =
+          parsed.date === undefined
+            ? openDaysBack(day, 5, cfg.calendar)
+            : [parsed.date];
+        const start = days[0]!;
+        const end = days[days.length - 1]!;
+
+        const priced = await apexDaySeries({
+          symbols: [
+            benchmark,
+            "QQQ",
+            ...baskets.flatMap((basket) => basket.members),
+            ...crossSection,
+          ],
+          start,
+          end,
+          ctx,
+        });
+
+        const table = eventDayTable({
+          series: priced.series,
+          baskets,
+          crossSection,
+          days,
+          ...(parsed.date === undefined ? {} : { date: parsed.date }),
+          benchmarks: [benchmark, "QQQ"],
+          missing: priced.missing,
+          notes: [...notes, ...priced.notes],
+        });
+
+        // The 1m slice, only when asked for: both ends INCLUSIVE, verified
+        // 2026-09-09 against the mini —
+        //   GET /v1/equity/SPY/bars?timeframe=1m&price_mode=adjusted
+        //       &start=2026-09-04T12:25:00Z&end=2026-09-04T12:35:00Z
+        //   -> {symbol, asset_class, timeframe, price_mode, listing_status,
+        //       adjustment_revision: 41, contract: null, count: 11,
+        //       generated_at, bars:[{time, open, high, low, close, volume}]}
+        // eleven bars for a ten-minute window, first 12:25:00+00:00 close
+        // 773.4109, last 12:35:00+00:00 close 771.72.
+        let intraday: Record<string, unknown> | undefined;
+        if (parsed.window !== undefined) {
+          const symbol = symbolLiteral(benchmark, tool);
+          const base = need(env, "OW_APEX_API_BASE", tool);
+          const url = new URL(
+            `/v1/equity/${encodeURIComponent(symbol)}/bars`,
+            base,
+          );
+          url.searchParams.set("timeframe", "1m");
+          url.searchParams.set("price_mode", "adjusted");
+          url.searchParams.set("start", parsed.window.start);
+          url.searchParams.set("end", parsed.window.end);
+          const doFetch = ctx?.fetchImpl ?? fetch;
+          try {
+            const response = await doFetch(url);
+            if (!response.ok)
+              throw new Error(
+                `${url.pathname} returned ${String(response.status)} ${response.statusText}`,
+              );
+            const body = (await response.json()) as { bars?: unknown };
+            intraday = {
+              symbol,
+              start: parsed.window.start,
+              end: parsed.window.end,
+              note: "1m bars, both ends inclusive",
+              bars: Array.isArray(body.bars) ? body.bars : [],
+            };
+            if (!Array.isArray(body.bars) || body.bars.length === 0)
+              table.notes.push(
+                `no 1m bar for ${symbol} between ${parsed.window.start} and ${parsed.window.end}`,
+              );
+          } catch (error: unknown) {
+            // The window is an extra, not the answer: its absence is a note,
+            // and the day's cross-section still prints in full.
+            table.notes.push(
+              `${tool}: no 1m window — ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+
+        return JSON.stringify({
+          ...table,
+          source: priced.source,
+          ...(intraday === undefined ? {} : { intraday }),
+        });
+      },
+    },
+    {
       // Verified 2026-09-03 against the live response: GET
       // /api/market/economic-calendar takes NO parameters and answers
       // { data: [{ type, time (ISO Z), event, forecast, prev,
@@ -5159,6 +5590,21 @@ export function buildTools(cfg: {
           frame.coverageCandidates.notes.push(
             `no universe name has an earnings date inside ${week.start}..${week.end}`,
           );
+
+        // ---- #107 item 2: the event day -----------------------------------
+        // The SUMMARY only. The member-level cross-section is `ow_event_day`'s
+        // own payload, which the author reads directly; carrying all of it
+        // here would put the same hundred rows in the context twice.
+        const eventDay = await answer("eventDay", "ow_event_day");
+        const eventDayWhy = skipped.eventDay;
+        delete skipped.eventDay; // not a declared coverage layer
+        if (eventDay !== undefined && eventDay !== null)
+          frame.eventDay = summariseEventDay(eventDay as EventDayTable);
+        else
+          frame.notes = [
+            ...(frame.notes ?? []),
+            `ow_event_day did not answer: ${eventDayWhy ?? "no reason recorded"}`,
+          ];
 
         return JSON.stringify(frame);
       },
