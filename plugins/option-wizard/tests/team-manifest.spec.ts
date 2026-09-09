@@ -512,6 +512,10 @@ describe("the flash page is public — no role reads the book", () => {
     expect(manifest.roles["frame-clerk"]?.permissions.tools).toEqual([
       "ow_session_frame",
       "ow_rotation",
+      // #107 item 2. The DAILY exposure of the event day: the deterministic
+      // step already prices it and hangs the summary on the frame, so every
+      // daily author sees the cross-section without a persona edit.
+      "ow_event_day",
     ]);
     expect(manifest.tasks.find((e) => e.id === "weekly")?.dependsOn).toContain(
       "rotation",
@@ -620,7 +624,7 @@ describe("the review authors, rewritten", () => {
           ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_earnings_report"]
           : name === "team.C.yaml"
             ? ["ow_reports", "ow_session_frame", "ow_rotation", "ow_uw_headlines", "ow_uw_earnings_report"]
-            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_uw_headlines", "ow_uw_earnings_report"],
+            : ["ow_reports", "ow_session_frame", "ow_rotation", "ow_stock_week", "ow_event_day", "ow_uw_headlines", "ow_uw_earnings_report"],
       );
       const internal = variant.tasks.find((task) => task.id === "week-review");
       expect(internal?.phases).toEqual(["weekly"]);

@@ -38,6 +38,7 @@ import {
   type CoverageRow,
 } from "./channels.js";
 import type { CoverageCandidates } from "./coverage-candidates.js";
+import type { EventDaySummary } from "./event-day.js";
 import { channelHistory } from "./history.js";
 import { LABEL_ORDER } from "./prior.js";
 import {
@@ -261,6 +262,10 @@ export interface SessionFrame {
    *  from `ow_stock_week` AFTER the frame is built. The author reads this list
    *  and may not re-rank it; absent when the frame ran without the tool. */
   coverageCandidates?: CoverageCandidates;
+  /** #107 item 2. The event day's SUMMARY — the date, why that date, and each
+   *  basket's two ends. The member-level table stays in `ow_event_day`'s own
+   *  payload: this block points at it, it does not replace it. */
+  eventDay?: EventDaySummary;
   notes?: string[];
 }
 
