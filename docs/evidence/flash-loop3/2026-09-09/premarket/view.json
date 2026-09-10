@@ -1,0 +1,641 @@
+{
+ "schemaVersion": 3,
+ "date": "2026-09-04",
+ "tenant": "option-wizard",
+ "outcome": "completed",
+ "headline": "Silicon bid and software sold split tech while September stays a coin-flip hike",
+ "cause": {
+  "located": false
+ },
+ "tape": [
+  {
+   "label": "SPY",
+   "value": "769.55",
+   "change": "",
+   "positive": true
+  },
+  {
+   "label": "QQQ",
+   "value": "717.5",
+   "change": "",
+   "positive": true
+  },
+  {
+   "label": "IWM",
+   "value": "295.39",
+   "change": "",
+   "positive": true
+  },
+  {
+   "label": "VIX",
+   "value": "14.32",
+   "change": "-0.88 pts",
+   "positive": true
+  },
+  {
+   "label": "10Y",
+   "value": "4.77",
+   "change": "-2 bp",
+   "positive": true
+  },
+  {
+   "label": "HY OAS",
+   "value": "2.65",
+   "change": "-1 bp",
+   "positive": true
+  },
+  {
+   "label": "USD (broad)",
+   "value": "118.7",
+   "change": "+0.4 idx",
+   "positive": false
+  }
+ ],
+ "schedule": [
+  {
+   "event": "ADBE earnings (post)",
+   "utc": "",
+   "et": "",
+   "consensus": "implied move 6.9333%",
+   "prior": "",
+   "group": "Sep 10"
+  },
+  {
+   "event": "ORCL earnings (post)",
+   "utc": "",
+   "et": "",
+   "consensus": "implied move 9.8619%",
+   "prior": "",
+   "group": "Sep 10"
+  },
+  {
+   "event": "FOMC 9/16",
+   "utc": "",
+   "et": "",
+   "consensus": "HOLD 50.7%",
+   "prior": "3.50-3.75%",
+   "group": "Sep 16"
+  },
+  {
+   "event": "MU earnings (post)",
+   "utc": "",
+   "et": "",
+   "consensus": "implied move 12.373%",
+   "prior": "",
+   "group": "Sep 30"
+  },
+  {
+   "event": "FOMC 10/28",
+   "utc": "",
+   "et": "",
+   "consensus": "HOLD 71.3%",
+   "prior": "3.50-3.75%",
+   "group": "Oct 28"
+  },
+  {
+   "event": "FOMC 12/9",
+   "utc": "",
+   "et": "",
+   "consensus": "HIKE 58%",
+   "prior": "3.75-4.00%",
+   "group": "Dec 9"
+  }
+ ],
+ "overnight": [],
+ "sections": [
+  {
+   "title": "Market review",
+   "body": "## Silicon is bid, software is sold — the week's story is inside tech\nThe one development worth naming is dispersion within technology, not a macro shock. Weekly sector reads dated 2026-09-04 show hardware leading and software lagging in the same tape. Memory/Storage is +7.6 (+7.5% vs SPY), all four members — STX, WDC, MU, SNDK — participating; Foundry +5.4 (+5.3%, INTC, TSEM, TSM, UMC, 4 of 4); Computer/GPU +3.4 (+3.3%, 6 of 6). Against that, Cybersecurity is −6.9 (−7.0%, NET, S, CRWD, PANW) and Software/SaaS −4.7 (−4.8%, ADBE, FIG, NOW, SHOP, ZM, CRM). XLK printed +0.9 on the week (+0.7 excess) while SPY did +0.1, so the tech-index gain is silicon-driven, not broad."
+  },
+  {
+   "title": "Outlook",
+   "body": "The within-tech read holds while Memory/Storage stays above +0 vs SPY and Software/SaaS stays below it; a convergence either way breaks it. ADBE and ORCL post-close 2026-09-10 are the near test — both sit on the software side, so their prints check whether the weakness is a repricing or a dip. On the macro side, front-end odds drifting below 50% hike into 9/16 would ease the pressure on rate-sensitive software; odds pushing toward the 12/9 hike path would deepen it. No live spot, rate or tide printed this run, so these are frozen levels, not intraday confirmation."
+  },
+  {
+   "title": "Dated catalysts",
+   "body": "- 2026-09-10 · ADBE earnings (post) · fcst implied move 6.9%\n- 2026-09-10 · ORCL earnings (post) · fcst implied move 9.9%\n- 2026-09-16 · FOMC 9/16 · fcst HOLD 50.7% · prev 3.50-3.8%\n- 2026-09-30 · MU earnings (post) · fcst implied move 12.4%\n- 2026-10-14 · ASML earnings (pre) · fcst implied move 10.2%\n- 2026-10-15 · TSM earnings · fcst implied move 7.9%\n- 2026-10-20 · TXN earnings · fcst implied move 10.4%\n- 2026-10-21 · IBM earnings (post) · fcst implied move 9.8%\n- 2026-10-22 · INTC earnings · fcst implied move 16.5%\n- 2026-10-26 · CDNS earnings · fcst implied move 13.2%\n- 2026-10-27 · STX earnings · fcst implied move 22.3%\n- 2026-10-27 · TER earnings · fcst implied move 22.3%\n- 2026-10-28 · FOMC 10/28 · fcst HOLD 71.3% · prev 3.50-3.8%\n- 2026-10-28 · TSLA earnings · fcst implied move 13.6%\n- 2026-10-28 · LRCX earnings · fcst implied move 19.7%\n- 2026-10-29 · AAPL earnings · fcst implied move 8.4%\n- 2026-12-09 · FOMC 12/9 · fcst HIKE 58% · prev 3.75-4.0%\n- 2026-12-10 · AVGO earnings · fcst implied move 15.1%\nADBE and ORCL both report post-close 2026-09-10 (implied moves 6.9333% and 9.8619%). FOMC 9/16 prices HOLD 50.7%. MU reports post-close 2026-09-30. FOMC 10/28 HOLD 71.3%; FOMC 12/9 HIKE 58%."
+  },
+  {
+   "title": "Supporting coverage",
+   "body": "3a macro\n- rates.front · no datum this period · UNTESTED · frame block empty — DGS2 not ingested\n- rates.long · 4.77 → -2 bp · UNTESTED · missing: level dated 2026-09-03, not live · frame block priced, as of 2026-09-03\n- curve.shape · no datum this period · UNTESTED · frame block empty — DGS2 not ingested; 2s10s cannot be computed\n- policy.path · 50.7 → — · UNTESTED · missing: no prior policy observation to delta · frame block priced, as of 2026-09-03\n- credit · 2.65 → -1 bp · UNTESTED · missing: 4-day-lagged mirror, not live · frame block priced, as of 2026-09-03\n- vol · 14.32 → -0.88 pts · CONTINUE · compression, quiet tape\n- dealer.positioning · 768.35 → +1.20 pts · UNTESTED · missing: no live spot to place vs flip · frame block priced, as of 2026-09-04T20:14:28.094000Z\n- flow · 536697084 → — · UNTESTED · missing: tide frozen at prior close · frame block priced, as of 2026-09-03T16:10:00-04:00\n- commodities · no datum this period · UNTESTED · frame block empty — no payload\n- fx · 118.7 → +0.4 index pts · UNTESTED · missing: level dated 2026-08-28, stale · frame block priced, as of 2026-08-28\n- equity.internals · 769.55 → SPY 769.55 · QQQ 717.5 · IWM 295.39 · UNTESTED · missing: no live spot this run · frame block priced, as of 2026-09-07T11:27:13.934Z\n3b sectors\n- sector:Computer/GPU · 3.4 → +3.3% vs SPY (6 of 6) · CONTINUE · 6 of 6 members leading\n- sector:Semi-Logic/ASIC · 1.8 → +1.7% vs SPY (6 of 6) · CONTINUE · 6 of 6 above SPY\n- sector:Foundry · 5.4 → +5.3% vs SPY (4 of 4) · CONTINUE · 4 of 4 leading strongly\n- sector:Semi-Cap/EDA · -1.5 → -1.6% vs SPY (8 of 8) · UNTESTED · missing: mild lag, no clear view · frame block priced, as of 2026-09-04\n- sector:Memory/Storage · 7.6 → +7.5% vs SPY (4 of 4) · CONTINUE · strongest basket, 4 of 4\n- sector:Cybersecurity · -6.9 → -7.0% vs SPY (4 of 4) · CONTINUE · weakest basket, 4 of 4 lag\n- sector:Software/SaaS · -4.7 → -4.8% vs SPY (6 of 6) · CONTINUE · 6 of 6 lag SPY\n- sector:Cloud/Hyperscaler · -1.3 → -1.4% vs SPY (6 of 6) · UNTESTED · missing: mild lag, no view · frame block priced, as of 2026-09-04\n- sector:Foundation-Model-Proxy · 0.9 → +0.8% vs SPY (5 of 5) · UNTESTED · missing: near flat, no view · frame block priced, as of 2026-09-04\n- sector:Devices/Endpoint · 0.8 → +0.7% vs SPY (2 of 2) · UNTESTED · missing: near flat, no view · frame block priced, as of 2026-09-04\n3c themes\n- theme:el-nino-ag-2026 · +6.5% (1w) · +0.0% (since 2026-09-06) · CONTINUE · basket +6.5 excess, 4 of 4\n  kill armed: ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions\n  evidence: operator-checked\nleft out: 14 rows — rates.front, rates.long, curve.shape, policy.path, credit, dealer.positioning, flow, commodities, fx, equity.internals, sector:Semi-Cap/EDA, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint"
+  },
+  {
+   "title": "Sources",
+   "body": "- ow_macro_rates · macro\n- ow_argon_policy_path · policy · as of 2026-09-03\n- ow_uw_gex · gex\n- ow_spot · spot · as of 2026-09-07T11:27:13.934Z\n- ow_uw_market_state · tide\n- ow_uw_calendar · calendar · as of 2026-09-04T12:45:00.000Z\n- ow_tv_commodities · commodities · ow_tv_commodities: ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?\n- ow_argon_watchlist · watchlist · as of 2026-09-07T16:07:58.024389+08:00\n- ow_uw_earnings · earnings · as of 2026-09-07T11:27:28.124Z\n- ow_uw_iv_term · ivTerm\n- ow_massive_actions · actions"
+  }
+ ],
+ "regime": {
+  "paragraph": "The calendar is unavailable; I'll draw dated events from the frame's own `calendar` array (earnings and FOMC paths). Writing the brief now."
+ },
+ "candidates": [],
+ "riskList": [],
+ "charts": {
+  "policyPath": {
+   "meetings": [
+    {
+     "label": "9/16",
+     "probability": 50.7,
+     "stance": "HOLD",
+     "impliedRate": "3.7532",
+     "targetRange": "3.50-3.75%"
+    },
+    {
+     "label": "10/28",
+     "probability": 71.3,
+     "stance": "HOLD",
+     "impliedRate": "3.825",
+     "targetRange": "3.50-3.75%"
+    },
+    {
+     "label": "12/9",
+     "probability": 58,
+     "stance": "HIKE",
+     "impliedRate": "3.97",
+     "targetRange": "3.75-4.00%"
+    }
+   ],
+   "snapshotDate": "2026-09-03"
+  },
+  "gex": []
+ },
+ "degradation": "Data degraded: gate flash-budget refused (5 of 5 sections over 60 words (160, 147, 120, 86, 116))",
+ "spyForecast": {
+  "scorable": true,
+  "forecast": {
+   "referenceClose": {
+    "date": "2026-09-03",
+    "value": 773.17
+   },
+   "t1Down": 0.5,
+   "t5Down": 0.55
+  }
+ },
+ "edited": true,
+ "decision": [
+  {
+   "label": "Call",
+   "value": "No book this session — every market-data feed returned no recording, so no strike could be anchored to a real spot."
+  },
+  {
+   "label": "Action",
+   "value": "none"
+  },
+  {
+   "label": "Aggression",
+   "value": "none"
+  },
+  {
+   "label": "WhyNow",
+   "value": "n/a"
+  },
+  {
+   "label": "MaxRisk",
+   "value": "none"
+  },
+  {
+   "label": "Invalidation",
+   "value": "n/a"
+  },
+  {
+   "label": "NextTrigger",
+   "value": "ADBE and ORCL prints post-close 2026-09-10."
+  },
+  {
+   "label": "Confidence",
+   "value": "n/a"
+  }
+ ],
+ "oneThing": {
+  "title": "The one thing",
+  "body": "The development to name this premarket is a rotation inside tech, not a macro move. On the frame's weekly reads (asOf 2026-09-04), Memory/Storage is +7.6 (+7.5% vs SPY, 4 of 4 — STX, WDC, MU, SNDK), Foundry +5.4 (+5.3%, 4 of 4 — INTC, TSEM, TSM, UMC) and Computer/GPU +3.4 (+3.3%, 6 of 6), while Cybersecurity is −6.9 (−7.0%, 4 of 4) and Software/SaaS −4.7 (−4.8%, 6 of 6). Silicon is bid and software is sold in the same week — a within-tech dispersion, not risk-on or risk-off.",
+  "why": "no single move stood out; VIXCLS has led for 0 sessions",
+  "checksLine": "Yesterday: no prior checks."
+ },
+ "changeMyMind": {
+  "text": "Memory/Storage giving back below +0 vs SPY, or Software/SaaS recovering above the flat line vs SPY, breaks the within-tech dispersion read.",
+  "series": "sector:Memory/Storage",
+  "threshold": "<0 vs SPY",
+  "horizon": "5 sessions"
+ },
+ "checks": [
+  {
+   "series": "VIXCLS",
+   "level": "14.32",
+   "text": "Against 14.32 — does the compression extend or reverse."
+  },
+  {
+   "series": "sector:Memory/Storage",
+   "level": "7.6",
+   "text": "Against +7.6 vs SPY — leadership holds or fades."
+  },
+  {
+   "series": "sector:Cybersecurity",
+   "level": "-6.9",
+   "text": "Against −6.9 vs SPY — weakness deepens or recovers."
+  }
+ ],
+ "everythingElse": [
+  "10Y 4.77, −2bp; HY OAS 2.65, −1bp; both quiet.",
+  "9/16 FOMC: HOLD 50.7% vs Hike 49.29%; zero cut priced.",
+  "12/9 path flips to HIKE 58%, implied 3.97%."
+ ],
+ "runLabel": "premarket",
+ "appBase": "http://127.0.0.1:3001",
+ "footer": {
+  "coverage": [
+   "macro — ow_macro_rates",
+   "policy — ow_argon_policy_path",
+   "gex — ow_uw_gex",
+   "spot — ow_spot",
+   "tide — ow_uw_market_state",
+   "calendar — ow_uw_calendar",
+   "commodities — ow_tv_commodities: ow_tv_commodities: ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?",
+   "watchlist — ow_argon_watchlist",
+   "earnings — ow_uw_earnings",
+   "ivTerm — ow_uw_iv_term",
+   "actions — ow_massive_actions"
+  ],
+  "asOf": [
+   "ow_argon_policy_path — 2026-09-03",
+   "ow_spot — 2026-09-07T11:27:13.934Z",
+   "ow_uw_calendar — 2026-09-04T12:45:00.000Z",
+   "ow_argon_watchlist — 2026-09-07T16:07:58.024389+08:00",
+   "ow_uw_earnings — 2026-09-07T11:27:28.124Z"
+  ],
+  "notes": [
+   "bars: 50 of 50 basket symbols answered",
+   "no answer from ow_tv_commodities: ow_tv_commodities: ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?"
+  ]
+ },
+ "faults": [
+  "focus TSLA: not on the computed list — the line is discarded",
+  "focus AVGO: not on the computed list — the line is discarded"
+ ],
+ "otherSections": [
+  {
+   "title": "The move is inside semis, not across the index: memory and foundry are carrying the week",
+   "body": "The one development worth naming this premarket is a rotation into hardware semis, not a macro shock."
+  },
+  {
+   "title": "The front end is the standing macro fact: September is a coin flip that leans hike, not cut",
+   "body": "The policy path is the macro anchor even on a day it did not move. Futures-implied via Frenzy Capital (not CME FedWatch), snapshot 2026-09-03: the 9/16 meeting prices HOLD at 50.7% against Hike 25bp at 49.29% — there is zero cut probability at any of the next three meetings."
+  },
+  {
+   "title": "Volatility and credit are quiet and confirm the calm, not a catalyst",
+   "body": "Vol and credit both did small, supportive things and neither is the story. VIXCLS closed 14.32 on 2026-09-03, down 0.88 pts from 15.2 — the top-ranked channel by the frame's own median-scaled score, but a compression, not an event."
+  },
+  {
+   "title": "The dealer perch and the frozen tide say the same thing: low-conviction premarket",
+   "body": "Positioning and flow are both benign and both carry a data caveat. SPY's gamma flip sits at 768.35 (asOf 2026-09-04T20:14:28.094000Z) against a last SPY read of 769.55 — spot is just above the flip, a mildly long-gamma, mean-reverting perch that dampens intraday range."
+  },
+  {
+   "title": "What to watch: ADBE and ORCL are the near catalysts, both post-close Sep 10",
+   "body": "The dated events that matter are earnings, not a data print — the economic calendar returned no history this run."
+  },
+  {
+   "title": "1 · Scorecard",
+   "body": "Nothing settled yet — no call has come due\n0 open calls\nFocus: 0 of 0 moved ≥ implied · 0 open\nCoverage gaps: 14 rows (rates.front, rates.long, curve.shape, policy.path, credit, dealer.positioning, flow, commodities, fx, equity.internals, sector:Semi-Cap/EDA, sector:Cloud/Hyperscaler, sector:Foundation-Model-Proxy, sector:Devices/Endpoint)"
+  },
+  {
+   "title": "6 · Focus",
+   "body": "rank · ticker · event · IV rank · implied move · open call · why\n| 1 | ADBE | earnings (post) 2026-09-10 | 69 | 6.9% | — | On the list for post-close 2026-09-10 earnings; IV rank 68.84 with a 6.9333% implied move prices a real event, not distance. Sits on the sold Software/SaaS side — the print tests repricing vs dip. No directional view yet. |\n| 2 | ORCL | earnings (post) 2026-09-10 | 62 | 9.9% | — | Also 2026-09-10 post-close; IV rank 62.39, 9.8619% implied move — the larger move and a Cloud/Hyperscaler name, so a downside miss could spill wider. Waiting on the print; no view. |\n| 3 | MU | earnings (post) 2026-09-30 | 33 | 12.4% | — | Memory leadership carrier — the +7.6 Memory/Storage basket is the week's strongest and MU is in it. Earnings 2026-09-30 post-close, IV rank 33.01; watch whether the basket holds into it. |\n| 4 | ASML | earnings (pre) 2026-10-14 | 28 | 10.2% | — | — |\n| 5 | TSM | earnings 2026-10-15 | 3 | 7.9% | — | — |\nweights: declared prior 2026-09-06"
+  },
+  {
+   "title": "7 · Open calls",
+   "body": "nothing outstanding"
+  }
+ ],
+ "focus": {
+  "period": "daily",
+  "rows": [
+   {
+    "ticker": "ADBE",
+    "event": "earnings (post) 2026-09-10",
+    "why": "On the list for post-close 2026-09-10 earnings; IV rank 68.84 with a 6.9333% implied move prices a real event, not distance. Sits on the sold Software/SaaS side — the print tests repricing vs dip. No directional view yet.",
+    "ivRank": 68.84
+   },
+   {
+    "ticker": "ORCL",
+    "event": "earnings (post) 2026-09-10",
+    "why": "Also 2026-09-10 post-close; IV rank 62.39, 9.8619% implied move — the larger move and a Cloud/Hyperscaler name, so a downside miss could spill wider. Waiting on the print; no view.",
+    "ivRank": 62.39
+   },
+   {
+    "ticker": "MU",
+    "event": "earnings (post) 2026-09-30",
+    "why": "Memory leadership carrier — the +7.6 Memory/Storage basket is the week's strongest and MU is in it. Earnings 2026-09-30 post-close, IV rank 33.01; watch whether the basket holds into it.",
+    "ivRank": 33.01
+   },
+   {
+    "ticker": "ASML",
+    "event": "earnings (pre) 2026-10-14",
+    "why": "",
+    "ivRank": 28.23
+   },
+   {
+    "ticker": "TSM",
+    "event": "earnings 2026-10-15",
+    "why": "",
+    "ivRank": 2.78
+   }
+  ],
+  "churn": 0
+ },
+ "themes": [
+  {
+   "id": "el-nino-ag-2026",
+   "token": "continue",
+   "excess1w": "+6.5%",
+   "excessSinceEntered": "+0.0%",
+   "leadership": "confirms",
+   "why": "Basket +6.5 excess this week, all four of DBA, MOS, NTR, DE participating; kill condition not met. Ag inputs bid, consistent with the thesis.",
+   "kill": "ONI < +0.5 two months running, or instruments underperform SPY by 10% over 60 sessions",
+   "killMet": false
+  }
+ ],
+ "coverageDetail": [
+  {
+   "id": "rates.front",
+   "untested": "DGS2 not ingested",
+   "leftOut": "DGS2 not ingested"
+  },
+  {
+   "id": "rates.long",
+   "level": "4.77",
+   "move": "-2 bp",
+   "prior": "4.79",
+   "asOf": "2026-09-03",
+   "leftOut": "missing: level dated 2026-09-03, not live"
+  },
+  {
+   "id": "curve.shape",
+   "untested": "DGS2 not ingested; 2s10s cannot be computed",
+   "leftOut": "DGS2 not ingested; 2s10s cannot be computed"
+  },
+  {
+   "id": "policy.path",
+   "level": "50.7",
+   "asOf": "2026-09-03",
+   "leftOut": "missing: no prior policy observation to delta"
+  },
+  {
+   "id": "credit",
+   "level": "2.65",
+   "move": "-1 bp",
+   "prior": "2.66",
+   "asOf": "2026-09-03",
+   "leftOut": "missing: 4-day-lagged mirror, not live"
+  },
+  {
+   "id": "vol",
+   "level": "14.32",
+   "move": "-0.88 pts",
+   "prior": "15.2",
+   "asOf": "2026-09-03",
+   "band": "(0.44pts..1.32pts)",
+   "observable": "VIXCLS holds below 15"
+  },
+  {
+   "id": "dealer.positioning",
+   "level": "768.35",
+   "move": "+1.20 pts",
+   "prior": "769.55",
+   "asOf": "2026-09-04T20:14:28.094000Z",
+   "leftOut": "missing: no live spot to place vs flip"
+  },
+  {
+   "id": "flow",
+   "level": "536697084",
+   "asOf": "2026-09-03T16:10:00-04:00",
+   "leftOut": "missing: tide frozen at prior close"
+  },
+  {
+   "id": "commodities",
+   "untested": "no payload",
+   "leftOut": "no payload"
+  },
+  {
+   "id": "fx",
+   "level": "118.7",
+   "move": "+0.4 index pts",
+   "prior": "118.4",
+   "asOf": "2026-08-28",
+   "leftOut": "missing: level dated 2026-08-28, stale"
+  },
+  {
+   "id": "equity.internals",
+   "level": "769.55",
+   "move": "SPY 769.55 · QQQ 717.5 · IWM 295.39",
+   "asOf": "2026-09-07T11:27:13.934Z",
+   "leftOut": "missing: no live spot this run"
+  },
+  {
+   "id": "sector:Computer/GPU",
+   "level": "3.4",
+   "move": "+3.3% vs SPY (6 of 6)",
+   "asOf": "2026-09-04",
+   "members": [
+    "NVDA",
+    "AMD",
+    "ARM",
+    "DELL",
+    "HPE",
+    "HPQ"
+   ],
+   "band": "(1.6%..4.9%)",
+   "observable": "holds above +0 vs SPY"
+  },
+  {
+   "id": "sector:Semi-Logic/ASIC",
+   "level": "1.8",
+   "move": "+1.7% vs SPY (6 of 6)",
+   "asOf": "2026-09-04",
+   "members": [
+    "AVGO",
+    "ARM",
+    "MCHP",
+    "MRVL",
+    "QCOM",
+    "TXN"
+   ],
+   "band": "(0.8%..2.5%)",
+   "observable": "holds above +0 vs SPY"
+  },
+  {
+   "id": "sector:Foundry",
+   "level": "5.4",
+   "move": "+5.3% vs SPY (4 of 4)",
+   "asOf": "2026-09-04",
+   "members": [
+    "INTC",
+    "TSEM",
+    "TSM",
+    "UMC"
+   ],
+   "band": "(2.7%..8.0%)",
+   "observable": "holds above +0 vs SPY"
+  },
+  {
+   "id": "sector:Semi-Cap/EDA",
+   "level": "-1.5",
+   "move": "-1.6% vs SPY (8 of 8)",
+   "asOf": "2026-09-04",
+   "members": [
+    "AMAT",
+    "ARM",
+    "ASML",
+    "CDNS",
+    "KLAC",
+    "LRCX",
+    "SNPS",
+    "TER"
+   ],
+   "leftOut": "missing: mild lag, no clear view"
+  },
+  {
+   "id": "sector:Memory/Storage",
+   "level": "7.6",
+   "move": "+7.5% vs SPY (4 of 4)",
+   "asOf": "2026-09-04",
+   "members": [
+    "STX",
+    "WDC",
+    "MU",
+    "SNDK"
+   ],
+   "band": "(3.7%..11.2%)",
+   "observable": "holds above +0 vs SPY"
+  },
+  {
+   "id": "sector:Cybersecurity",
+   "level": "-6.9",
+   "move": "-7.0% vs SPY (4 of 4)",
+   "asOf": "2026-09-04",
+   "members": [
+    "NET",
+    "S",
+    "CRWD",
+    "PANW"
+   ],
+   "band": "(3.5%..10.4%)",
+   "observable": "stays below −0 vs SPY"
+  },
+  {
+   "id": "sector:Software/SaaS",
+   "level": "-4.7",
+   "move": "-4.8% vs SPY (6 of 6)",
+   "asOf": "2026-09-04",
+   "members": [
+    "ADBE",
+    "FIG",
+    "NOW",
+    "SHOP",
+    "ZM",
+    "CRM"
+   ],
+   "band": "(2.4%..7.2%)",
+   "observable": "stays below −0 vs SPY"
+  },
+  {
+   "id": "sector:Cloud/Hyperscaler",
+   "level": "-1.3",
+   "move": "-1.4% vs SPY (6 of 6)",
+   "asOf": "2026-09-04",
+   "members": [
+    "GOOGL",
+    "AMZN",
+    "BABA",
+    "IBM",
+    "MSFT",
+    "ORCL"
+   ],
+   "leftOut": "missing: mild lag, no view"
+  },
+  {
+   "id": "sector:Foundation-Model-Proxy",
+   "level": "0.9",
+   "move": "+0.8% vs SPY (5 of 5)",
+   "asOf": "2026-09-04",
+   "members": [
+    "GOOGL",
+    "AMZN",
+    "NVDA",
+    "MSFT",
+    "META"
+   ],
+   "leftOut": "missing: near flat, no view"
+  },
+  {
+   "id": "sector:Devices/Endpoint",
+   "level": "0.8",
+   "move": "+0.7% vs SPY (2 of 2)",
+   "asOf": "2026-09-04",
+   "members": [
+    "TSLA",
+    "AAPL"
+   ],
+   "leftOut": "missing: near flat, no view"
+  },
+  {
+   "id": "theme:el-nino-ag-2026",
+   "level": "+6.5",
+   "move": "+6.5% (1w) · +0.0% (since 2026-09-06)",
+   "prior": "+0.0",
+   "asOf": "2026-09-04",
+   "band": "(3.3%..9.8%)",
+   "observable": "excess holds above +0 vs SPY"
+  }
+ ],
+ "sources": [
+  {
+   "tool": "ow_macro_rates",
+   "what": "macro"
+  },
+  {
+   "tool": "ow_argon_policy_path",
+   "what": "policy",
+   "asOf": "2026-09-03"
+  },
+  {
+   "tool": "ow_uw_gex",
+   "what": "gex"
+  },
+  {
+   "tool": "ow_spot",
+   "what": "spot",
+   "asOf": "2026-09-07T11:27:13.934Z"
+  },
+  {
+   "tool": "ow_uw_market_state",
+   "what": "tide"
+  },
+  {
+   "tool": "ow_uw_calendar",
+   "what": "calendar",
+   "asOf": "2026-09-04T12:45:00.000Z"
+  },
+  {
+   "tool": "ow_tv_commodities",
+   "what": "commodities",
+   "reason": "ow_tv_commodities: ow_tv_commodities: no commodity answered with a numeric close; is the TradingView app running?"
+  },
+  {
+   "tool": "ow_argon_watchlist",
+   "what": "watchlist",
+   "asOf": "2026-09-07T16:07:58.024389+08:00"
+  },
+  {
+   "tool": "ow_uw_earnings",
+   "what": "earnings",
+   "asOf": "2026-09-07T11:27:28.124Z"
+  },
+  {
+   "tool": "ow_uw_iv_term",
+   "what": "ivTerm"
+  },
+  {
+   "tool": "ow_massive_actions",
+   "what": "actions"
+  }
+ ]
+}

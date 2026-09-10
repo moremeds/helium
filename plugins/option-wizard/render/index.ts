@@ -51,6 +51,7 @@ import {
   type RotationResult,
   type ThemeViewRow,
 } from "./review.js";
+import type { SourceRow } from "./sources.js";
 import { REVIEW_PERIODS, type ReviewPeriod } from "../quality/review-config.js";
 import { toolPayloadStrings, type SessionFrame } from "../quality/frame.js";
 import type { RotationRow } from "../quality/themes.js";
@@ -404,6 +405,10 @@ export interface BriefView {
    *  the left-out reason the printed bullet no longer carries. Data, not
    *  prose — nothing here is rendered. */
   coverageDetail?: CoverageDetail[];
+  /** #108 item 3. The run's sources, structured, so the argon brief page can
+   *  fold them into a real `<details>`; the email prints the same rows flat as
+   *  the last section, because Gmail strips `<details>`. */
+  sources?: SourceRow[];
   /** Sections a step wrote that a review document does not render — the
    *  week-reviewer's three windows. Carried, not printed. */
   otherSections?: Section[];
@@ -1869,6 +1874,14 @@ function authoredReviewSections(doc: ReviewDoc): Section[] {
       title: MARKET_REPORT_TITLES[3],
       body: "Coverage detail is unavailable because this recorded run has no deterministic session frame.",
     },
+    // #108 item 3. The block is renderer-owned and built from the frame, so a
+    // run without one says it has no sources rather than borrowing the
+    // author's. Never omitted: a missing Sources block reads as "no source was
+    // needed", which is the claim this section exists to refuse.
+    {
+      title: MARKET_REPORT_TITLES[4],
+      body: "No source was recorded: this recorded run has no deterministic session frame.",
+    },
   ];
 }
 
@@ -1891,6 +1904,7 @@ function reviewOf(
     themes?: ThemeViewRow[];
     rotation?: BriefView["rotation"];
     coverageDetail?: CoverageDetail[];
+    sources?: SourceRow[];
   };
   doc: ReviewDoc | null;
   period: ReviewPeriod;
@@ -2037,6 +2051,9 @@ export function buildView(report: RunReport, cfg: TenantSpec): BriefView {
           ...(review.view.coverageDetail === undefined
             ? {}
             : { coverageDetail: review.view.coverageDetail }),
+          ...(review.view.sources === undefined
+            ? {}
+            : { sources: review.view.sources }),
         }),
   };
 }
