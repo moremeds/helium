@@ -564,7 +564,11 @@ function refusalFields(
   refusals: Refusal[],
 ): Pick<RunReport["steps"][number], "failure" | "gateRefusals"> {
   if (refusals.length === 0) return {};
-  const gateRefusals = refusals.map(({ id, reason }) => ({ id, reason }));
+  const gateRefusals = refusals.map(({ id, reason, advisory }) => ({
+    id,
+    reason,
+    ...(advisory === true ? { advisory: true } : {}),
+  }));
   return refusals.every((refusal) => refusal.advisory === true)
     ? { gateRefusals }
     : { failure: "gate-refused", gateRefusals };

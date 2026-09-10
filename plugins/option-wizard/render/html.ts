@@ -38,6 +38,8 @@
  * @module dsh-plugin-tenant-option-wizard/render/html
  */
 import type { BriefView, CandidateView, TapeItem } from "./index.js";
+// The period is a TASK name the review renderer already keys on, not a phase.
+import { REVIEW_PERIODS } from "../quality/review-config.js";
 import { invalidationLabel } from "./math.js";
 import { flashUrl } from "./week.js";
 
@@ -320,7 +322,7 @@ export function renderHtml(view: BriefView): string {
        <td class="ink-dim" style="color:${MUTED};font-size:11px;letter-spacing:0.12em;text-transform:uppercase;font-weight:600">${esc(view.tenant)}</td>
        <td align="right" class="ink-dim" style="color:${MUTED};font-size:11px">${esc(view.date)}${statusBadge}</td>
      </tr></table>
-     <div class="ink" style="color:${INK};font-size:29px;font-weight:650;letter-spacing:-0.5px;line-height:1.2;padding-top:16px">Daily Market Report</div>
+     <div class="ink" style="color:${INK};font-size:29px;font-weight:650;letter-spacing:-0.5px;line-height:1.2;padding-top:16px">${view.focus?.period === REVIEW_PERIODS[0] ? "Weekly" : "Daily"} Market Report</div>
      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:14px"><tr><td width="36" style="width:36px;height:3px;line-height:3px;font-size:1px;background-color:${ACCENT};border-radius:2px">&nbsp;</td></tr></table>
    </td></tr>
    <tr><td class="pad" style="padding:22px 32px 26px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td class="rule" style="border-top:1px solid ${BORDER};font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>`;

@@ -134,6 +134,46 @@ describe("buildView", () => {
     );
   });
 
+  it("titles the mail by the review period it carries", () => {
+    // 2026-09-10 weekly mail read "Daily Market Report". The renderer may not
+    // know the phase, but it knows which focus list it printed.
+    const daily = buildView(report(), SPEC);
+    expect(renderHtml(daily)).toContain("Daily Market Report");
+    const weekly: BriefView = {
+      ...daily,
+      focus: { period: "weekly", rows: [], churn: 0 },
+    };
+    expect(renderHtml(weekly)).toContain("Weekly Market Report");
+    expect(renderHtml(weekly)).not.toContain("Daily Market Report");
+  });
+
+  it("labels an advisory refusal as advisory, not as degraded data", () => {
+    // 2026-09-10 weekly: flash-budget (advisory) refused over a 43-word focus
+    // line, nothing failed, the renderer trimmed it, and the mail still said
+    // "Data degraded". The label overstated it.
+    const base = report();
+    const view = buildView(
+      report({
+        steps: [
+          ...base.steps,
+          {
+            task: "weekly",
+            role: "weekly-analyst",
+            mode: "model",
+            text: "",
+            gateRefusals: [
+              { id: "flash-budget", reason: "focusWords ADBE 43 of 40", advisory: true },
+            ],
+          },
+        ],
+      }),
+      SPEC,
+    );
+    expect(view.degradation).toBe(
+      "Advisory: gate flash-budget refused (focusWords ADBE 43 of 40)",
+    );
+  });
+
   it("a failed run still carries the steps that finished, under a banner", () => {
     // Voiding the whole brief over one refused step is the same single-point
     // failure the tenant is forbidden to have. 2026-09-02 intraday: a stale

@@ -19,7 +19,7 @@ export interface StepReport {
   text: string;
   failure?: string;
   /** Gates that said no. An input refusal means no model call was made. */
-  gateRefusals?: Array<{ id: string; reason: string }>;
+  gateRefusals?: Array<{ id: string; reason: string; advisory?: boolean }>;
   /**
    * What this step's tools ANSWERED, verbatim, when it called any.
    *

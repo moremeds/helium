@@ -91,6 +91,15 @@ describe("phase remits", () => {
     );
   });
 
+  it("makes the editor copy names from headlines the way it copies numbers", () => {
+    // 2026-09-09 premarket: the news pass delivered Meta's "Muse" headline and
+    // the editor wrote "its consumer AI-agent launch". The name is what the
+    // reader searches for; a paraphrase that drops it is a fault.
+    const persona = manifest.roles["editor"]?.persona ?? "";
+    expect(persona).toContain("NAMES ARE COPIED LIKE NUMBERS");
+    expect(persona).toContain('"Muse"');
+  });
+
   it("forbids the gex step from asking the reader a question", () => {
     // 2026-09-03 close: ow_tv_watchlist and ow_ib_positions were unavailable
     // as-of, and the step wrote "To proceed, I need clarification: Should
