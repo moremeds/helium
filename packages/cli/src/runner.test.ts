@@ -701,7 +701,7 @@ describe("gates", () => {
     expect(report.outcome).toBe("completed");
     expect(report.steps[0]?.failure).toBeUndefined();
     expect(report.steps[0]?.gateRefusals).toEqual([
-      { id: "budget", reason: "headline 31 of 30" },
+      { id: "budget", reason: "headline 31 of 30", advisory: true },
     ]);
     expect(
       audit.spans(report.runId).some((s) => s.toolName === "gate:budget"),

@@ -516,15 +516,28 @@ function degradationFrom(report: RunReport): string | undefined {
     ),
     ...report.steps
       .flatMap((step) => step.gateRefusals ?? [])
+      .filter((refusal) => refusal.advisory !== true)
       .map((refusal) => `gate ${refusal.id} refused (${refusal.reason})`),
     ...report.steps
       .filter((step) => step.failure !== undefined)
       .map((step) => `step ${step.task} failed (${step.failure ?? ""})`),
   ];
+  // An advisory refusal (flash-budget over by three words, 2026-09-10 weekly)
+  // failed nothing and the renderer already trimmed what it measured, so it
+  // is not "degraded": it gets its own label, and only leads when nothing
+  // actually broke.
+  const advisory = report.steps
+    .flatMap((step) => step.gateRefusals ?? [])
+    .filter((refusal) => refusal.advisory === true)
+    .map((refusal) => `gate ${refusal.id} refused (${refusal.reason})`);
   // `toolsUnconfigured` is NOT here. It is a known false positive today and its
   // root fix belongs to sub-project B; printing it would train the reader to
   // ignore the one line that is supposed to mean something.
-  return parts.length === 0 ? undefined : `Data degraded: ${parts.join("; ")}`;
+  const lines = [
+    ...(parts.length === 0 ? [] : [`Data degraded: ${parts.join("; ")}`]),
+    ...(advisory.length === 0 ? [] : [`Advisory: ${advisory.join("; ")}`]),
+  ];
+  return lines.length === 0 ? undefined : lines.join(" ");
 }
 
 /** The masthead's one-sentence daily call, straight from the regime step's
