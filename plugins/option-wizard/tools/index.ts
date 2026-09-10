@@ -43,6 +43,7 @@ import {
 import {
   candidateLimit,
   inWindowEarnings,
+  mergeMoverCandidates,
   rankCoverageCandidates,
   reportedWeek,
 } from "../quality/coverage-candidates.js";
@@ -6087,9 +6088,20 @@ export function buildTools(cfg: {
           });
           const moversWhy = skipped.premarketMovers;
           delete skipped.premarketMovers; // not a declared coverage layer
-          if (movers !== undefined && movers !== null)
+          if (movers !== undefined && movers !== null) {
             frame.premarketMovers = movers as PremarketMoversSummary;
-          else
+            // #113 item 1, Loop 4. The movers are only a selector if something
+            // selects with them. The ranked candidate list is what the news
+            // pass and the §3e table read, so the union happens HERE — after
+            // the earnings pass, whose cost is bounded by the ranked names
+            // alone, and before the news pass, which is the whole point: a
+            // name that is moving overnight gets its own feed queried.
+            frame.coverageCandidates = mergeMoverCandidates({
+              candidates: frame.coverageCandidates,
+              movers: frame.premarketMovers,
+              limit: candidateLimit(cfg.phase),
+            });
+          } else
             frame.notes = [
               ...(frame.notes ?? []),
               `ow_premarket_movers did not answer: ${moversWhy ?? "no reason recorded"}`,
@@ -6132,6 +6144,15 @@ export function buildTools(cfg: {
             // difference between the Muse headline (related NASDAQ:META) and
             // the Baltic dry index.
             universe: [...universe],
+            // The movers block already resolved a venue for every name it
+            // carries, in the SAME opencli call that got the number. Handing
+            // those through saves up to three subprocesses per moved name on
+            // the phase where the news pass is most time-critical.
+            tvSymbols: Object.fromEntries(
+              frame.coverageCandidates.stocks.flatMap((row) =>
+                row.tvSymbol === undefined ? [] : [[row.symbol, row.tvSymbol]],
+              ),
+            ),
             caps: newsCapsFor(cfg.phase),
             read: async (ask) =>
               JSON.parse(await newsTool.run(ask, ctx)) as unknown,

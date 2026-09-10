@@ -679,4 +679,65 @@ describe("buildNewsOverview", () => {
       MARKETS_TODAY[1]!.id,
     ]);
   });
+  // ---- #113 item 1, Loop 4: the movers' own venue -------------------------
+
+  it("uses a caller's tvSymbol and skips the venue probe", async () => {
+    // SPY answers on AMEX and nowhere else, so without a hint it costs a
+    // NASDAQ miss first. The movers block already resolved the venue in the
+    // same screener call that gave it the number.
+    const state = fresh();
+    const overview = await buildNewsOverview({
+      asOf: "2026-09-09T02:00:00.000Z",
+      symbols: ["SPY"],
+      caps: NEWS_CAPS.daily,
+      tvSymbols: { SPY: "AMEX:SPY" },
+      read: reader(state),
+    });
+    expect(state.asked).toEqual(["markets_today", "economic", "AMEX:SPY"]);
+    expect(overview.stocks).toMatchObject([
+      { symbol: "SPY", tvSymbol: "AMEX:SPY", headlines: [{ id: SPY[0]!.id }] },
+    ]);
+  });
+
+  it("falls through to the probe when the hint answers empty", async () => {
+    // A stale or wrong hint must never be the reason a name has no headline.
+    const state = fresh();
+    const overview = await buildNewsOverview({
+      asOf: "2026-09-09T02:00:00.000Z",
+      symbols: ["NVDA"],
+      caps: NEWS_CAPS.daily,
+      tvSymbols: { NVDA: "NYSE:NVDA" },
+      read: reader(state),
+    });
+    expect(state.asked).toEqual([
+      "markets_today",
+      "economic",
+      "NYSE:NVDA",
+      "NASDAQ:NVDA",
+    ]);
+    expect(overview.stocks[0]?.tvSymbol).toBe("NASDAQ:NVDA");
+  });
+
+  it("asks for the merged list: a mover-only name gets its own feed", async () => {
+    // The regression #113 is about. On 2026-09-09 the per-stock pass saw only
+    // the five ranked candidates; META was not one, so nothing ever queried
+    // its feed and the Muse headline could not reach the note. With the merged
+    // list it is asked for, inside the same cap of five.
+    const state = fresh();
+    await buildNewsOverview({
+      asOf: "2026-09-09T13:30:00.000Z",
+      symbols: ["SNDK", "META", "FIG", "ORCL", "DELL", "CDNS", "SNPS"],
+      caps: NEWS_CAPS.daily,
+      tvSymbols: { META: "NASDAQ:META", ORCL: "NYSE:ORCL" },
+      read: reader(state),
+    });
+    expect(state.asked).toContain("NASDAQ:META");
+    // Five stocks, not seven: the cap is unchanged.
+    expect(
+      state.asked.filter((ask) => ask.includes(":")).map((ask) => ask.split(":")[1]),
+    ).toEqual(
+      expect.arrayContaining(["SNDK", "META", "FIG", "ORCL", "DELL"]),
+    );
+    expect(state.asked).not.toContain("NASDAQ:SNPS");
+  });
 });
