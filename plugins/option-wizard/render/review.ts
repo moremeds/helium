@@ -221,9 +221,21 @@ export const MARKET_REPORT_TITLES = [
   "Outlook",
   "Dated catalysts",
   "Supporting coverage",
+  // #108 item 3. RENDERER-OWNED AND LAST. The author writes no source: it
+  // writes prose, and this block says where every payload behind it came from.
+  // Gmail strips `<details>`, so the email prints these rows flat at the end
+  // and the argon page folds the same rows off `view.sources`.
+  "Sources",
 ] as const;
 
 import { reportedWeek } from "../quality/coverage-candidates.js";
+import {
+  sourcesBlock,
+  sourcesBody,
+  stripSourceParentheticals,
+  toolNamesIn,
+  type SourceRow,
+} from "./sources.js";
 
 export type { CalendarRow } from "../quality/frame.js";
 
@@ -592,6 +604,9 @@ export interface ReviewSectionsResult {
     rotation?: { asOf: string; benchmark: string; rows: RotationRow[] };
     /** One entry per coverage row, in the same order §3 printed them. */
     coverageDetail?: CoverageDetail[];
+    /** #108 item 3. The run's sources, structured, so the argon page can fold
+     *  them into a real `<details>`; the email prints the same rows flat. */
+    sources?: SourceRow[];
   };
 }
 
@@ -644,6 +659,30 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const { frame, doc, caps, period } = args;
   const faults: string[] = [];
   const sections: Section[] = [];
+
+  // #108 ITEM 3 — SOURCES LEAVE THE PROSE, TOGETHER WITH THE BLOCK THAT
+  // REPLACES THEM. Never the strip alone: the parentheticals exist because of
+  // the 2026-09-03 finding that unsourced numbers get fabricated, so prose
+  // loses them only because §Sources now carries the same provenance in a form
+  // a machine reads. A source-shaped parenthetical is REMOVED (it is
+  // removable without touching the sentence); a tool name inside a sentence is
+  // faulted and left alone, because rewriting a sentence is authoring.
+  const clean = (field: string, text: string): string => {
+    if (text === "") return "";
+    const stripped = stripSourceParentheticals(text);
+    if (stripped.removed.length > 0)
+      faults.push(
+        `${field} carries inline source parentheticals ${stripped.removed.join(" ")} — ` +
+          "removed; the Sources block is where a source goes",
+      );
+    const tools = toolNamesIn(stripped.text);
+    if (tools.length > 0)
+      faults.push(
+        `${field} names ${tools.join(", ")} in prose — a tool name belongs in ` +
+          "the Sources block, never in a sentence",
+      );
+    return stripped.text;
+  };
 
   // ---------------- section 1: the scorecard, zero model words -------------
   const settled = frame.ledger.settledToday;
@@ -924,6 +963,23 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       return `- ${id} · ${shown} · UNTESTED · ${entry.why || "—"}${mark}`;
     return `- ${id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
   };
+  // #108 ITEM 1 — WHICH BLOCK IS EMPTY, IN THE RENDERER'S WORDS.
+  // The 2026-09-09 weekly printed eleven macro rows as one-line
+  // `missing: ...` and the reader could not tell an absent payload from an
+  // author who did not look. The frame knows the difference, so it says it:
+  // an empty block names itself, a priced row that was still declined says it
+  // was priced. No number is repeated — `shown` already carries the level —
+  // only the as-of stamps, copied.
+  const frameState = (row: CoverageRow): string => {
+    if (row.untested !== undefined)
+      return `frame block empty — ${row.untested}`;
+    if (row.level === undefined || row.level === "")
+      return "frame block empty — no level";
+    const window = frame.coverageCandidates?.window;
+    if (!inWindow(row) && window !== undefined)
+      return `frame block dated ${row.asOf ?? "—"}, outside ${window.start}→${window.end}`;
+    return `frame block priced${row.asOf === undefined ? "" : `, as of ${row.asOf}`}`;
+  };
   const rowLine = (row: CoverageRow): string => {
     const entry = entries.get(row.id);
     // Staleness is a property of the DATUM, not of whether the model gave the
@@ -965,7 +1021,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // TWO FIELDS AND NO MORE WHEN THERE IS NO DATUM. The `left out:` summary at
     // the end of the section still carries the source's own words.
     if (row.untested !== undefined)
-      return `- ${row.id} · ${NO_DATUM} · UNTESTED`;
+      return `- ${row.id} · ${NO_DATUM} · UNTESTED · ${frameState(row)}`;
     // A DATUM NOBODY CALLED STILL PRINTS ITS NUMBER. Folding this into the
     // no-datum line put "no datum this period" beside ten sector rows the
     // frame had just priced, on the review-v6 rerun where the author answered
@@ -973,10 +1029,10 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     // count is what `coverageGaps` is measured against — but it does not
     // claim the frame came back empty.
     if (entry === undefined)
-      return `- ${row.id} · ${shown} · UNTESTED · ${NOT_CALLED}`;
+      return `- ${row.id} · ${shown} · UNTESTED · ${NOT_CALLED} · ${frameState(row)}`;
     if (entry.token === "untested")
       return (
-        `- ${row.id} · ${shown} · UNTESTED · ${entry.why || "—"}` +
+        `- ${row.id} · ${shown} · UNTESTED · ${entry.why || "—"} · ${frameState(row)}` +
         (declined.has(row.id) ? " · call declined on priced data" : "")
       );
     return `- ${row.id} · ${shown} · ${entry.token.toUpperCase()} · ${entry.why || "—"}`;
@@ -1084,7 +1140,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     ...settled.map((row) => row.id),
     ...open.map((row) => row.id),
   ]);
-  let review = doc?.review ?? "";
+  let review = clean("复盘", doc?.review ?? "");
   for (const match of review.matchAll(COMMITMENT_ID)) {
     faults.push(
       printedIds.has(match[0])
@@ -1126,6 +1182,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
     .filter((line) => PROPOSED.exec(line.trim()) === null)
     .join("\n")
     .trim();
+  outlook = clean("outlook", outlook);
   outlook = outlook === "" ? "" : trim(outlook, caps.outlook).text;
   for (const row of stale)
     for (const sentence of outlook.split(/(?<=[.。!?])\s+/u))
@@ -1184,7 +1241,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   for (const line of notAdmitted) catalystLines.push(`not admitted: ${line}`);
   if (admitted.length === 0)
     catalystLines.push("no dated event was admitted this period");
-  let catalysts = doc?.catalysts ?? "";
+  let catalysts = clean("dated catalysts", doc?.catalysts ?? "");
   if (catalysts !== "") {
     const named = notAdmitted
       .map((line) => line.split(" — ")[0] ?? "")
@@ -1316,11 +1373,75 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
 
   // Assembled LAST, in §J.1's order, because the bodies are computed in
   // dependency order and not in print order.
+  // The block, from the run and nothing else: the frame's own coverage table
+  // (tool, layer, its own as-of, its own skip reason) plus the derived blocks
+  // the frame carries. A source the run did not call has no row here.
+  const news = frame.newsOverview;
+  const sourceRows = sourcesBlock({
+    coverage: frame.coverage,
+    ...(frame.coverageCandidates === undefined
+      ? {}
+      : {
+          candidates: {
+            window: frame.coverageCandidates.window,
+            source: frame.coverageCandidates.source,
+          },
+        }),
+    ...(frame.eventDay === undefined
+      ? {}
+      : {
+          eventDay: {
+            date: frame.eventDay.date,
+            pickedBy: frame.eventDay.pickedBy,
+          },
+        }),
+    ...(frame.macroReleases === undefined
+      ? {}
+      : {
+          macroReleases: {
+            weekStart: frame.macroReleases.weekStart,
+            weekEnd: frame.macroReleases.weekEnd,
+            scheduled: frame.macroReleases.scheduled.length,
+            printed: frame.macroReleases.printed.length,
+            ...(frame.macroReleases.unavailable === undefined
+              ? {}
+              : { unavailable: frame.macroReleases.unavailable }),
+          },
+        }),
+    ...(frame.premarketMovers === undefined
+      ? {}
+      : {
+          premarketMovers: {
+            asOf: frame.premarketMovers.asOf,
+            session: frame.premarketMovers.session,
+          },
+        }),
+    ...(news === undefined
+      ? {}
+      : {
+          news: {
+            asOf: news.asOf,
+            providers: [
+              ...news.marketsToday,
+              ...news.economic,
+              ...news.stocks.flatMap((entry) => entry.headlines),
+            ].map((row) => ({
+              provider: row.provider,
+              published: row.published,
+            })),
+          },
+        }),
+    ...(args.rotation === null
+      ? {}
+      : { rotation: { asOf: args.rotation.asOf, benchmark: args.rotation.benchmark } }),
+  });
+
   sections.push(
     { title: MARKET_REPORT_TITLES[0], body: reviewBody },
     { title: MARKET_REPORT_TITLES[1], body: outlookBody },
     { title: MARKET_REPORT_TITLES[2], body: catalystBody },
     { title: MARKET_REPORT_TITLES[3], body: coverageBody },
+    { title: MARKET_REPORT_TITLES[4], body: sourcesBody(sourceRows) },
   );
 
   // ---------------- the structured view blocks -----------------------------
@@ -1368,6 +1489,7 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
       },
       themes: themeView,
       coverageDetail: detail,
+      sources: sourceRows,
       ...(period === WEEKLY && args.rotation !== null
         ? {
             rotation: {

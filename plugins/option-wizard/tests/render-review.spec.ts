@@ -336,7 +336,8 @@ describe("section 3 — the coverage list never shrinks", () => {
     const section = body(legacySections(out), 3);
     for (const line of section.split("\n").filter((l) => l.startsWith("- ")))
       expect(line).toBe(
-        `- ${line.split(" · ")[0]!.slice(2)} · no datum this period · UNTESTED`,
+        `- ${line.split(" · ")[0]!.slice(2)} · no datum this period · UNTESTED` +
+          ` · ${line.split(" · ").slice(3).join(" · ")}`,
       );
     expect(out.gaps).toBe(ROW_COUNT);
     // ONE line, not one per row: eighteen copies of the same reason is what the
@@ -1976,7 +1977,11 @@ describe("an untested coverage row prints three fields and no more", () => {
     const line = body(legacySections(out), 3)
       .split("\n")
       .find((row) => row.startsWith("- rates.front"))!;
-    expect(line).toBe("- rates.front · no datum this period · UNTESTED");
+    // #108 item 1: the row now names WHICH block was empty, in the frame's own
+    // words, instead of leaving the reader with a bare "missing:".
+    expect(line).toBe(
+      "- rates.front · no datum this period · UNTESTED · frame block empty — tool absent",
+    );
     expect(line).not.toContain("settles:");
   });
 
@@ -2056,5 +2061,75 @@ describe("an untested coverage row prints three fields and no more", () => {
     expect(
       out.faults.filter((line) => line.startsWith("coverage omits")),
     ).toEqual([]);
+  });
+});
+
+describe("#108 Loop 3 — sources and the empty-block reason", () => {
+  it("prints a Sources block built from the frame's own coverage table", () => {
+    const out = render({
+      frame: frame({
+        coverage: [
+          {
+            layer: "macro",
+            source: "ow_macro_rates",
+            asOf: "2026-09-03",
+            state: "ok",
+          },
+          {
+            layer: "flow",
+            source: "ow_uw_market_state",
+            state: "skipped",
+            reason: "no payload",
+          },
+        ],
+      }),
+    });
+    const sources = out.sections.at(-1);
+    expect(sources?.title).toBe("Sources");
+    expect(sources?.body).toContain("ow_macro_rates · macro · as of 2026-09-03");
+    expect(sources?.body).toContain("ow_uw_market_state · flow · no payload");
+    // The whitelist a provenance check reads is the BLOCK, not a sentence.
+    expect(out.view.sources?.map((row) => row.tool)).toEqual([
+      "ow_macro_rates",
+      "ow_uw_market_state",
+    ]);
+  });
+
+  it("removes a source parenthetical from prose and faults the page", () => {
+    const out = render({
+      doc: {
+        ...DOC_EMPTY,
+        review: "The gamma flip sat at 768.35 (as-of 2026-09-04).",
+      },
+    });
+    expect(body(out.sections, 1)).toBe("The gamma flip sat at 768.35.");
+    expect(out.faults.join(" ")).toContain("(as-of 2026-09-04)");
+  });
+
+  it("faults prose that names a tool and leaves the sentence alone", () => {
+    const out = render({
+      doc: {
+        ...DOC_EMPTY,
+        review: "ow_reports returned no stored close notes for the week.",
+      },
+    });
+    expect(body(out.sections, 1)).toContain("ow_reports");
+    expect(out.faults.join(" ")).toContain("names ow_reports in prose");
+  });
+
+  it("says WHICH block was empty instead of a bare missing:", () => {
+    const rows = untestedRows();
+    const out = render({
+      frame: frame({ rows }),
+      doc: {
+        ...DOC_EMPTY,
+        coverage: rows.map((row) => ({
+          id: row.id,
+          token: "untested",
+          why: "missing: not ingested",
+        })),
+      },
+    });
+    expect(body(out.sections, 4)).toContain("frame block empty");
   });
 });

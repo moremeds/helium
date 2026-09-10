@@ -1,0 +1,5 @@
+page: /private/tmp/claude-501/-Users-chenxi-projects-helium/26cb1e46-e7ce-42aa-bfb1-d752fe162d2d/scratchpad/pm1/evidence/option-wizard-2026-09-04-premarket-run-acba0a36-2cf6-407d-8f18-887a57146be2.json
+recordings: /private/tmp/claude-501/-Users-chenxi-projects-helium/26cb1e46-e7ce-42aa-bfb1-d752fe162d2d/scratchpad/pm1/runs/run-acba0a36-2cf6-407d-8f18-887a57146be2/tool-io (29 files)
+distinct printed numbers: 114
+hits: 114 (verbatim 111, rounding 3)
+misses: 0

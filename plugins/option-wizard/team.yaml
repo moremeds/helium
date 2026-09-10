@@ -771,6 +771,39 @@ tasks:
       dated inside this phase's window HAS the data and owes continue, reverse,
       strengthen or fade with its `p` and `observable`. Wherever `untested` is
       right, `why` begins with "missing: " and names what you lack.
+      A BACKED COVERAGE ROW OWES A PARAGRAPH, AT THIS PHASE'S SCALE. A row is
+      BACKED when a frame block carries values behind it: a macro row with a
+      `level` dated inside the window, a sector or theme row with a `delta`, a
+      `coverageCandidates.stocks` row, a basket the `eventDay` block prices, or
+      a name `newsOverview` carries a headline for. Every backed row is
+      discussed in `review` with the treatment a basket gets — which members or
+      series led and which lagged, the number each moved, the mechanism you
+      claim, and the counterevidence — and one paragraph may cover several rows
+      only when they are members of the same basket. The SCALE is the phase's:
+      the weekly writes a full paragraph per backed row, the daily writes the
+      same shape in two or three sentences over the ranked names and the
+      baskets that moved. A row no frame block priced is a one-line `untested`
+      whose `why` begins with "missing: " and stops there — the renderer prints
+      which block was empty, so never spend a paragraph on an absence.
+      The macro rows read `frame.macroReleases`, and its `forecast`, `prior`
+      and `actual` are TEXT — "3.4%", "208K", a decimal string. Quote them as
+      text, character for character. Never parse one into a number, never
+      subtract a prior from an actual, never call a print a beat or a miss:
+      that comparison is arithmetic, and you do none. A `macroReleases` block
+      with no rows means NO RELEASE WAS HANDED TO THIS RUN — it never means the
+      week was quiet, and a sentence that reads it as calm macro is a claim
+      about data you were not given.
+
+      NO SOURCE IN A SENTENCE. Never write a tool name (`ow_rotation`, any
+      `ow_*`), and never a source parenthetical: "(as-of 2026-09-04)", "(frame
+      sector rows, as-of ...)", "(company source, reportDate ...)", "GuruFocus
+      (2026-09-08T21:33:48Z)". The renderer prints ONE Sources block per note,
+      built from the frame's own as-of stamps and the tools this run recorded;
+      it removes a source parenthetical from your prose and faults the page for
+      it. A date that is part of the FACT — the day an event happened, a report
+      date you argue from, the window itself — is not a source and stays in the
+      sentence.
+
       EACH SELECTED TOPIC ENDS WITH A SIGNAL PAIR — one confirming and one
       refuting, given together, each carrying a date from your payloads or a
       numeric threshold. If one tape can satisfy both, you wrote one signal twice.
@@ -969,6 +1002,39 @@ tasks:
       no `eventDay`, this paragraph does not apply and you write nothing in its
       place.
 
+      A BACKED COVERAGE ROW OWES A PARAGRAPH, AT THIS PHASE'S SCALE. A row is
+      BACKED when a frame block carries values behind it: a macro row with a
+      `level` dated inside the window, a sector or theme row with a `delta`, a
+      `coverageCandidates.stocks` row, a basket the `eventDay` block prices, or
+      a name `newsOverview` carries a headline for. Every backed row is
+      discussed in `review` with the treatment a basket gets — which members or
+      series led and which lagged, the number each moved, the mechanism you
+      claim, and the counterevidence — and one paragraph may cover several rows
+      only when they are members of the same basket. The SCALE is the phase's:
+      the weekly writes a full paragraph per backed row, the daily writes the
+      same shape in two or three sentences over the ranked names and the
+      baskets that moved. A row no frame block priced is a one-line `untested`
+      whose `why` begins with "missing: " and stops there — the renderer prints
+      which block was empty, so never spend a paragraph on an absence.
+      The macro rows read `frame.macroReleases`, and its `forecast`, `prior`
+      and `actual` are TEXT — "3.4%", "208K", a decimal string. Quote them as
+      text, character for character. Never parse one into a number, never
+      subtract a prior from an actual, never call a print a beat or a miss:
+      that comparison is arithmetic, and you do none. A `macroReleases` block
+      with no rows means NO RELEASE WAS HANDED TO THIS RUN — it never means the
+      week was quiet, and a sentence that reads it as calm macro is a claim
+      about data you were not given.
+
+      NO SOURCE IN A SENTENCE. Never write a tool name (`ow_rotation`, any
+      `ow_*`), and never a source parenthetical: "(as-of 2026-09-04)", "(frame
+      sector rows, as-of ...)", "(company source, reportDate ...)", "GuruFocus
+      (2026-09-08T21:33:48Z)". The renderer prints ONE Sources block per note,
+      built from the frame's own as-of stamps and the tools this run recorded;
+      it removes a source parenthetical from your prose and faults the page for
+      it. A date that is part of the FACT — the day an event happened, a report
+      date you argue from, the window itself — is not a source and stays in the
+      sentence.
+
       FOUR BEATS PER TOPIC. Every selected topic covers, in this order and as
       ordinary prose rather than labelled parts: what happened (the dated fact
       with its number), why it matters (the mechanism you claim), how the market
@@ -982,7 +1048,7 @@ tasks:
       is neither. The two must be able to disagree — if one tape can satisfy
       both, you have written one signal twice.
 
-      `review` is the MARKET WEEK, at most 900 words. Open with the week's market
+      `review` is the MARKET WEEK, at most 1800 words. Open with the week's market
       conclusion in two or three lines, then explain the few developments that
       mattered: what changed, the dated evidence, cross-asset confirmation or
       contradiction, and the implications for leading sectors and active themes.

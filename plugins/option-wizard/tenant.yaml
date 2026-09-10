@@ -259,12 +259,16 @@ extensions:
     # Weekly has more room than daily. Totals also allow supporting coverage;
     # these are ceilings, never output targets or required topic counts.
     caps:
-      weeklyModelWords: 2000
+      # #108 item 1: the weekly came out at 2.3k words against a premarket's
+      # 3.8k because 900 words cannot hold a paragraph per backed coverage row.
+      # The ceiling moves; the daily's does not (item 2: the 2026-09-09
+      # premarket is the reference shape and must not be regressed).
+      weeklyModelWords: 3200
       dailyModelWords: 800
       reviewWords: 300
       weekly:
         {
-          review: 900,
+          review: 1800,
           outlook: 450,
           catalysts: 150,
           rowWords: 15,
