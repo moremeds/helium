@@ -950,8 +950,18 @@ export function reviewSections(args: ReviewSectionsArgs): ReviewSectionsResult {
   const stockLine = (row: CandidateRow): string => {
     const id = stockRowId(row.symbol);
     const entry = entries.get(id);
+    // #113 item 1. A row the MOVERS block put here has no week return and no
+    // excess, so the priced half of the line would read as two em dashes and
+    // nothing would say why the name is in the table. Its own number and its
+    // own block are named instead. `overnight_ret` is TradingView's percent
+    // already — it is NOT run through `asPct`, which is for fractions.
     const shown =
-      `${asPct(row.window_return)} week · excess vs SPY ${asPct(row.excess_vs_spy)}` +
+      (row.rankedOn === "overnight_ret"
+        ? `overnight ${row.overnight_ret === undefined ? "—" : `${fmtSigned(row.overnight_ret, "pct")}%`} (movers) · no week return`
+        : `${asPct(row.window_return)} week · excess vs SPY ${asPct(row.excess_vs_spy)}` +
+          (row.overnight_ret === undefined
+            ? ""
+            : ` · overnight ${fmtSigned(row.overnight_ret, "pct")}% (movers)`)) +
       (row.earnings === undefined
         ? ""
         : ` · reported ${row.earnings.reportDate} EPS ${row.earnings.actualEps}` +

@@ -471,6 +471,12 @@ export async function buildNewsOverview(args: {
    *  never an error, because a caller with no universe is still better served
    *  by a deduped feed. */
   universe?: readonly string[];
+  /** Venue-qualified symbols a CALLER already resolved — the movers block gets
+   *  `tvSymbol` back from the same screener call that gave it the number
+   *  (#113 item 1). A hint that answers skips `NEWS_VENUES` entirely; a hint
+   *  that comes back empty falls through to the probe, because a stale hint
+   *  must never be the reason a name has no headline. */
+  tvSymbols?: Readonly<Record<string, string>>;
 }): Promise<NewsOverview> {
   const { caps } = args;
   const universe = new Set(
@@ -548,16 +554,23 @@ export async function buildNewsOverview(args: {
   // Serial by construction: symbol after symbol, venue after venue.
   for (const symbol of asked) {
     let hit: { tvSymbol: string; rows: NewsRow[] } | undefined;
-    try {
-      // Same one call per venue as before, asked deep and capped late: an
-      // empty answer still means "wrong venue, try the next one", because a
-      // symbol's feed that returns rows returns ranked rows.
-      hit = await resolveVenue(symbol, async (tvSymbol) =>
-        rankStockNews(
-          await args.read({ symbol: tvSymbol, limit: NEWS_FETCH_LIMIT }),
-          caps.perStock,
-        ),
+    // ONE fetch helper, two callers — the caller's venue hint and the probe —
+    // so #121's deep fetch and late cap apply to both. Asked deep
+    // (`NEWS_FETCH_LIMIT`), ranked, then cut to `caps.perStock`: an empty
+    // answer still means "wrong venue, try the next one", because a symbol's
+    // feed that returns rows returns ranked rows.
+    const fetchRows = async (tvSymbol: string): Promise<NewsRow[]> =>
+      rankStockNews(
+        await args.read({ symbol: tvSymbol, limit: NEWS_FETCH_LIMIT }),
+        caps.perStock,
       );
+    try {
+      const hint = args.tvSymbols?.[symbol];
+      if (hint !== undefined && hint !== "") {
+        const rows = await fetchRows(hint);
+        if (rows.length > 0) hit = { tvSymbol: hint, rows };
+      }
+      hit ??= await resolveVenue(symbol, fetchRows);
     } catch (error: unknown) {
       missing.push({ symbol, reason: why(error) });
       continue;

@@ -14,7 +14,7 @@
  * @module dsh-plugin-tenant-option-wizard/quality/coverage-candidates
  */
 
-import type { CalendarRow } from "./frame.js";
+import type { CalendarRow, PremarketMoversSummary } from "./frame.js";
 
 /** How many ranked stocks the frame carries. Fixed and named: a cap the caller
  *  can pass is a cap a prompt can argue with. Eight is one screen of rows and
@@ -99,9 +99,21 @@ export interface CandidateRow {
   window_return: number | null;
   excess_vs_spy: number | null;
   excess_vs_qqq: number | null;
-  /** WHICH number ordered this row. A reader must be able to see that a row
-   *  ranked on its own return had no benchmark, not that we hid one. */
-  rankedOn: "excess_vs_spy" | "window_return";
+  /** WHICH number ordered this row, and therefore WHICH block backs it. A
+   *  reader must be able to see that a row ranked on its own return had no
+   *  benchmark, not that we hid one — and that an `overnight_ret` row came
+   *  from the movers block and carries no week return at all. */
+  rankedOn: "excess_vs_spy" | "window_return" | "overnight_ret";
+  /** #113 item 1. TradingView's OWN percent for the overnight/premarket
+   *  session (`premarketMovers.rows[].ret`), copied. A percent, not a
+   *  fraction: the other three numbers on this row are fractions, and this one
+   *  is not converted, because a converted number is one nobody can re-read
+   *  against the payload it came from. Present on a row the movers block named
+   *  — whether or not `ow_stock_week` also priced it. */
+  overnight_ret?: number;
+  /** The venue-qualified symbol the movers block already resolved. Carried so
+   *  the news pass can skip its three-venue probe. */
+  tvSymbol?: string;
   /** Set only when this name REPORTED inside the reported week. */
   earnings?: CandidateEarnings;
   /** Citations only; empty until #113. */
@@ -259,6 +271,121 @@ export function rankCoverageCandidates(args: {
     missing,
     notes,
   };
+}
+
+/**
+ * Fold the overnight movers into the ranked candidate list (#113 item 1,
+ * Loop 4).
+ *
+ * WHY AT ALL. On 2026-09-09 the premarket ran with META up 5.5 % on the Muse
+ * launch and never mentioned it: META was not one of the five ranked
+ * candidates, so its symbol feed was never queried, and the general feed had
+ * already scrolled past the 11:44Z headline. The ranked list answers "what
+ * moved against the market last week"; it cannot answer "a mega-cap is moving
+ * on news right now". The movers block is that second selector, and this is
+ * where the two lists become the one list the news pass and the §3e table read.
+ *
+ * INTERLEAVED BY RANK, NOT MERGED BY MAGNITUDE. The obvious rule — sort both
+ * lists into one by the size of their own number — cannot work, because the
+ * two numbers are not the same measurement. `excess_vs_spy` is a FRACTION over
+ * the reported Monday–Friday (the 2026-09-04 week's top five were 0.171,
+ * 0.164, 0.148, 0.141, 0.111 — 17.1 % down to 11.1 %); `ret` is a PERCENT over
+ * one overnight session (META's was 5.519). Compare them raw and every mover
+ * outranks every ranked row and evicts the whole priced table; convert to
+ * common units and no overnight move ever beats a week, so META is still
+ * missed — the exact defect this function exists to close. A week and a night
+ * have no exchange rate, so neither list gets to price the other: they take
+ * alternate slots, ranked first, until the cap is full. At `limit` 5 that is
+ * three priced rows and the two biggest movers.
+ *
+ * DEDUPED BY SYMBOL, ranked row wins. A name in both keeps its week numbers
+ * and its rank and gains `overnight_ret` — it is one name, and dropping the
+ * priced half of it to make room for the moved half would lose the settleable
+ * number.
+ *
+ * Nothing is computed. `overnight_ret` is the payload's `ret` copied; the only
+ * arithmetic is `Math.abs` on the movers' own ordering key, which nothing
+ * prints.
+ */
+export function mergeMoverCandidates(args: {
+  candidates: CoverageCandidates;
+  movers: PremarketMoversSummary | undefined;
+  limit: number;
+}): CoverageCandidates {
+  const { candidates, limit } = args;
+  const moverRows = Array.isArray(args.movers?.rows) ? args.movers.rows : [];
+  const usable: Array<{ symbol: string; tvSymbol?: string; ret: number }> = [];
+  for (const raw of moverRows) {
+    if (raw === null || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const symbol = text(row.symbol).trim().toUpperCase();
+    const ret = finite(row.ret);
+    if (symbol === "" || ret === null) continue;
+    usable.push({
+      symbol,
+      ...(text(row.tvSymbol) === "" ? {} : { tvSymbol: text(row.tvSymbol) }),
+      ret,
+    });
+  }
+  if (usable.length === 0) return candidates;
+  // The tool already sorts by |ret| descending; re-sorting makes the order a
+  // property of THIS function rather than of a payload that might not.
+  usable.sort((a, b) => Math.abs(b.ret) - Math.abs(a.ret) || a.symbol.localeCompare(b.symbol, "en"));
+
+  const byMover = new Map(usable.map((row) => [row.symbol, row]));
+  // Ranked rows keep identity of order and gain the overnight number where the
+  // movers block also named them.
+  const ranked: CandidateRow[] = candidates.stocks.map((row) => {
+    const hit = byMover.get(row.symbol.toUpperCase());
+    return hit === undefined
+      ? row
+      : {
+          ...row,
+          overnight_ret: hit.ret,
+          ...(hit.tvSymbol === undefined ? {} : { tvSymbol: hit.tvSymbol }),
+        };
+  });
+  const rankedSymbols = new Set(ranked.map((row) => row.symbol.toUpperCase()));
+  const queue = usable.filter((row) => !rankedSymbols.has(row.symbol));
+
+  const merged: CandidateRow[] = [];
+  let r = 0;
+  let m = 0;
+  while (merged.length < limit && (r < ranked.length || m < queue.length)) {
+    const before = merged.length;
+    if (r < ranked.length) merged.push(ranked[r++]!);
+    if (merged.length < limit && m < queue.length) {
+      const mover = queue[m++]!;
+      merged.push({
+        id: stockRowId(mover.symbol),
+        rank: 0,
+        symbol: mover.symbol,
+        window_return: null,
+        excess_vs_spy: null,
+        excess_vs_qqq: null,
+        rankedOn: "overnight_ret",
+        overnight_ret: mover.ret,
+        ...(mover.tvSymbol === undefined ? {} : { tvSymbol: mover.tvSymbol }),
+      });
+    }
+    if (merged.length === before) break;
+  }
+  const stocks = merged.map((row, index) => ({ ...row, rank: index + 1 }));
+
+  const admitted = stocks.filter((row) => row.rankedOn === "overnight_ret");
+  const notes = [...candidates.notes];
+  notes.push(
+    admitted.length === 0
+      ? `premarketMovers: ${String(queue.length)} mover-only names, none admitted at cap ${String(limit)}`
+      : `premarketMovers admitted ${admitted.map((row) => row.symbol).join(", ")} on overnight move alone (no week return); ranked and movers take alternate slots up to the cap of ${String(limit)}`,
+  );
+  const dropped = candidates.stocks.length - stocks.filter((row) => row.rankedOn !== "overnight_ret").length;
+  if (dropped > 0)
+    notes.push(
+      `${String(dropped)} ranked name(s) left the table to make room for movers`,
+    );
+
+  return { ...candidates, stocks, notes };
 }
 
 /**
