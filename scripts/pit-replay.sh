@@ -1,8 +1,10 @@
 #!/bin/bash
-# Point-in-time runs of a tenant, in two modes.
+# Source capture and point-in-time runs of a tenant.
 #
 #   pit-replay.sh record <YYYY-MM-DD> <premarket|intraday|close|weekly> <state-root>
 #   pit-replay.sh replay <sample-dir> <state-root>
+#   pit-replay.sh capture <phase> <entry-tool>
+# `capture` records live sources in fresh local state, without model calls.
 #
 # `record` is a run pinned to the phase's as-of instant. Every tool call is
 # written to <state-root>/runs/<runId>/tool-io/ by the runner itself.
@@ -24,6 +26,7 @@ usage() {
 usage:
   pit-replay.sh record <YYYY-MM-DD> <premarket|intraday|close|weekly> <state-root>
   pit-replay.sh replay <sample-dir> <state-root>
+  pit-replay.sh capture <phase> <entry-tool>
 
 record needs HELIUM_ENV_FILE in the environment (path to the tenant's env
 file). Optional: HELIUM_ARGON_ENV_FILE (default ~/.config/helium/argon-local.env),
@@ -82,6 +85,11 @@ run_cli() {
 
 mode="${1:-}"
 case "$mode" in
+  capture)
+    [ $# -eq 3 ] || usage
+    load_env
+    ( cd "$REPO_ROOT" && node "$CLI" runtime-capture "$TENANT" --phase "$2" --tool "$3" )
+    ;;
   record)
     [ $# -eq 4 ] || usage
     day="$2"; phase="$3"; state_root="$4"

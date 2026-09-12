@@ -18,6 +18,7 @@ import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { probeEgress } from "@helium/provider-sdk/probe";
 import { selectedTools } from "@helium/provider-sdk/tool-loop";
 import type { CodexEffort } from "./catalog.js";
+import type { CodexInvocationObserver } from "./invoke.js";
 import { invokeCodex, turnEvents,
   REQUEST_TIMEOUT_MS,
 } from "./invoke.js";
@@ -129,7 +130,10 @@ export class CodexSubscriptionProvider implements Provider {
 
   #reason = "";
 
-  constructor(private readonly env: NodeJS.ProcessEnv = process.env) {}
+  constructor(
+    private readonly env: NodeJS.ProcessEnv = process.env,
+    private readonly evaluation?: { observer: CodexInvocationObserver; maxOutputTokens: number },
+  ) {}
 
   get capabilities(): string[] {
     return [...new Set(this.models.flatMap((model) => model.caps))].sort();
@@ -203,6 +207,10 @@ export class CodexSubscriptionProvider implements Provider {
     }
     const startedAt = Date.now();
     const result = await invokeCodex({
+      ...(this.evaluation === undefined ? {} : { observer: {
+        ...this.evaluation.observer,
+        beforeRequest: (body: string, timeoutMs: number) => this.evaluation!.observer.beforeRequest(body, timeoutMs, { role: work.role }),
+      } }),
       model: selection.model,
       effort: (selection.effort ?? "low") as CodexEffort,
       prompt: work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
@@ -210,6 +218,9 @@ export class CodexSubscriptionProvider implements Provider {
       ...(work.constraints.maxOutputTokens === undefined
         ? {}
         : { maxOutputTokens: work.constraints.maxOutputTokens }),
+      ...(this.evaluation === undefined ? {} : {
+        maxOutputTokens: Math.min(work.constraints.maxOutputTokens ?? Infinity, this.evaluation.maxOutputTokens),
+      }),
       env: this.env as Record<string, string>,
       signal,
       ...(tools.length === 0 ? {} : { tools }),

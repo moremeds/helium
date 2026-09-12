@@ -11,7 +11,8 @@
  * rather than producing a number that looks like accounting.
  * @module @helium/cli/cli
  */
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import {
@@ -23,10 +24,13 @@ import {
   loadOperatorEnv,
   readLedger,
   parseStrictJson,
+  canonicalJson,
 } from "@helium/core";
 import type { ControlConnection } from "@helium/runtime-control";
-import { runRuntimePilot } from "./runtime-pilot.js";
+import { runRuntimePilot, type RuntimeInference } from "./runtime-pilot.js";
 import { captureRuntimeSources } from "./runtime-capture.js";
+import { loadSnapshotRecordings } from "./replay-strict.js";
+import { sha256 } from "./tool-io.js";
 import { parseRunArgs } from "./args.js";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
@@ -223,10 +227,12 @@ export function printScoreboard(
 
 async function main(argv: string[]): Promise<number> {
   const [command, argument] = argv;
-  if (command === "runtime-pilot") {
+  if (command === "runtime-pilot" || command === "runtime-evaluate") {
     const { values } = parseArgs({ args: argv.slice(2), options: {
       connection: { type: "string" }, input: { type: "string" },
       "as-of": { type: "string" }, phase: { type: "string", default: "premarket" },
+      provider: { type: "string" }, model: { type: "string" }, policy: { type: "string" },
+      capture: { type: "string" },
     } });
     if (!argument || !values.connection || !values.input || !values["as-of"])
       throw new Error("usage: helium runtime-pilot <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> [--phase <phase>]");
@@ -234,10 +240,40 @@ async function main(argv: string[]): Promise<number> {
     const tenant = loadTenants(root).tenants.find((entry) => entry.spec.tenant === argument);
     if (!tenant || !tenant.spec.enabled) throw new Error("Pilot tenant is missing or disabled");
     const connection = parseStrictJson(readFileSync(values.connection, "utf8")) as ControlConnection;
+    let inference: RuntimeInference | undefined;
+    let expectedInputHash: string | undefined;
+    if (command === "runtime-evaluate") {
+      if (!values.provider || !/^[a-z0-9-]+$/.test(values.provider) || !values.model || !values.policy || !values.capture)
+        throw new Error("runtime-evaluate also requires --provider <id> --model <id> --policy <limits.json> --capture <capture.json>");
+      const captureBytes = readFileSync(values.capture, "utf8");
+      const capture = parseStrictJson(captureBytes) as Record<string, unknown>;
+      if (capture.status !== "COMPLETE" || capture.tenant !== argument || capture.phase !== values.phase ||
+          capture.replayAsOf !== values["as-of"] ||
+          capture.inputWorldHash !== loadSnapshotRecordings(values.input).inputHash)
+        throw new Error("Evaluation requires a complete capture bound to the exact tenant, phase, clock and input files");
+      expectedInputHash = capture.inputWorldHash as string;
+      const limits = parseStrictJson(readFileSync(values.policy, "utf8"));
+      const providerDir = join(root, `provider-${values.provider}`, "lib");
+      const adapter = await import(pathToFileURL(join(providerDir, "evaluation.js")).href);
+      if (typeof adapter.default !== "function") throw new Error("Provider has no controlled evaluation adapter");
+      loadOperatorEnv();
+      applyProxy(process.env);
+      inference = {
+        targetId: `${values.provider}:${values.model}`,
+        identity: { grade: "ROUTE_ONLY", provider: values.provider, requestedModel: values.model,
+          policyHash: sha256(canonicalJson(limits)), captureManifestHash: sha256(captureBytes), limits },
+        artifactDirs: [providerDir, join(root, "../packages/provider-sdk/lib")],
+        create: stateRoot => adapter.default({ outputDir: join(stateRoot, "inference"),
+          model: values.model, env: { ...process.env }, limits }),
+      };
+    } else if (values.provider || values.model || values.policy || values.capture) {
+      throw new Error("Inference options require runtime-evaluate; runtime-pilot remains model-free");
+    }
     const result = await runRuntimePilot({ connection, tenant, pluginsDir: root,
-      inputDir: values.input, asOf: new Date(values["as-of"]), phase: values.phase! });
+      inputDir: values.input, asOf: new Date(values["as-of"]), phase: values.phase!,
+      ...(inference ? { inference, expectedInputHash } : {}) });
     printRun(result.report);
-    console.log(`mechanism evidence: ${result.stateRoot}`);
+    console.log(`${inference ? "evaluation" : "mechanism"} evidence: ${result.stateRoot}`);
     return result.report.outcome === "completed" ? 0 : 1;
   }
   // Before anything reads a credential or a proxy. Ambient values still win,
@@ -369,6 +405,7 @@ async function main(argv: string[]): Promise<number> {
       "usage:",
       "  helium runtime-pilot <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> [--phase <phase>]",
       "  helium runtime-capture <tenant> --tool <entry-tool> [--phase <phase>]",
+      "  helium runtime-evaluate <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> --capture <capture.json> --provider <id> --model <id> --policy <limits.json> [--phase <phase>]",
       "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>] [--model-pin <targetId>]",
       "      run one tenant's team once. --as-of replays a past instant: it becomes",
       "      the run's clock, and every tool that has no history for it says so",
