@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { canonicalJson, parseStrictJson } from "../packages/core/lib/index.js";
+import { canonicalJson, parseStrictJson, parseTenantYaml } from "../packages/core/lib/index.js";
 import { RuntimeControl } from "../plugins/runtime-control/lib/index.js";
 import { loadSnapshotRecordings } from "../packages/cli/lib/replay-strict.js";
 import { buildIdentity } from "../packages/cli/lib/runtime-pilot.js";
@@ -50,7 +50,7 @@ const writeOnce = (path, data) => {
 };
 const subprocessEnv = (extra = {}) => Object.fromEntries([
   "HOME", "PATH", "TMPDIR", "TERM", "TERM_PROGRAM", "COLORTERM", "LANG", "LC_ALL", "LC_CTYPE",
-  "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING", "SSH_AUTH_SOCK",
+  "USER", "LOGNAME", "SHELL", "__CF_USER_TEXT_ENCODING",
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "all_proxy", "no_proxy",
 ].flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]).concat(Object.entries(extra)));
@@ -487,6 +487,23 @@ export async function runCampaign(options, deps = {}) {
       [join(REPO_ROOT, "plugins", `provider-${execution.provider}`, "lib"),
         join(REPO_ROOT, "packages/provider-sdk/lib")],
     );
+    const baseHashKeys = Object.keys(registration.comparison.baseManifestHashes).sort();
+    if (canonicalJson(baseHashKeys) !== canonicalJson(["lockfile", "team", "tenant"]))
+      throw new Error("comparison baseManifestHashes must contain exactly lockfile, team and tenant");
+    const tenantDir = join(REPO_ROOT, "plugins", scope.tenant);
+    const tenantBytes = readFileSync(join(tenantDir, "tenant.yaml"));
+    const tenantSpec = parseTenantYaml(tenantBytes.toString("utf8"), `${scope.tenant}/tenant.yaml`);
+    if (tenantSpec.tenant !== scope.tenant)
+      throw new Error("tenant.yaml identity differs from the registered scope");
+    const actualBaseHashes = {
+      tenant: sha256Bytes(tenantBytes),
+      team: sha256Bytes(readFileSync(join(tenantDir, tenantSpec.team))),
+      lockfile: identity.lockfileHash,
+    };
+    if (identity.dirtySource !== false)
+      throw new Error("campaign requires a clean source tree");
+    if (canonicalJson(actualBaseHashes) !== canonicalJson(registration.comparison.baseManifestHashes))
+      throw new Error("current tenant, declared team or lockfile differs from the frozen comparison registration");
     if (identity.engineSha !== registration.comparison.engineSha ||
         identity.engineArtifactHash !== registration.comparison.engineArtifactHash)
       throw new Error("current built engine identity differs from the frozen comparison registration");
@@ -696,13 +713,16 @@ export async function runCampaign(options, deps = {}) {
 
       const hasResult = existsSync(join(stateDir, "result.json"));
       const hasFailure = existsSync(join(stateDir, "failure.json"));
-      if (hasResult === hasFailure)
-        throw new CampaignHalt("MALFORMED_OUTCOME",
-          `state carries ${hasResult ? "both" : "neither"} result.json and failure.json`);
+      if (!hasResult && !hasFailure)
+        throw new CampaignHalt("MALFORMED_OUTCOME", "state carries neither result.json nor failure.json");
+      const dualFinalization = hasResult && hasFailure;
       const outcomeFile = hasResult ? "result.json" : "failure.json";
-      const outcomeBytes = readFileSync(join(stateDir, outcomeFile));
+      const resultBytes = hasResult ? readFileSync(join(stateDir, "result.json")) : null;
+      const failureBytes = hasFailure ? readFileSync(join(stateDir, "failure.json")) : null;
+      const outcomeBytes = resultBytes ?? failureBytes;
       const snapshotBytes = readFileSync(join(stateDir, "snapshot.json"));
-      writeOnce(join(trialDir, outcomeFile), outcomeBytes);
+      if (resultBytes !== null) writeOnce(join(trialDir, "result.json"), resultBytes);
+      if (failureBytes !== null) writeOnce(join(trialDir, "failure.json"), failureBytes);
       writeOnce(join(trialDir, "snapshot.json"), snapshotBytes);
       const outcome = parseStrictJson(outcomeBytes.toString("utf8"));
       const snapshot = parseStrictJson(snapshotBytes.toString("utf8"));
@@ -724,6 +744,11 @@ export async function runCampaign(options, deps = {}) {
       if (snapshot.metadata?.engineSha !== registration.comparison.engineSha ||
           snapshot.metadata?.engineArtifactHash !== registration.comparison.engineArtifactHash)
         throw new CampaignHalt("AMBIGUOUS", "the run engine identity differs from the frozen comparison registration");
+      const snapshotBaseHashes = { tenant: snapshot.metadata?.baseTenantHash,
+        team: snapshot.metadata?.baseTeamHash, lockfile: snapshot.metadata?.lockfileHash };
+      if (snapshot.metadata?.dirtySource !== false || canonicalJson(snapshotBaseHashes) !==
+          canonicalJson(registration.comparison.baseManifestHashes))
+        throw new CampaignHalt("AMBIGUOUS", "the run base manifests or clean-source state differ from registration");
       const expectedRoute = { grade: "ROUTE_ONLY", provider: execution.provider,
         requestedModel: execution.requestedModel, policyHash: policySha256,
         captureManifestHash: evidence.captureSha256, limits: execution.limits };
@@ -783,6 +808,13 @@ export async function runCampaign(options, deps = {}) {
         throw new CampaignHalt("AMBIGUOUS", "the DB attempt does not bind this trial's scope and arm");
       if (!["SUCCEEDED", "FAILED", "UNKNOWN", "DISPATCHED"].includes(attempt.status))
         throw new CampaignHalt("MALFORMED_OUTCOME", `attempt has unsupported status ${String(attempt.status)}`);
+      if (dualFinalization) {
+        writeOnce(join(trialDir, "stop.json"), canonicalJson({ reason: "AMBIGUOUS_FINALIZATION",
+          detail: "runtime preserved both result.json and failure.json after finalization" }) + "\n");
+        halt("AMBIGUOUS_FINALIZATION",
+          `attempt ${attemptId} has both result.json and failure.json; its full reservation remains held`, trialId);
+        break;
+      }
       if (result.drained === false || result.error) {
         writeOnce(join(trialDir, "stop.json"), canonicalJson({ reason: "AMBIGUOUS_PROCESS",
           detail: result.error ?? "subprocess streams did not reach a confirmed close" }) + "\n");

@@ -5,14 +5,16 @@ import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-import { canonicalJson } from "../packages/core/lib/index.js";
+import { canonicalJson, parseTenantYaml } from "../packages/core/lib/index.js";
 import { runCampaign, spawnRecordedSubprocess } from "./runtime-campaign.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const contentHash = (value) => hash(canonicalJson(value));
 const json = (value) => canonicalJson(value) + "\n";
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "helium-campaign-test-"));
@@ -48,13 +50,20 @@ function fixture() {
       inputWorldHash, inputDir, capture: join(root, `${caseId}-capture.json`), asOf };
   });
 
+  const tenantBytes = readFileSync(join(REPO_ROOT, "plugins/option-wizard/tenant.yaml"));
+  const tenantSpec = parseTenantYaml(tenantBytes.toString("utf8"), "option-wizard/tenant.yaml");
+  const baseManifestHashes = {
+    tenant: hash(tenantBytes),
+    team: hash(readFileSync(join(REPO_ROOT, "plugins/option-wizard", tenantSpec.team))),
+    lockfile: hash(readFileSync(join(REPO_ROOT, "pnpm-lock.yaml"))),
+  };
   const registration = {
     schemaVersion: "runtime-comparison-registration-v1", status: "REGISTERED",
     experimentId: "m2-test", comparisonMode: "CONFIRMATION_2V3",
     champion: { configVersionId: "cfg-2", configHash: contentHash(champion) },
     candidate: { configVersionId: "cfg-3", configHash: contentHash(candidate) },
     changedPaths: ["/config/news/perStock"], engineSha: "engine-test",
-    engineArtifactHash: hash("engine-artifacts"), baseManifestHashes: {},
+    engineArtifactHash: hash("engine-artifacts"), baseManifestHashes,
     replay: { mode: "SNAPSHOT_PIPELINE",
       inputCorpusHash: contentHash(cases.map(({ caseId, inputWorldHash }) => ({ caseId, inputWorldHash }))),
       ledgerSnapshotHash: ref("ledger"), calendarHash: ref("calendar"),
@@ -103,7 +112,9 @@ function fixture() {
   };
   const executionPath = join(root, "execution.json");
   writeFileSync(executionPath, json(execution));
-  return { root, registration, execution, executionPath, cases, champion, candidate };
+  const identity = { engineSha: registration.engineSha, engineArtifactHash: registration.engineArtifactHash,
+    dirtySource: false, lockfileHash: baseManifestHashes.lockfile };
+  return { root, registration, execution, executionPath, cases, champion, candidate, identity };
 }
 
 function harness(f, outcomes) {
@@ -133,8 +144,9 @@ function harness(f, outcomes) {
         stdout: Buffer.from(json({ versionId: current, revision })), stderr: Buffer.alloc(0) };
     }
     const outcome = outcomes[evalIndex++];
-    const status = ["FAILED_RESULT", "FAILED_UNDRAINED", "FAILED_PROCESS_ERROR", "NOT_COMPARABLE"].includes(outcome)
-      ? "FAILED" : outcome;
+    const status = outcome === "DUAL_SUCCEEDED" ? "SUCCEEDED" : outcome === "DUAL_DISPATCHED" ? "DISPATCHED" :
+      ["FAILED_RESULT", "FAILED_UNDRAINED", "FAILED_PROCESS_ERROR", "NOT_COMPARABLE"].includes(outcome)
+        ? "FAILED" : outcome;
     calls.push({ kind: "evaluate", env, argv });
     const trialId = f.execution.order[evalIndex - 1];
     const id = `attempt-${evalIndex}`;
@@ -145,13 +157,18 @@ function harness(f, outcomes) {
       configHash: hashes[current], deploymentRevision: revision, configurationApprovalId: "test",
       resolvedPayload: payloads[current], resolvedAt: new Date().toISOString(),
       metadata: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash,
+        dirtySource: false, lockfileHash: f.registration.baseManifestHashes.lockfile,
+        baseTenantHash: f.registration.baseManifestHashes.tenant, baseTeamHash: f.registration.baseManifestHashes.team,
         inputWorldHash: caseSpec.inputWorldHash, deliveryMode: "disabled", executionEnvironment: "evaluation",
         actualModelIdentity: { grade: "ROUTE_ONLY", provider: "devin-subscription", requestedModel: "swe-2-high",
           policyHash: contentHash(f.execution.limits), captureManifestHash: hash(readFileSync(caseSpec.capture)),
           limits: f.execution.limits } } };
     const snapshot = { ...snapshotBase, effectiveSnapshotHash: contentHash(snapshotBase) };
     writeFileSync(join(stateDir, "snapshot.json"), json(snapshot));
-    if (outcome === "FAILED") {
+    if (["DUAL_SUCCEEDED", "DUAL_DISPATCHED"].includes(outcome)) {
+      writeFileSync(join(stateDir, "result.json"), json({ outcome: "completed", runId: id }));
+      writeFileSync(join(stateDir, "failure.json"), json({ error: "finalize acknowledgement failed" }));
+    } else if (outcome === "FAILED") {
       mkdirSync(join(stateDir, "runs", id), { recursive: true });
       writeFileSync(join(stateDir, "failure.json"), json({ error: "known" }));
     } else if (["FAILED_RESULT", "FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"].includes(outcome)) {
@@ -174,7 +191,8 @@ function harness(f, outcomes) {
         knownInputTokens: outcome === "NOT_COMPARABLE" ? 0 : 11,
         knownOutputTokens: outcome === "NOT_COMPARABLE" ? 0 : 7,
         reportedModelLabels: [], unknown: status === "UNKNOWN" } } });
-    return { code: ["FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"].includes(outcome) ? null : status === "FAILED" ? 1 : 0,
+    return { code: ["FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"].includes(outcome) ? null :
+      status === "FAILED" || outcome.startsWith("DUAL_") ? 1 : 0,
       signal: null, timedOut: false, wallMs: 25,
       stdout: Buffer.from("stdout\u0000after"), stderr: Buffer.from("stderr\ntrailing"),
       drained: outcome === "FAILED_UNDRAINED" ? false : undefined,
@@ -188,7 +206,7 @@ test("runs exact registered order, keeps failures, and stops after UNKNOWN", asy
   const h = harness(f, ["FAILED_RESULT", "UNKNOWN"]);
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: f.identity });
 
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "UNKNOWN_ATTEMPT", JSON.stringify(summary.stop));
@@ -216,8 +234,9 @@ test("runs exact registered order, keeps failures, and stops after UNKNOWN", asy
   const switched = events.find(({ event, trialId }) => event === "switch-intent" && trialId === "case-a--candidate--r1");
   assert.ok(prepared.seq < switched.seq);
   assert.ok(h.calls.every(({ kind, env }) => kind !== "evaluate" || env.PGPASSWORD === undefined));
+  assert.ok(h.calls.every(({ kind, env }) => kind !== "evaluate" || env.SSH_AUTH_SOCK === undefined));
   await assert.rejects(() => runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } }), /refusing to overwrite/);
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: f.identity }), /refusing to overwrite/);
 });
 
 test("rejects input and reference symlinks before pointer or model work", async () => {
@@ -227,7 +246,7 @@ test("rejects input and reference symlinks before pointer or model work", async 
     const h = harness(f, []);
     const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
       runnerConnectionPath: "runner.json", outputDir: join(f.root, "out") }, { control: h.control, spawn: h.spawn,
-        identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+        identity: f.identity });
     assert.equal(summary.status, "INVALID");
     assert.match(summary.stop.detail, /symbolic link/);
     assert.equal(h.calls.length, 0);
@@ -246,7 +265,7 @@ test("rejects missing, duplicate, and unsupported execution inventory before sid
     const h = harness(f, []);
     const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
       runnerConnectionPath: "runner.json", outputDir: join(f.root, "invalid-out") },
-    { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    { control: h.control, spawn: h.spawn, identity: f.identity });
     assert.equal(summary.status, "INVALID");
     assert.equal(h.calls.length, 0);
   }
@@ -264,7 +283,7 @@ test("retains malformed admin stdout and stops before model dispatch", async () 
   };
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: f.identity });
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "AMBIGUOUS");
   assert.equal(readFileSync(join(outputDir, "trials/case-a--candidate--r1/admin-request-stdout"), "utf8"),
@@ -277,7 +296,7 @@ test("retains malformed outcome bytes before reporting the stop", async () => {
   const h = harness(f, ["MALFORMED"]);
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: f.identity });
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "AMBIGUOUS");
   assert.equal(readFileSync(join(outputDir, "trials/case-a--champion--r1/state/failure.json"), "utf8"),
@@ -291,7 +310,7 @@ test("stops on a calendar-skipped NOT_COMPARABLE result without consuming a gene
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
     runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn,
-      identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+      identity: f.identity });
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "NOT_COMPARABLE");
   assert.equal(summary.stop.detail, "calendar closed 2026-09-12 (weekend)");
@@ -311,7 +330,7 @@ test("stops after preserving a bound FAILED result when subprocess close is unco
     const outputDir = join(f.root, "out");
     const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
       runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn,
-        identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+        identity: f.identity });
     assert.equal(summary.status, "STOPPED");
     assert.equal(summary.stop.reason, "AMBIGUOUS_PROCESS");
     assert.equal(summary.counts.dispatched, 1);
@@ -329,13 +348,57 @@ test("stops after preserving a bound FAILED result when subprocess close is unco
   }
 });
 
+test("preserves dual finalization artifacts, binds the attempt, and stops with the full reservation held", async () => {
+  for (const [outcome, dbStatus] of [["DUAL_SUCCEEDED", "SUCCEEDED"], ["DUAL_DISPATCHED", "DISPATCHED"]]) {
+    const f = fixture();
+    const h = harness(f, [outcome]);
+    const outputDir = join(f.root, "out");
+    const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+      runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn,
+        identity: f.identity });
+    assert.equal(summary.status, "STOPPED");
+    assert.equal(summary.stop.reason, "AMBIGUOUS_FINALIZATION");
+    assert.equal(summary.budget.heldOrSpentCalls, 2);
+    assert.equal(summary.budget.heldOrSpentMs, 1000);
+    assert.equal(h.calls.filter(({ kind }) => kind === "evaluate").length, 1);
+    assert.equal(h.calls.filter(({ kind }) => kind === "inspect").length, 1);
+    assert.equal(h.calls.filter(({ kind }) => kind === "admin").length, 0);
+    const trialDir = join(outputDir, "trials/case-a--champion--r1");
+    assert.equal(JSON.parse(readFileSync(join(trialDir, "inspection.json"), "utf8")).status, dbStatus);
+    assert.equal(JSON.parse(readFileSync(join(trialDir, "result.json"), "utf8")).outcome, "completed");
+    assert.equal(JSON.parse(readFileSync(join(trialDir, "failure.json"), "utf8")).error,
+      "finalize acknowledgement failed");
+    assert.equal(existsSync(join(trialDir, "trial.json")), false);
+  }
+});
+
+test("rejects stale base manifests and dirty source before pointer or model work", async () => {
+  for (const mutate of [
+    (f) => { f.registration.baseManifestHashes.tenant = hash("stale-tenant"); },
+    (f) => { f.registration.baseManifestHashes.team = hash("stale-team"); },
+    (f) => { f.identity.lockfileHash = hash("stale-lockfile"); },
+    (f) => { f.registration.baseManifestHashes.extra = hash("extra"); },
+    (f) => { f.identity.dirtySource = true; },
+  ]) {
+    const f = fixture();
+    mutate(f);
+    writeFileSync(join(f.root, "registration.json"), json(f.registration));
+    const h = harness(f, []);
+    const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+      runnerConnectionPath: "runner.json", outputDir: join(f.root, "out") },
+    { control: h.control, spawn: h.spawn, identity: f.identity });
+    assert.equal(summary.status, "INVALID");
+    assert.equal(h.calls.length, 0);
+  }
+});
+
 test("refuses a stale built engine before pointer or model work", async () => {
   const f = fixture();
   const h = harness(f, []);
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
     runnerConnectionPath: "runner.json", outputDir: join(f.root, "out") },
   { control: h.control, spawn: h.spawn,
-    identity: { engineSha: "different", engineArtifactHash: f.registration.engineArtifactHash } });
+    identity: { ...f.identity, engineSha: "different" } });
   assert.equal(summary.status, "INVALID");
   assert.match(summary.stop.detail, /built engine identity/);
   assert.equal(h.calls.length, 0);
