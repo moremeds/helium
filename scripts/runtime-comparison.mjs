@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline paired analysis: frozen registration + independently bound trial evidence
 // -> a NEW output directory. Never overwrites, never activates, never infers scores.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -15,12 +15,14 @@ if (existsSync(outputDir))
   throw new Error(`output path already exists: ${outputDir}; refusing to overwrite evidence`);
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+// Malformed evidence is still evidence: the original bytes are kept and hashed
+// even when strict parsing fails, so nothing supplied is silently dropped.
 const readJson = (path, errors) => {
   let bytes = null;
   try { bytes = readFileSync(path); } catch (error) { if (error.code !== "ENOENT") errors.push(`${path.split("/").pop()}: ${error.message}`); }
   if (bytes === null) return { bytes: null, value: null };
   try { return { bytes, value: parseStrictJson(bytes.toString("utf8")) }; }
-  catch (error) { errors.push(`${path.split("/").pop()}: ${error.message}`); return { bytes: null, value: null }; }
+  catch (error) { errors.push(`${path.split("/").pop()}: ${error.message}`); return { bytes, value: null }; }
 };
 
 const registrationBytes = readFileSync(registrationPath);
@@ -28,8 +30,10 @@ const registration = parseStrictJson(registrationBytes.toString("utf8"));
 
 const refs = [];
 if (refsDir !== "-")
-  for (const name of readdirSync(refsDir).sort())
-    refs.push({ name, bytes: readFileSync(join(refsDir, name)), sha256: digest(readFileSync(join(refsDir, name))) });
+  for (const name of readdirSync(refsDir).sort()) {
+    const bytes = readFileSync(join(refsDir, name));
+    refs.push({ name, bytes, sha256: digest(bytes) });
+  }
 
 const trials = [];
 for (const label of readdirSync(trialsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()) {
@@ -41,6 +45,7 @@ for (const label of readdirSync(trialsDir, { withFileTypes: true }).filter((entr
   const measurement = readJson(join(dir, "measurement.json"), inputErrors);
   const snapshot = readJson(join(dir, "snapshot.json"), inputErrors);
   const claims = readJson(join(dir, "claims.json"), inputErrors);
+  const usage = readJson(join(dir, "usage.json"), inputErrors);
   const result = readJson(join(dir, "result.json"), inputErrors);
   const failure = readJson(join(dir, "failure.json"), inputErrors);
   if (result.bytes !== null && failure.bytes !== null)
@@ -58,12 +63,13 @@ for (const label of readdirSync(trialsDir, { withFileTypes: true }).filter((entr
     outcome: outcome.value, outcomeSha256: outcome.bytes === null ? null : digest(outcome.bytes),
     outcomeFile: result.bytes !== null ? "result.json" : failure.bytes !== null ? "failure.json" : null,
     claims: claims.value, claimsSha256: claims.bytes === null ? null : digest(claims.bytes),
+    usage: usage.value, usageSha256: usage.bytes === null ? null : digest(usage.bytes),
     finalSha256: finalBytes === null ? null : digest(finalBytes),
     finalLines: finalBytes === null ? null : finalBytes.toString("utf8").split(/\r?\n/),
     inputErrors,
     files: { "trial.json": trial.bytes, "events.json": events.bytes, "review.json": review.bytes,
       "measurement.json": measurement.bytes, "snapshot.json": snapshot.bytes, "claims.json": claims.bytes,
-      "result.json": result.bytes, "failure.json": failure.bytes, "final.txt": finalBytes },
+      "usage.json": usage.bytes, "result.json": result.bytes, "failure.json": failure.bytes, "final.txt": finalBytes },
   });
 }
 
@@ -73,7 +79,7 @@ const result = analyzeComparison({
 });
 
 mkdirSync(outputDir);
-copyFileSync(registrationPath, join(outputDir, "registration.json"));
+writeFileSync(join(outputDir, "registration.json"), registrationBytes, { flag: "wx" });
 mkdirSync(join(outputDir, "inputs"));
 for (const trial of trials) {
   const dir = join(outputDir, "inputs", trial.label);

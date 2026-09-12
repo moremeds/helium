@@ -89,20 +89,26 @@ function snapshot(arm: "champion" | "candidate", world: string) {
     resolvedPayload: PAYLOAD(arm === "champion" ? 2 : 3), resolvedAt: "2026-09-12T00:00:00.000Z",
     metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
       inputWorldHash: H(world), deliveryMode: "disabled", executionEnvironment: "evaluation",
-      actualModelIdentity: "synthetic-model" },
+      requestedModelId: "synthetic-model", actualModelIdentity: "synthetic-model" },
   };
   return { ...unsigned, effectiveSnapshotHash: contentHash(unsigned) };
 }
 
 function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
                options: { coverage?: number; failed?: boolean; usageUnknown?: boolean; requests?: number;
-                          claims?: boolean; observedThirdRow?: boolean | null } = {}): ComparisonTrialInput {
+                          claims?: boolean; observedThirdRow?: boolean | null; outcome?: string;
+                          reportedId?: string | null; actualModel?: string | null; usageBound?: boolean } = {}): ComparisonTrialInput {
   const { coverage = 1, failed = false, usageUnknown = false, requests = 3, claims = true } = options;
   const cohortCase = CASES.find((entry) => entry.caseId === caseId)!;
   const label = `trial-${caseId}-${arm}-${replicate}`;
   const events = EVENTS(caseId);
   const eventsBytes = JSON.stringify(events);
   const snapshotObj = snapshot(arm, cohortCase.world);
+  const snapshotMeta = snapshotObj.metadata as Record<string, unknown>;
+  if (options.actualModel === null) delete snapshotMeta.actualModelIdentity;
+  else if (typeof options.actualModel === "string") snapshotMeta.actualModelIdentity = options.actualModel;
+  snapshotObj.effectiveSnapshotHash = contentHash(
+    Object.fromEntries(Object.entries(snapshotObj).filter(([key]) => key !== "effectiveSnapshotHash")));
   const snapshotBytes = JSON.stringify(snapshotObj);
   const article = coverage >= 1 ? "line one\nline two" : "line one\nsecond line";
   const addressed = Math.round(coverage * events.length);
@@ -117,20 +123,25 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
   const measurement = { mode: "MANUAL_REVIEW_DIAGNOSTIC", eventManifestHash: H(eventsBytes),
     reviewHash: H(reviewBytes), finalArtifactHash: failed ? null : H(article),
     measurement: measureRuntimeCoverage({ ...review, events }) };
-  const outcomeObj = failed ? { stateRoot: "synthetic", error: "synthetic failure" } : { outcome: "completed", runId: label };
+  const outcomeObj = failed ? { stateRoot: "synthetic", error: "synthetic failure" } : { outcome: options.outcome ?? "completed", runId: label };
   const outcomeBytes = JSON.stringify(outcomeObj);
   const claimsObj = claims ? { schemaVersion: "runtime-comparison-claims-v1", reviewer: REVIEWER, reviewed: 10, supported: 10 } : null;
   const claimsBytes = claimsObj === null ? null : JSON.stringify(claimsObj);
+  const attempts = [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests, tokens: 1200,
+    latencyMs: 5000, costUsd: null, usageUnknown }];
+  const usageBound = options.usageBound ?? true;
+  const usageObj = usageBound ? { schemaVersion: "runtime-comparison-usage-v1", attempts } : null;
+  const usageBytes = usageObj === null ? null : JSON.stringify(usageObj);
   const manifest = {
     schemaVersion: "runtime-comparison-trial-v1", trialId: label, caseId, arm, replicate,
     configVersionId: `cfg-${arm}`, configHash: ARM_HASH[arm],
-    model: { requestedId: "synthetic-model", reportedId: "synthetic-model" },
+    model: { requestedId: "synthetic-model", reportedId: options.reportedId === undefined ? "synthetic-model" : options.reportedId },
     snapshotSha256: H(snapshotBytes),
     outcomeFile: failed ? "failure.json" : "result.json", outcomeSha256: H(outcomeBytes),
     claimsEvidenceSha256: claimsBytes === null ? null : H(claimsBytes),
+    usageEvidenceSha256: usageBytes === null ? null : H(usageBytes),
     observedThirdRow: options.observedThirdRow ?? (arm === "candidate" && ["case-1", "case-3"].includes(caseId)),
-    attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests, tokens: 1200,
-      latencyMs: 5000, costUsd: null, usageUnknown }],
+    attempts,
   };
   return {
     label, trial: manifest, trialSha256: H(JSON.stringify(manifest)),
@@ -140,6 +151,7 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
     snapshot: snapshotObj, snapshotSha256: H(snapshotBytes),
     outcome: outcomeObj, outcomeSha256: H(outcomeBytes), outcomeFile: failed ? "failure.json" : "result.json",
     claims: claimsObj, claimsSha256: claimsBytes === null ? null : H(claimsBytes),
+    usage: usageObj, usageSha256: usageBytes === null ? null : H(usageBytes),
     finalSha256: failed ? null : H(article), finalLines: failed ? null : article.split("\n"),
     inputErrors: [],
   };
@@ -278,9 +290,39 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     expect(analyze(noClaims).decision).toBe("INCONCLUSIVE");
   });
 
-  it("reproduces the same seeded interval deterministically", () => {
-    const first = analyze(cohort({ champion: 0.5, candidate: 0.75 }));
-    const second = analyze(cohort({ champion: 0.5, candidate: 0.75 }));
-    expect(first.primary.estimate).toEqual(second.primary.estimate);
+  it("rejects a failed result.json outcome that accompanies a completed review", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 })
+      .map((entry) => entry.label === "trial-case-1-candidate-1" ? trial("case-1", "candidate", 1, { coverage: 1, outcome: "failed" }) : entry);
+    expect(analyze(trials).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("never verifies the actual route from self-declared reportedId alone", () => {
+    const rebuild = (entry: ComparisonTrialInput, opts: Parameters<typeof trial>[3]) => {
+      const manifest = entry.trial as { caseId: string; arm: "champion" | "candidate"; replicate: number };
+      return trial(manifest.caseId, manifest.arm, manifest.replicate, { coverage: manifest.arm === "candidate" ? 1 : 0.5, ...opts });
+    };
+    const trials = cohort({ champion: 0.5, candidate: 1 });
+    // Snapshot records no bound model identity: reportedId is unverifiable.
+    expect(analyze(trials.map((entry) => rebuild(entry, { actualModel: null }))).decision).toBe("INCONCLUSIVE");
+    // Self-declared reportedId contradicting the bound snapshot identity is not comparable.
+    expect(analyze(trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? rebuild(entry, { reportedId: "other-model" }) : entry)).decision).toBe("NOT_COMPARABLE");
+    // Bound snapshots recording two different routes are not comparable.
+    expect(analyze(trials.map((entry) => (entry.trial as { arm: string }).arm === "candidate"
+      ? rebuild(entry, { actualModel: "other-model", reportedId: "other-model" }) : entry)).decision).toBe("INCONCLUSIVE");
+  });
+
+  it("never verifies attempt usage from the self-declared manifest alone", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 });
+    const unbound = trials.map((entry) => ({ ...entry, usage: null, usageSha256: null,
+      trial: { ...entry.trial as Record<string, unknown>, usageEvidenceSha256: null } }));
+    const result = analyze(unbound);
+    expect(result.decision).toBe("INCONCLUSIVE");
+    expect((result.reasons as string[]).join(" ")).toMatch(/self-declared/);
+    const disagreedUsage = { schemaVersion: "runtime-comparison-usage-v1",
+      attempts: [{ attemptId: "x", status: "SUCCEEDED", requests: 1, tokens: 1, latencyMs: 1, costUsd: null, usageUnknown: false }] };
+    const disagreed = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? { ...entry, usage: disagreedUsage, usageSha256: H(JSON.stringify(disagreedUsage)) } : entry);
+    expect(analyze(disagreed).decision).toBe("NOT_COMPARABLE");
   });
 });

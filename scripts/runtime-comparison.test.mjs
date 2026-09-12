@@ -44,16 +44,19 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       configurationApprovalId: "synthetic", resolvedPayload: payload(arm === "champion" ? 2 : 3),
       resolvedAt: "2026-09-12T00:00:00.000Z",
       metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("engine"), inputWorldHash: H(worlds[caseId]),
-        deliveryMode: "disabled", executionEnvironment: "evaluation" } };
+        deliveryMode: "disabled", executionEnvironment: "evaluation",
+        requestedModelId: "synthetic-model", actualModelIdentity: "synthetic-model" } };
     const snapshot = { ...snapshotBase, effectiveSnapshotHash: contentHash(snapshotBase) };
     const result = { outcome: "completed", runId: label };
     const claims = { schemaVersion: "runtime-comparison-claims-v1", reviewer, reviewed: 4, supported: 4 };
+    const attempts = [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests: 2, tokens: 900, latencyMs: 1000, costUsd: null, usageUnknown: false }];
+    const usage = { schemaVersion: "runtime-comparison-usage-v1", attempts };
     const manifest = { schemaVersion: "runtime-comparison-trial-v1", trialId: label, caseId, arm, replicate: 1,
       configVersionId: `cfg-${arm}`, configHash: armHash[arm],
       model: { requestedId: "synthetic-model", reportedId: "synthetic-model" },
       snapshotSha256: H(json(snapshot)), outcomeFile: "result.json", outcomeSha256: H(json(result)),
-      claimsEvidenceSha256: H(json(claims)), observedThirdRow: thirdRow,
-      attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests: 2, tokens: 900, latencyMs: 1000, costUsd: null, usageUnknown: false }] };
+      claimsEvidenceSha256: H(json(claims)), usageEvidenceSha256: H(json(usage)), observedThirdRow: thirdRow,
+      attempts };
     writeFileSync(join(td, "trial.json"), json(manifest));
     writeFileSync(join(td, "events.json"), json(events));
     writeFileSync(join(td, "review.json"), json(review));
@@ -61,6 +64,7 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
     writeFileSync(join(td, "snapshot.json"), json(snapshot));
     writeFileSync(join(td, "result.json"), json(result));
     writeFileSync(join(td, "claims.json"), json(claims));
+    writeFileSync(join(td, "usage.json"), json(usage));
     writeFileSync(join(td, "final.txt"), article);
   };
   writeTrial("case-1", "champion", 0, false);
@@ -127,4 +131,12 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(readFileSync(join(dir, "out2/comparison.json"), "utf8")).decision, "NOT_COMPARABLE");
   assert.equal(readFileSync(join(outDir, "comparison.json"), "utf8"), before);
+
+  // Malformed evidence bytes are never dropped: a file that fails strict parsing is
+  // still hashed, copied into the new output directory and counted not comparable.
+  writeFileSync(join(trialsDir, "case-2-candidate/events.json"), "not-json{{{");
+  const third = run(join(dir, "out3"));
+  assert.equal(third.status, 0, third.stderr);
+  assert.equal(JSON.parse(readFileSync(join(dir, "out3/comparison.json"), "utf8")).decision, "NOT_COMPARABLE");
+  assert.equal(readFileSync(join(dir, "out3/inputs/case-2-candidate/events.json"), "utf8"), "not-json{{{");
 });

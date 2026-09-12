@@ -13,7 +13,7 @@ or authorization.
   pure analysis over parsed bytes + caller-computed SHA-256 values.
 - `scripts/runtime-comparison.mjs` — CLI wrapper; hashes, preserves and copies
   original bytes.
-- `plugins/option-wizard/tests/runtime-comparison.spec.ts` — 15 synthetic
+- `plugins/option-wizard/tests/runtime-comparison.spec.ts` — 17 synthetic
   mechanism checks (vitest unit project).
 - `scripts/runtime-comparison.test.mjs` — end-to-end command check
   (`node --test`, requires `pnpm build` first).
@@ -27,7 +27,9 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
 - `<trials-dir>` holds one subdirectory per trial. Recognized files:
   `trial.json` (required manifest), `snapshot.json`, `result.json` or
   `failure.json`, `events.json`, `review.json`, `measurement.json`,
-  `final.txt`, `claims.json`.
+  `final.txt`, `claims.json`, `usage.json`. A file that exists but fails
+  strict parsing is still hashed and copied into `inputs/` — malformed
+  evidence is never dropped — and counts the trial not comparable.
 - `<refs-dir>` holds byte-identified evidence artifacts matched to registered
   hashes; `-` supplies none (confirmation then stays INCONCLUSIVE).
 - `<new-output-dir>` must not exist; the command refuses to overwrite. It
@@ -62,12 +64,28 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
 - **trial.json** (`runtime-comparison-trial-v1`): `{trialId, caseId, arm:
   "champion"|"candidate", replicate, configVersionId, configHash, model:
   {requestedId, reportedId}, snapshotSha256, outcomeFile, outcomeSha256,
-  claimsEvidenceSha256|null, observedThirdRow, attempts[]}` where each
-  attempt is `{attemptId,
+  claimsEvidenceSha256|null, usageEvidenceSha256|null, observedThirdRow,
+  attempts[]}` where each attempt is `{attemptId,
   status: SUCCEEDED|FAILED|UNKNOWN, requests, tokens, latencyMs, costUsd,
   usageUnknown}`. `observedThirdRow` records the treatment exposure actually
   observed; for confirmation a missing value is inconclusive evidence and a
-  contradicting value is not comparable.
+  contradicting value is not comparable. `model.reportedId` and `attempts[]`
+  are self-declared: they verify nothing by themselves.
+- **usage.json** (`runtime-comparison-usage-v1`): the execution
+  environment's `{attempts[]}` record, bound via
+  `trial.json.usageEvidenceSha256` and required to reproduce the manifest
+  attempts exactly. Only bound usage verifies a registered resource limit;
+  unbound usage keeps resource conclusions unverified and the comparison
+  inconclusive.
+- **snapshot metadata**: `requestedModelId` (when recorded) must equal the
+  manifest's declared requested model; `actualModelIdentity` is the only
+  bound source for the actual route. A manifest `reportedId` that
+  contradicts it is not comparable; a missing bound identity leaves the
+  route unknown.
+- **outcome agreement**: `result.json` must carry a recognized `outcome`
+  string consistent with the review state in both directions — a completed
+  review cannot accompany a failed outcome and vice versa; `failure.json`
+  cannot accompany a completed review.
 - **snapshot.json**: the actual `RuntimeSnapshot` from the runtime-control
   path. Its `effectiveSnapshotHash` and `configHash` self-integrity are
   recomputed; `metadata.inputWorldHash` must equal the world registered for
@@ -135,10 +153,27 @@ Applied on top of `e62572d`, no amend/reset:
 - A/A output reports estimate and interval relative to zero as a diagnostic;
   it no longer asserts that a nonzero interval proves bias.
 
+Second correction round (CLI follow-up):
+
+- `readJson` keeps the raw buffer on parse failure (`bytes` retained,
+  `value: null`, error recorded), so malformed input bytes survive into the
+  copied `inputs/` and provenance.
+- Reference and registration bytes are read once; the persisted copy and the
+  reported hash always come from the same buffer.
+- `result.json` now requires a recognized outcome agreeing with the review
+  state in both directions; `outcome: "failed"` plus a completed review is
+  not comparable.
+- `model.reportedId` and manifest `attempts[]` are self-declared only: the
+  actual route is bound from `snapshot.metadata.actualModelIdentity`, the
+  declared requested model is compared to `snapshot.metadata.requestedModelId`
+  when recorded, and attempt usage verifies a registered limit only when a
+  bound `usage.json` reproduces it. Unverifiable routes/usage stay
+  INCONCLUSIVE; nothing invents provider identity or hidden usage.
+
 ## Checks run
 
 - `pnpm build` — clean.
-- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 15/15.
+- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 17/17.
 - `node --test scripts/runtime-comparison.test.mjs` — 1/1.
 - `pnpm test` (full unit suite) — 1343 passed, 5 skipped, no regressions.
 

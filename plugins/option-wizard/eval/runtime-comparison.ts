@@ -44,6 +44,9 @@ export interface ComparisonTrialInput {
   outcomeFile: "result.json" | "failure.json" | null;
   claims: unknown;
   claimsSha256: string | null;
+  /** Parsed usage.json session/attempt evidence, if supplied. */
+  usage: unknown;
+  usageSha256: string | null;
   finalSha256: string | null;
   finalLines: string[] | null;
   /** Files that existed but failed to parse, e.g. "review.json: not strict JSON". */
@@ -179,6 +182,8 @@ const trialSchema = z.strictObject({
   outcomeFile: z.enum(["result.json", "failure.json"]),
   outcomeSha256: sha,
   claimsEvidenceSha256: nullableSha,
+  /** Hash of the bound usage/session evidence artifact; null = attempt accounting is self-declared only. */
+  usageEvidenceSha256: nullableSha,
   /** Whether a third eligible row actually entered this trial's context; null = not recorded. */
   observedThirdRow: z.boolean().nullable(),
   attempts: z.array(attemptSchema).min(1),
@@ -193,6 +198,13 @@ const claimsSchema = z.strictObject({
   supported: z.number().int().min(0),
 });
 
+// Raw per-attempt usage recorded by the execution environment, bound by hash;
+// the self-declared manifest attempts must reproduce it exactly.
+const usageSchema = z.strictObject({
+  schemaVersion: z.literal("runtime-comparison-usage-v1"),
+  attempts: z.array(attemptSchema).min(1),
+});
+
 const snapshotSchema = z.object({
   scope: z.object({ tenant: text, phase: text, kind: text, environment: z.literal("test") }),
   configVersionId: text,
@@ -204,6 +216,8 @@ const snapshotSchema = z.object({
     inputWorldHash: sha,
     deliveryMode: text,
     executionEnvironment: text,
+    requestedModelId: text.optional(),
+    actualModelIdentity: nullableText.optional(),
   }),
   effectiveSnapshotHash: sha,
 });
@@ -280,6 +294,10 @@ interface EvaluatedTrial {
   unresolvedCriticalDisagreement: boolean;
   claims: { reviewed: number; supported: number } | null;
   usage: { requests: number | null; tokens: number | null; latencyMs: number | null; costUsd: number | null; unknownAttempts: boolean };
+  /** True only when a bound usage.json reproduced the declared attempts. */
+  usageVerified: boolean;
+  /** Actual route bound from snapshot metadata; null when the snapshot records none. */
+  actualModel: string | null;
 }
 
 function sumAttempts(attempts: ParsedTrial["attempts"], pick: (attempt: ParsedTrial["attempts"][number]) => number | null): number | null {
@@ -357,13 +375,14 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   const evaluated: EvaluatedTrial[] = [];
   const seenKeys = new Set<string>();
   const seenTrialIds = new Set<string>();
-  const reportedModels = new Set<string>();
+  const actualModels = new Set<string>();
   const payloads: Partial<Record<Arm, unknown>> = {};
 
   for (const raw of input.trials) {
     for (const [file, hashValue] of [["trial.json", raw.trialSha256], ["events.json", raw.eventsSha256], ["review.json", raw.reviewSha256],
       ["measurement.json", raw.measurementSha256], ["snapshot.json", raw.snapshotSha256],
-      [raw.outcomeFile ?? "outcome", raw.outcomeSha256], ["claims.json", raw.claimsSha256], ["final.txt", raw.finalSha256]] as const)
+      [raw.outcomeFile ?? "outcome", raw.outcomeSha256], ["claims.json", raw.claimsSha256],
+      ["usage.json", raw.usageSha256], ["final.txt", raw.finalSha256]] as const)
       if (hashValue !== null) provenance.push({ name: `${raw.label}/${file}`, sha256: hashValue, role: "trial-input" });
 
     let parsed: ParsedTrial;
@@ -395,7 +414,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       unknownAttempts: parsed.attempts.some((attempt) => attempt.status === "UNKNOWN" || attempt.usageUnknown),
     };
     const trial: EvaluatedTrial = { parsed, status: "unresolved", coverage: null, verifiedCritical: 0,
-      unresolvedCriticalDisagreement: false, claims: null, usage };
+      unresolvedCriticalDisagreement: false, claims: null, usage, usageVerified: false, actualModel: null };
     evaluated.push(trial);
 
     if (raw.inputErrors.length > 0) { notComparable.push(`${parsed.trialId}: ${raw.inputErrors.join("; ")}`); continue; }
@@ -437,7 +456,15 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         throw new Error("snapshot scope is outside the registered target deployment");
       if (parsed.model.requestedId !== registration.actualModelIdentityPlan.requestedModelId)
         throw new Error("requested model is not the registered model identity plan");
-      if (parsed.model.reportedId !== null) reportedModels.add(parsed.model.reportedId);
+      if (snapshot.metadata.requestedModelId !== undefined && snapshot.metadata.requestedModelId !== parsed.model.requestedId)
+        throw new Error("snapshot requested model does not match the declared requested model");
+      // The actual route is accepted only from bound snapshot metadata; a self-declared
+      // reportedId must agree with it but can never verify it.
+      const boundModel = snapshot.metadata.actualModelIdentity ?? null;
+      if (parsed.model.reportedId !== null && boundModel !== null && parsed.model.reportedId !== boundModel)
+        throw new Error("declared reported model contradicts the bound snapshot model identity");
+      trial.actualModel = boundModel;
+      if (boundModel !== null) actualModels.add(boundModel);
       // Actual treatment exposure must be recorded and consistent with the slice assigned before generation.
       if (mode === "CONFIRMATION_2V3") {
         const expected = parsed.arm === "candidate" && ev.treatmentSlices.withThirdEligibleRowCaseIds.includes(parsed.caseId);
@@ -455,11 +482,18 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     // Measurement chain: supplied files must reproduce the bound diagnostic measurement.
     if (!unbound && !measurementMissing) try {
       const review = raw.review as Record<string, unknown>;
-      const outcomeCompleted = raw.outcomeFile === "result.json" && (raw.outcome as Record<string, unknown>).outcome === "completed";
+      // Outcome agreement in both directions: a recognized outcome must match the review state.
+      if (raw.outcomeFile === "result.json") {
+        const outcomeValue = (raw.outcome as Record<string, unknown>).outcome;
+        if (typeof outcomeValue !== "string" || outcomeValue.length === 0)
+          throw new Error("result.json carries no recognized outcome");
+        if (review.completed === true && outcomeValue !== "completed")
+          throw new Error(`result.json outcome "${outcomeValue}" cannot accompany a completed review`);
+        if (review.completed === false && outcomeValue === "completed")
+          throw new Error("result.json reports completed but the review claims failed generation");
+      }
       if (raw.outcomeFile === "failure.json" && review.completed !== false)
         throw new Error("failure.json outcome cannot accompany a completed review");
-      if (outcomeCompleted && review.completed === false)
-        throw new Error("result.json reports completed but the review claims failed generation");
       const measurement = parse(z.strictObject({
         mode: z.literal("MANUAL_REVIEW_DIAGNOSTIC"),
         eventManifestHash: sha, reviewHash: sha, finalArtifactHash: nullableSha, measurement: z.unknown(),
@@ -514,6 +548,19 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         trial.claims = { reviewed: claims.reviewed, supported: claims.supported };
       } catch (error) { notComparable.push(`${parsed.trialId}: ${(error as Error).message}`); }
     } else if (raw.claims != null) notComparable.push(`${parsed.trialId}: undeclared claims.json was supplied without a binding hash`);
+
+    // Attempt accounting is self-declared in trial.json; it is verified only when a bound
+    // usage/session artifact reproduces it exactly. Otherwise usage stays unverified.
+    if (parsed.usageEvidenceSha256 !== null) {
+      if (raw.usage == null) inconclusive.push(`${parsed.trialId}: declared usage evidence is not supplied`);
+      else try {
+        if (raw.usageSha256 !== parsed.usageEvidenceSha256) throw new Error("usage.json bytes do not match the declared usageEvidenceSha256");
+        const evidence = parse(usageSchema, raw.usage, "usage evidence");
+        if (canonicalJson(evidence.attempts) !== canonicalJson(parsed.attempts))
+          throw new Error("bound usage evidence disagrees with the declared attempt accounting");
+        trial.usageVerified = true;
+      } catch (error) { notComparable.push(`${parsed.trialId}: ${(error as Error).message}`); }
+    } else if (raw.usage != null) notComparable.push(`${parsed.trialId}: undeclared usage.json was supplied without a binding hash`);
   }
 
   // The two arms' bound payloads may differ only at the registered changed paths.
@@ -535,11 +582,12 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   if (missing.length > 0)
     inconclusive.push(`${missing.length} registered trial(s) have no supplied measurement: ${missing.map((entry) => `${entry.caseId}/${entry.arm}#${entry.replicate}`).join(", ")}`);
 
-  // Model identity compatibility: one reported route across all trials of both arms.
-  if (reportedModels.size > 1)
-    inconclusive.push(`trials report multiple actual model identities (${[...reportedModels].join(", ")}); ROUTE_ONLY identity is not comparable`);
-  if (evaluated.some((entry) => entry.status !== "unresolved" && entry.parsed.model.reportedId === null))
-    inconclusive.push("at least one measured trial lacks a reported model identity; the actual route is unknown");
+  // Model identity compatibility: one bound route across all trials of both arms.
+  // Self-declared reportedId alone never verifies the actual model.
+  if (actualModels.size > 1)
+    inconclusive.push(`bound snapshots record multiple actual model identities (${[...actualModels].join(", ")}); the actual route is not comparable`);
+  if (evaluated.some((entry) => entry.status !== "unresolved" && entry.actualModel === null))
+    inconclusive.push("at least one measured trial has no bound snapshot model identity; the actual route is unknown");
 
   // Aggregate: replicates within case-arm, then paired case differences, then equal-weight clusters.
   const byKey = new Map(evaluated.map((entry) => [`${entry.parsed.caseId}${entry.parsed.arm}${entry.parsed.replicate}`, entry]));
@@ -608,6 +656,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         requests: sum((entry) => entry.usage.requests), tokens: sum((entry) => entry.usage.tokens),
         latencyMs: sum((entry) => entry.usage.latencyMs), costUsd: sum((entry) => entry.usage.costUsd),
         unknown: trials.some((entry) => usageUnknown(entry)) || trials.length < registeredCount,
+        bound: trials.length === registeredCount && trials.every((entry) => entry.usageVerified),
         attempts: trials.flatMap((entry) => entry.parsed.attempts.map((attempt) => ({ trialId: entry.parsed.trialId, ...attempt }))),
       },
     };
@@ -647,6 +696,8 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   const policy = registration.resourcePolicy;
   const resources: Record<string, unknown> = {};
   const anyUnknownUsage = evaluated.some((entry) => usageUnknown(entry)) || missing.length > 0;
+  // Self-declared manifest usage alone cannot verify or violate a registered limit.
+  const usageBound = missing.length === 0 && evaluated.length > 0 && evaluated.every((entry) => entry.usageVerified);
   const perTrial = (pick: (usage: EvaluatedTrial["usage"]) => number | null) => {
     let max: number | null = 0;
     for (const trial of evaluated) {
@@ -658,10 +709,11 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   };
   const limitCheck = (name: string, dimension: "requests" | "tokens" | "latencyMs" | "costUsd", limit: number | null, observed: number | null) => {
     if (limit === null) { resources[name] = { declared: false, measured: measured.has(dimension), observed }; return; }
-    const pass = observed === null ? null : observed <= limit;
+    const pass = observed === null || !usageBound ? null : observed <= limit;
     resources[name] = { limit, observed, pass };
     if (pass === false) violations.push(`${name} exceeded: observed ${observed} over the registered ${limit}`);
-    if (pass === null) inconclusive.push(`${name} cannot be verified: usage accounting is unknown`);
+    if (pass === null)
+      inconclusive.push(`${name} cannot be verified: ${observed === null ? "usage accounting is unknown" : "attempt usage is self-declared without bound source evidence"}`);
   };
   const tokensMax = perTrial((usage) => usage.tokens);
   const callsMax = perTrial((usage) => usage.requests);
@@ -730,6 +782,8 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       inconclusive.push(`${arm}: at least one measurement has unknown verdicts or unadjudicated rows`);
   }
   if (anyUnknownUsage) inconclusive.push("usage accounting is unknown or incomplete; unknown cost is never zero");
+  if (evaluated.some((entry) => !entry.usageVerified))
+    inconclusive.push("attempt usage is self-declared without bound usage.json source evidence; resource conclusions are unverified");
 
   // Primary paired interval plus the two treatment slices defined before generation.
   const intervalArgs = [ev.intervalImplementation.seed, ev.intervalImplementation.replicates, ev.alpha] as const;
@@ -778,7 +832,8 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       "Manual review validity, evaluator qualification and holdout lineage are bound only by byte-identical artifacts and registered references; this analysis cannot itself establish semantic truth.",
       `The paired interval is the registered fixed implementation (${INTERVAL_METHOD}); it requires preregistration and calibration and is not automatically scientifically qualified.`,
       "Coverage scores reuse the manual review semantics of the coverage command; unresolved judgment is unknown, never zero or tie.",
-      "Model identity is ROUTE_ONLY: requested and reported identities are recorded, never promoted to a pinned revision.",
+      "Model identity is ROUTE_ONLY: the actual route is accepted only from bound snapshot metadata; a self-declared reportedId alone does not verify it and nothing is promoted to a pinned revision.",
+      "Attempt usage values are retained as declared; a resource conclusion is verified only against a bound usage.json session artifact, and unmeasured dimensions are reported as unmeasured, never fabricated.",
     ],
     registration: { experimentId: registration.experimentId, sha256: input.registrationSha256 },
     inventory: {
