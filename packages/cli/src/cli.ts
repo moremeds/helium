@@ -26,6 +26,7 @@ import {
 } from "@helium/core";
 import type { ControlConnection } from "@helium/runtime-control";
 import { runRuntimePilot } from "./runtime-pilot.js";
+import { captureRuntimeSources } from "./runtime-capture.js";
 import { parseRunArgs } from "./args.js";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
@@ -246,6 +247,21 @@ async function main(argv: string[]): Promise<number> {
   // Before the first fetch, so no provider probe goes out unproxied.
   applyProxy(env);
 
+  if (command === "runtime-capture") {
+    const { values } = parseArgs({ args: argv.slice(2), options: {
+      tool: { type: "string" }, phase: { type: "string", default: "premarket" },
+    } });
+    if (!argument || !values.tool)
+      throw new Error("usage: helium runtime-capture <tenant> --tool <entry-tool> [--phase <phase>]");
+    const tenant = loadTenants(tenantsDir(env)).tenants.find(entry => entry.spec.tenant === argument);
+    if (!tenant || !tenant.spec.enabled) throw new Error("Capture tenant is missing or disabled");
+    const result = await captureRuntimeSources({ tenant, entryTool: values.tool, phase: values.phase!, env });
+    console.log(JSON.stringify({ stateRoot: result.stateRoot, status: result.status,
+      sourceCount: result.sourceCount, sourceFailureCount: result.sourceFailureCount,
+      recordingFailureCount: result.recordingFailureCount, replayAsOf: result.replayAsOf }, null, 2));
+    return result.status === "COMPLETE" ? 0 : 1;
+  }
+
   if (command === "audit") {
     if (argument === undefined) {
       console.error("usage: helium audit <run-id>");
@@ -352,6 +368,7 @@ async function main(argv: string[]): Promise<number> {
     [
       "usage:",
       "  helium runtime-pilot <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> [--phase <phase>]",
+      "  helium runtime-capture <tenant> --tool <entry-tool> [--phase <phase>]",
       "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>] [--model-pin <targetId>]",
       "      run one tenant's team once. --as-of replays a past instant: it becomes",
       "      the run's clock, and every tool that has no history for it says so",
