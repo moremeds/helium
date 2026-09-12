@@ -13,7 +13,7 @@ or authorization.
   pure analysis over parsed bytes + caller-computed SHA-256 values.
 - `scripts/runtime-comparison.mjs` — CLI wrapper; hashes, preserves and copies
   original bytes.
-- `plugins/option-wizard/tests/runtime-comparison.spec.ts` — 11 synthetic
+- `plugins/option-wizard/tests/runtime-comparison.spec.ts` — 15 synthetic
   mechanism checks (vitest unit project).
 - `scripts/runtime-comparison.test.mjs` — end-to-end command check
   (`node --test`, requires `pnpm build` first).
@@ -42,22 +42,36 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
   "REGISTERED"`): the frozen form of `pilot-experiment.template.json` plus
   `comparisonMode` (`AA_DIAGNOSTIC` | `CONFIRMATION_2V3`), a
   `confirmationCohort.cases[]` list of `{caseId, clusterId,
-  eventManifestHash}`, `evaluation.manualReview` (`requiredReviewerIdentity`,
+  eventManifestHash, inputWorldHash}` (each case binds its own input world;
+  `replay.inputCorpusHash` must equal the hash of the ordered case/world
+  manifest), `evaluation.manualReview` (`requiredReviewerIdentity`,
   `requiredRubricHash`), and `evaluation.intervalImplementation` =
   `{method:"paired-cluster-bootstrap-v1", seed, replicates}`. All statistical
   parameters (seed, replicates, alpha, minimumPracticalEffect,
   independentClusterCount, replicatesPerCase, noninferiority margins, resource
   limits, rationales) must be supplied; there are no defaults. Slices must
-  partition the cohort exactly.
+  partition the cohort exactly. `decisionFamilyId` and `holdoutCohortId` are
+  identifiers, not hashes; their associated evidence is bound separately.
+  `resourcePolicy.measured` explicitly registers which dimensions
+  (`requests|tokens|latencyMs|costUsd`) are actually measured; a limit may
+  only target a measured dimension, unmeasured dimensions must stay
+  unmeasured (never fabricated), and confirmation requires finite
+  `perTrialCallLimit`, `timeoutSeconds` and `totalCallLimit` with `requests`
+  and `latencyMs` measured. Ledger/calendar/world-completeness references are
+  byte-bound artifacts when confirmation depends on them.
 - **trial.json** (`runtime-comparison-trial-v1`): `{trialId, caseId, arm:
   "champion"|"candidate", replicate, configVersionId, configHash, model:
   {requestedId, reportedId}, snapshotSha256, outcomeFile, outcomeSha256,
-  claimsEvidenceSha256|null, attempts[]}` where each attempt is `{attemptId,
+  claimsEvidenceSha256|null, observedThirdRow, attempts[]}` where each
+  attempt is `{attemptId,
   status: SUCCEEDED|FAILED|UNKNOWN, requests, tokens, latencyMs, costUsd,
-  usageUnknown}`.
+  usageUnknown}`. `observedThirdRow` records the treatment exposure actually
+  observed; for confirmation a missing value is inconclusive evidence and a
+  contradicting value is not comparable.
 - **snapshot.json**: the actual `RuntimeSnapshot` from the runtime-control
   path. Its `effectiveSnapshotHash` and `configHash` self-integrity are
-  recomputed; `metadata.inputWorldHash`, `engineSha`, `engineArtifactHash`,
+  recomputed; `metadata.inputWorldHash` must equal the world registered for
+  that trial's own case, `engineSha`, `engineArtifactHash`,
   `deliveryMode: "disabled"`, `executionEnvironment: "evaluation"` and scope
   must equal the registered values. For `CONFIRMATION_2V3`, the two arms'
   `resolvedPayload`s must be identical outside `changedPaths`.
@@ -91,14 +105,42 @@ Aggregation is replicates-within-case (mean), case paired difference, then
 equal-weight cluster differences with the seeded percentile bootstrap. A
 failed legitimate generation scores 0 and counts as a reliability failure;
 missing or unresolved evidence is unknown, never zero or tie. All-attempt
-requests/tokens/latency/cost are preserved per arm including UNKNOWN.
+requests/tokens/latency/cost are preserved per arm including UNKNOWN;
+dimensions absent from `resourcePolicy.measured` are reported as unmeasured
+rather than zero. In A/A mode the estimate and interval are reported relative
+to zero as a diagnostic only: random sampling produces nonzero estimates, so
+a nonzero interval is not evidence of bias by itself.
+
+## Corrections (lead review of e62572d)
+
+Applied on top of `e62572d`, no amend/reset:
+
+- Per-case `inputWorldHash` is now bound per case; the aggregate corpus hash
+  covers the ordered case/world manifest, so distinct multi-date worlds are
+  supported and reordering or a wrong-world trial fails binding.
+- Confirmation now requires supplied, hash-matched artifacts for the world
+  completeness receipt, ledger snapshot, calendar snapshot, treatment
+  exposure record and the previously listed evaluator/lineage/rubric
+  references; anything missing stays INCONCLUSIVE.
+- `decisionFamilyId` and `holdoutCohortId` are treated as identifiers
+  (required, never hash-checked); only real artifact references are
+  byte-bound.
+- `resourcePolicy.measured` is the registered measured basis: limits may
+  only target measured dimensions, unmeasured USD is reported as unmeasured
+  rather than fabricated, tokens are retained and reported without a hard
+  output-token cap, and confirmation requires finite enforceable
+  calls/time limits.
+- `trial.json.observedThirdRow` records actual treatment exposure; missing
+  exposure is INCONCLUSIVE, contradictory exposure is NOT_COMPARABLE.
+- A/A output reports estimate and interval relative to zero as a diagnostic;
+  it no longer asserts that a nonzero interval proves bias.
 
 ## Checks run
 
 - `pnpm build` — clean.
-- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 11/11.
-- `node --test scripts/runtime-comparison.test.mjs scripts/runtime-coverage.test.mjs` — 2/2.
-- `pnpm test` (full unit suite) — 1339 passed, 5 skipped, no regressions.
+- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 15/15.
+- `node --test scripts/runtime-comparison.test.mjs` — 1/1.
+- `pnpm test` (full unit suite) — 1343 passed, 5 skipped, no regressions.
 
 ## Explicit limits
 

@@ -12,11 +12,13 @@ import { measureRuntimeCoverage } from "../eval/runtime-coverage.js";
 const H = (bytes: string) => createHash("sha256").update(bytes).digest("hex");
 const contentHash = (value: unknown) => H(canonicalJson(value));
 
+// Multi-date cohort: each case binds its own input world; the corpus hash is
+// the hash of the ordered case/world manifest.
 const CASES = [
-  { caseId: "case-1", clusterId: "cluster-1" },
-  { caseId: "case-2", clusterId: "cluster-1" },
-  { caseId: "case-3", clusterId: "cluster-2" },
-  { caseId: "case-4", clusterId: "cluster-2" },
+  { caseId: "case-1", clusterId: "cluster-1", world: "world-2026-09-08" },
+  { caseId: "case-2", clusterId: "cluster-1", world: "world-2026-09-09" },
+  { caseId: "case-3", clusterId: "cluster-2", world: "world-2026-09-10" },
+  { caseId: "case-4", clusterId: "cluster-2", world: "world-2026-09-11" },
 ];
 const EVENTS = (caseId: string) => [
   { id: `${caseId}-ev1`, evidenceRefs: [`${caseId}-src1`] },
@@ -25,11 +27,10 @@ const EVENTS = (caseId: string) => [
 const PAYLOAD = (perStock: number) => ({ tenant: "option-wizard", phase: "premarket", config: { news: { perStock } } });
 const ARM_HASH = { champion: contentHash(PAYLOAD(2)), candidate: contentHash(PAYLOAD(3)) };
 const REVIEWER = { identity: "synthetic-independent-reviewer", rubricHash: H("synthetic-rubric") };
-const INPUT_WORLD = H("synthetic-input-world");
 
-const refNames = ["evaluator", "qualification", "policy", "lineage", "rubric", "decision-family",
-  "cohort", "exposure", "validity", "aa", "arm-order"];
-const REFS = refNames.map((name) => ({ name: `${name}.json`, sha256: H(`synthetic-${name}`) }));
+const ARTIFACT_REFS = ["evaluator", "qualification", "policy", "lineage", "rubric", "world-receipt",
+  "ledger", "calendar", "exposure", "validity", "aa", "arm-order"];
+const REFS = ARTIFACT_REFS.map((name) => ({ name: `${name}.json`, sha256: H(`synthetic-${name}`) }));
 const refHash = (name: string) => REFS.find((ref) => ref.name === `${name}.json`)!.sha256;
 
 function registration(overrides: Record<string, unknown> = {}) {
@@ -37,7 +38,8 @@ function registration(overrides: Record<string, unknown> = {}) {
     evaluatorHash: refHash("evaluator"), qualificationHash: refHash("qualification"),
     promotionPolicyHash: refHash("policy"), primaryMetric: "coverage.final",
     minimumPracticalEffect: 0.1, alpha: 0.05, independentClusterCount: 2, replicatesPerCase: 2,
-    decisionFamilyId: refHash("decision-family"), holdoutCohortId: refHash("cohort"),
+    // Identifiers are IDs, not byte-bindable artifacts.
+    decisionFamilyId: "family-m2-premarket", holdoutCohortId: "cohort-confirmation-2026-09",
     holdoutLineageHash: refHash("lineage"), criticalErrorsMaximum: 0,
     claimsSupportedNonInferiorityMargin: 0.05, reliabilityNonInferiorityMargin: 0.05,
     decisionRule: "paired-cluster-lower-bound-min-effect",
@@ -59,12 +61,17 @@ function registration(overrides: Record<string, unknown> = {}) {
     changedPaths: ["/config/news/perStock"],
     engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
     baseManifestHashes: { tenant: H("tenant"), team: H("team") },
-    replay: { mode: "SNAPSHOT_PIPELINE", inputCorpusHash: INPUT_WORLD,
-      ledgerSnapshotHash: H("ledger"), calendarHash: H("calendar"), worldCompletenessReceipt: H("world") },
+    replay: { mode: "SNAPSHOT_PIPELINE",
+      inputCorpusHash: contentHash(CASES.map((entry) => ({ caseId: entry.caseId, inputWorldHash: H(entry.world) }))),
+      ledgerSnapshotHash: refHash("ledger"), calendarHash: refHash("calendar"), worldCompletenessReceipt: refHash("world-receipt") },
     evaluation,
-    confirmationCohort: { cases: CASES.map((entry) => ({ ...entry, eventManifestHash: H(JSON.stringify(EVENTS(entry.caseId))) })) },
-    resourcePolicy: { perTrialTokenLimit: 10000, perTrialCallLimit: 10, timeoutSeconds: 120,
-      totalTokenLimit: 1000000, totalCallLimit: 500, costIncreaseLimit: 1, latencyIncreaseLimit: 1,
+    confirmationCohort: { cases: CASES.map((entry) => ({ caseId: entry.caseId, clusterId: entry.clusterId,
+      eventManifestHash: H(JSON.stringify(EVENTS(entry.caseId))), inputWorldHash: H(entry.world) })) },
+    // Subscription-style basis: requests and time are measured and enforceable; tokens are
+    // measured and reported without a hard cap; USD is not measured and must not be limited.
+    resourcePolicy: { measured: ["requests", "tokens", "latencyMs"],
+      perTrialTokenLimit: null, perTrialCallLimit: 10, timeoutSeconds: 120,
+      totalTokenLimit: null, totalCallLimit: 500, costIncreaseLimit: null, latencyIncreaseLimit: 1,
       aggregationRule: "all-attempts-summed" },
     actualModelIdentityPlan: { requestedModelId: "synthetic-model" },
     targetDeployment: { tenant: "option-wizard", phase: "premarket", environment: "test", kind: "product" },
@@ -74,26 +81,28 @@ function registration(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function snapshot(arm: "champion" | "candidate", configVersionId: string) {
+function snapshot(arm: "champion" | "candidate", world: string) {
   const unsigned = {
     scope: { tenant: "option-wizard", phase: "premarket", kind: "product", environment: "test" },
-    configVersionId, configHash: ARM_HASH[arm],
+    configVersionId: `cfg-${arm}`, configHash: ARM_HASH[arm],
     deploymentRevision: 7, configurationApprovalId: "synthetic-approval",
     resolvedPayload: PAYLOAD(arm === "champion" ? 2 : 3), resolvedAt: "2026-09-12T00:00:00.000Z",
     metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
-      inputWorldHash: INPUT_WORLD, deliveryMode: "disabled", executionEnvironment: "evaluation",
+      inputWorldHash: H(world), deliveryMode: "disabled", executionEnvironment: "evaluation",
       actualModelIdentity: "synthetic-model" },
   };
   return { ...unsigned, effectiveSnapshotHash: contentHash(unsigned) };
 }
 
 function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
-               options: { coverage?: number; failed?: boolean; usageUnknown?: boolean; tokens?: number; claims?: boolean } = {}): ComparisonTrialInput {
-  const { coverage = 1, failed = false, usageUnknown = false, tokens = 1200, claims = true } = options;
+               options: { coverage?: number; failed?: boolean; usageUnknown?: boolean; requests?: number;
+                          claims?: boolean; observedThirdRow?: boolean | null } = {}): ComparisonTrialInput {
+  const { coverage = 1, failed = false, usageUnknown = false, requests = 3, claims = true } = options;
+  const cohortCase = CASES.find((entry) => entry.caseId === caseId)!;
   const label = `trial-${caseId}-${arm}-${replicate}`;
   const events = EVENTS(caseId);
   const eventsBytes = JSON.stringify(events);
-  const snapshotObj = snapshot(arm, arm === "champion" ? "cfg-champion" : "cfg-candidate");
+  const snapshotObj = snapshot(arm, cohortCase.world);
   const snapshotBytes = JSON.stringify(snapshotObj);
   const article = coverage >= 1 ? "line one\nline two" : "line one\nsecond line";
   const addressed = Math.round(coverage * events.length);
@@ -114,13 +123,14 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
   const claimsBytes = claimsObj === null ? null : JSON.stringify(claimsObj);
   const manifest = {
     schemaVersion: "runtime-comparison-trial-v1", trialId: label, caseId, arm, replicate,
-    configVersionId: arm === "champion" ? "cfg-champion" : "cfg-candidate", configHash: ARM_HASH[arm],
+    configVersionId: `cfg-${arm}`, configHash: ARM_HASH[arm],
     model: { requestedId: "synthetic-model", reportedId: "synthetic-model" },
     snapshotSha256: H(snapshotBytes),
     outcomeFile: failed ? "failure.json" : "result.json", outcomeSha256: H(outcomeBytes),
     claimsEvidenceSha256: claimsBytes === null ? null : H(claimsBytes),
-    attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests: 3, tokens,
-      latencyMs: 5000, costUsd: 0.01, usageUnknown }],
+    observedThirdRow: options.observedThirdRow ?? (arm === "candidate" && ["case-1", "case-3"].includes(caseId)),
+    attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests, tokens: 1200,
+      latencyMs: 5000, costUsd: null, usageUnknown }],
   };
   return {
     label, trial: manifest, trialSha256: H(JSON.stringify(manifest)),
@@ -144,10 +154,11 @@ const analyze = (trials: ComparisonTrialInput[], reg = registration(), refs = RE
   analyzeComparison({ registration: reg, registrationSha256: H(JSON.stringify(reg)), refs, trials });
 
 describe("runtime paired comparison (synthetic mechanism evidence only)", () => {
-  it("reaches REVIEW_READY only when every binding and declared requirement holds", () => {
+  it("reaches REVIEW_READY with distinct per-case worlds and an unmeasured-USD basis", () => {
     const result = analyze(cohort({ champion: 0.5, candidate: 1 }));
     expect(result.decision).toBe("REVIEW_READY");
     expect(result.primary.estimate.meanDiff).toBe(0.5);
+    expect(result.arms.candidate.usage.costUsd).toBeNull(); // unmeasured, reported, never faked
     expect(result.slices.withThirdEligibleRow.cases).toBe(2);
     expect(result.provenance.files.length).toBeGreaterThan(0);
   });
@@ -169,6 +180,7 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     const result = analyze(trials, reg);
     expect(result.decision).not.toBe("REVIEW_READY");
     expect(result.decision).not.toBe("INVALID");
+    expect((result.reasons as string[]).join(" ")).toMatch(/diagnostic/);
   });
 
   it("counts failed generation as zero coverage and a reliability failure", () => {
@@ -209,7 +221,7 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     expect(analyze(trials).decision).toBe("INCONCLUSIVE");
   });
 
-  it("refuses tampered review bytes and unregistered engine or input identity", () => {
+  it("refuses tampered review bytes and a case-bound world mismatch", () => {
     const trials = cohort({ champion: 0.5, candidate: 1 });
     const tampered = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
       ? { ...entry, reviewSha256: H("tampered") } : entry);
@@ -221,16 +233,49 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     expect(analyze(wrongWorld).decision).toBe("NOT_COMPARABLE");
   });
 
-  it("rejects a registered resource-limit violation", () => {
-    const trials = cohort({ champion: 0.5, candidate: 1 }, { tokens: 99999 });
+  it("rejects a corpus hash that does not match the ordered case/world manifest", () => {
+    const reg = registration();
+    reg.replay.inputCorpusHash = H("not-the-manifest");
+    expect(analyze(cohort({ champion: 0.5, candidate: 1 }), reg).decision).toBe("INVALID");
+  });
+
+  it("stays INCONCLUSIVE when completeness, ledger or calendar artifacts are not supplied", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 });
+    const withoutLedger = REFS.filter((ref) => ref.name !== "ledger.json");
+    expect(analyze(trials, registration(), withoutLedger).decision).toBe("INCONCLUSIVE");
+    const reg = registration();
+    reg.replay.worldCompletenessReceipt = null;
+    expect(analyze(trials, reg).decision).toBe("INCONCLUSIVE");
+  });
+
+  it("requires recorded treatment exposure consistent with the registered slice", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 });
+    const unrecorded = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? { ...entry, trial: { ...entry.trial as Record<string, unknown>, observedThirdRow: null } } : entry);
+    expect(analyze(unrecorded).decision).toBe("INCONCLUSIVE");
+    const contradicted = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? { ...entry, trial: { ...entry.trial as Record<string, unknown>, observedThirdRow: false } } : entry);
+    expect(analyze(contradicted).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("rejects a registered resource-limit violation on an enforceable dimension", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 }, { requests: 99 });
     expect(analyze(trials).decision).toBe("REJECT");
   });
 
-  it("stays INCONCLUSIVE when confirmation evidence or usage accounting is missing", () => {
+  it("rejects a registration that limits an unmeasured dimension", () => {
+    const reg = registration();
+    reg.resourcePolicy.costIncreaseLimit = 1; // costUsd is not in the measured basis
+    expect(analyze(cohort({ champion: 0.5, candidate: 1 }), reg).decision).toBe("INVALID");
+  });
+
+  it("stays INCONCLUSIVE when confirmation evidence or measured usage accounting is missing", () => {
     const trials = cohort({ champion: 0.5, candidate: 1 });
     expect(analyze(trials, registration(), []).decision).toBe("INCONCLUSIVE");
     const unknownUsage = cohort({ champion: 0.5, candidate: 1 }, { usageUnknown: true });
     expect(analyze(unknownUsage).decision).toBe("INCONCLUSIVE");
+    const noClaims = cohort({ champion: 0.5, candidate: 1 }, { claims: false });
+    expect(analyze(noClaims).decision).toBe("INCONCLUSIVE");
   });
 
   it("reproduces the same seeded interval deterministically", () => {

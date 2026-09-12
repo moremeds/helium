@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { canonicalJson, parseStrictJson } from "../packages/core/lib/index.js";
+import { canonicalJson } from "../packages/core/lib/index.js";
 import { measureRuntimeCoverage } from "../plugins/option-wizard/lib/eval/runtime-coverage.js";
 
 const H = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -25,10 +25,10 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
   const eventsOf = (caseId) => [{ id: `${caseId}-ev`, evidenceRefs: [`${caseId}-src`] }];
   const payload = (perStock) => ({ tenant: "option-wizard", phase: "premarket", config: { news: { perStock } } });
   const armHash = { champion: contentHash(payload(2)), candidate: contentHash(payload(3)) };
-  const world = H("synthetic world");
+  const worlds = { "case-1": "world-a", "case-2": "world-b" };
   const reviewer = { identity: "synthetic reviewer", rubricHash };
 
-  const writeTrial = (caseId, clusterCase, arm, coverage) => {
+  const writeTrial = (caseId, arm, coverage, thirdRow) => {
     const label = `${caseId}-${arm}`;
     const td = join(trialsDir, label);
     mkdirSync(td);
@@ -43,7 +43,7 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       configVersionId: `cfg-${arm}`, configHash: armHash[arm], deploymentRevision: 1,
       configurationApprovalId: "synthetic", resolvedPayload: payload(arm === "champion" ? 2 : 3),
       resolvedAt: "2026-09-12T00:00:00.000Z",
-      metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("engine"), inputWorldHash: world,
+      metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("engine"), inputWorldHash: H(worlds[caseId]),
         deliveryMode: "disabled", executionEnvironment: "evaluation" } };
     const snapshot = { ...snapshotBase, effectiveSnapshotHash: contentHash(snapshotBase) };
     const result = { outcome: "completed", runId: label };
@@ -52,8 +52,8 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       configVersionId: `cfg-${arm}`, configHash: armHash[arm],
       model: { requestedId: "synthetic-model", reportedId: "synthetic-model" },
       snapshotSha256: H(json(snapshot)), outcomeFile: "result.json", outcomeSha256: H(json(result)),
-      claimsEvidenceSha256: H(json(claims)),
-      attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests: 2, tokens: 900, latencyMs: 1000, costUsd: 0.01, usageUnknown: false }] };
+      claimsEvidenceSha256: H(json(claims)), observedThirdRow: thirdRow,
+      attempts: [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests: 2, tokens: 900, latencyMs: 1000, costUsd: null, usageUnknown: false }] };
     writeFileSync(join(td, "trial.json"), json(manifest));
     writeFileSync(join(td, "events.json"), json(events));
     writeFileSync(join(td, "review.json"), json(review));
@@ -63,10 +63,10 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
     writeFileSync(join(td, "claims.json"), json(claims));
     writeFileSync(join(td, "final.txt"), article);
   };
-  for (const caseId of ["case-1", "case-2"]) {
-    writeTrial(caseId, null, "champion", 0);
-    writeTrial(caseId, null, "candidate", 1);
-  }
+  writeTrial("case-1", "champion", 0, false);
+  writeTrial("case-1", "candidate", 1, true);
+  writeTrial("case-2", "champion", 0, false);
+  writeTrial("case-2", "candidate", 1, false);
 
   const registration = {
     schemaVersion: "runtime-comparison-registration-v1", status: "REGISTERED",
@@ -75,12 +75,14 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
     candidate: { configVersionId: "cfg-candidate", configHash: armHash.candidate },
     changedPaths: ["/config/news/perStock"],
     engineSha: "synthetic-engine", engineArtifactHash: H("engine"), baseManifestHashes: {},
-    replay: { mode: "SNAPSHOT_PIPELINE", inputCorpusHash: world, ledgerSnapshotHash: null, calendarHash: null, worldCompletenessReceipt: null },
+    replay: { mode: "SNAPSHOT_PIPELINE",
+      inputCorpusHash: contentHash([{ caseId: "case-1", inputWorldHash: H("world-a") }, { caseId: "case-2", inputWorldHash: H("world-b") }]),
+      ledgerSnapshotHash: refHash("ledger"), calendarHash: refHash("calendar"), worldCompletenessReceipt: refHash("receipt") },
     evaluation: {
       evaluatorHash: refHash("evaluator"), qualificationHash: refHash("qualification"), promotionPolicyHash: refHash("policy"),
       primaryMetric: "coverage.final", minimumPracticalEffect: 0.2, alpha: 0.05,
       independentClusterCount: 2, replicatesPerCase: 1,
-      decisionFamilyId: refHash("family"), holdoutCohortId: refHash("cohort"), holdoutLineageHash: refHash("lineage"),
+      decisionFamilyId: "family-synthetic", holdoutCohortId: "cohort-synthetic", holdoutLineageHash: refHash("lineage"),
       criticalErrorsMaximum: 0, claimsSupportedNonInferiorityMargin: 0.05, reliabilityNonInferiorityMargin: 0.05,
       decisionRule: "paired-cluster-lower-bound-min-effect",
       intervalImplementation: { method: "paired-cluster-bootstrap-v1", seed: 7, replicates: 100 },
@@ -92,11 +94,11 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       manualEvidenceValidityReviewRef: refHash("validity"), holdoutExposureRecordRef: refHash("exposure"),
     },
     confirmationCohort: { cases: [
-      { caseId: "case-1", clusterId: "cluster-1", eventManifestHash: H(json(eventsOf("case-1"))) },
-      { caseId: "case-2", clusterId: "cluster-2", eventManifestHash: H(json(eventsOf("case-2"))) },
+      { caseId: "case-1", clusterId: "cluster-1", eventManifestHash: H(json(eventsOf("case-1"))), inputWorldHash: H("world-a") },
+      { caseId: "case-2", clusterId: "cluster-2", eventManifestHash: H(json(eventsOf("case-2"))), inputWorldHash: H("world-b") },
     ] },
-    resourcePolicy: { perTrialTokenLimit: 5000, perTrialCallLimit: 5, timeoutSeconds: 60,
-      totalTokenLimit: 100000, totalCallLimit: 100, costIncreaseLimit: 1, latencyIncreaseLimit: 1,
+    resourcePolicy: { measured: ["requests", "tokens", "latencyMs"], perTrialTokenLimit: null, perTrialCallLimit: 5,
+      timeoutSeconds: 60, totalTokenLimit: null, totalCallLimit: 100, costIncreaseLimit: null, latencyIncreaseLimit: 1,
       aggregationRule: "all-attempts-summed" },
     actualModelIdentityPlan: { requestedModelId: "synthetic-model" },
     targetDeployment: { tenant: "option-wizard", phase: "premarket", environment: "test", kind: "product" },

@@ -89,7 +89,7 @@ const registrationSchema = z.strictObject({
     inputCorpusHash: sha,
     ledgerSnapshotHash: nullableSha,
     calendarHash: nullableSha,
-    worldCompletenessReceipt: nullableText,
+    worldCompletenessReceipt: nullableSha,
   }),
   evaluation: z.strictObject({
     evaluatorHash: sha,
@@ -128,9 +128,11 @@ const registrationSchema = z.strictObject({
     unresolvedCriticalDisagreement: z.literal("INCONCLUSIVE"),
   }),
   confirmationCohort: z.strictObject({
-    cases: z.array(z.strictObject({ caseId: text, clusterId: text, eventManifestHash: sha })).min(1),
+    cases: z.array(z.strictObject({ caseId: text, clusterId: text, eventManifestHash: sha, inputWorldHash: sha })).min(1),
   }),
   resourcePolicy: z.strictObject({
+    /** Dimensions the runtime actually measured; a limit may exist only for a measured dimension. */
+    measured: z.array(z.enum(["requests", "tokens", "latencyMs", "costUsd"])),
     perTrialTokenLimit: z.number().int().min(1).nullable(),
     perTrialCallLimit: z.number().int().min(1).nullable(),
     timeoutSeconds: finite.gt(0).nullable(),
@@ -150,6 +152,8 @@ const registrationSchema = z.strictObject({
   deliveryWave: z.literal("M2"),
   activationMode: z.literal("MANUAL_REVIEW_ONLY"),
 });
+
+type Registration = z.infer<typeof registrationSchema>;
 
 const attemptSchema = z.strictObject({
   attemptId: text,
@@ -175,6 +179,8 @@ const trialSchema = z.strictObject({
   outcomeFile: z.enum(["result.json", "failure.json"]),
   outcomeSha256: sha,
   claimsEvidenceSha256: nullableSha,
+  /** Whether a third eligible row actually entered this trial's context; null = not recorded. */
+  observedThirdRow: z.boolean().nullable(),
   attempts: z.array(attemptSchema).min(1),
 });
 
@@ -273,7 +279,7 @@ interface EvaluatedTrial {
   verifiedCritical: number;
   unresolvedCriticalDisagreement: boolean;
   claims: { reviewed: number; supported: number } | null;
-  usage: { requests: number | null; tokens: number | null; latencyMs: number | null; costUsd: number | null; unknown: boolean };
+  usage: { requests: number | null; tokens: number | null; latencyMs: number | null; costUsd: number | null; unknownAttempts: boolean };
 }
 
 function sumAttempts(attempts: ParsedTrial["attempts"], pick: (attempt: ParsedTrial["attempts"][number]) => number | null): number | null {
@@ -324,6 +330,29 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   if (mode === "AA_DIAGNOSTIC" && (registration.champion.configHash !== registration.candidate.configHash || registration.changedPaths.length > 0))
     invalid.push("A/A diagnostic requires the same arm configuration and no changed paths");
 
+  // The registered corpus hash is the hash of the ordered case/world manifest; each case may keep its own world.
+  const corpusManifest = registration.confirmationCohort.cases.map((entry) => ({ caseId: entry.caseId, inputWorldHash: entry.inputWorldHash }));
+  if (contentHash(corpusManifest) !== registration.replay.inputCorpusHash)
+    invalid.push("replay.inputCorpusHash must equal the hash of the ordered case/world manifest");
+
+  // Resource basis consistency: no limits on unmeasured dimensions; confirmation keeps finite enforceable calls/time.
+  const measured = new Set(registration.resourcePolicy.measured);
+  const limitDimensions: Array<[keyof Registration["resourcePolicy"], "requests" | "tokens" | "latencyMs" | "costUsd"]> = [
+    ["perTrialTokenLimit", "tokens"], ["perTrialCallLimit", "requests"], ["timeoutSeconds", "latencyMs"],
+    ["totalTokenLimit", "tokens"], ["totalCallLimit", "requests"], ["costIncreaseLimit", "costUsd"],
+    ["latencyIncreaseLimit", "latencyMs"],
+  ];
+  for (const [field, dimension] of limitDimensions)
+    if (registration.resourcePolicy[field] !== null && !measured.has(dimension))
+      invalid.push(`resourcePolicy.${field} limits an unmeasured dimension (${dimension} is not in measured)`);
+  if (mode === "CONFIRMATION_2V3") {
+    if (!measured.has("requests") || !measured.has("latencyMs"))
+      invalid.push("confirmation requires a measured basis covering calls and time");
+    if (registration.resourcePolicy.perTrialCallLimit === null || registration.resourcePolicy.timeoutSeconds === null ||
+        registration.resourcePolicy.totalCallLimit === null)
+      invalid.push("confirmation requires finite perTrialCallLimit, timeoutSeconds and totalCallLimit");
+  }
+
   const caseById = new Map(registration.confirmationCohort.cases.map((entry) => [entry.caseId, entry]));
   const evaluated: EvaluatedTrial[] = [];
   const seenKeys = new Set<string>();
@@ -363,7 +392,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       tokens: sumAttempts(parsed.attempts, (attempt) => attempt.tokens),
       latencyMs: sumAttempts(parsed.attempts, (attempt) => attempt.latencyMs),
       costUsd: sumAttempts(parsed.attempts, (attempt) => attempt.costUsd),
-      unknown: parsed.attempts.some((attempt) => attempt.status === "UNKNOWN" || attempt.usageUnknown),
+      unknownAttempts: parsed.attempts.some((attempt) => attempt.status === "UNKNOWN" || attempt.usageUnknown),
     };
     const trial: EvaluatedTrial = { parsed, status: "unresolved", coverage: null, verifiedCritical: 0,
       unresolvedCriticalDisagreement: false, claims: null, usage };
@@ -396,8 +425,8 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       if (snapshot.configHash !== identity.configHash || snapshot.configVersionId !== identity.configVersionId ||
           parsed.configHash !== identity.configHash || parsed.configVersionId !== identity.configVersionId)
         throw new Error(`bound config is not the registered ${parsed.arm} identity`);
-      if (snapshot.metadata.inputWorldHash !== registration.replay.inputCorpusHash)
-        throw new Error("snapshot input world is not the registered input corpus");
+      if (snapshot.metadata.inputWorldHash !== cohortCase!.inputWorldHash)
+        throw new Error("snapshot input world is not the registered world for this case");
       if (snapshot.metadata.engineSha !== registration.engineSha || snapshot.metadata.engineArtifactHash !== registration.engineArtifactHash)
         throw new Error("snapshot engine identity is not the registered engine");
       if (snapshot.metadata.deliveryMode !== "disabled" || snapshot.metadata.executionEnvironment !== "evaluation")
@@ -409,6 +438,14 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       if (parsed.model.requestedId !== registration.actualModelIdentityPlan.requestedModelId)
         throw new Error("requested model is not the registered model identity plan");
       if (parsed.model.reportedId !== null) reportedModels.add(parsed.model.reportedId);
+      // Actual treatment exposure must be recorded and consistent with the slice assigned before generation.
+      if (mode === "CONFIRMATION_2V3") {
+        const expected = parsed.arm === "candidate" && ev.treatmentSlices.withThirdEligibleRowCaseIds.includes(parsed.caseId);
+        if (parsed.observedThirdRow === null)
+          inconclusive.push(`${parsed.trialId}: treatment exposure (third eligible row in context) was not recorded`);
+        else if (parsed.observedThirdRow !== expected)
+          throw new Error(`observed third-row exposure contradicts the registered slice assignment (expected ${expected})`);
+      }
       if (payloads[parsed.arm] === undefined) payloads[parsed.arm] = snapshot.resolvedPayload;
     } catch (error) {
       notComparable.push(`${parsed.trialId}: ${(error as Error).message}`);
@@ -539,6 +576,10 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     inconclusive.push("fewer than two independent clusters are paired; a one-cluster interval would be degenerate");
 
   // Reliability and usage accounting over every registered trial; all attempts preserved.
+  // A dimension absent from the registered measured basis is reported but never "unknown";
+  // a measured dimension with missing values is unknown usage, never zero.
+  const usageUnknown = (trial: EvaluatedTrial) =>
+    trial.usage.unknownAttempts || [...measured].some((dimension) => trial.usage[dimension] === null);
   const armSummary = (arm: Arm) => {
     const trials = evaluated.filter((entry) => entry.parsed.arm === arm);
     const registeredCount = registration.confirmationCohort.cases.length * ev.replicatesPerCase;
@@ -566,7 +607,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
       usage: {
         requests: sum((entry) => entry.usage.requests), tokens: sum((entry) => entry.usage.tokens),
         latencyMs: sum((entry) => entry.usage.latencyMs), costUsd: sum((entry) => entry.usage.costUsd),
-        unknown: trials.some((entry) => entry.usage.unknown) || trials.length < registeredCount,
+        unknown: trials.some((entry) => usageUnknown(entry)) || trials.length < registeredCount,
         attempts: trials.flatMap((entry) => entry.parsed.attempts.map((attempt) => ({ trialId: entry.parsed.trialId, ...attempt }))),
       },
     };
@@ -605,7 +646,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
 
   const policy = registration.resourcePolicy;
   const resources: Record<string, unknown> = {};
-  const anyUnknownUsage = evaluated.some((entry) => entry.usage.unknown) || missing.length > 0;
+  const anyUnknownUsage = evaluated.some((entry) => usageUnknown(entry)) || missing.length > 0;
   const perTrial = (pick: (usage: EvaluatedTrial["usage"]) => number | null) => {
     let max: number | null = 0;
     for (const trial of evaluated) {
@@ -615,8 +656,8 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     }
     return max;
   };
-  const limitCheck = (name: string, limit: number | null, observed: number | null) => {
-    if (limit === null) { resources[name] = { declared: false, observed }; return; }
+  const limitCheck = (name: string, dimension: "requests" | "tokens" | "latencyMs" | "costUsd", limit: number | null, observed: number | null) => {
+    if (limit === null) { resources[name] = { declared: false, measured: measured.has(dimension), observed }; return; }
     const pass = observed === null ? null : observed <= limit;
     resources[name] = { limit, observed, pass };
     if (pass === false) violations.push(`${name} exceeded: observed ${observed} over the registered ${limit}`);
@@ -625,12 +666,12 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
   const tokensMax = perTrial((usage) => usage.tokens);
   const callsMax = perTrial((usage) => usage.requests);
   const latencyMax = perTrial((usage) => usage.latencyMs);
-  limitCheck("perTrialTokenLimit", policy.perTrialTokenLimit, tokensMax);
-  limitCheck("perTrialCallLimit", policy.perTrialCallLimit, callsMax);
-  limitCheck("perTrialWallTimeMs", policy.timeoutSeconds === null ? null : policy.timeoutSeconds * 1000, latencyMax);
-  limitCheck("totalTokenLimit", policy.totalTokenLimit,
+  limitCheck("perTrialTokenLimit", "tokens", policy.perTrialTokenLimit, tokensMax);
+  limitCheck("perTrialCallLimit", "requests", policy.perTrialCallLimit, callsMax);
+  limitCheck("perTrialWallTimeMs", "latencyMs", policy.timeoutSeconds === null ? null : policy.timeoutSeconds * 1000, latencyMax);
+  limitCheck("totalTokenLimit", "tokens", policy.totalTokenLimit,
     arms.champion.usage.tokens === null || arms.candidate.usage.tokens === null ? null : arms.champion.usage.tokens + arms.candidate.usage.tokens);
-  limitCheck("totalCallLimit", policy.totalCallLimit,
+  limitCheck("totalCallLimit", "requests", policy.totalCallLimit,
     arms.champion.usage.requests === null || arms.candidate.usage.requests === null ? null : arms.champion.usage.requests + arms.candidate.usage.requests);
   const meanPerTrial = (arm: Arm, pick: (usage: EvaluatedTrial["usage"]) => number | null) => {
     const trials = evaluated.filter((entry) => entry.parsed.arm === arm);
@@ -645,35 +686,39 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     if (championMean === 0) return candidateMean === 0 ? 0 : Number.POSITIVE_INFINITY;
     return (candidateMean - championMean) / championMean;
   };
-  limitCheck("costIncreaseLimit", policy.costIncreaseLimit, relativeIncrease((usage) => usage.costUsd));
-  limitCheck("latencyIncreaseLimit", policy.latencyIncreaseLimit, relativeIncrease((usage) => usage.latencyMs));
+  limitCheck("costIncreaseLimit", "costUsd", policy.costIncreaseLimit, relativeIncrease((usage) => usage.costUsd));
+  limitCheck("latencyIncreaseLimit", "latencyMs", policy.latencyIncreaseLimit, relativeIncrease((usage) => usage.latencyMs));
   constraints.resources = resources;
 
-  // Confirmation evidence: declared references must resolve to supplied, hash-matched artifacts.
+  // Confirmation evidence: artifact references must be SHA-256 values resolving to supplied
+  // bytes; identifiers are identifiers and are required but never hashed.
   if (mode === "CONFIRMATION_2V3") {
     const refHashes = new Map(input.refs.map((ref) => [ref.sha256, ref.name]));
     const missingEvidence: string[] = [];
-    const requireRef = (name: string, value: string | null, byteBound: boolean) => {
+    const requireArtifact = (name: string, value: string | null) => {
       if (value === null) { missingEvidence.push(`${name} is not registered`); return; }
-      if (byteBound && !refHashes.has(value)) missingEvidence.push(`${name} artifact bytes were not supplied`);
-      if (!byteBound && !HASH.test(value)) missingEvidence.push(`${name} is declared but cannot be byte-bound`);
-      if (!byteBound && HASH.test(value) && !refHashes.has(value)) missingEvidence.push(`${name} artifact bytes were not supplied`);
+      if (!HASH.test(value)) { missingEvidence.push(`${name} is not a byte-bindable SHA-256 reference`); return; }
+      if (!refHashes.has(value)) missingEvidence.push(`${name} artifact bytes were not supplied`);
     };
-    requireRef("evaluator", ev.evaluatorHash, true);
-    requireRef("evaluator qualification", ev.qualificationHash, true);
-    requireRef("promotion policy", ev.promotionPolicyHash, true);
-    requireRef("holdout lineage", ev.holdoutLineageHash, true);
-    requireRef("manual review rubric", ev.manualReview.requiredRubricHash, true);
-    requireRef("decision family", ev.decisionFamilyId, false);
-    requireRef("holdout cohort", ev.holdoutCohortId, false);
-    requireRef("holdout exposure record", ev.holdoutExposureRecordRef, false);
-    requireRef("manual evidence validity review", ev.manualEvidenceValidityReviewRef, false);
-    requireRef("A/A calibration evidence", ev.aaCalibrationEvidence, false);
-    requireRef("arm order randomization plan", ev.armOrderRandomizationPlan, false);
+    const requireId = (name: string, value: string | null) => {
+      if (value === null) missingEvidence.push(`${name} is not registered`);
+    };
+    requireArtifact("evaluator", ev.evaluatorHash);
+    requireArtifact("evaluator qualification", ev.qualificationHash);
+    requireArtifact("promotion policy", ev.promotionPolicyHash);
+    requireArtifact("holdout lineage", ev.holdoutLineageHash);
+    requireArtifact("world completeness receipt", registration.replay.worldCompletenessReceipt);
+    requireArtifact("ledger snapshot", registration.replay.ledgerSnapshotHash);
+    requireArtifact("calendar snapshot", registration.replay.calendarHash);
+    requireArtifact("manual review rubric", ev.manualReview.requiredRubricHash);
+    requireArtifact("holdout exposure record", ev.holdoutExposureRecordRef);
+    requireArtifact("manual evidence validity review", ev.manualEvidenceValidityReviewRef);
+    requireArtifact("A/A calibration evidence", ev.aaCalibrationEvidence);
+    requireArtifact("arm order randomization plan", ev.armOrderRandomizationPlan);
+    requireId("decision family", ev.decisionFamilyId);
+    requireId("holdout cohort", ev.holdoutCohortId);
     if (ev.claimsSupportedNonInferiorityMargin === null) missingEvidence.push("claims noninferiority margin is not registered");
     if (ev.reliabilityNonInferiorityMargin === null) missingEvidence.push("reliability noninferiority margin is not registered");
-    for (const [name, limit] of Object.entries(policy))
-      if (name !== "aggregationRule" && limit === null) missingEvidence.push(`resource policy ${name} is not frozen`);
     if (missingEvidence.length > 0)
       inconclusive.push(`confirmation lacks frozen, byte-bound evidence: ${missingEvidence.join(", ")}`);
   }
@@ -725,7 +770,7 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     reasons.push("all registered requirements and byte-bound evidence hold; awaiting human review, never activation");
   }
   if (mode === "AA_DIAGNOSTIC" && primary.interval !== null)
-    reasons.push(`A/A noise check: paired cluster difference ${primary.meanDiff} in [${primary.interval.lower}, ${primary.interval.upper}] — a nonzero interval signals measurement or pairing bias, not a real effect`);
+    reasons.push(`A/A diagnostic estimate ${primary.meanDiff} with interval [${primary.interval.lower}, ${primary.interval.upper}]; its relation to zero is a diagnostic observation only — random sampling produces nonzero estimates and even an interval excluding zero can be an expected false positive, so this alone neither proves nor rules out measurement bias`);
 
   return {
     schemaVersion: "runtime-comparison-result-v1", decision, mode, reasons,
