@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { WorkOrder } from "@helium/core";
 import { ExecutionTargetId } from "@helium/core";
-import type { AcpChild } from "./acp.js";
-import createDevinEvaluation, { ISOLATION_CONFIG } from "./evaluation.js";
+import { DevinAcpClient, type AcpChild } from "./acp.js";
+import createDevinEvaluation, { ISOLATION_CONFIG, ISOLATION_PROFILE } from "./evaluation.js";
 
 interface Stub extends AcpChild {
   stdout: EventEmitter;
@@ -95,7 +95,7 @@ function make(outputDir: string, child: Stub, limits?: object) {
   const spawned: { argv: string[]; env: Record<string, string>; cwd: string }[] = [];
   const evaluation = createDevinEvaluation({
     outputDir,
-    model: "swe-2-max",
+    model: "swe-2-high",
     env: {
       HOME: "/home/test", PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-secret",
       OPENAI_API_KEY: "sk-secret-2", HTTPS_PROXY: "http://127.0.0.1:7897",
@@ -121,8 +121,8 @@ const work = (over: Partial<WorkOrder> = {}): WorkOrder => ({
 });
 
 const selection = (extra?: Record<string, unknown>) => ({
-  targetId: ExecutionTargetId("devin-subscription:swe-2-max"),
-  model: "swe-2-max",
+  targetId: ExecutionTargetId("devin-subscription:swe-2-high"),
+  model: "swe-2-high",
   options: { ...(extra ?? {}) },
 });
 
@@ -171,7 +171,7 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
     // request-1.json was reserved BEFORE the frame went out, state UNKNOWN.
     const reserved = readJson(dir, "request-1.json");
     expect(reserved.state).toBe("UNKNOWN");
-    expect(reserved.requestedModel).toBe("swe-2-max");
+    expect(reserved.requestedModel).toBe("swe-2-high");
     const wire = readFileSync(join(dir, "wire.ndjson"), "utf8")
       .trim().split("\n").map((l) => JSON.parse(l) as { dir: string; frame: string });
     expect(wire.some((r) => r.dir === "out" && r.frame.includes('"method":"session/prompt"'))).toBe(true);
@@ -196,7 +196,7 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
     const { evaluation, spawned } = make(dir, child);
     await evaluation.provider.run!(work(), selection(), new AbortController().signal);
     expect(spawned).toHaveLength(1);
-    expect(child.argv).toEqual(["devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-max"]);
+    expect(child.argv).toEqual(["/usr/bin/sandbox-exec", "-p", ISOLATION_PROFILE, "-D", "GLOBAL_SKILLS=/home/test/.agents/skills", "devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-high"]);
     expect(child.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(child.env.OPENAI_API_KEY).toBeUndefined();
     expect(child.env.XDG_CONFIG_HOME).toBe(join(dir, "xdg-config"));
@@ -241,6 +241,26 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
     const eventTypes = out.events.map((e) => e.type);
     expect(eventTypes).toContain("tool/call");
     expect(eventTypes).toContain("tool/result");
+  });
+
+  it("keeps a budget stop before turn two FAILED with settled usage", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "devin-eval-"));
+    const tool = echoTool();
+    const child = stubChild({ promptText: '{"tool_calls":[{"name":"helium.echo","arguments":{}}]}' });
+    const { evaluation } = make(dir, child, { maxRequests: 1 });
+    await expect(evaluation.provider.run!(work({ constraints: { tools: [tool.name], mutations: "forbidden", minIsolationClass: "process" } }), selection({ tools: [tool] }), new AbortController().signal)).rejects.toThrow("maxRequests");
+    expect(tool.run).toHaveBeenCalledTimes(1);
+    expect(evaluation.summary()).toMatchObject({ unknown: false, requestCount: 1, inputTokens: 10, outputTokens: 3 });
+    expect(child.written.filter(line => line.includes('"session/prompt"'))).toHaveLength(1);
+    const failure = readdirSync(dir).find(name => name.startsWith("failure-"))!;
+    expect(readJson(dir, failure).state).toBe("FAILED");
+  });
+
+  it("supports deep-reasoning role selection only on the observed High route", () => {
+    const { evaluation } = make(mkdtempSync(join(tmpdir(), "devin-eval-")), stubChild({}));
+    expect(evaluation.provider.models.map(model => model.id)).toEqual(["swe-2-high"]);
+    expect(evaluation.provider.capabilities).toEqual(expect.arrayContaining(["reason.deep", "long.context", "tool.use", "structured.output"]));
+    expect(() => createDevinEvaluation({ outputDir: mkdtempSync(join(tmpdir(), "devin-eval-")), model: "swe-2-max", env: {}, limits: { maxRequests: 1, timeoutMs: 1000, maxRequestBytes: 1000 } })).toThrow("swe-2-high");
   });
 
   it("never executes a tool the role did not declare and reports the rejection", async () => {
@@ -315,10 +335,21 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
       evaluation.provider.run!(work(), selection(), new AbortController().signal),
     ).rejects.toThrow(/envelope/i);
     const summary = evaluation.summary();
-    expect(summary.unknown).toBe(true);
+    expect(summary.unknown).toBe(false);
     const failureName = readdirSync(dir).find((n) => n.startsWith("failure-"));
-    expect(readJson(dir, failureName!).state).toBe("UNKNOWN");
+    expect(readJson(dir, failureName!).state).toBe("FAILED");
     expect(existsSync(join(dir, "request-1.json"))).toBe(true);
+  });
+
+  it("marks an unconfirmed child close UNKNOWN even after known usage", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "devin-eval-"));
+    const { evaluation } = make(dir, stubChild({ promptText: '{"final":"DONE"}' }));
+    const close = vi.spyOn(DevinAcpClient.prototype, "close").mockResolvedValue(false);
+    try {
+      await expect(evaluation.provider.run!(work(), selection(), new AbortController().signal)).rejects.toThrow("child-close-unconfirmed");
+      expect(evaluation.summary()).toMatchObject({ unknown: true, inputTokens: null, knownInputTokens: 10 });
+      expect(readJson(dir, "close-1.json").drained).toBe(false);
+    } finally { close.mockRestore(); }
   });
 
   it("keeps trailing unparsed stdout as evidence after close", async () => {

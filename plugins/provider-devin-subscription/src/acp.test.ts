@@ -26,7 +26,7 @@ function stubChild(): AcpChild & {
 const opts = (child: AcpChild, sinks: {
   stdout?: Buffer[]; stderr?: Buffer[]; frames?: string[]; tail?: string[];
 }) => ({
-  argv: ["devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-max"],
+  argv: ["devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-high"],
   cwd: "/tmp",
   env: { PATH: "/usr/bin" },
   spawn: () => child,
@@ -96,6 +96,39 @@ describe("DevinAcpClient byte fidelity and lifecycle", () => {
     expect(tail).toEqual(["incomplete-tail-without-newline"]);
   });
 
+  it("keeps buffered text before an incomplete UTF-8 decoder tail", async () => {
+    const child = stubChild();
+    const tail: string[] = [];
+    const client = new DevinAcpClient(opts(child, { tail }));
+    child.stdout.emit("data", Buffer.concat([Buffer.from("prefix"), Buffer.from([0xf0, 0x9f])]));
+    child.bus.emit("close", 0, null);
+    expect(await client.close()).toBe(true);
+    expect(tail).toEqual(["prefix�"]);
+  });
+
+  it.each(["child", "stdin"])("fails a %s error promptly while draining later bytes on close", async (source) => {
+    const child = stubChild();
+    const input = new EventEmitter();
+    child.stdin.on = input.on.bind(input);
+    const stdout: Buffer[] = [];
+    const tail: string[] = [];
+    const client = new DevinAcpClient(opts(child, { stdout, tail }));
+    const openPromise = client.open(5_000);
+    child.stdout.emit("data", ok(await waitForWrite(child, "initialize"), { protocolVersion: 1, authMethods: [] }));
+    child.stdout.emit("data", ok(await waitForWrite(child, "session/new"), { sessionId: "s1" }));
+    await openPromise;
+    const pending = client.prompt("s1", "synthetic");
+    (source === "child" ? child.bus : input).emit("error", new Error("EPIPE"));
+    expect((await pending).error).toMatchObject({ message: expect.stringContaining("EPIPE") });
+    child.stdout.emit("data", Buffer.from("after-error"));
+    expect(tail).toEqual([]);
+    child.bus.emit("close", 1, null);
+    expect(await client.close()).toBe(true);
+    expect(Buffer.concat(stdout).toString()).toContain("after-error");
+    expect(tail).toEqual(["after-error"]);
+    expect((await client.prompt("s1", "never dispatched")).error).toBeDefined();
+  });
+
   it("rejects open promptly on spawn error instead of hanging", async () => {
     const child = stubChild();
     const client = new DevinAcpClient(opts(child, {}));
@@ -121,7 +154,7 @@ describe("DevinAcpClient byte fidelity and lifecycle", () => {
     child.stdout.emit("data", ok(await waitForWrite(child, "session/new"), { sessionId: "s1" }));
     await openPromise;
     // No exit/close events at all — the stub is wedged.
-    await client.close(30);
+    expect(await client.close(30)).toBe(false);
     expect(child.killed).toEqual(["SIGTERM", "SIGKILL"]);
   });
 

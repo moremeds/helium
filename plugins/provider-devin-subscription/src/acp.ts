@@ -20,7 +20,7 @@ import { StringDecoder } from "node:string_decoder";
 
 /** The slice of ChildProcess the client drives; tests substitute a stub. */
 export interface AcpChild {
-  stdin: { write(chunk: string): unknown };
+  stdin: { write(chunk: string): unknown; on?(event: "error", cb: (error: Error) => void): unknown };
   stdout: { on(event: "data", cb: (chunk: Buffer) => void): unknown };
   stderr: { on(event: "data", cb: (chunk: Buffer) => void): unknown };
   on(event: "exit", cb: (code: number | null, signal: string | null) => void): unknown;
@@ -67,7 +67,7 @@ interface PendingRequest {
 }
 
 export interface DevinAcpClientOptions {
-  /** Full argv, e.g. ["devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-max"]. */
+  /** Full argv, e.g. ["devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-high"]. */
   argv: string[];
   /** Session cwd — the scratch directory the session believes it works in. */
   cwd: string;
@@ -103,7 +103,7 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<{ kind: "done"; va
 
 export class DevinAcpClient {
   readonly child: AcpChild;
-  spawnError: Error | undefined;
+  transportError: Error | undefined;
   #decoder = new StringDecoder("utf8");
   #buffer = "";
   #nextId = 0;
@@ -143,16 +143,16 @@ export class DevinAcpClient {
     this.child.stderr.on("data", (chunk) => {
       options.onStderrBytes?.(chunk);
     });
-    // 'exit' can precede the final stdout/stderr data events; only 'close'
-    // means the pipes are drained. A spawn failure emits 'error' and may never
-    // emit 'exit' at all, so both paths funnel into #settle.
+    // Errors fail pending requests promptly, but only close proves pipe drain.
+    const onError = (error: Error) => {
+      this.transportError = error;
+      this.#failPending(`devin acp transport error: ${error.message}`);
+    };
+    this.child.stdin.on?.("error", onError);
     this.child.on("exit", (code, signal) => {
       this.#exited = { code, signal };
     });
-    this.child.on("error", (error) => {
-      this.spawnError = error;
-      this.#settle();
-    });
+    this.child.on("error", onError);
     this.child.on("close", () => {
       this.#settle();
     });
@@ -161,13 +161,17 @@ export class DevinAcpClient {
   #settle(): void {
     if (this.#closed) return;
     this.#closed = true;
-    const tail = this.#decoder.end() + this.#buffer;
+    const tail = this.#buffer + this.#decoder.end();
     this.#buffer = "";
     if (tail !== "") this.options.onStdoutTail?.(tail);
     for (const waiter of this.#onSettled.splice(0)) waiter();
-    const detail = this.spawnError !== undefined
-      ? `devin acp failed to spawn: ${this.spawnError.message}`
+    const detail = this.transportError !== undefined
+      ? `devin acp transport error: ${this.transportError.message}`
       : `devin acp exited (${String(this.#exited?.code)}/${String(this.#exited?.signal)})`;
+    this.#failPending(detail);
+  }
+
+  #failPending(detail: string): void {
     const error = { code: -32000, message: detail };
     for (const [, pending] of this.#pending) {
       pending.resolve({ jsonrpc: "2.0", id: null, error });
@@ -213,9 +217,9 @@ export class DevinAcpClient {
   }
 
   #request(method: string, params: unknown): Promise<Record<string, unknown>> {
-    if (this.#closed) {
-      const detail = this.spawnError !== undefined
-        ? `devin acp failed to spawn: ${this.spawnError.message}`
+    if (this.#closed || this.transportError !== undefined) {
+      const detail = this.transportError !== undefined
+        ? `devin acp transport error: ${this.transportError.message}`
         : "devin acp already exited";
       return Promise.resolve({ jsonrpc: "2.0", id: null, error: { code: -32000, message: detail } });
     }
@@ -318,8 +322,8 @@ export class DevinAcpClient {
   }
 
   /** SIGTERM, then SIGKILL after `graceMs` if the child has not closed. */
-  async close(graceMs = 2000): Promise<void> {
-    if (this.#closed) return;
+  async close(graceMs = 2000): Promise<boolean> {
+    if (this.#closed) return true;
     this.child.kill("SIGTERM");
     const deadline = Date.now() + graceMs;
     while (!this.#closed && Date.now() < deadline) {
@@ -338,6 +342,7 @@ export class DevinAcpClient {
         });
       }
     }
+    return this.#closed;
   }
 
   kill(): void {

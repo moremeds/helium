@@ -20,7 +20,7 @@
  * @module @helium/provider-devin-subscription/evaluation
  */
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve, delimiter } from "node:path";
+import { join, resolve, delimiter, isAbsolute } from "node:path";
 import type { Provider, ProviderModel, LogEvent } from "@helium/core";
 import { ExecutionTargetId, ProviderRunFailure } from "@helium/core";
 import { MAX_TOOL_TURNS, parseToolArgs, runToolCall, selectedTools, toolCallEvents, toolSpecs } from "@helium/provider-sdk/tool-loop";
@@ -53,25 +53,15 @@ export interface DevinEvaluationSummary {
   artifacts: string[];
 }
 
-/**
- * The request ids this adapter accepts. Evidence note (task 1/2 probes): the
- * `--model` flag is a REQUEST — task 1 observed a session recorded as
- * `swe-2-high` regardless of a non-SWE-2 request, so acceptance here is a
- * routing identity, not a verified serving revision. The summary records the
- * requested id and any wire-reported labels separately; the session-recorded
- * value is checked in evidence, not claimed at runtime.
+/** High is the observed no-tools route, not an independently pinned serving revision.
+ * Cognition's SWE-2 model behavior describes High as a reasoning tier for
+ * complex planning/verification; the installed catalog reports 262K context.
+ * These routing capabilities are not evidence of tenant answer quality.
  */
 export const DEVIN_EVALUATION_MODELS: ProviderModel[] = [
   {
-    id: "swe-2-max",
-    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
-    usdIn: 0, usdOut: 0, unmetered: true, quotaDomain: "devin-subscription-session",
-  },
-  {
-    // Accepted because the contract names it the supported no-tools tier when
-    // Max is not served; a pin mismatch stays recorded, not hidden.
     id: "swe-2-high",
-    caps: ["reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
+    caps: ["reason.deep", "reason.fast", "code.edit", "code.review", "tool.use", "structured.output", "long.context"],
     usdIn: 0, usdOut: 0, unmetered: true, quotaDomain: "devin-subscription-session",
   },
 ];
@@ -100,8 +90,8 @@ const ALLOWED_ENV = [
 
 /**
  * Documented `read_config_from` switches — every importer off — plus
- * `subagents_enabled: false` so the "Available subagent profiles" system
- * block is not injected either. Exported so drivers/tests assert on the
+ * `subagents_enabled: false` to remove subagent tools. Builtin profile
+ * descriptions remain intrinsic provider context. Exported so drivers/tests assert on the
  * exact bytes the child sees rather than a hand copy.
  */
 export const ISOLATION_CONFIG = {
@@ -112,6 +102,14 @@ export const ISOLATION_CONFIG = {
   },
   subagents_enabled: false,
 };
+
+/** Native read denial for the remaining global skill importer. XDG redirects
+ * Devin/Cognition config; this directory otherwise bypasses those redirects.
+ * Builtin skills/profiles are provider preamble, not operator files.
+ */
+export const ISOLATION_PROFILE = `(version 1)
+(allow default)
+(deny file-read* (subpath (param "GLOBAL_SKILLS")))`;
 
 /** The handshake gets this much of the remaining deadline at most. */
 const CONNECT_BUDGET_MS = 60_000;
@@ -210,7 +208,10 @@ export function createDevinEvaluation(options: {
   }
   if (limits.timeoutMs > 2_147_483_647) throw new Error("evaluation timeout exceeds the timer limit");
   const model = DEVIN_EVALUATION_MODELS.find((candidate) => candidate.id === options.model);
-  if (model === undefined) throw new Error("evaluation model must be a SWE-2 family model");
+  if (model === undefined) throw new Error("evaluation model must be swe-2-high (the supported SWE-2 no-tools route)");
+  if (!options.env.HOME || !isAbsolute(options.env.HOME)) throw new Error("Devin isolation requires an absolute existing HOME");
+  if (options.spawn === undefined && (process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec")))
+    throw new Error("Devin evaluation isolation requires macOS sandbox-exec");
   const outputDir = resolve(options.outputDir);
   mkdirSync(outputDir, { mode: 0o700, recursive: true });
   // The scratch namespace the ACP child lives in: an empty session cwd plus a
@@ -376,8 +377,10 @@ export function createDevinEvaluation(options: {
       try {
         // The client exists BEFORE the handshake so a hung or failed open()
         // still leaves a killable child in the finally below.
+        const argv = ["/usr/bin/sandbox-exec", "-p", ISOLATION_PROFILE, "-D", `GLOBAL_SKILLS=${join(childEnv.HOME!, ".agents", "skills")}`, "devin", "acp", "--agent-type", "summarizer", "--model", model.id];
+        write(`launch-${String(runIndex)}.json`, { argv, cwd: scratchCwd, environmentKeys: Object.keys(childEnv).sort() });
         client = new DevinAcpClient({
-          argv: ["devin", "acp", "--agent-type", "summarizer", "--model", model.id],
+          argv,
           cwd: scratchCwd,
           env: childEnv,
           ...(options.spawn === undefined ? {} : { spawn: options.spawn }),
@@ -465,9 +468,8 @@ export function createDevinEvaluation(options: {
         );
       } catch (runError) {
         stopped = true;
-        // A dispatched request whose run cannot complete is not a clean
-        // measurement: keep the trial UNKNOWN even when its usage arrived.
-        if (state.requestCount > 0) state.unknown = true;
+        // beforeRequest/afterRequest own accounting uncertainty. A settled
+        // malformed generation or a limit before the next dispatch is FAILED.
         write(`failure-${String(revision)}.json`, {
           state: state.unknown ? "UNKNOWN" : "FAILED", requestCount: state.requestCount,
           error: runError instanceof Error ? runError.message : String(runError),
@@ -477,7 +479,17 @@ export function createDevinEvaluation(options: {
         throw runError;
       } finally {
         running = false;
-        await client?.close();
+        if (client !== undefined) {
+          const drained = await client.close();
+          write(`close-${String(runIndex)}.json`, { drained, transportError: client.transportError?.message ?? null });
+          if (!drained) {
+            stopped = true;
+            state.unknown = true;
+            state.inputTokens = null;
+            state.outputTokens = null;
+            stop("child-close-unconfirmed");
+          }
+        }
       }
     },
   };

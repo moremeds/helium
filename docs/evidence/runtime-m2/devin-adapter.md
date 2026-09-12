@@ -146,3 +146,110 @@ metered — those remain outside visibility.
 `task2/evidence-manifest.json` holds full SHA-256 digests for every retained
 file (217 entries). Manifest file's own SHA-256:
 `0474ba56402285f606e14b4439fdaa80fabdfb8fd2b21b556ef868a72773a75b`.
+
+
+## Provider repair — 2026-09-13 (supersedes the affected claims above)
+
+The original task-2 account and artifacts above remain historical evidence.
+The following corrections describe the repaired adapter; they do not upgrade
+any original probe into final-tree validation or establish M2 quality.
+
+- **FAILED versus UNKNOWN:** a malformed generation or a request-budget stop
+  before the next dispatch is FAILED when all dispatched calls have settled
+  responses and usage. The old outer catch incorrectly changed every
+  post-dispatch failure to UNKNOWN. That overwrite is removed. Missing usage,
+  ambiguous dispatch, timeout, cancellation and persistence failure still
+  preserve UNKNOWN and stop continuation. Probe C's original UNKNOWN artifact
+  is retained; its fully accounted budget stop is the regression being fixed.
+- **High-only route:** `swe-2-max` is rejected. `swe-2-high` advertises
+  `reason.deep` as a routing capability: [Cognition's SWE-2 model behavior](https://cognition.com/blog/swe-2)
+  identifies High as a reasoning tier for complex planning and verification;
+  the installed CLI catalog reports 262K context. Existing tenant role
+  requirements are unchanged. Host tool use and JSON output are exercised
+  below. None of these facts proves tenant answer quality.
+- **Native isolation:** macOS `sandbox-exec` denies reads of the observed
+  global agents skill directory, with HOME unchanged and scratch XDG config
+  and session database. The native profile supplements the existing disabled
+  importers, empty MCP selection and no-tools Summarizer. Unsupported native
+  environments fail clearly; there is no unsandboxed default fallback.
+  The launch artifact records argv and environment key names before spawn.
+
+### New finite synthetic batch: two calls, both accounted
+
+Logical evidence root: `provider-repair/` under the private M2 evidence root.
+`preflight-1/` used initialization and session creation only: zero prompts,
+zero imported rules/plugins/hooks/MCP, three builtin skills and zero user
+skills. The original task-2 preflight loaded eight user skills; the native
+profile is retained because it removes that observed input leak.
+
+`probe-1/` then completed a real host-tool round trip in session
+`humane-sailor`: one host tool execution, followed by final `TOKEN_7F3A`.
+The new batch spent exactly **2 of 2 ACP invocations**, no retries:
+
+| Invocation | Input tokens | Output tokens | Recorded state |
+| --- | ---: | ---: | --- |
+| Host tool request | 933 | 82 | RECORDED |
+| Final answer | 1044 | 39 | RECORDED |
+| Total | 1977 | 121 | Known; `unknown=false` |
+
+User payload was bounded below 512 bytes; each invocation had a 120-second
+latency bound, with a finite overall 240-second driver bound. The entire run
+completed in 9.7 seconds. Requested model and session-recorded model are both
+`swe-2-high`; the wire label remains `Summarizer`. Identity is still
+**ROUTE_ONLY**, with no independently verified serving revision.
+
+The exact session export contains only three builtin skill entries and the
+builtin `subagent_explore`/`subagent_general` descriptions. No operator skill
+inventory was imported. Intrinsic Summarizer instructions and `system_info`
+remain; the preamble mentions rules tags as formatting instructions, which
+must not be mistaken for imported user rules. No fs/terminal request or MCP
+connection was observed. This proves the tested CLI session's input isolation,
+not a universal guarantee about future CLI changes.
+
+### Reproducibility and checks
+
+Before dispatch, `predispatch-build-1/` copied 128 source/build files, including
+all runnable core, provider-sdk and adapter JavaScript. Manifest SHA-256:
+`18f34031b2fa4f582b5487c106d9afde8c36e6921d1e430f081f5f0c97a1970c`.
+Post-probe hashes match. Exact requests, raw stdout/stderr bytes, session DB
+and exports, command outputs, errors and exit codes are retained separately
+from original task-2 evidence. `provider-repair/evidence-manifest-1.json`
+contains 279 file entries; its SHA-256 is
+`3aa4fc55c60f0b00a87bec9f2e87551724917bc1d6de53a32c0059235a490dc0`.
+
+Provider offline suite: **22 passed**. Provider build: passed. The existing
+runtime-pilot mechanism test was also run with its scratch PostgreSQL gate
+enabled: **1 passed**, no live model. Initial missing-build failures and the
+initial gated skip remain in the evidence; required workspace artifacts were
+built before the passing run. Self-review and native-isolation ablation are
+recorded in `provider-repair/review-1.md`. ACP byte capture, process drain and
+bounded cancellation behavior remain covered by the existing tests.
+
+No production route, dependency, core/CLI/campaign change, deployment, tenant
+quality claim or scientific M2 acceptance is included. Router overhead stays
+an uncalibrated zero placeholder; observed ACP usage is authoritative. The
+new two-call development budget is exhausted and no further probe is implied.
+
+
+### Lead transport review after the synthetic batch
+
+Subsequent lifecycle corrections are **offline verified only**; no further
+live call was made. The preceding live results and matching post-probe hashes
+refer specifically to `predispatch-build-1`, not this later source revision.
+
+- Decoder tail flush now appends the unfinished UTF-8 decoder bytes after
+  already buffered text, preserving their original order.
+- Child errors and stdin EPIPE fail pending requests promptly while raw-byte
+  capture remains active until actual process close. An error event does not
+  itself claim drained pipes.
+- `close()` now returns whether close was observed. Every adapter run records
+  that result in `close-N.json`; an unconfirmed close marks UNKNOWN and blocks
+  continuation even if the completed invocation supplied known usage.
+
+Final provider build passed; **26 offline tests passed**, including four new
+lifecycle regressions. The scratch-PostgreSQL pilot mechanism passed earlier
+and was not changed by these transport-only fixes. Final source/build copies
+are in `post-review-build-1/`; they have zero live dispatches. Review notes are
+`review-2.md`. The expanded immutable evidence manifest is
+`provider-repair/evidence-manifest-2.json` (308 entries), SHA-256:
+`b5839fc6bfdac289bce27e237afb77d5b3d452cf69c674f0db984b952527a298`.
