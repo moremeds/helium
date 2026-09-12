@@ -12,6 +12,8 @@
  * @module @helium/cli/cli
  */
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { parseArgs } from "node:util";
 import {
   AuditStore,
   CapabilityCatalog,
@@ -20,7 +22,10 @@ import {
   auditDbPath,
   loadOperatorEnv,
   readLedger,
+  parseStrictJson,
 } from "@helium/core";
+import type { ControlConnection } from "@helium/runtime-control";
+import { runRuntimePilot } from "./runtime-pilot.js";
 import { parseRunArgs } from "./args.js";
 import { discoverProviders, pluginsDir, tenantsDir } from "./discovery.js";
 import { applyProxy } from "./proxy.js";
@@ -217,6 +222,23 @@ export function printScoreboard(
 
 async function main(argv: string[]): Promise<number> {
   const [command, argument] = argv;
+  if (command === "runtime-pilot") {
+    const { values } = parseArgs({ args: argv.slice(2), options: {
+      connection: { type: "string" }, input: { type: "string" },
+      "as-of": { type: "string" }, phase: { type: "string", default: "premarket" },
+    } });
+    if (!argument || !values.connection || !values.input || !values["as-of"])
+      throw new Error("usage: helium runtime-pilot <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> [--phase <phase>]");
+    const root = resolve(import.meta.dirname, "../../../plugins");
+    const tenant = loadTenants(root).tenants.find((entry) => entry.spec.tenant === argument);
+    if (!tenant || !tenant.spec.enabled) throw new Error("Pilot tenant is missing or disabled");
+    const connection = parseStrictJson(readFileSync(values.connection, "utf8")) as ControlConnection;
+    const result = await runRuntimePilot({ connection, tenant, pluginsDir: root,
+      inputDir: values.input, asOf: new Date(values["as-of"]), phase: values.phase! });
+    printRun(result.report);
+    console.log(`mechanism evidence: ${result.stateRoot}`);
+    return result.report.outcome === "completed" ? 0 : 1;
+  }
   // Before anything reads a credential or a proxy. Ambient values still win,
   // so a one-off `HELIUM_PROXY=... helium run` overrides the file.
   loadOperatorEnv();
@@ -329,6 +351,7 @@ async function main(argv: string[]): Promise<number> {
   console.error(
     [
       "usage:",
+      "  helium runtime-pilot <tenant> --connection <runner.json> --input <tool-io-directory> --as-of <ISO instant> [--phase <phase>]",
       "  helium run <tenant> [--phase <phase>] [--as-of <ISO instant>] [--variant <label>] [--replay-from <runId>] [--model-pin <targetId>]",
       "      run one tenant's team once. --as-of replays a past instant: it becomes",
       "      the run's clock, and every tool that has no history for it says so",

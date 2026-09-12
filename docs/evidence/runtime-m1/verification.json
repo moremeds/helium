@@ -1,0 +1,128 @@
+{
+  "timestamp": "2026-09-12T04:13:01.282961+00:00",
+  "results": [
+    {
+      "command": [
+        "pnpm",
+        "build"
+      ],
+      "environment": {},
+      "exitCode": 0,
+      "summary": [
+        "plugins/helium-self build: Done",
+        "plugins/provider-codex-subscription build$ tsc -p tsconfig.json",
+        "plugins/runtime-control build: Done",
+        "packages/cli build$ tsc -p tsconfig.json && chmod +x lib/cli.js",
+        "plugins/provider-claude-subscription build: Done",
+        "plugins/provider-codex-subscription build: Done",
+        "packages/cli build: Done",
+        "plugins/option-wizard build$ tsc -p tsconfig.json",
+        "plugins/provider-dsh build: Done",
+        "plugins/option-wizard build: Done"
+      ],
+      "logSha256": "1bc182cb8378cd8440324c37165a7ef360f94f3e34648dff2925d5b516cdce72"
+    },
+    {
+      "command": [
+        "pnpm",
+        "typecheck"
+      ],
+      "environment": {},
+      "exitCode": 0,
+      "summary": [
+        "plugins/runtime-control typecheck: Done",
+        "packages/cli typecheck$ tsc -p tsconfig.json --noEmit",
+        "plugins/provider-claude-subscription typecheck: Done",
+        "plugins/provider-codex-subscription typecheck: Done",
+        "contracts typecheck$ tsc -p tsconfig.json --noEmit",
+        "packages/cli typecheck: Done",
+        "plugins/option-wizard typecheck$ tsc -p tsconfig.json --noEmit",
+        "plugins/provider-dsh typecheck: Done",
+        "contracts typecheck: Done",
+        "plugins/option-wizard typecheck: Done"
+      ],
+      "logSha256": "756ae125a5b031651f69e43c546313549b2dd8d72b2c247e4c9b99604ba42f96"
+    },
+    {
+      "command": [
+        "pnpm",
+        "test"
+      ],
+      "environment": {},
+      "exitCode": 0,
+      "summary": [
+        " ✓ |unit| packages/cli/tests/code-version.spec.ts (1 test) 2ms",
+        " ✓ |unit| plugins/option-wizard/tests/render-forecast.spec.ts (8 tests) 2ms",
+        " ↓ |unit| plugins/runtime-control/tests/store.spec.ts (1 test | 1 skipped)",
+        " ↓ |unit| packages/cli/tests/runtime-pilot.spec.ts (1 test | 1 skipped)",
+        "",
+        " Test Files  119 passed | 2 skipped (121)",
+        "      Tests  1302 passed | 5 skipped (1307)",
+        "   Start at  12:12:48",
+        "   Duration  4.91s (transform 1.45s, setup 0ms, collect 12.50s, tests 11.40s, environment 16ms, prepare 4.63s)",
+        ""
+      ],
+      "logSha256": "682b8c59d402551cc60e5374c804fd0f165f85f29ba8a2b3454bc3259a9cd03b"
+    },
+    {
+      "command": [
+        "pnpm",
+        "test:contracts"
+      ],
+      "environment": {},
+      "exitCode": 0,
+      "summary": [
+        " ✓ |contracts| contracts/tests/core-neutrality.contract.spec.ts (4 tests) 3ms",
+        " ↓ |contracts| contracts/tests/provider-overhead.live.contract.spec.ts (2 tests | 2 skipped)",
+        " ✓ |contracts| contracts/tests/tool-restriction.contract.spec.ts (1 test) 5035ms",
+        "   ✓ contract: agentCtx.tools.restrict() denies a tool in the agent's own scoped view > keeps the allow-listed tool visible and removes the denied one  2405ms",
+        "",
+        " Test Files  2 passed | 2 skipped (4)",
+        "      Tests  5 passed | 3 skipped (8)",
+        "   Start at  12:12:54",
+        "   Duration  5.22s (transform 88ms, setup 0ms, collect 155ms, tests 5.04s, environment 0ms, prepare 165ms)",
+        ""
+      ],
+      "logSha256": "8f022696f6f4a0caa461ad35733dc9224de1de3d1a2db332894369ee47972c57"
+    },
+    {
+      "command": [
+        "pnpm",
+        "vitest",
+        "run",
+        "--project",
+        "unit",
+        "packages/cli/tests/runtime-pilot.spec.ts",
+        "plugins/runtime-control/tests/store.spec.ts"
+      ],
+      "environment": {
+        "HELIUM_RUNTIME_PG_TEST": "1"
+      },
+      "exitCode": 0,
+      "summary": [
+        "",
+        " ✓ |unit| packages/cli/tests/runtime-pilot.spec.ts (1 test) 1257ms",
+        "   ✓ database-to-runner mechanism (synthetic source world, no models) > uses the active DB version in rebuilt news and downstream context, then rolls back  1257ms",
+        "",
+        " Test Files  2 passed (2)",
+        "      Tests  2 passed (2)",
+        "   Start at  12:12:59",
+        "   Duration  1.74s (transform 325ms, setup 0ms, collect 391ms, tests 2.39s, environment 0ms, prepare 69ms)",
+        ""
+      ],
+      "logSha256": "3d561384b41829efdcaba7b355a4912fb113e38ae9320b67547141a8a113ce16"
+    }
+  ],
+  "scope": "M1_LOCAL_MECHANISM_ONLY",
+  "executionBase": "fd78edcdf7623d48b3910af4b8fc28299045ca42",
+  "sourceBaseline": "e2175344525e355edc5662124712a7250a3d9b88",
+  "realModelCalls": 0,
+  "productionActions": false,
+  "originalChecklistStatuses": "NOT_RUN; this record covers M1 sub-scopes only",
+  "independentReview": {
+    "mode": "native agent source review",
+    "finding": "unhandled pilot tool failure could be marked successful",
+    "resolution": "step failure propagated to report/DB; real PostgreSQL+frame failure regression passes",
+    "crossModelTribunal": "NOT_RUN"
+  }
+}
