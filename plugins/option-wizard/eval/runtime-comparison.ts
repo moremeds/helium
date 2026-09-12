@@ -457,6 +457,19 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         throw new Error("snapshot.json bytes do not match the declared snapshotSha256");
       if (raw.outcomeFile !== parsed.outcomeFile || raw.outcomeSha256 !== parsed.outcomeSha256)
         throw new Error(`${parsed.outcomeFile} bytes do not match the declared outcomeSha256`);
+      // Deterministic outcome validation, independent of any manual review: only the
+      // real RunReport outcomes are recognized, and a skipped/NOT_COMPARABLE run is
+      // never a legitimate generation failure — it cannot enter the denominator.
+      if (raw.outcomeFile === "result.json") {
+        const outcome = raw.outcome as Record<string, unknown>;
+        if (outcome.outcome !== "completed" && outcome.outcome !== "failed")
+          throw new Error("result.json carries an unrecognized outcome");
+        const failureClass = (outcome.failure as { class?: unknown } | undefined)?.class;
+        if (outcome.skipped !== undefined || failureClass === "NOT_COMPARABLE")
+          throw new Error("result.json records a skipped or NOT_COMPARABLE run (frozen input invalid, skipped or unconsumed); it is not a legitimate generation failure");
+        if (outcome.outcome === "failed" && outcome.failure === undefined)
+          throw new Error("failed result.json carries no failure record; a skip cannot be distinguished from a legitimate failure");
+      }
       const snapshot = parse(snapshotSchema, raw.snapshot, "snapshot");
       // Hash the raw parsed object: the zod view intentionally drops fields the integrity hash covers.
       const { effectiveSnapshotHash, ...unsigned } = raw.snapshot as Record<string, unknown>;
@@ -515,11 +528,10 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
     // Measurement chain: supplied files must reproduce the bound diagnostic measurement.
     if (!unbound && !measurementMissing) try {
       const review = raw.review as Record<string, unknown>;
-      // Outcome agreement in both directions: a recognized outcome must match the review state.
+      // Completion-vs-review agreement in both directions; the outcome itself was
+      // already validated deterministically against the bound outcome bytes.
       if (raw.outcomeFile === "result.json") {
         const outcomeValue = (raw.outcome as Record<string, unknown>).outcome;
-        if (typeof outcomeValue !== "string" || outcomeValue.length === 0)
-          throw new Error("result.json carries no recognized outcome");
         if (review.completed === true && outcomeValue !== "completed")
           throw new Error(`result.json outcome "${outcomeValue}" cannot accompany a completed review`);
         if (review.completed === false && outcomeValue === "completed")

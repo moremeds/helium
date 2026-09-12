@@ -90,10 +90,18 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
   hash the recorded `limits`. A manifest `reportedId` that contradicts the
   bound route is not comparable; a missing/sentinel bound identity leaves
   the route unknown and the result inconclusive.
-- **outcome agreement**: `result.json` must carry a recognized `outcome`
-  string consistent with the review state in both directions — a completed
-  review cannot accompany a failed outcome and vice versa; `failure.json`
-  cannot accompany a completed review.
+- **outcome agreement**: `result.json` carries the real `RunReport`
+  outcomes only — `"completed"` or `"failed"`; any other value is
+  unrecognized and not comparable. A `skipped` record or a
+  `failure.class` of `"NOT_COMPARABLE"` marks a run whose frozen input was
+  invalid, skipped (calendar-closed) or unconsumed: it is bound to
+  NOT_COMPARABLE and never enters the legitimate-failure denominator. A
+  failed outcome without a `failure` record is likewise not comparable —
+  a skip cannot be distinguished from a legitimate failure. Ordinary
+  failed outcomes with any other class stay legitimate generation
+  failures scored by the existing manual review. Agreement is checked in
+  both directions — a completed review cannot accompany a failed outcome
+  and vice versa; `failure.json` cannot accompany a completed review.
 - **snapshot.json**: the actual `RuntimeSnapshot` from the runtime-control
   path. Its `effectiveSnapshotHash` and `configHash` self-integrity are
   recomputed; `metadata.inputWorldHash` must equal the world registered for
@@ -180,10 +188,28 @@ Second correction round (CLI follow-up):
   identity or hidden usage. `usage.json` is documented as an
   operator-normalized session artifact, not independent provider proof.
 
+Third correction round (task 2):
+
+- `result.json` outcomes are bound to the real `RunReport` contract
+  deterministically inside the byte-bound identity/outcome block —
+  independent of any manual review — so only `completed`/`failed` are
+  recognized and any other string is rejected even when no review,
+  measurement or events were supplied.
+- A `skipped` record (calendar-closed) or `failure.class: "NOT_COMPARABLE"`
+  — what runtime-pilot writes when the frozen source is invalid, skipped or
+  unconsumed — is bound to NOT_COMPARABLE and can no longer be laundered
+  into the legitimate generation-failure denominator by a
+  `completed: false` review. A failed outcome with no `failure` record is
+  not comparable for the same reason. Ordinary failed outcomes keep the
+  existing manual-evidence path to coverage 0.
+- Regressions cover the calendar skip, the NOT_COMPARABLE class, an
+  unknown outcome string, a legitimate `provider-error` failure, and
+  skip/unknown outcomes with no manual artifacts supplied.
+
 ## Checks run
 
 - `pnpm build` — clean.
-- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 17/17.
+- `pnpm vitest run --project unit plugins/option-wizard/tests/runtime-comparison.spec.ts` — 21/21.
 - `node --test scripts/runtime-comparison.test.mjs` — 1/1.
 - `pnpm test` (full unit suite) — 1343 passed, 5 skipped, no regressions.
 

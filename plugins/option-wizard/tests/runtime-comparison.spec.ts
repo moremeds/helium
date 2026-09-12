@@ -103,9 +103,11 @@ function snapshot(arm: "champion" | "candidate", world: string) {
 function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
                options: { coverage?: number; failed?: boolean; usageUnknown?: boolean; requests?: number;
                           claims?: boolean; observedThirdRow?: boolean | null; outcome?: string;
+                          resultFailure?: string; skipped?: boolean;
                           reportedId?: string | null; actualModel?: string | null; routeProvider?: string;
                           routeGrade?: string; usageBound?: boolean } = {}): ComparisonTrialInput {
   const { coverage = 1, failed = false, usageUnknown = false, requests = 3, claims = true } = options;
+  const failedGeneration = failed || options.resultFailure !== undefined;
   const cohortCase = CASES.find((entry) => entry.caseId === caseId)!;
   const label = `trial-${caseId}-${arm}-${replicate}`;
   const events = EVENTS(caseId);
@@ -121,7 +123,7 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
   const snapshotBytes = JSON.stringify(snapshotObj);
   const article = coverage >= 1 ? "line one\nline two" : "line one\nsecond line";
   const addressed = Math.round(coverage * events.length);
-  const review = failed
+  const review = failedGeneration
     ? { completed: false, finalArtifactHash: null, reviewer: null, reviews: [] }
     : { completed: true, finalArtifactHash: H(article), reviewer: REVIEWER,
         reviews: events.map((event, index) => ({
@@ -130,10 +132,16 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
           criticalErrors: 0, adjudication: "resolved" })) };
   const reviewBytes = JSON.stringify(review);
   const measurement = { mode: "MANUAL_REVIEW_DIAGNOSTIC", eventManifestHash: H(eventsBytes),
-    reviewHash: H(reviewBytes), finalArtifactHash: failed ? null : H(article),
+    reviewHash: H(reviewBytes), finalArtifactHash: failedGeneration ? null : H(article),
     measurement: measureRuntimeCoverage({ ...review, events }) };
-  const outcomeObj = failed ? { stateRoot: "synthetic", error: "synthetic failure" } : { outcome: options.outcome ?? "completed", runId: label };
+  const outcomeObj = failed ? { stateRoot: "synthetic", error: "synthetic failure" }
+    : options.resultFailure !== undefined || options.skipped === true
+      ? { outcome: options.resultFailure !== undefined ? "failed" : "completed", runId: label,
+          ...(options.resultFailure !== undefined ? { failure: { class: options.resultFailure, detail: "synthetic failure" } } : {}),
+          ...(options.skipped === true ? { skipped: { reason: "calendar closed" } } : {}) }
+      : { outcome: options.outcome ?? "completed", runId: label };
   const outcomeBytes = JSON.stringify(outcomeObj);
+  const outcomeFile = failed ? "failure.json" : "result.json";
   const claimsObj = claims ? { schemaVersion: "runtime-comparison-claims-v1", reviewer: REVIEWER, reviewed: 10, supported: 10 } : null;
   const claimsBytes = claimsObj === null ? null : JSON.stringify(claimsObj);
   const attempts = [{ attemptId: `${label}-a1`, status: "SUCCEEDED", requests, tokens: 1200,
@@ -146,7 +154,7 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
     configVersionId: `cfg-${arm}`, configHash: ARM_HASH[arm],
     model: { requestedId: "synthetic-model", reportedId: options.reportedId === undefined ? "synthetic-model" : options.reportedId },
     snapshotSha256: H(snapshotBytes),
-    outcomeFile: failed ? "failure.json" : "result.json", outcomeSha256: H(outcomeBytes),
+    outcomeFile, outcomeSha256: H(outcomeBytes),
     claimsEvidenceSha256: claimsBytes === null ? null : H(claimsBytes),
     usageEvidenceSha256: usageBytes === null ? null : H(usageBytes),
     observedThirdRow: options.observedThirdRow ?? (arm === "candidate" && ["case-1", "case-3"].includes(caseId)),
@@ -158,10 +166,10 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
     review, reviewSha256: H(reviewBytes),
     measurement, measurementSha256: H(JSON.stringify(measurement)),
     snapshot: snapshotObj, snapshotSha256: H(snapshotBytes),
-    outcome: outcomeObj, outcomeSha256: H(outcomeBytes), outcomeFile: failed ? "failure.json" : "result.json",
+    outcome: outcomeObj, outcomeSha256: H(outcomeBytes), outcomeFile,
     claims: claimsObj, claimsSha256: claimsBytes === null ? null : H(claimsBytes),
     usage: usageObj, usageSha256: usageBytes === null ? null : H(usageBytes),
-    finalSha256: failed ? null : H(article), finalLines: failed ? null : article.split("\n"),
+    finalSha256: failedGeneration ? null : H(article), finalLines: failedGeneration ? null : article.split("\n"),
     inputErrors: [],
   };
 }
@@ -303,6 +311,47 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     const trials = cohort({ champion: 0.5, candidate: 1 })
       .map((entry) => entry.label === "trial-case-1-candidate-1" ? trial("case-1", "candidate", 1, { coverage: 1, outcome: "failed" }) : entry);
     expect(analyze(trials).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("rejects an unrecognized result.json outcome string", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 })
+      .map((entry) => entry.label === "trial-case-1-candidate-1" ? trial("case-1", "candidate", 1, { outcome: "indeterminate" }) : entry);
+    expect(analyze(trials).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("binds skipped/NOT_COMPARABLE runs to NOT_COMPARABLE, never the failure denominator", () => {
+    const skipCase = (opts: { resultFailure?: string; skipped?: boolean }) =>
+      cohort({ champion: 0.5, candidate: 1 })
+        .map((entry) => entry.label === "trial-case-1-candidate-1"
+          ? trial("case-1", "candidate", 1, { coverage: 1, ...opts }) : entry);
+    // Calendar-closed skip with a completed:false review must not become coverage 0.
+    expect(analyze(skipCase({ resultFailure: "NOT_COMPARABLE", skipped: true })).decision).toBe("NOT_COMPARABLE");
+    expect(analyze(skipCase({ resultFailure: "NOT_COMPARABLE" })).decision).toBe("NOT_COMPARABLE");
+    expect(analyze(skipCase({ skipped: true })).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("binds a skipped/NOT_COMPARABLE or unrecognized outcome even with no manual artifacts", () => {
+    const bare = (built: ComparisonTrialInput) => ({ ...built,
+      review: null, reviewSha256: null, measurement: null, measurementSha256: null,
+      events: null, eventsSha256: null });
+    const swap = (built: ComparisonTrialInput) =>
+      cohort({ champion: 0.5, candidate: 1 }).map((entry) => entry.label === built.label ? built : entry);
+    // No review/measurement/events supplied: the bound outcome alone is still decisive.
+    expect(analyze(swap(bare(trial("case-1", "candidate", 1, { resultFailure: "NOT_COMPARABLE", skipped: true })))).decision)
+      .toBe("NOT_COMPARABLE");
+    expect(analyze(swap(bare(trial("case-1", "candidate", 1, { outcome: "indeterminate" })))).decision)
+      .toBe("NOT_COMPARABLE");
+  });
+
+  it("keeps an ordinary failed result.json a legitimate generation failure", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 })
+      .map((entry) => (entry.trial as { arm: string }).arm === "candidate"
+        ? trial((entry.trial as { caseId: string }).caseId, "candidate", (entry.trial as { replicate: number }).replicate,
+            { resultFailure: "provider-error" })
+        : entry);
+    const result = analyze(trials);
+    expect(result.decision).toBe("REJECT");
+    expect(result.arms.candidate.generationFailed).toBe(8);
   });
 
   it("never verifies the actual route from self-declared reportedId alone", () => {
