@@ -20,7 +20,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync,
+  closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync,
   readdirSync, renameSync, writeSync, fsyncSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -79,6 +79,13 @@ function intOf(value, at, min = 1) {
   return value;
 }
 
+function rejectSymlinks(path) {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) throw new Error(`frozen input contains a symbolic link: ${path}`);
+  if (stat.isDirectory())
+    for (const name of readdirSync(path)) rejectSymlinks(join(path, name));
+}
+
 function freezeInputs(value, executionDir, outputDir) {
   strictKeys(value, ["schemaVersion", "comparisonRegistration", "referencesDir", "configPayloads",
     "limits", "admin", "cases", "order"], "execution");
@@ -88,9 +95,12 @@ function freezeInputs(value, executionDir, outputDir) {
     textOf(required(value, "comparisonRegistration", "execution"), "execution.comparisonRegistration"))));
   frozen.comparisonRegistration = registrationPath;
 
+  const sourceRefsDir = resolve(executionDir, textOf(required(value, "referencesDir", "execution"),
+    "execution.referencesDir"));
+  rejectSymlinks(sourceRefsDir);
   const refsDir = join(outputDir, "refs");
-  cpSync(resolve(executionDir, textOf(required(value, "referencesDir", "execution"),
-    "execution.referencesDir")), refsDir, { recursive: true });
+  cpSync(sourceRefsDir, refsDir, { recursive: true });
+  rejectSymlinks(refsDir);
   frozen.referencesDir = refsDir;
 
   const payloads = required(value, "configPayloads", "execution");
@@ -113,8 +123,11 @@ function freezeInputs(value, executionDir, outputDir) {
     seen.add(caseId);
     const target = join(outputDir, "cases", caseId);
     mkdirSync(target, { recursive: true });
+    const sourceInputDir = resolve(executionDir, textOf(entry.inputDir, `cases.${caseId}.inputDir`));
+    rejectSymlinks(sourceInputDir);
     const inputDir = join(target, "inputs");
-    cpSync(resolve(executionDir, textOf(entry.inputDir, `cases.${caseId}.inputDir`)), inputDir, { recursive: true });
+    cpSync(sourceInputDir, inputDir, { recursive: true });
+    rejectSymlinks(inputDir);
     const capture = join(target, "capture.json");
     writeOnce(capture, readFileSync(resolve(executionDir, textOf(entry.capture, `cases.${caseId}.capture`))));
     return { ...entry, inputDir, capture };
@@ -308,10 +321,11 @@ export function spawnRecordedSubprocess({ argv, env, timeoutMs, stdoutPath, stde
     const captured = [];
     let timedOut = false;
     let settled = false;
+    let terminating = false;
     let spawnError = null;
     let hardTimer;
     let forceTimer;
-    const finish = (code, signal) => {
+    const finish = (code, signal, drained) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -321,18 +335,21 @@ export function spawnRecordedSubprocess({ argv, env, timeoutMs, stdoutPath, stde
       fsyncSync(stdoutFd); fsyncSync(stderrFd); closeSync(stdoutFd); closeSync(stderrFd);
       resolvePromise({ code, signal, timedOut, wallMs: Date.now() - started,
         stdout: Buffer.concat(captured), stderr: Buffer.alloc(0), persisted: true,
-        error: spawnError?.message ?? null });
+        drained, error: spawnError?.message ?? null });
     };
     const killGroup = (signal) => {
       try { if (child?.pid !== undefined) process.kill(-child.pid, signal); }
       catch { try { child?.kill(signal); } catch { /* already closed */ } }
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const terminate = () => {
+      if (terminating || settled) return;
+      terminating = true;
       killGroup("SIGTERM");
+      if (settled) return;
       hardTimer = setTimeout(() => killGroup("SIGKILL"), 3_000);
-      forceTimer = setTimeout(() => finish(null, "SIGKILL"), 5_000);
-    }, timeoutMs);
+      forceTimer = setTimeout(() => finish(null, "SIGKILL", false), 5_000);
+    };
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, timeoutMs);
     try {
       child = spawn(argv[0], argv.slice(1), { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
       child.stdout.on("data", (chunk) => {
@@ -343,12 +360,13 @@ export function spawnRecordedSubprocess({ argv, env, timeoutMs, stdoutPath, stde
       child.stderr.on("data", (chunk) => { if (!settled) writeSync(stderrFd, chunk); });
       child.once("error", (error) => {
         spawnError = error;
-        setTimeout(() => finish(null, null), 1_000);
+        clearTimeout(timer);
+        terminate();
       });
-      child.once("close", finish);
+      child.once("close", (code, signal) => finish(code, signal, true));
     } catch (error) {
       spawnError = error;
-      finish(null, null);
+      finish(null, null, false);
     }
   });
 }
@@ -503,7 +521,7 @@ export async function runCampaign(options, deps = {}) {
     writeOnce(join(dir, `${name}-process.json`), canonicalJson({
       argv: [process.execPath, ADMIN_JS, options.adminConnectionPath, requestPath],
       code: result.code, signal: result.signal, timedOut: result.timedOut, wallMs: result.wallMs,
-      error: result.error ?? null,
+      drained: result.drained ?? true, error: result.error ?? null,
     }) + "\n");
     if (result.timedOut || result.code !== 0)
       throw new CampaignHalt("POINTER_SWITCH_FAILED",
@@ -657,7 +675,7 @@ export async function runCampaign(options, deps = {}) {
           "--provider", execution.provider, "--model", execution.requestedModel,
           "--policy", join(trialDir, "policy.json")],
         code: result.code, signal: result.signal, timedOut: result.timedOut, wallMs: result.wallMs,
-        error: result.error ?? null,
+        drained: result.drained ?? true, error: result.error ?? null,
       }) + "\n");
       record.code = result.code; record.signal = result.signal;
       record.timedOut = result.timedOut; record.wallMs = result.wallMs;
@@ -870,9 +888,17 @@ export async function runCampaign(options, deps = {}) {
           throw new CampaignHalt("AMBIGUOUS", "a SUCCEEDED attempt does not match a completed result.json");
         counts.succeeded += 1;
         record.outcome = "completed";
-      } else { // FAILED: a known generation failure stays in the denominator.
+      } else { // FAILED: distinguish ineligible input from a generation failure.
         if (!hasFailure && !(hasResult && outcome.outcome === "failed"))
           throw new CampaignHalt("AMBIGUOUS", "a FAILED attempt matches neither failure.json nor a failed result.json");
+        if (hasResult && (outcome.skipped !== undefined || outcome.failure?.class === "NOT_COMPARABLE")) {
+          record.outcome = "not-comparable";
+          writeOnce(join(trialDir, "stop.json"), canonicalJson({ reason: "NOT_COMPARABLE",
+            detail: outcome.skipped?.reason ?? outcome.failure?.detail ?? "runtime marked the input not comparable" }) + "\n");
+          halt("NOT_COMPARABLE",
+            outcome.skipped?.reason ?? outcome.failure?.detail ?? "runtime marked the input not comparable", trialId);
+          break;
+        }
         counts.knownFailures += 1;
         record.outcome = "failed";
         const stopOnFailure = continuationPolicy.onKnownGenerationFailure === "stop";

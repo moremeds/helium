@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -133,7 +133,7 @@ function harness(f, outcomes) {
         stdout: Buffer.from(json({ versionId: current, revision })), stderr: Buffer.alloc(0) };
     }
     const outcome = outcomes[evalIndex++];
-    const status = outcome === "FAILED_RESULT" ? "FAILED" : outcome;
+    const status = outcome === "FAILED_RESULT" || outcome === "NOT_COMPARABLE" ? "FAILED" : outcome;
     calls.push({ kind: "evaluate", env, argv });
     const trialId = f.execution.order[evalIndex - 1];
     const id = `attempt-${evalIndex}`;
@@ -156,6 +156,10 @@ function harness(f, outcomes) {
     } else if (outcome === "FAILED_RESULT") {
       writeFileSync(join(stateDir, "result.json"), json({ outcome: "failed", runId: id,
         failure: { class: "renderer-failed", detail: "known" } }));
+    } else if (outcome === "NOT_COMPARABLE") {
+      writeFileSync(join(stateDir, "result.json"), json({ outcome: "failed", runId: id,
+        skipped: { reason: "calendar closed 2026-09-12 (weekend)" },
+        failure: { class: "NOT_COMPARABLE", detail: "pilot skipped or consumed no frozen source" } }));
     } else if (outcome === "MALFORMED") {
       mkdirSync(join(stateDir, "runs", id), { recursive: true });
       writeFileSync(join(stateDir, "failure.json"), Buffer.from("{\"error\":\"partial\"}\ntrailing"));
@@ -163,9 +167,12 @@ function harness(f, outcomes) {
       writeFileSync(join(stateDir, "result.json"), json({ outcome: "completed", runId: id }));
     }
     inspections.set(id, { id, scope: f.registration.targetDeployment, snapshot, status,
-      evidence: { inference: { requestCount: status === "UNKNOWN" ? 2 : 1,
-        invocationUnit: "ACP_INVOCATION", inputTokens: 11, outputTokens: 7,
-        knownInputTokens: 11, knownOutputTokens: 7, reportedModelLabels: ["Summarizer"], unknown: status === "UNKNOWN" } } });
+      evidence: { inference: { requestCount: outcome === "NOT_COMPARABLE" ? 0 : status === "UNKNOWN" ? 2 : 1,
+        invocationUnit: "ACP_INVOCATION", inputTokens: outcome === "NOT_COMPARABLE" ? 0 : 11,
+        outputTokens: outcome === "NOT_COMPARABLE" ? 0 : 7,
+        knownInputTokens: outcome === "NOT_COMPARABLE" ? 0 : 11,
+        knownOutputTokens: outcome === "NOT_COMPARABLE" ? 0 : 7,
+        reportedModelLabels: [], unknown: status === "UNKNOWN" } } });
     return { code: status === "FAILED" ? 1 : 0, signal: null, timedOut: false, wallMs: 25,
       stdout: Buffer.from("stdout\u0000after"), stderr: Buffer.from("stderr\ntrailing") };
   };
@@ -207,6 +214,20 @@ test("runs exact registered order, keeps failures, and stops after UNKNOWN", asy
   assert.ok(h.calls.every(({ kind, env }) => kind !== "evaluate" || env.PGPASSWORD === undefined));
   await assert.rejects(() => runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
     runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } }), /refusing to overwrite/);
+});
+
+test("rejects input and reference symlinks before pointer or model work", async () => {
+  for (const linkDir of [(f) => f.cases[0].inputDir, (f) => join(f.root, "refs")]) {
+    const f = fixture();
+    symlinkSync("0001.json.gz", join(linkDir(f), "source-alias"));
+    const h = harness(f, []);
+    const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+      runnerConnectionPath: "runner.json", outputDir: join(f.root, "out") }, { control: h.control, spawn: h.spawn,
+        identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    assert.equal(summary.status, "INVALID");
+    assert.match(summary.stop.detail, /symbolic link/);
+    assert.equal(h.calls.length, 0);
+  }
 });
 
 test("rejects missing, duplicate, and unsupported execution inventory before side effects", async () => {
@@ -260,6 +281,25 @@ test("retains malformed outcome bytes before reporting the stop", async () => {
   assert.deepEqual(readFileSync(join(outputDir, "trials/case-a--champion--r1/stderr")), Buffer.from("stderr\ntrailing"));
 });
 
+test("stops on a calendar-skipped NOT_COMPARABLE result without consuming a generation failure", async () => {
+  const f = fixture();
+  const h = harness(f, ["NOT_COMPARABLE"]);
+  const outputDir = join(f.root, "out");
+  const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn,
+      identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+  assert.equal(summary.status, "STOPPED");
+  assert.equal(summary.stop.reason, "NOT_COMPARABLE");
+  assert.equal(summary.stop.detail, "calendar closed 2026-09-12 (weekend)");
+  assert.equal(summary.counts.dispatched, 1);
+  assert.equal(summary.counts.knownFailures, 0);
+  assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/trial.json"), "utf8")).outcomeFile,
+    "result.json");
+  assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/stop.json"), "utf8")).reason,
+    "NOT_COMPARABLE");
+  assert.equal(h.calls.filter(({ kind }) => kind === "evaluate").length, 1);
+});
+
 test("refuses a stale built engine before pointer or model work", async () => {
   const f = fixture();
   const h = harness(f, []);
@@ -280,6 +320,7 @@ test("streams subprocess bytes and kills the timed-out child process group", asy
     'process.stdout.write("first");process.stderr.write("err");setTimeout(()=>process.stdout.write("second"),20)'],
   env: process.env, timeoutMs: 1000, stdoutPath, stderrPath });
   assert.equal(normal.code, 0);
+  assert.equal(normal.drained, true);
   assert.equal(readFileSync(stdoutPath, "utf8"), "firstsecond");
   assert.equal(readFileSync(stderrPath, "utf8"), "err");
 
@@ -289,6 +330,7 @@ test("streams subprocess bytes and kills the timed-out child process group", asy
   const timed = await spawnRecordedSubprocess({ argv: [process.execPath, "-e", parentCode], env: process.env,
     timeoutMs: 50, stdoutPath: join(root, "timeout-stdout"), stderrPath: join(root, "timeout-stderr") });
   assert.equal(timed.timedOut, true);
+  assert.equal(timed.drained, true);
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 400));
   assert.equal(existsSync(sentinel), false);
 
