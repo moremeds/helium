@@ -45,7 +45,9 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       resolvedAt: "2026-09-12T00:00:00.000Z",
       metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("engine"), inputWorldHash: H(worlds[caseId]),
         deliveryMode: "disabled", executionEnvironment: "evaluation",
-        requestedModelId: "synthetic-model", actualModelIdentity: "synthetic-model" } };
+        // The exact route-identity object runtime-evaluate writes (cli.ts).
+        actualModelIdentity: { grade: "ROUTE_ONLY", provider: "synthetic-provider", requestedModel: "synthetic-model",
+          policyHash: contentHash({ maxCalls: 5 }), captureManifestHash: H("capture"), limits: { maxCalls: 5 } } } };
     const snapshot = { ...snapshotBase, effectiveSnapshotHash: contentHash(snapshotBase) };
     const result = { outcome: "completed", runId: label };
     const claims = { schemaVersion: "runtime-comparison-claims-v1", reviewer, reviewed: 4, supported: 4 };
@@ -104,7 +106,7 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
     resourcePolicy: { measured: ["requests", "tokens", "latencyMs"], perTrialTokenLimit: null, perTrialCallLimit: 5,
       timeoutSeconds: 60, totalTokenLimit: null, totalCallLimit: 100, costIncreaseLimit: null, latencyIncreaseLimit: 1,
       aggregationRule: "all-attempts-summed" },
-    actualModelIdentityPlan: { requestedModelId: "synthetic-model" },
+    actualModelIdentityPlan: { requestedModelId: "synthetic-model", acceptedGrade: "ROUTE_ONLY", providerId: "synthetic-provider" },
     targetDeployment: { tenant: "option-wizard", phase: "premarket", environment: "test", kind: "product" },
     executionContext: { environment: "evaluation", stateNamespace: "synthetic", deliveryMode: "disabled" },
     deliveryWave: "M2", activationMode: "MANUAL_REVIEW_ONLY",

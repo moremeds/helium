@@ -71,17 +71,25 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
   observed; for confirmation a missing value is inconclusive evidence and a
   contradicting value is not comparable. `model.reportedId` and `attempts[]`
   are self-declared: they verify nothing by themselves.
-- **usage.json** (`runtime-comparison-usage-v1`): the execution
-  environment's `{attempts[]}` record, bound via
-  `trial.json.usageEvidenceSha256` and required to reproduce the manifest
-  attempts exactly. Only bound usage verifies a registered resource limit;
-  unbound usage keeps resource conclusions unverified and the comparison
+- **usage.json** (`runtime-comparison-usage-v1`): an operator-normalized
+  `{attempts[]}` session record bound via `trial.json.usageEvidenceSha256`
+  and required to reproduce the manifest attempts exactly. It is
+  operator-side session evidence, not independent provider-side billing
+  proof. Only bound usage verifies a registered resource limit; unbound
+  usage keeps resource conclusions unverified and the comparison
   inconclusive.
-- **snapshot metadata**: `requestedModelId` (when recorded) must equal the
-  manifest's declared requested model; `actualModelIdentity` is the only
-  bound source for the actual route. A manifest `reportedId` that
-  contradicts it is not comparable; a missing bound identity leaves the
-  route unknown.
+- **snapshot metadata**: `actualModelIdentity` is the only bound source for
+  the actual route and has the exact shape runtime-evaluate writes
+  (`packages/cli/src/cli.ts`): the `"NONE_TOOL_ONLY"` sentinel or
+  `{grade, provider, requestedModel, policyHash, captureManifestHash,
+  limits}`. The bound `grade` must equal the registered
+  `actualModelIdentityPlan.acceptedGrade` (ROUTE_ONLY is permitted when
+  preregistered; PINNED is never required universally), `requestedModel`
+  must equal the manifest's declared requested model, `provider` must equal
+  the registered `providerId` when one is declared, and `policyHash` must
+  hash the recorded `limits`. A manifest `reportedId` that contradicts the
+  bound route is not comparable; a missing/sentinel bound identity leaves
+  the route unknown and the result inconclusive.
 - **outcome agreement**: `result.json` must carry a recognized `outcome`
   string consistent with the review state in both directions — a completed
   review cannot accompany a failed outcome and vice versa; `failure.json`
@@ -164,11 +172,13 @@ Second correction round (CLI follow-up):
   state in both directions; `outcome: "failed"` plus a completed review is
   not comparable.
 - `model.reportedId` and manifest `attempts[]` are self-declared only: the
-  actual route is bound from `snapshot.metadata.actualModelIdentity`, the
-  declared requested model is compared to `snapshot.metadata.requestedModelId`
-  when recorded, and attempt usage verifies a registered limit only when a
-  bound `usage.json` reproduces it. Unverifiable routes/usage stay
-  INCONCLUSIVE; nothing invents provider identity or hidden usage.
+  actual route is bound from the real `snapshot.metadata.actualModelIdentity`
+  object (`{grade, provider, requestedModel, policyHash, captureManifestHash,
+  limits}`) with the accepted grade preregistered, and attempt usage verifies
+  a registered limit only when a bound `usage.json` reproduces it.
+  Unverifiable routes/usage stay INCONCLUSIVE; nothing invents provider
+  identity or hidden usage. `usage.json` is documented as an
+  operator-normalized session artifact, not independent provider proof.
 
 ## Checks run
 

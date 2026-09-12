@@ -145,7 +145,14 @@ const registrationSchema = z.strictObject({
     latencyIncreaseLimit: finite.min(0).nullable(),
     aggregationRule: z.literal("all-attempts-summed"),
   }),
-  actualModelIdentityPlan: z.strictObject({ requestedModelId: text }),
+  // The registered model-identity grant: which route grade the comparison accepts and,
+  // when registered, which provider. ROUTE_ONLY records the actual route; it never
+  // masquerades as a pinned serving revision.
+  actualModelIdentityPlan: z.strictObject({
+    requestedModelId: text,
+    acceptedGrade: z.enum(["ROUTE_ONLY", "PINNED"]),
+    providerId: text.optional(),
+  }),
   targetDeployment: z.strictObject({ tenant: text, phase: text, environment: text, kind: text }).nullish(),
   executionContext: z.strictObject({
     environment: z.literal("evaluation"),
@@ -198,11 +205,24 @@ const claimsSchema = z.strictObject({
   supported: z.number().int().min(0),
 });
 
-// Raw per-attempt usage recorded by the execution environment, bound by hash;
-// the self-declared manifest attempts must reproduce it exactly.
+// Operator-normalized per-attempt usage record for the execution session, bound by
+// hash; the self-declared manifest attempts must reproduce it exactly. This is
+// operator-side session evidence, never independent provider-side billing proof.
 const usageSchema = z.strictObject({
   schemaVersion: z.literal("runtime-comparison-usage-v1"),
   attempts: z.array(attemptSchema).min(1),
+});
+
+// The route identity the runtime actually writes into snapshot metadata
+// (packages/cli runtime-evaluate composition): the "NONE_TOOL_ONLY" sentinel for a
+// model-free run, or the bound route object.
+const routeIdentitySchema = z.object({
+  grade: text,
+  provider: text,
+  requestedModel: text,
+  policyHash: sha,
+  captureManifestHash: sha,
+  limits: z.unknown(),
 });
 
 const snapshotSchema = z.object({
@@ -216,8 +236,7 @@ const snapshotSchema = z.object({
     inputWorldHash: sha,
     deliveryMode: text,
     executionEnvironment: text,
-    requestedModelId: text.optional(),
-    actualModelIdentity: nullableText.optional(),
+    actualModelIdentity: z.union([z.literal("NONE_TOOL_ONLY"), routeIdentitySchema]).optional(),
   }),
   effectiveSnapshotHash: sha,
 });
@@ -456,15 +475,24 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         throw new Error("snapshot scope is outside the registered target deployment");
       if (parsed.model.requestedId !== registration.actualModelIdentityPlan.requestedModelId)
         throw new Error("requested model is not the registered model identity plan");
-      if (snapshot.metadata.requestedModelId !== undefined && snapshot.metadata.requestedModelId !== parsed.model.requestedId)
-        throw new Error("snapshot requested model does not match the declared requested model");
       // The actual route is accepted only from bound snapshot metadata; a self-declared
-      // reportedId must agree with it but can never verify it.
-      const boundModel = snapshot.metadata.actualModelIdentity ?? null;
-      if (parsed.model.reportedId !== null && boundModel !== null && parsed.model.reportedId !== boundModel)
-        throw new Error("declared reported model contradicts the bound snapshot model identity");
-      trial.actualModel = boundModel;
-      if (boundModel !== null) actualModels.add(boundModel);
+      // reportedId must agree with it but can never verify it. "NONE_TOOL_ONLY" (or an
+      // absent field) means the run recorded no route at all.
+      const route = snapshot.metadata.actualModelIdentity;
+      if (route !== undefined && route !== "NONE_TOOL_ONLY") {
+        if (route.grade !== registration.actualModelIdentityPlan.acceptedGrade)
+          throw new Error(`bound route grade ${route.grade} is not the registered accepted grade ${registration.actualModelIdentityPlan.acceptedGrade}`);
+        if (route.requestedModel !== parsed.model.requestedId)
+          throw new Error("bound route requested model does not match the declared requested model");
+        if (registration.actualModelIdentityPlan.providerId !== undefined && route.provider !== registration.actualModelIdentityPlan.providerId)
+          throw new Error("bound route provider is not the registered provider");
+        if (contentHash(route.limits) !== route.policyHash)
+          throw new Error("route policyHash fails its own integrity check over the recorded limits");
+        if (parsed.model.reportedId !== null && parsed.model.reportedId !== route.requestedModel)
+          throw new Error("declared reported model contradicts the bound route requested model");
+        trial.actualModel = `${route.provider}:${route.requestedModel}`;
+        actualModels.add(trial.actualModel);
+      }
       // Actual treatment exposure must be recorded and consistent with the slice assigned before generation.
       if (mode === "CONFIRMATION_2V3") {
         const expected = parsed.arm === "candidate" && ev.treatmentSlices.withThirdEligibleRowCaseIds.includes(parsed.caseId);

@@ -73,13 +73,19 @@ function registration(overrides: Record<string, unknown> = {}) {
       perTrialTokenLimit: null, perTrialCallLimit: 10, timeoutSeconds: 120,
       totalTokenLimit: null, totalCallLimit: 500, costIncreaseLimit: null, latencyIncreaseLimit: 1,
       aggregationRule: "all-attempts-summed" },
-    actualModelIdentityPlan: { requestedModelId: "synthetic-model" },
+    actualModelIdentityPlan: { requestedModelId: "synthetic-model", acceptedGrade: "ROUTE_ONLY", providerId: "synthetic-provider" },
     targetDeployment: { tenant: "option-wizard", phase: "premarket", environment: "test", kind: "product" },
     executionContext: { environment: "evaluation", stateNamespace: "synthetic-ns", deliveryMode: "disabled" },
     deliveryWave: "M2", activationMode: "MANUAL_REVIEW_ONLY",
     ...overrides,
   };
 }
+
+// The exact route-identity object runtime-evaluate writes into snapshot metadata.
+const ROUTE_LIMITS = { maxCalls: 10, timeoutSeconds: 120 };
+const routeIdentity = (model = "synthetic-model", provider = "synthetic-provider", grade = "ROUTE_ONLY") =>
+  ({ grade, provider, requestedModel: model,
+    policyHash: contentHash(ROUTE_LIMITS), captureManifestHash: H("synthetic-capture"), limits: ROUTE_LIMITS });
 
 function snapshot(arm: "champion" | "candidate", world: string) {
   const unsigned = {
@@ -89,7 +95,7 @@ function snapshot(arm: "champion" | "candidate", world: string) {
     resolvedPayload: PAYLOAD(arm === "champion" ? 2 : 3), resolvedAt: "2026-09-12T00:00:00.000Z",
     metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
       inputWorldHash: H(world), deliveryMode: "disabled", executionEnvironment: "evaluation",
-      requestedModelId: "synthetic-model", actualModelIdentity: "synthetic-model" },
+      actualModelIdentity: routeIdentity() },
   };
   return { ...unsigned, effectiveSnapshotHash: contentHash(unsigned) };
 }
@@ -97,7 +103,8 @@ function snapshot(arm: "champion" | "candidate", world: string) {
 function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
                options: { coverage?: number; failed?: boolean; usageUnknown?: boolean; requests?: number;
                           claims?: boolean; observedThirdRow?: boolean | null; outcome?: string;
-                          reportedId?: string | null; actualModel?: string | null; usageBound?: boolean } = {}): ComparisonTrialInput {
+                          reportedId?: string | null; actualModel?: string | null; routeProvider?: string;
+                          routeGrade?: string; usageBound?: boolean } = {}): ComparisonTrialInput {
   const { coverage = 1, failed = false, usageUnknown = false, requests = 3, claims = true } = options;
   const cohortCase = CASES.find((entry) => entry.caseId === caseId)!;
   const label = `trial-${caseId}-${arm}-${replicate}`;
@@ -105,8 +112,10 @@ function trial(caseId: string, arm: "champion" | "candidate", replicate: number,
   const eventsBytes = JSON.stringify(events);
   const snapshotObj = snapshot(arm, cohortCase.world);
   const snapshotMeta = snapshotObj.metadata as Record<string, unknown>;
-  if (options.actualModel === null) delete snapshotMeta.actualModelIdentity;
-  else if (typeof options.actualModel === "string") snapshotMeta.actualModelIdentity = options.actualModel;
+  if (options.actualModel === null) snapshotMeta.actualModelIdentity = "NONE_TOOL_ONLY";
+  else if (options.actualModel !== undefined || options.routeProvider !== undefined || options.routeGrade !== undefined)
+    snapshotMeta.actualModelIdentity = routeIdentity(options.actualModel ?? "synthetic-model",
+      options.routeProvider ?? "synthetic-provider", options.routeGrade ?? "ROUTE_ONLY");
   snapshotObj.effectiveSnapshotHash = contentHash(
     Object.fromEntries(Object.entries(snapshotObj).filter(([key]) => key !== "effectiveSnapshotHash")));
   const snapshotBytes = JSON.stringify(snapshotObj);
@@ -307,9 +316,15 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
     // Self-declared reportedId contradicting the bound snapshot identity is not comparable.
     expect(analyze(trials.map((entry) => entry.label === "trial-case-1-candidate-1"
       ? rebuild(entry, { reportedId: "other-model" }) : entry)).decision).toBe("NOT_COMPARABLE");
-    // Bound snapshots recording two different routes are not comparable.
+    // A bound grade outside the registered grant is not comparable either.
+    expect(analyze(trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? rebuild(entry, { routeGrade: "PINNED" }) : entry)).decision).toBe("NOT_COMPARABLE");
+    // Bound snapshots recording two different routes are not comparable (provider not
+    // preregistered here, so the differing bound route passes identity checks).
+    const noProviderReg = registration();
+    delete noProviderReg.actualModelIdentityPlan.providerId;
     expect(analyze(trials.map((entry) => (entry.trial as { arm: string }).arm === "candidate"
-      ? rebuild(entry, { actualModel: "other-model", reportedId: "other-model" }) : entry)).decision).toBe("INCONCLUSIVE");
+      ? rebuild(entry, { routeProvider: "other-provider" }) : entry), noProviderReg).decision).toBe("INCONCLUSIVE");
   });
 
   it("never verifies attempt usage from the self-declared manifest alone", () => {
