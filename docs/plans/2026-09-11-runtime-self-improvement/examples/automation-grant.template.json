@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "automation-grant-template-v1.1",
+  "documentStatus": "TEMPLATE_DISABLED_NOT_AUTHORIZATION",
+  "enabled": false,
+  "grantId": null,
+  "authorizedBy": null,
+  "authorizedAt": null,
+  "scope": {
+    "tenant": "option-wizard",
+    "phase": "premarket",
+    "environment": "production",
+    "kind": "product"
+  },
+  "allowedPaths": {
+    "/config/news/perStock": [
+      1,
+      2,
+      3
+    ]
+  },
+  "protectedFields": [
+    "permissions",
+    "tools",
+    "evaluator",
+    "promotionPolicy",
+    "budgetCeiling",
+    "deliveryRecipients",
+    "marketData",
+    "clockSemantics"
+  ],
+  "promotionPolicyHash": null,
+  "evaluatorQualificationHash": null,
+  "allowedEngineArtifactHashes": [],
+  "maxActiveCampaigns": 1,
+  "maxConfirmCandidatesPerExperiment": 1,
+  "budget": {
+    "maxModelCalls": null,
+    "maxTokens": null,
+    "maxToolCalls": null,
+    "maxWalltimeSeconds": null,
+    "maxRetries": null,
+    "maxCandidatesPerCampaign": null,
+    "meteredUsdCeiling": null
+  },
+  "modelIdentity": {
+    "minimumTier": "PINNED",
+    "allowRouteOnly": false,
+    "allowUnknown": false
+  },
+  "validFrom": null,
+  "validUntil": null,
+  "receiptTtlSeconds": null,
+  "shadowRequirementHash": null,
+  "rollbackPolicyHash": null,
+  "criticalUnknownBlocks": true,
+  "allowGitWrites": false,
+  "allowDatabaseMigrations": false,
+  "notes": [
+    "This template is deliberately incomplete and disabled. Administrator must bind real identities, approved budgets, calibrated policy and expiry before a trusted service can create an effective grant.",
+    "A schema-valid config is not permission to activate it. No scores or real results are supplied.",
+    "A monetary ceiling can remain null only under an explicit token/call-budget policy where monetary charges are unavailable; null never means free or unlimited.",
+    "This grant is not a configuration approval or a delivery permit. Revoking an active configuration requires an explicit configuration-revocation action.",
+    "MANUAL_ACTIVATE and INITIALIZE use distinct exact administrator approvals, not a fabricated AUTO grant."
+  ],
+  "action": "AUTO_ACTIVATE",
+  "decisionFamilyId": null,
+  "approvedHoldoutAccessPolicyHash": null,
+  "configurationApprovalPolicyHash": null,
+  "scopeRevocationEpochAtIssue": null,
+  "expiresEffect": "DENY_FUTURE_AUTO_ACTIVATIONS_ONLY"
+}
