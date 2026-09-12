@@ -21,3 +21,11 @@ Native isolation excluded the observed operator skill import. Builtin skills, in
 A new complete trading-day world is needed for useful real premarket A/A development. Statistical calibration additionally needs actual independent case/cluster evidence and qualified semantic evaluation. The single current world cannot supply these by repetition or relabeling.
 
 The fixed 2-versus-3 confirmation still requires a candidate and evaluation policy frozen before results, a genuinely unexposed independent cohort, actual treatment/context exposure, reviewer qualification and adjudication, and complete bound ledger/calendar/source evidence. No calibration threshold, independent sample, semantic score, confirmation result, or improvement claim has been invented. The current disposition is AWAITING_NEW_EVIDENCE.
+
+## Integrated verification and review
+
+The final code build and 50 focused provider/comparison tests passed, along with 11 campaign checks and the comparison CLI check. Before the final focused corrections, the full unit suite passed 1,371 tests with five environment-gated skips, existing contracts passed five with three skips, and typecheck/deployment-script checks passed. These are offline mechanism checks; the scratch-PostgreSQL pilot check passed separately.
+
+One read-only Cursor/Grok review examined fixed commit `1fccef6`; the lead independently reviewed its findings and subsequent corrections. Tenant/team/lockfile identity is now bound before dispatch and in analysis, dirty frozen campaigns are refused, ambiguous finalization retains both result and error plus DB inspection, and final close uncertainty is explicit without rewriting prior failure bytes. Unnecessary SSH agent inheritance was removed. The installed provider binary and its authentication remain trusted; the narrow native import control is not a general host-filesystem sandbox.
+
+Private review ID: `final-review/cursor.txt`, SHA-256 `2b386de353425a4a5e005031fc288247462bc8b25a6ec2d75a40a1b417997190`. Corrective changes were checked by the lead with offline regressions; no second Grok pass or additional live Devin probe was claimed. All original branches, drafts and raw failures remain retained.
