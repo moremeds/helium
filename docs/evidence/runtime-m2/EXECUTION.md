@@ -114,6 +114,12 @@ reported missing Silver daily artifacts for both symbols. No fallback or source
 repair was applied. The private raw capture is durably retained. It remains `INCOMPLETE` and
 `DIAGNOSTIC_ONLY`; no failed input was silently removed or substituted.
 
+A later revision-46 refresh superseded that missing-source status: it recorded
+all 90 sources with zero failures and input hash
+`2351da70e29b3993fabd7a66270d3376ce27d854389e68069c46b4ec3c592a89`.
+The capture is `COMPLETE` but explicitly `DIAGNOSTIC_ONLY`; it is not an
+eligible confirmation cohort and establishes no M2 A/A or confirmation result.
+
 `runtime-evaluate` composes the existing runtime pilot with one explicitly
 pinned provider. It requires a COMPLETE capture bound to the tenant, phase,
 clock and exact input hash, plus an explicit model and limits file. The Codex

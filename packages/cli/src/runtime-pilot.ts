@@ -13,7 +13,7 @@ import { sha256 } from "./tool-io.js";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 
-function buildIdentity(tenantDir: string, providerDirs: string[] = []): Record<string, unknown> {
+export function buildIdentity(tenantDir: string, providerDirs: string[] = []): Record<string, unknown> {
   const artifacts: Array<[string, string]> = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en"))) {

@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { canonicalJson, parseStrictJson } from "../packages/core/lib/index.js";
 import { RuntimeControl } from "../plugins/runtime-control/lib/index.js";
 import { loadSnapshotRecordings } from "../packages/cli/lib/replay-strict.js";
+import { buildIdentity } from "../packages/cli/lib/runtime-pilot.js";
 import { renderText } from "../plugins/option-wizard/lib/render/text.js";
 import { parseRuntimeConfig } from "../plugins/option-wizard/lib/runtime/index.js";
 import { parseComparisonRegistration } from "../plugins/option-wizard/lib/eval/runtime-comparison.js";
@@ -76,6 +77,49 @@ function textOf(value, at) {
 function intOf(value, at, min = 1) {
   if (!Number.isSafeInteger(value) || value < min) throw new Error(`${at} must be an integer >= ${min}`);
   return value;
+}
+
+function freezeInputs(value, executionDir, outputDir) {
+  strictKeys(value, ["schemaVersion", "comparisonRegistration", "referencesDir", "configPayloads",
+    "limits", "admin", "cases", "order"], "execution");
+  const frozen = structuredClone(value);
+  const registrationPath = join(outputDir, "registration.json");
+  writeOnce(registrationPath, readFileSync(resolve(executionDir,
+    textOf(required(value, "comparisonRegistration", "execution"), "execution.comparisonRegistration"))));
+  frozen.comparisonRegistration = registrationPath;
+
+  const refsDir = join(outputDir, "refs");
+  cpSync(resolve(executionDir, textOf(required(value, "referencesDir", "execution"),
+    "execution.referencesDir")), refsDir, { recursive: true });
+  frozen.referencesDir = refsDir;
+
+  const payloads = required(value, "configPayloads", "execution");
+  strictKeys(payloads, ["champion", "candidate"], "execution.configPayloads");
+  mkdirSync(join(outputDir, "config"));
+  frozen.configPayloads = {};
+  for (const arm of ["champion", "candidate"]) {
+    const target = join(outputDir, "config", `${arm}.json`);
+    writeOnce(target, readFileSync(resolve(executionDir, textOf(payloads[arm], `configPayloads.${arm}`))));
+    frozen.configPayloads[arm] = target;
+  }
+
+  const rawCases = required(value, "cases", "execution");
+  if (!Array.isArray(rawCases)) throw new Error("execution.cases must be an array");
+  const seen = new Set();
+  frozen.cases = rawCases.map((entry) => {
+    if (!isRecord(entry)) throw new Error("cases[] must be a plain object");
+    const caseId = textOf(entry.caseId, "cases[].caseId");
+    if (!LABEL.test(caseId) || seen.has(caseId)) throw new Error(`invalid or duplicate caseId ${caseId}`);
+    seen.add(caseId);
+    const target = join(outputDir, "cases", caseId);
+    mkdirSync(target, { recursive: true });
+    const inputDir = join(target, "inputs");
+    cpSync(resolve(executionDir, textOf(entry.inputDir, `cases.${caseId}.inputDir`)), inputDir, { recursive: true });
+    const capture = join(target, "capture.json");
+    writeOnce(capture, readFileSync(resolve(executionDir, textOf(entry.capture, `cases.${caseId}.capture`))));
+    return { ...entry, inputDir, capture };
+  });
+  return frozen;
 }
 /**
  * Bind the small execution-only document to one strict, immutable comparison
@@ -254,23 +298,58 @@ function parseCampaign(value, executionDir) {
   };
 }
 
-/** The real subprocess edge: raw stdout/stderr stay as bytes until close. */
-function spawnSubprocess({ argv, env, timeoutMs }) {
-  return new Promise((resolvePromise, reject) => {
+/** Stream evidence to exclusive files; timeout terminates the whole subprocess group. */
+export function spawnRecordedSubprocess({ argv, env, timeoutMs, stdoutPath, stderrPath, captureStdout = false }) {
+  const stdoutFd = openSync(stdoutPath, "wx");
+  const stderrFd = openSync(stderrPath, "wx");
+  return new Promise((resolvePromise) => {
     const started = Date.now();
-    const child = spawn(argv[0], argv.slice(1), { env, stdio: ["ignore", "pipe", "pipe"] });
-    const stdout = [];
-    const stderr = [];
+    let child;
+    const captured = [];
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("close", (code, signal) => {
+    let settled = false;
+    let spawnError = null;
+    let hardTimer;
+    let forceTimer;
+    const finish = (code, signal) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      clearTimeout(hardTimer);
+      clearTimeout(forceTimer);
+      child?.stdout?.destroy(); child?.stderr?.destroy();
+      fsyncSync(stdoutFd); fsyncSync(stderrFd); closeSync(stdoutFd); closeSync(stderrFd);
       resolvePromise({ code, signal, timedOut, wallMs: Date.now() - started,
-        stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) });
-    });
+        stdout: Buffer.concat(captured), stderr: Buffer.alloc(0), persisted: true,
+        error: spawnError?.message ?? null });
+    };
+    const killGroup = (signal) => {
+      try { if (child?.pid !== undefined) process.kill(-child.pid, signal); }
+      catch { try { child?.kill(signal); } catch { /* already closed */ } }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup("SIGTERM");
+      hardTimer = setTimeout(() => killGroup("SIGKILL"), 3_000);
+      forceTimer = setTimeout(() => finish(null, "SIGKILL"), 5_000);
+    }, timeoutMs);
+    try {
+      child = spawn(argv[0], argv.slice(1), { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+      child.stdout.on("data", (chunk) => {
+        if (settled) return;
+        writeSync(stdoutFd, chunk);
+        if (captureStdout) captured.push(chunk);
+      });
+      child.stderr.on("data", (chunk) => { if (!settled) writeSync(stderrFd, chunk); });
+      child.once("error", (error) => {
+        spawnError = error;
+        setTimeout(() => finish(null, null), 1_000);
+      });
+      child.once("close", finish);
+    } catch (error) {
+      spawnError = error;
+      finish(null, null);
+    }
   });
 }
 
@@ -283,7 +362,7 @@ class CampaignHalt extends Error {
 }
 
 export async function runCampaign(options, deps = {}) {
-  const spawnEdge = deps.spawn ?? spawnSubprocess;
+  const spawnEdge = deps.spawn ?? spawnRecordedSubprocess;
   const outputDir = options.outputDir;
   if (existsSync(outputDir))
     throw new Error(`output path already exists: ${outputDir}; refusing to overwrite evidence`);
@@ -353,11 +432,8 @@ export async function runCampaign(options, deps = {}) {
   let registration;
   try {
     const executionValue = parseStrictJson(executionBytes.toString("utf8"));
-    if (isRecord(executionValue) && typeof executionValue.comparisonRegistration === "string") {
-      const bytes = readFileSync(resolve(dirname(resolve(options.executionPath)), executionValue.comparisonRegistration));
-      writeOnce(join(outputDir, "registration.json"), bytes);
-    }
-    registration = parseCampaign(executionValue, dirname(resolve(options.executionPath)));
+    const executionDir = dirname(resolve(options.executionPath));
+    registration = parseCampaign(freezeInputs(executionValue, executionDir, outputDir), executionDir);
   } catch (error) {
     status = "INVALID";
     stop = { reason: "INVALID_REGISTRATION", detail: error instanceof Error ? error.message : String(error) };
@@ -388,6 +464,14 @@ export async function runCampaign(options, deps = {}) {
     if (deps.spawn === undefined &&
         !existsSync(join(REPO_ROOT, "plugins", `provider-${execution.provider}`, "lib", "evaluation.js")))
       throw new Error(`provider-${execution.provider} has no controlled evaluation adapter`);
+    const identity = deps.identity ?? buildIdentity(
+      join(REPO_ROOT, "plugins", scope.tenant),
+      [join(REPO_ROOT, "plugins", `provider-${execution.provider}`, "lib"),
+        join(REPO_ROOT, "packages/provider-sdk/lib")],
+    );
+    if (identity.engineSha !== registration.comparison.engineSha ||
+        identity.engineArtifactHash !== registration.comparison.engineArtifactHash)
+      throw new Error("current built engine identity differs from the frozen comparison registration");
   } catch (error) {
     status = "INVALID";
     stop = { reason: "INVALID_INPUT", detail: error instanceof Error ? error.message : String(error) };
@@ -400,8 +484,6 @@ export async function runCampaign(options, deps = {}) {
     projectedMs: registration.trials.length * budget.perTrialMs,
     cases: registration.cases.map((entry) => ({ caseId: entry.caseId, inputWorldHash: entry.inputWorldHash })),
     arms: { champion: registration.arms.champion.configVersionId, candidate: registration.arms.candidate.configVersionId } });
-  cpSync(registration.refsDir, join(outputDir, "refs"), { recursive: true });
-
   const control = deps.control ??
     new RuntimeControl(parseStrictJson(readFileSync(options.runnerConnectionPath, "utf8")));
 
@@ -411,12 +493,17 @@ export async function runCampaign(options, deps = {}) {
     const result = await spawnEdge({
       argv: [process.execPath, ADMIN_JS, options.adminConnectionPath, requestPath],
       env: { PATH: process.env.PATH }, timeoutMs: ADMIN_TIMEOUT_MS,
+      stdoutPath: join(dir, `${name}-stdout`), stderrPath: join(dir, `${name}-stderr`),
+      captureStdout: true,
     });
-    writeOnce(join(dir, `${name}-stdout`), result.stdout);
-    writeOnce(join(dir, `${name}-stderr`), result.stderr);
+    if (result.persisted !== true) {
+      writeOnce(join(dir, `${name}-stdout`), result.stdout);
+      writeOnce(join(dir, `${name}-stderr`), result.stderr);
+    }
     writeOnce(join(dir, `${name}-process.json`), canonicalJson({
       argv: [process.execPath, ADMIN_JS, options.adminConnectionPath, requestPath],
       code: result.code, signal: result.signal, timedOut: result.timedOut, wallMs: result.wallMs,
+      error: result.error ?? null,
     }) + "\n");
     if (result.timedOut || result.code !== 0)
       throw new CampaignHalt("POINTER_SWITCH_FAILED",
@@ -557,9 +644,12 @@ export async function runCampaign(options, deps = {}) {
           "--policy", join(trialDir, "policy.json")],
         env: subprocessEnv({ TMPDIR: runTmp }),
         timeoutMs: budget.perTrialMs,
+        stdoutPath: join(trialDir, "stdout"), stderrPath: join(trialDir, "stderr"),
       });
-      writeOnce(join(trialDir, "stdout"), result.stdout);
-      writeOnce(join(trialDir, "stderr"), result.stderr);
+      if (result.persisted !== true) {
+        writeOnce(join(trialDir, "stdout"), result.stdout);
+        writeOnce(join(trialDir, "stderr"), result.stderr);
+      }
       writeOnce(join(trialDir, "process.json"), canonicalJson({
         argv: [process.execPath, CLI_JS, "runtime-evaluate", scope.tenant,
           "--connection", options.runnerConnectionPath, "--input", caseSpec.inputDir,
@@ -567,6 +657,7 @@ export async function runCampaign(options, deps = {}) {
           "--provider", execution.provider, "--model", execution.requestedModel,
           "--policy", join(trialDir, "policy.json")],
         code: result.code, signal: result.signal, timedOut: result.timedOut, wallMs: result.wallMs,
+        error: result.error ?? null,
       }) + "\n");
       record.code = result.code; record.signal = result.signal;
       record.timedOut = result.timedOut; record.wallMs = result.wallMs;
@@ -780,8 +871,8 @@ export async function runCampaign(options, deps = {}) {
         counts.succeeded += 1;
         record.outcome = "completed";
       } else { // FAILED: a known generation failure stays in the denominator.
-        if (!hasFailure)
-          throw new CampaignHalt("AMBIGUOUS", "a FAILED attempt does not match failure.json");
+        if (!hasFailure && !(hasResult && outcome.outcome === "failed"))
+          throw new CampaignHalt("AMBIGUOUS", "a FAILED attempt matches neither failure.json nor a failed result.json");
         counts.knownFailures += 1;
         record.outcome = "failed";
         const stopOnFailure = continuationPolicy.onKnownGenerationFailure === "stop";

@@ -2,13 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
-  mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { canonicalJson } from "../packages/core/lib/index.js";
-import { runCampaign } from "./runtime-campaign.mjs";
+import { runCampaign, spawnRecordedSubprocess } from "./runtime-campaign.mjs";
 
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const contentHash = (value) => hash(canonicalJson(value));
@@ -133,6 +133,7 @@ function harness(f, outcomes) {
         stdout: Buffer.from(json({ versionId: current, revision })), stderr: Buffer.alloc(0) };
     }
     const outcome = outcomes[evalIndex++];
+    const status = outcome === "FAILED_RESULT" ? "FAILED" : outcome;
     calls.push({ kind: "evaluate", env, argv });
     const trialId = f.execution.order[evalIndex - 1];
     const id = `attempt-${evalIndex}`;
@@ -152,17 +153,20 @@ function harness(f, outcomes) {
     if (outcome === "FAILED") {
       mkdirSync(join(stateDir, "runs", id), { recursive: true });
       writeFileSync(join(stateDir, "failure.json"), json({ error: "known" }));
+    } else if (outcome === "FAILED_RESULT") {
+      writeFileSync(join(stateDir, "result.json"), json({ outcome: "failed", runId: id,
+        failure: { class: "renderer-failed", detail: "known" } }));
     } else if (outcome === "MALFORMED") {
       mkdirSync(join(stateDir, "runs", id), { recursive: true });
       writeFileSync(join(stateDir, "failure.json"), Buffer.from("{\"error\":\"partial\"}\ntrailing"));
     } else {
       writeFileSync(join(stateDir, "result.json"), json({ outcome: "completed", runId: id }));
     }
-    inspections.set(id, { id, scope: f.registration.targetDeployment, snapshot, status: outcome,
-      evidence: { inference: { requestCount: outcome === "UNKNOWN" ? 2 : 1,
+    inspections.set(id, { id, scope: f.registration.targetDeployment, snapshot, status,
+      evidence: { inference: { requestCount: status === "UNKNOWN" ? 2 : 1,
         invocationUnit: "ACP_INVOCATION", inputTokens: 11, outputTokens: 7,
-        knownInputTokens: 11, knownOutputTokens: 7, reportedModelLabels: ["Summarizer"], unknown: outcome === "UNKNOWN" } } });
-    return { code: outcome === "FAILED" ? 1 : 0, signal: null, timedOut: false, wallMs: 25,
+        knownInputTokens: 11, knownOutputTokens: 7, reportedModelLabels: ["Summarizer"], unknown: status === "UNKNOWN" } } });
+    return { code: status === "FAILED" ? 1 : 0, signal: null, timedOut: false, wallMs: 25,
       stdout: Buffer.from("stdout\u0000after"), stderr: Buffer.from("stderr\ntrailing") };
   };
   return { control, spawn, calls };
@@ -170,10 +174,10 @@ function harness(f, outcomes) {
 
 test("runs exact registered order, keeps failures, and stops after UNKNOWN", async () => {
   const f = fixture();
-  const h = harness(f, ["FAILED", "UNKNOWN"]);
+  const h = harness(f, ["FAILED_RESULT", "UNKNOWN"]);
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
 
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "UNKNOWN_ATTEMPT", JSON.stringify(summary.stop));
@@ -183,12 +187,16 @@ test("runs exact registered order, keeps failures, and stops after UNKNOWN", asy
   assert.equal(summary.budget.heldOrSpentMs, 1025);
   assert.equal(h.calls.filter(({ kind }) => kind === "evaluate").length, 2);
   assert.equal(h.calls.filter(({ kind }) => kind === "admin").length, 1);
+  const firstEval = h.calls.find(({ kind }) => kind === "evaluate");
+  assert.ok(firstEval.argv[firstEval.argv.indexOf("--input") + 1].startsWith(join(outputDir, "cases", "case-a")));
+  assert.ok(firstEval.argv[firstEval.argv.indexOf("--capture") + 1].startsWith(join(outputDir, "cases", "case-a")));
   assert.deepEqual(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/policy.json"), "utf8")),
     { maxRequests: 2, timeoutMs: 1000, maxRequestBytes: 4096 });
   assert.deepEqual(readFileSync(join(outputDir, "trials/case-a--champion--r1/stdout")), Buffer.from("stdout\u0000after"));
-  assert.deepEqual(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/state/failure.json"), "utf8")),
-    { error: "known" });
+  assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/state/result.json"), "utf8")).outcome,
+    "failed");
   assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/trial.json"), "utf8")).observedThirdRow, null);
+  assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/trial.json"), "utf8")).outcomeFile, "result.json");
   assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/usage.json"), "utf8")).attempts[0].tokens, 18);
   assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/trial.json"), "utf8")).model.reportedId, null);
   assert.ok(readFileSync(join(outputDir, "registration.json")).equals(readFileSync(join(f.root, "registration.json"))));
@@ -198,7 +206,7 @@ test("runs exact registered order, keeps failures, and stops after UNKNOWN", asy
   assert.ok(prepared.seq < switched.seq);
   assert.ok(h.calls.every(({ kind, env }) => kind !== "evaluate" || env.PGPASSWORD === undefined));
   await assert.rejects(() => runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn }), /refusing to overwrite/);
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } }), /refusing to overwrite/);
 });
 
 test("rejects missing, duplicate, and unsupported execution inventory before side effects", async () => {
@@ -213,7 +221,7 @@ test("rejects missing, duplicate, and unsupported execution inventory before sid
     const h = harness(f, []);
     const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
       runnerConnectionPath: "runner.json", outputDir: join(f.root, "invalid-out") },
-    { control: h.control, spawn: h.spawn });
+    { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
     assert.equal(summary.status, "INVALID");
     assert.equal(h.calls.length, 0);
   }
@@ -231,7 +239,7 @@ test("retains malformed admin stdout and stops before model dispatch", async () 
   };
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "AMBIGUOUS");
   assert.equal(readFileSync(join(outputDir, "trials/case-a--candidate--r1/admin-request-stdout"), "utf8"),
@@ -244,10 +252,49 @@ test("retains malformed outcome bytes before reporting the stop", async () => {
   const h = harness(f, ["MALFORMED"]);
   const outputDir = join(f.root, "out");
   const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
-    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn });
+    runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn, identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
   assert.equal(summary.status, "STOPPED");
   assert.equal(summary.stop.reason, "AMBIGUOUS");
   assert.equal(readFileSync(join(outputDir, "trials/case-a--champion--r1/state/failure.json"), "utf8"),
     "{\"error\":\"partial\"}\ntrailing");
   assert.deepEqual(readFileSync(join(outputDir, "trials/case-a--champion--r1/stderr")), Buffer.from("stderr\ntrailing"));
+});
+
+test("refuses a stale built engine before pointer or model work", async () => {
+  const f = fixture();
+  const h = harness(f, []);
+  const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+    runnerConnectionPath: "runner.json", outputDir: join(f.root, "out") },
+  { control: h.control, spawn: h.spawn,
+    identity: { engineSha: "different", engineArtifactHash: f.registration.engineArtifactHash } });
+  assert.equal(summary.status, "INVALID");
+  assert.match(summary.stop.detail, /built engine identity/);
+  assert.equal(h.calls.length, 0);
+});
+
+test("streams subprocess bytes and kills the timed-out child process group", async () => {
+  const root = mkdtempSync(join(tmpdir(), "helium-campaign-process-"));
+  const stdoutPath = join(root, "stdout");
+  const stderrPath = join(root, "stderr");
+  const normal = await spawnRecordedSubprocess({ argv: [process.execPath, "-e",
+    'process.stdout.write("first");process.stderr.write("err");setTimeout(()=>process.stdout.write("second"),20)'],
+  env: process.env, timeoutMs: 1000, stdoutPath, stderrPath });
+  assert.equal(normal.code, 0);
+  assert.equal(readFileSync(stdoutPath, "utf8"), "firstsecond");
+  assert.equal(readFileSync(stderrPath, "utf8"), "err");
+
+  const sentinel = join(root, "grandchild-survived");
+  const childCode = `setTimeout(()=>require("node:fs").writeFileSync(${JSON.stringify(sentinel)},"bad"),300)`;
+  const parentCode = `require("node:child_process").spawn(process.execPath,["-e",${JSON.stringify(childCode)}],{stdio:"ignore"});setInterval(()=>{},1000)`;
+  const timed = await spawnRecordedSubprocess({ argv: [process.execPath, "-e", parentCode], env: process.env,
+    timeoutMs: 50, stdoutPath: join(root, "timeout-stdout"), stderrPath: join(root, "timeout-stderr") });
+  assert.equal(timed.timedOut, true);
+  await new Promise((resolvePromise) => setTimeout(resolvePromise, 400));
+  assert.equal(existsSync(sentinel), false);
+
+  const missing = await spawnRecordedSubprocess({ argv: [join(root, "missing-command")], env: process.env,
+    timeoutMs: 100, stdoutPath: join(root, "missing-stdout"), stderrPath: join(root, "missing-stderr") });
+  assert.match(missing.error, /ENOENT/);
+  assert.equal(existsSync(join(root, "missing-stdout")), true);
+  assert.equal(existsSync(join(root, "missing-stderr")), true);
 });
