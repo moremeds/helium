@@ -1,5 +1,7 @@
 # Task 2 — opt-in Devin evaluation adapter
 
+The original task-2 account below is retained. The appended 2026-09-13 repair record supersedes its Max-route, UNKNOWN classification, and isolation conclusions; see [current M2 status](execution-status.md).
+
 Status: adapter delivered, verified offline end-to-end, exercised live twice
 under the documented isolation configuration. This is a controlled evaluation
 seam only — not a production provider route and not M2 acceptance.

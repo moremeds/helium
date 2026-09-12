@@ -175,3 +175,7 @@ changed to the existing `HELIUM_CURL_BIN` seam and now runs a local response
 stub, covering the actual adapter and transport parser without network access.
 The failed attempt is retained separately; it is not a successful inference or
 A/A observation.
+
+## 2026-09-13 continuation
+
+The acquisition, transport and analysis follow-up is recorded in [current execution status](execution-status.md). The earlier incomplete captures and HTTP403 test incident above remain preserved. Revision46 acquisition is now COMPLETE, but the only complete frozen world is calendar-closed for premarket; real A/A calibration and independent confirmation remain unclosed.
