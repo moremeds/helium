@@ -232,6 +232,8 @@ export interface RunOptions {
   runtimePilot?: {
     snapshot: { resolvedPayload: unknown };
     recordings: RecordingIndex;
+    /** A caller-supplied provider with request-level accounting and limits. */
+    inference?: true;
   };
 }
 
@@ -715,9 +717,9 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   const phase = options.phase ?? "premarket";
   const { spec, manifest } = options.tenant;
   if (options.runtimePilot !== undefined &&
-      (options.providers?.length !== 0 || spec.delivery.length !== 0 ||
+      ((options.runtimePilot.inference ? options.providers?.length !== 1 : options.providers?.length !== 0) || spec.delivery.length !== 0 ||
        options.asOf === undefined || options.replayFrom !== undefined))
-    throw new Error("Runtime pilot requires offline providers, no delivery and an explicit frozen clock");
+    throw new Error("Runtime pilot requires explicit controlled providers, no delivery and a frozen clock");
   // ONE day for the whole run, read once at the start: the prompt's clock, the
   // subject, the report file name and the per-day delivery counter are then the
   // same date even for a run that crosses midnight in some zone. Computing it
