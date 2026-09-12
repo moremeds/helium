@@ -228,6 +228,11 @@ export interface RunOptions {
    * step with no candidates instead of quietly routing elsewhere.
    */
   modelPin?: string;
+  /** M1 composition supplies an already-persisted snapshot and frozen sources. */
+  runtimePilot?: {
+    snapshot: { resolvedPayload: unknown };
+    recordings: RecordingIndex;
+  };
 }
 
 /**
@@ -709,6 +714,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   const runId = options.runId ?? `run-${randomUUID()}`;
   const phase = options.phase ?? "premarket";
   const { spec, manifest } = options.tenant;
+  if (options.runtimePilot !== undefined &&
+      (options.providers?.length !== 0 || spec.delivery.length !== 0 ||
+       options.asOf === undefined || options.replayFrom !== undefined))
+    throw new Error("Runtime pilot requires offline providers, no delivery and an explicit frozen clock");
   // ONE day for the whole run, read once at the start: the prompt's clock, the
   // subject, the report file name and the per-day delivery counter are then the
   // same date even for a run that crosses midnight in some zone. Computing it
@@ -786,11 +795,12 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   // writing it, and so the walk happens once per run rather than per call.
   // No keep-list here: `pruneRecordings` takes one, and the caller that knows
   // a run is still cited is the one that will pass it.
-  pruneRecordings(options.stateRoot);
+  if (options.runtimePilot === undefined) pruneRecordings(options.stateRoot);
   const replayIndex: RecordingIndex | undefined =
+    options.runtimePilot?.recordings ?? (
     options.replayFrom === undefined
       ? undefined
-      : loadRecordings(recordingsDir(options.stateRoot, options.replayFrom));
+      : loadRecordings(recordingsDir(options.stateRoot, options.replayFrom)));
   const tools =
     options.tools ??
     (await loadTenantTools(options.tenant.dir, {
@@ -802,9 +812,10 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       ...(options.asOf === undefined ? {} : { asOf: options.asOf }),
       ...(spec.calendar === undefined ? {} : { calendar: spec.calendar }),
       ...(replayIndex === undefined ? {} : { recordings: replayIndex }),
-      ...(Object.keys(spec.extensions).length === 0
-        ? {}
-        : { extensions: spec.extensions }),
+      ...(options.runtimePilot === undefined
+        ? (Object.keys(spec.extensions).length === 0 ? {} : { extensions: spec.extensions })
+        : { extensions: { ...spec.extensions, runtimeConfig: options.runtimePilot.snapshot.resolvedPayload },
+            replayMode: "snapshot-pipeline" as const }),
     }));
   // ONE wrapper, installed once, covering both paths a tool can be called on:
   // the deterministic path calls `tool.run` directly and the model path hands
@@ -833,7 +844,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
             // a recording made after one lands is still self-describing.
             context: null,
           });
-        } catch {
+        } catch (error) {
+          if (options.runtimePilot !== undefined) throw error;
           // A recording that cannot be written must never cost the run the
           // answer it already has.
         }
@@ -851,7 +863,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
             context: null,
             error: message,
           });
-        } catch {
+        } catch (recordError) {
+          if (options.runtimePilot !== undefined) throw recordError;
           // Same rule.
         }
         throw error;
@@ -1054,6 +1067,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       teamYamlSha256: sha256File(join(options.tenant.dir, spec.team)),
       tenantYamlSha256: sha256File(join(options.tenant.dir, "tenant.yaml")),
       toolIo: join(options.stateRoot, "runs", runId, "tool-io") + "/",
+      ...(options.runtimePilot === undefined ? {} : { runtimeSnapshot: options.runtimePilot.snapshot }),
     },
   );
 
@@ -1178,6 +1192,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
       const stepToolCalls: string[] = [];
       /** Same step scope as `stepToolCalls`: the raw values, not "name -> value". */
       const stepToolOutputs: string[] = [];
+      let pilotToolFailed = false;
       for (const name of role.permissions.tools) {
         const tool = toolsByName.get(name);
         if (tool === undefined) {
@@ -1205,6 +1220,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         try {
           value = await tool.run(args);
         } catch (error: unknown) {
+          if (options.runtimePilot !== undefined) pilotToolFailed = true;
           value = `FAILED: ${error instanceof Error ? error.message : String(error)}`;
         }
         const span: Span = {
@@ -1276,6 +1292,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         mode: deterministic ? "deterministic" : "tool-only",
         text: kept,
         ...refusalFields(out.refusals),
+        ...(pilotToolFailed ? { failure: "tool-failed" } : {}),
       });
       continue;
     }

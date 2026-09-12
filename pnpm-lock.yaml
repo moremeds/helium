@@ -90,6 +90,9 @@ importers:
       '@helium/core':
         specifier: file:../core
         version: link:../core
+      '@helium/runtime-control':
+        specifier: file:../../plugins/runtime-control
+        version: link:../../plugins/runtime-control
       undici:
         specifier: ^8.10.0
         version: 8.10.0
@@ -341,6 +344,19 @@ importers:
       '@deepseek-ai/dsh':
         specifier: 0.1.2-alpha.3
         version: 0.1.2-alpha.3(913969de375f818a4f65d0c37b7b6bf5)
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/runtime-control:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
       '@types/node':
         specifier: ^22
         version: 22.20.1

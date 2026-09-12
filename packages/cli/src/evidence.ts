@@ -38,6 +38,8 @@ export interface EvidenceHeader {
   tenantYamlSha256: string;
   /** Written by the run recorder, not by this module. */
   toolIo: string;
+  /** Opaque, frozen control-store snapshot; never an activation instruction. */
+  runtimeSnapshot?: unknown;
 }
 
 export interface EvidenceStep {
