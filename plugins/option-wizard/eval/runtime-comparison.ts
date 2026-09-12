@@ -74,6 +74,7 @@ const nullableText = text.nullable();
 const finite = z.number();
 
 const armIdentity = z.strictObject({ configVersionId: text, configHash: sha });
+const baseManifestHashes = z.strictObject({ tenant: sha, team: sha, lockfile: sha });
 
 const registrationSchema = z.strictObject({
   schemaVersion: z.literal("runtime-comparison-registration-v1"),
@@ -86,7 +87,7 @@ const registrationSchema = z.strictObject({
   changedPaths: z.array(text),
   engineSha: text,
   engineArtifactHash: sha,
-  baseManifestHashes: z.record(z.string(), sha),
+  baseManifestHashes,
   replay: z.strictObject({
     mode: z.literal("SNAPSHOT_PIPELINE"),
     inputCorpusHash: sha,
@@ -238,6 +239,10 @@ const snapshotSchema = z.object({
   metadata: z.object({
     engineSha: text,
     engineArtifactHash: sha,
+    baseTenantHash: sha,
+    baseTeamHash: sha,
+    lockfileHash: sha,
+    dirtySource: z.boolean(),
     inputWorldHash: sha,
     deliveryMode: text,
     executionEnvironment: text,
@@ -485,6 +490,12 @@ export function analyzeComparison(input: ComparisonInput): Record<string, unknow
         throw new Error("snapshot input world is not the registered world for this case");
       if (snapshot.metadata.engineSha !== registration.engineSha || snapshot.metadata.engineArtifactHash !== registration.engineArtifactHash)
         throw new Error("snapshot engine identity is not the registered engine");
+      if (snapshot.metadata.baseTenantHash !== registration.baseManifestHashes.tenant ||
+          snapshot.metadata.baseTeamHash !== registration.baseManifestHashes.team ||
+          snapshot.metadata.lockfileHash !== registration.baseManifestHashes.lockfile)
+        throw new Error("snapshot base tenant/team/lockfile identity is not the registered manifest identity");
+      if (snapshot.metadata.dirtySource !== false)
+        throw new Error("snapshot dirtySource must be false for frozen comparison");
       if (snapshot.metadata.deliveryMode !== "disabled" || snapshot.metadata.executionEnvironment !== "evaluation")
         throw new Error("snapshot was not produced in the disabled-delivery evaluation context");
       if (registration.targetDeployment != null &&

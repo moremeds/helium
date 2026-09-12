@@ -60,7 +60,9 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
   unmeasured (never fabricated), and confirmation requires finite
   `perTrialCallLimit`, `timeoutSeconds` and `totalCallLimit` with `requests`
   and `latencyMs` measured. Ledger/calendar/world-completeness references are
-  byte-bound artifacts when confirmation depends on them.
+  byte-bound artifacts when confirmation depends on them. `baseManifestHashes`
+  has exactly `tenant`, `team`, and `lockfile` SHA-256 values, binding the
+  frozen source manifests separately from the built engine artifact.
 - **trial.json** (`runtime-comparison-trial-v1`): `{trialId, caseId, arm:
   "champion"|"candidate", replicate, configVersionId, configHash, model:
   {requestedId, reportedId}, snapshotSha256, outcomeFile, outcomeSha256,
@@ -107,7 +109,10 @@ node scripts/runtime-comparison.mjs registration.json <trials-dir> <refs-dir>|- 
   recomputed; `metadata.inputWorldHash` must equal the world registered for
   that trial's own case, `engineSha`, `engineArtifactHash`,
   `deliveryMode: "disabled"`, `executionEnvironment: "evaluation"` and scope
-  must equal the registered values. For `CONFIRMATION_2V3`, the two arms'
+  must equal the registered values. `metadata.baseTenantHash`,
+  `metadata.baseTeamHash`, and `metadata.lockfileHash` must equal the three
+  registered base-manifest hashes; `metadata.dirtySource` must be `false` for
+  this frozen comparison path. For `CONFIRMATION_2V3`, the two arms'
   `resolvedPayload`s must be identical outside `changedPaths`.
 - **events.json / review.json / measurement.json / final.txt**: the same
   shapes the `runtime-coverage.mjs` diagnostic consumes and emits. The

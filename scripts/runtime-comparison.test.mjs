@@ -25,6 +25,7 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
   const eventsOf = (caseId) => [{ id: `${caseId}-ev`, evidenceRefs: [`${caseId}-src`] }];
   const payload = (perStock) => ({ tenant: "option-wizard", phase: "premarket", config: { news: { perStock } } });
   const armHash = { champion: contentHash(payload(2)), candidate: contentHash(payload(3)) };
+  const baseManifestHashes = { tenant: H("tenant"), team: H("team"), lockfile: H("lockfile") };
   const worlds = { "case-1": "world-a", "case-2": "world-b" };
   const reviewer = { identity: "synthetic reviewer", rubricHash };
 
@@ -44,6 +45,8 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
       configurationApprovalId: "synthetic", resolvedPayload: payload(arm === "champion" ? 2 : 3),
       resolvedAt: "2026-09-12T00:00:00.000Z",
       metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("engine"), inputWorldHash: H(worlds[caseId]),
+        baseTenantHash: baseManifestHashes.tenant, baseTeamHash: baseManifestHashes.team,
+        lockfileHash: baseManifestHashes.lockfile, dirtySource: false,
         deliveryMode: "disabled", executionEnvironment: "evaluation",
         // The exact route-identity object runtime-evaluate writes (cli.ts).
         actualModelIdentity: { grade: "ROUTE_ONLY", provider: "synthetic-provider", requestedModel: "synthetic-model",
@@ -80,7 +83,7 @@ test("paired comparison command binds evidence, preserves originals, refuses ove
     champion: { configVersionId: "cfg-champion", configHash: armHash.champion },
     candidate: { configVersionId: "cfg-candidate", configHash: armHash.candidate },
     changedPaths: ["/config/news/perStock"],
-    engineSha: "synthetic-engine", engineArtifactHash: H("engine"), baseManifestHashes: {},
+    engineSha: "synthetic-engine", engineArtifactHash: H("engine"), baseManifestHashes,
     replay: { mode: "SNAPSHOT_PIPELINE",
       inputCorpusHash: contentHash([{ caseId: "case-1", inputWorldHash: H("world-a") }, { caseId: "case-2", inputWorldHash: H("world-b") }]),
       ledgerSnapshotHash: refHash("ledger"), calendarHash: refHash("calendar"), worldCompletenessReceipt: refHash("receipt") },

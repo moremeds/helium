@@ -27,6 +27,7 @@ const EVENTS = (caseId: string) => [
 const PAYLOAD = (perStock: number) => ({ tenant: "option-wizard", phase: "premarket", config: { news: { perStock } } });
 const ARM_HASH = { champion: contentHash(PAYLOAD(2)), candidate: contentHash(PAYLOAD(3)) };
 const REVIEWER = { identity: "synthetic-independent-reviewer", rubricHash: H("synthetic-rubric") };
+const BASE_MANIFEST_HASHES = { tenant: H("tenant"), team: H("team"), lockfile: H("lockfile") };
 
 const ARTIFACT_REFS = ["evaluator", "qualification", "policy", "lineage", "rubric", "world-receipt",
   "ledger", "calendar", "exposure", "validity", "aa", "arm-order"];
@@ -60,7 +61,7 @@ function registration(overrides: Record<string, unknown> = {}) {
     candidate: { configVersionId: "cfg-candidate", configHash: ARM_HASH.candidate },
     changedPaths: ["/config/news/perStock"],
     engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
-    baseManifestHashes: { tenant: H("tenant"), team: H("team") },
+    baseManifestHashes: BASE_MANIFEST_HASHES,
     replay: { mode: "SNAPSHOT_PIPELINE",
       inputCorpusHash: contentHash(CASES.map((entry) => ({ caseId: entry.caseId, inputWorldHash: H(entry.world) }))),
       ledgerSnapshotHash: refHash("ledger"), calendarHash: refHash("calendar"), worldCompletenessReceipt: refHash("world-receipt") },
@@ -94,6 +95,8 @@ function snapshot(arm: "champion" | "candidate", world: string) {
     deploymentRevision: 7, configurationApprovalId: "synthetic-approval",
     resolvedPayload: PAYLOAD(arm === "champion" ? 2 : 3), resolvedAt: "2026-09-12T00:00:00.000Z",
     metadata: { engineSha: "synthetic-engine", engineArtifactHash: H("synthetic-engine-artifact"),
+      baseTenantHash: BASE_MANIFEST_HASHES.tenant, baseTeamHash: BASE_MANIFEST_HASHES.team,
+      lockfileHash: BASE_MANIFEST_HASHES.lockfile, dirtySource: false,
       inputWorldHash: H(world), deliveryMode: "disabled", executionEnvironment: "evaluation",
       actualModelIdentity: routeIdentity() },
   };
@@ -182,6 +185,25 @@ function cohort(coverage: { champion: number; candidate: number }, opts = {}) {
 const analyze = (trials: ComparisonTrialInput[], reg = registration(), refs = REFS) =>
   analyzeComparison({ registration: reg, registrationSha256: H(JSON.stringify(reg)), refs, trials });
 
+function withSnapshotMetadata(
+  entry: ComparisonTrialInput,
+  change: (metadata: Record<string, unknown>) => void,
+): ComparisonTrialInput {
+  const snapshot = structuredClone(entry.snapshot) as Record<string, unknown>;
+  change(snapshot.metadata as Record<string, unknown>);
+  const { effectiveSnapshotHash: _old, ...unsigned } = snapshot;
+  snapshot.effectiveSnapshotHash = contentHash(unsigned);
+  const snapshotBytes = JSON.stringify(snapshot);
+  const trialManifest = { ...(entry.trial as Record<string, unknown>), snapshotSha256: H(snapshotBytes) };
+  return {
+    ...entry,
+    snapshot,
+    snapshotSha256: H(snapshotBytes),
+    trial: trialManifest,
+    trialSha256: H(JSON.stringify(trialManifest)),
+  };
+}
+
 describe("runtime paired comparison (synthetic mechanism evidence only)", () => {
   it("reaches REVIEW_READY with distinct per-case worlds and an unmeasured-USD basis", () => {
     const result = analyze(cohort({ champion: 0.5, candidate: 1 }));
@@ -260,6 +282,27 @@ describe("runtime paired comparison (synthetic mechanism evidence only)", () => 
           metadata: { ...(entry.snapshot as Record<string, unknown>).metadata as Record<string, unknown>, inputWorldHash: H("other-world") } } }
       : entry);
     expect(analyze(wrongWorld).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("binds tenant, team and lockfile identities and refuses dirty source", () => {
+    const trials = cohort({ champion: 0.5, candidate: 1 });
+    for (const field of ["baseTenantHash", "baseTeamHash", "lockfileHash"] as const) {
+      const mutated = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+        ? withSnapshotMetadata(entry, (metadata) => { metadata[field] = H(`mutated-${field}`); })
+        : entry);
+      expect(analyze(mutated).decision).toBe("NOT_COMPARABLE");
+    }
+    const dirty = trials.map((entry) => entry.label === "trial-case-1-candidate-1"
+      ? withSnapshotMetadata(entry, (metadata) => { metadata.dirtySource = true; })
+      : entry);
+    expect(analyze(dirty).decision).toBe("NOT_COMPARABLE");
+  });
+
+  it("requires exactly the registered tenant, team and lockfile hashes", () => {
+    const missing = registration({ baseManifestHashes: { tenant: BASE_MANIFEST_HASHES.tenant, team: BASE_MANIFEST_HASHES.team } });
+    expect(analyze(cohort({ champion: 0.5, candidate: 1 }), missing).decision).toBe("INVALID");
+    const extra = registration({ baseManifestHashes: { ...BASE_MANIFEST_HASHES, unrelated: H("unrelated") } });
+    expect(analyze(cohort({ champion: 0.5, candidate: 1 }), extra).decision).toBe("INVALID");
   });
 
   it("rejects a corpus hash that does not match the ordered case/world manifest", () => {
