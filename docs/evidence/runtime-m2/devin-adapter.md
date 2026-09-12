@@ -255,3 +255,31 @@ are in `post-review-build-1/`; they have zero live dispatches. Review notes are
 `review-2.md`. The expanded immutable evidence manifest is
 `provider-repair/evidence-manifest-2.json` (308 entries), SHA-256:
 `b5839fc6bfdac289bce27e237afb77d5b3d452cf69c674f0db984b952527a298`.
+
+
+### Concentrated review follow-up: final disposition and trust boundary
+
+The native profile neutralizes the observed configuration/skill imports. It
+is **not a sandbox for an untrusted or malicious provider binary**: the
+installed Devin CLI and its authentication implementation remain trusted,
+HOME is unchanged, and the CLI can read its existing credentials. The agent
+receives no fs, terminal or MCP capability. Credentials were not copied and
+HOME was not replaced. Unnecessary `SSH_AUTH_SOCK` inheritance is now removed.
+
+`close-N.json` records the final classified state and references any earlier
+failure artifact. If a known FAILED run cannot confirm direct-child close,
+its original failure bytes remain unchanged and the close disposition records
+UNKNOWN with `child-close-unconfirmed`; the latest summary also stays UNKNOWN.
+This prevents the earlier known-failure snapshot from being mistaken for the
+final disposition.
+
+Close confirmation means the spawned process emitted close and its observed
+pipes drained. The adapter signals that direct child; termination of an
+arbitrary descendant process tree has **not** been independently proved.
+There is no process-group or general descendant kill guarantee.
+
+This follow-up made zero live calls. Build passed and **27 offline tests
+passed**, including known FAILED bytes preserved before an undrained final
+UNKNOWN and explicit SSH-agent exclusion. Evidence:
+`provider-repair/grok-followup-1/manifest.json`, SHA-256
+`144f7d478f5225939c130aa21ea5617b8d06809f448b6d5704098b235603c929`.

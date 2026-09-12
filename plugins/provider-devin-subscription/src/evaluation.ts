@@ -83,7 +83,7 @@ export const DEVIN_OVERHEAD_TOKENS = 0;
 const ALLOWED_ENV = [
   "HOME", "PATH", "TMPDIR", "TERM", "TERM_PROGRAM", "COLORTERM",
   "LANG", "LC_ALL", "LC_CTYPE", "USER", "LOGNAME", "SHELL",
-  "__CF_USER_TEXT_ENCODING", "SSH_AUTH_SOCK",
+  "__CF_USER_TEXT_ENCODING",
   "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
   "http_proxy", "https_proxy", "all_proxy", "no_proxy",
 ] as const;
@@ -374,6 +374,7 @@ export function createDevinEvaluation(options: {
       const said: string[] = [];
       const log: LogEvent[] = [];
       let client: DevinAcpClient | undefined;
+      let failureArtifact: string | undefined;
       try {
         // The client exists BEFORE the handshake so a hung or failed open()
         // still leaves a killable child in the finally below.
@@ -470,7 +471,8 @@ export function createDevinEvaluation(options: {
         stopped = true;
         // beforeRequest/afterRequest own accounting uncertainty. A settled
         // malformed generation or a limit before the next dispatch is FAILED.
-        write(`failure-${String(revision)}.json`, {
+        failureArtifact = `failure-${String(revision)}.json`;
+        write(failureArtifact, {
           state: state.unknown ? "UNKNOWN" : "FAILED", requestCount: state.requestCount,
           error: runError instanceof Error ? runError.message : String(runError),
           partialText: said, eventCount: log.length, events: log,
@@ -481,14 +483,19 @@ export function createDevinEvaluation(options: {
         running = false;
         if (client !== undefined) {
           const drained = await client.close();
-          write(`close-${String(runIndex)}.json`, { drained, transportError: client.transportError?.message ?? null });
           if (!drained) {
             stopped = true;
             state.unknown = true;
             state.inputTokens = null;
             state.outputTokens = null;
-            stop("child-close-unconfirmed");
           }
+          write(`close-${String(runIndex)}.json`, {
+            drained, state: state.unknown ? "UNKNOWN" : failureArtifact === undefined ? "COMPLETED" : "FAILED",
+            priorFailure: failureArtifact ?? null,
+            reason: drained ? null : "child-close-unconfirmed",
+            transportError: client.transportError?.message ?? null,
+          });
+          if (!drained) stop("child-close-unconfirmed");
         }
       }
     },

@@ -98,7 +98,7 @@ function make(outputDir: string, child: Stub, limits?: object) {
     model: "swe-2-high",
     env: {
       HOME: "/home/test", PATH: "/usr/bin", ANTHROPIC_API_KEY: "sk-secret",
-      OPENAI_API_KEY: "sk-secret-2", HTTPS_PROXY: "http://127.0.0.1:7897",
+      OPENAI_API_KEY: "sk-secret-2", SSH_AUTH_SOCK: "/ambient/ssh-agent", HTTPS_PROXY: "http://127.0.0.1:7897",
       CHISEL_SESSION_DB: "/ambient/should-not-survive.db",
       XDG_CONFIG_HOME: "/ambient/should-not-survive",
     },
@@ -199,6 +199,7 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
     expect(child.argv).toEqual(["/usr/bin/sandbox-exec", "-p", ISOLATION_PROFILE, "-D", "GLOBAL_SKILLS=/home/test/.agents/skills", "devin", "acp", "--agent-type", "summarizer", "--model", "swe-2-high"]);
     expect(child.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(child.env.OPENAI_API_KEY).toBeUndefined();
+    expect(child.env.SSH_AUTH_SOCK).toBeUndefined();
     expect(child.env.XDG_CONFIG_HOME).toBe(join(dir, "xdg-config"));
     expect(child.env.CHISEL_SESSION_DB).toBe(join(dir, "sessions.db"));
     expect(child.env.HOME).toBe("/home/test");
@@ -349,6 +350,25 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
       await expect(evaluation.provider.run!(work(), selection(), new AbortController().signal)).rejects.toThrow("child-close-unconfirmed");
       expect(evaluation.summary()).toMatchObject({ unknown: true, inputTokens: null, knownInputTokens: 10 });
       expect(readJson(dir, "close-1.json").drained).toBe(false);
+    } finally { close.mockRestore(); }
+  });
+
+  it("preserves known failure bytes and records final UNKNOWN when close is unconfirmed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "devin-eval-"));
+    const { evaluation } = make(dir, stubChild({ promptText: "malformed" }));
+    let failureName = "";
+    let priorBytes: Buffer | undefined;
+    const close = vi.spyOn(DevinAcpClient.prototype, "close").mockImplementation(async () => {
+      failureName = readdirSync(dir).find(name => name.startsWith("failure-"))!;
+      priorBytes = readFileSync(join(dir, failureName));
+      expect(JSON.parse(priorBytes.toString()).state).toBe("FAILED");
+      return false;
+    });
+    try {
+      await expect(evaluation.provider.run!(work(), selection(), new AbortController().signal)).rejects.toThrow("child-close-unconfirmed");
+      expect(readFileSync(join(dir, failureName))).toEqual(priorBytes);
+      expect(readJson(dir, "close-1.json")).toMatchObject({ state: "UNKNOWN", priorFailure: failureName, drained: false, reason: "child-close-unconfirmed" });
+      expect(evaluation.summary()).toMatchObject({ unknown: true, inputTokens: null, knownInputTokens: 10 });
     } finally { close.mockRestore(); }
   });
 
