@@ -523,9 +523,9 @@ export async function runCampaign(options, deps = {}) {
       code: result.code, signal: result.signal, timedOut: result.timedOut, wallMs: result.wallMs,
       drained: result.drained ?? true, error: result.error ?? null,
     }) + "\n");
-    if (result.timedOut || result.code !== 0)
+    if (result.drained === false || result.error || result.timedOut || result.code !== 0)
       throw new CampaignHalt("POINTER_SWITCH_FAILED",
-        `admin ${request.action} exited ${result.code ?? result.signal}; stderr preserved in ${name}-stderr`);
+        `admin ${request.action} did not close cleanly (${result.error ?? result.code ?? result.signal}); stderr preserved in ${name}-stderr`);
     let parsed;
     try { parsed = JSON.parse(result.stdout.toString("utf8")); }
     catch { throw new CampaignHalt("AMBIGUOUS", `admin ${request.action} returned no parseable result`); }
@@ -783,6 +783,13 @@ export async function runCampaign(options, deps = {}) {
         throw new CampaignHalt("AMBIGUOUS", "the DB attempt does not bind this trial's scope and arm");
       if (!["SUCCEEDED", "FAILED", "UNKNOWN", "DISPATCHED"].includes(attempt.status))
         throw new CampaignHalt("MALFORMED_OUTCOME", `attempt has unsupported status ${String(attempt.status)}`);
+      if (result.drained === false || result.error) {
+        writeOnce(join(trialDir, "stop.json"), canonicalJson({ reason: "AMBIGUOUS_PROCESS",
+          detail: result.error ?? "subprocess streams did not reach a confirmed close" }) + "\n");
+        halt("AMBIGUOUS_PROCESS",
+          result.error ?? `trial ${trialId} subprocess streams did not reach a confirmed close`, trialId);
+        break;
+      }
 
       // Operator-normalized session usage, from the attempt's own evidence.
       const inference = attempt.evidence?.inference;

@@ -133,7 +133,8 @@ function harness(f, outcomes) {
         stdout: Buffer.from(json({ versionId: current, revision })), stderr: Buffer.alloc(0) };
     }
     const outcome = outcomes[evalIndex++];
-    const status = outcome === "FAILED_RESULT" || outcome === "NOT_COMPARABLE" ? "FAILED" : outcome;
+    const status = ["FAILED_RESULT", "FAILED_UNDRAINED", "FAILED_PROCESS_ERROR", "NOT_COMPARABLE"].includes(outcome)
+      ? "FAILED" : outcome;
     calls.push({ kind: "evaluate", env, argv });
     const trialId = f.execution.order[evalIndex - 1];
     const id = `attempt-${evalIndex}`;
@@ -153,7 +154,7 @@ function harness(f, outcomes) {
     if (outcome === "FAILED") {
       mkdirSync(join(stateDir, "runs", id), { recursive: true });
       writeFileSync(join(stateDir, "failure.json"), json({ error: "known" }));
-    } else if (outcome === "FAILED_RESULT") {
+    } else if (["FAILED_RESULT", "FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"].includes(outcome)) {
       writeFileSync(join(stateDir, "result.json"), json({ outcome: "failed", runId: id,
         failure: { class: "renderer-failed", detail: "known" } }));
     } else if (outcome === "NOT_COMPARABLE") {
@@ -173,8 +174,11 @@ function harness(f, outcomes) {
         knownInputTokens: outcome === "NOT_COMPARABLE" ? 0 : 11,
         knownOutputTokens: outcome === "NOT_COMPARABLE" ? 0 : 7,
         reportedModelLabels: [], unknown: status === "UNKNOWN" } } });
-    return { code: status === "FAILED" ? 1 : 0, signal: null, timedOut: false, wallMs: 25,
-      stdout: Buffer.from("stdout\u0000after"), stderr: Buffer.from("stderr\ntrailing") };
+    return { code: ["FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"].includes(outcome) ? null : status === "FAILED" ? 1 : 0,
+      signal: null, timedOut: false, wallMs: 25,
+      stdout: Buffer.from("stdout\u0000after"), stderr: Buffer.from("stderr\ntrailing"),
+      drained: outcome === "FAILED_UNDRAINED" ? false : undefined,
+      error: outcome === "FAILED_PROCESS_ERROR" ? "subprocess close not confirmed" : undefined };
   };
   return { control, spawn, calls };
 }
@@ -298,6 +302,31 @@ test("stops on a calendar-skipped NOT_COMPARABLE result without consuming a gene
   assert.equal(JSON.parse(readFileSync(join(outputDir, "trials/case-a--champion--r1/stop.json"), "utf8")).reason,
     "NOT_COMPARABLE");
   assert.equal(h.calls.filter(({ kind }) => kind === "evaluate").length, 1);
+});
+
+test("stops after preserving a bound FAILED result when subprocess close is unconfirmed", async () => {
+  for (const outcome of ["FAILED_UNDRAINED", "FAILED_PROCESS_ERROR"]) {
+    const f = fixture();
+    const h = harness(f, [outcome]);
+    const outputDir = join(f.root, "out");
+    const summary = await runCampaign({ executionPath: f.executionPath, adminConnectionPath: "admin.json",
+      runnerConnectionPath: "runner.json", outputDir }, { control: h.control, spawn: h.spawn,
+        identity: { engineSha: f.registration.engineSha, engineArtifactHash: f.registration.engineArtifactHash } });
+    assert.equal(summary.status, "STOPPED");
+    assert.equal(summary.stop.reason, "AMBIGUOUS_PROCESS");
+    assert.equal(summary.counts.dispatched, 1);
+    assert.equal(summary.counts.knownFailures, 0);
+    assert.equal(h.calls.filter(({ kind }) => kind === "evaluate").length, 1);
+    assert.equal(h.calls.filter(({ kind }) => kind === "inspect").length, 1);
+    assert.equal(h.calls.filter(({ kind }) => kind === "admin").length, 0);
+    const processResult = JSON.parse(readFileSync(
+      join(outputDir, "trials/case-a--champion--r1/process.json"), "utf8"));
+    assert.ok(processResult.drained === false || processResult.error !== null);
+    assert.equal(JSON.parse(readFileSync(
+      join(outputDir, "trials/case-a--champion--r1/inspection.json"), "utf8")).status, "FAILED");
+    assert.equal(JSON.parse(readFileSync(
+      join(outputDir, "trials/case-a--champion--r1/state/result.json"), "utf8")).outcome, "failed");
+  }
 });
 
 test("refuses a stale built engine before pointer or model work", async () => {
