@@ -296,6 +296,22 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  plugins/provider-devin-subscription:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+      '@helium/provider-sdk':
+        specifier: file:../../packages/provider-sdk
+        version: link:../../packages/provider-sdk
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   plugins/provider-dsh:
     dependencies:
       '@deepseek-ai/cordis':
