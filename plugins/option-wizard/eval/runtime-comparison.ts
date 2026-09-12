@@ -165,6 +165,11 @@ const registrationSchema = z.strictObject({
 
 type Registration = z.infer<typeof registrationSchema>;
 
+/** Shared strict parser for executors that must bind the exact comparison registration. */
+export function parseComparisonRegistration(value: unknown): Registration {
+  return parse(registrationSchema, value, "registration");
+}
+
 const attemptSchema = z.strictObject({
   attemptId: text,
   status: z.enum(["SUCCEEDED", "FAILED", "UNKNOWN"]),
