@@ -1,0 +1,18 @@
+{
+  "scope": "GITHUB_WRITE_ATTEMPT",
+  "operation": "GitHub.create_branch",
+  "repository": "moremeds/helium",
+  "requestedBranch": "docs/runtime-self-improvement-reviewed-20260911",
+  "requestedBaseSha": "e2175344525e355edc5662124712a7250a3d9b88",
+  "observedResponse": {
+    "message": "Resource not accessible by integration",
+    "status": "403",
+    "is_error": true
+  },
+  "remoteBranchCreated": false,
+  "remoteCommitCreated": false,
+  "pullRequestCreated": false,
+  "merged": false,
+  "deployed": false,
+  "note": "No alternative write endpoint was attempted to bypass the integration denial. Local document-only commit and application patch are separate artifacts, not a remote helium branch."
+}
