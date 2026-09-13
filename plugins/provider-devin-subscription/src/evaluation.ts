@@ -394,6 +394,7 @@ export function createDevinEvaluation(options: {
         const sessionId = await client.open(Math.min(CONNECT_BUDGET_MS, Math.max(1, deadline - Date.now())));
         state.sessionIds.push(sessionId);
         const specs = toolSpecs(tools);
+        const responseEnvelope = 'Host protocol: reply with exactly {"tool_calls":[{"name":"<offered tool>","arguments":{...}}]} to request tools, or {"final":"<complete step answer>"} to finish. If the step answer is JSON, serialize that entire JSON object as the string value of "final"; never return the inner object at the top level.';
         const envelope = [
           "You are one step in a controlled helium evaluation. You have no tools of your own; a host executes offered tools for you.",
           "Reply with EXACTLY ONE JSON object and nothing else:",
@@ -405,6 +406,8 @@ export function createDevinEvaluation(options: {
           "",
           "Work order prompt:",
           work.inputs.prompt ?? JSON.stringify(work.inputs.artifacts),
+          "",
+          responseEnvelope,
         ].join("\n");
 
         let seq = 0;
@@ -458,7 +461,7 @@ export function createDevinEvaluation(options: {
             log.push(...toolCallEvents(seq, turn, callId, call.name, callStarted, toolOutcome));
             seq += 2;
           }
-          body = JSON.stringify({ tool_results: results });
+          body = JSON.stringify({ tool_results: results }) + "\n\n" + responseEnvelope;
         }
         // The tool-turn ceiling is a FAILURE: a truncated loop must never read
         // as a considered final answer. Partial text and tool outputs are

@@ -226,7 +226,8 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
       "{\"tool_calls\":[{\"name\":\"helium.echo\",\"arguments\":{}}]}",
       "{\"final\":\"USED TOOL_VALUE\"}", laterBodies);
     const { evaluation } = make(dir, child);
-    const w = work({ constraints: { tools: ["helium.echo"], mutations: "forbidden", minIsolationClass: "process" } });
+    const rolePrompt = 'Reply as ONE JSON object: {"review":"..."}.';
+    const w = work({ inputs: { artifacts: [], prompt: rolePrompt }, constraints: { tools: ["helium.echo"], mutations: "forbidden", minIsolationClass: "process" } });
     const out = await evaluation.provider.run!(w, selection({ tools: [tool] }), new AbortController().signal);
     expect(tool.run).toHaveBeenCalledTimes(1);
     expect(out.text).toBe("USED TOOL_VALUE");
@@ -235,6 +236,12 @@ describe("createDevinEvaluation offline (stub stdio transport)", () => {
     expect(laterBodies[0]).toContain('"isError":false');
     const reserved2 = readJson(dir, "request-2.json");
     expect(reserved2.state).toBe("UNKNOWN");
+    const firstBody = String(readJson(dir, "request-1.json").body);
+    expect(firstBody).toContain(rolePrompt);
+    const reminder = firstBody.slice(firstBody.lastIndexOf("Host protocol:"));
+    expect(reminder).toContain('string value of "final"');
+    expect(firstBody.lastIndexOf("Host protocol:")).toBeGreaterThan(firstBody.indexOf(rolePrompt));
+    expect(String(reserved2.body)).toBe(JSON.stringify({ tool_results: [{ name: "helium.echo", content: "TOOL_VALUE", isError: false }] }) + "\n\n" + reminder);
     const summary = evaluation.summary();
     expect(summary.requestCount).toBe(2);
     expect(summary.inputTokens).toBe(23);
