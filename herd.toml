@@ -1,0 +1,28 @@
+# Helium local herd workers. Keep names unique on the herdr server.
+[[worker]]
+name = "helium-m2-implementer"
+kind = "devin"
+role = "M2 implementation and development experiments; task review gate"
+machine = "local"
+args = ["--permission-mode", "accept-edits"]
+
+[[worker]]
+name = "helium-m2-reviewer"
+kind = "cursor"
+role = "M2 read-only concentrated verification"
+machine = "local"
+args = ["--force", "--model", "cursor-grok-4.6-high"]
+
+[[worker]]
+name = "helium-m2-analysis"
+kind = "devin"
+role = "tenant-owned M2 paired analysis with offline tests"
+machine = "local"
+args = ["--permission-mode", "accept-edits"]
+
+[[worker]]
+name = "helium-m2-campaign"
+kind = "devin"
+role = "bounded sequential M2 campaign executor; offline only"
+machine = "local"
+args = ["--permission-mode", "accept-edits"]
