@@ -85,3 +85,17 @@ weekly 写作、输入 coverage、模型协议、量化策略。主目标被环�
 - M2 历史实现、route guard、input repair worktrees/证据继续保留，未清理。
 - 已知 herdr 工作者 `helium-m2-implementer` 与 `argon-m3-vrp-implementer`
   收尾时均为 idle；未重新派发。其 pane/context 保留，避免丢失交接上下文。
+
+
+## 2026-09-16 交付决定更新
+
+用户在研究结案后授权 merge and release，条件是不影响 production。本节覆盖上文
+“关闭、未合并”和“不合并”的交付决定；原研究结论及历史记录保留。
+
+Helium 通过 #131 向 master 汇总 #127/#128/#129 的依赖内容，保留原提交历史。
+Argon #431 已合并，merge commit 为 `a7cc531f7d432951f439eb4f1508c26c74f91ef6`。
+发布采用非生产 prerelease：Helium 仅发布源码存档；Argon 使用既有 prerelease
+路径，不更新 `latest` 镜像。不得调用 Helium deploy 或修改 Mac mini 服务。
+合并和发布不代表 M2 qualification、M3 改进有效或生产验收。
+
+下一步仍从上文的新任务定义开始；本次不重启实验，不清理任何证据或 worktree。
