@@ -28,3 +28,24 @@ describe("M3 campaign retention", () => {
   });
 });
 
+
+it("uses constrained utility and freezes policy independently of caller mutations", () => {
+  const policy = { constraint: { metric: "loss", upperBound: 0.15 },
+    objectives: [{ metric: "reward", direction: "higher" as const, epsilon: 0.001 }] };
+  const frozen = freezeCampaign({ ...contract, utilityPolicy: policy });
+  policy.constraint.upperBound = 1;
+  policy.objectives[0]!.epsilon = 100;
+  expect(frozen.utilityPolicy!.constraint.upperBound).toBe(0.15);
+  const base = { loss: 0.2, reward: 0.3 };
+  const c = candidate({ measures: { loss: 0.1, reward: 0.2 } });
+  expect(decideRetention(frozen, base, c).status).toBe("retained");
+  expect(decideRetention(frozen, { loss: 0.1, reward: 0.2 },
+    candidate({ measures: { loss: 0.2, reward: 0.9 } })).status).toBe("rolled_back");
+  expect(decideRetention(frozen, base, candidate()).status).toBe("ineligible");
+  expect(decideRetention(frozen, base, { ...c,
+    checks: { routeResolved: "false", outputValid: true, evidenceComplete: true },
+  } as unknown as CandidateResult).status).toBe("ineligible");
+});
+it('refuses improvement attributed to an unchanged revision', () => {
+  expect(decideRetention(contract, {score:0.1}, candidate({revision:'base'})).status).toBe('ineligible');
+});

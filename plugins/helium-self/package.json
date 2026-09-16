@@ -10,7 +10,7 @@
     "./tools": "./lib/tools/index.js",
     "./render": "./lib/render/index.js"
   },
-  "files": ["lib", "tools", "render", "experiments", "tenant.yaml", "team.yaml"],
+  "files": ["lib", "tools", "render", "evolution", "experiments", "tenant.yaml", "team.yaml"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
