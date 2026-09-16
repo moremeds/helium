@@ -25,3 +25,4 @@ export * from "./budget.js";
 export * from "./config.js";
 export * from "./report.js";
 export * from "./ledger.js";
+export * from "./strict-json.js";

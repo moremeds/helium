@@ -66,6 +66,7 @@ import { isPriorRun, labelRank } from "../quality/prior.js";
 import { realizedThreshold } from "../eval/verdict.js";
 import { rotationTable } from "../quality/themes.js";
 import type { Bar } from "../eval/bars.js";
+import { parseRuntimeConfig } from "../runtime/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -1890,6 +1891,8 @@ export function buildTools(cfg: {
     has: (tool: string) => boolean;
     lookup: (tool: string, args: Record<string, unknown>) => string | undefined;
   };
+  /** Rebuild deterministic assembly while every source tool is replay-only. */
+  replayMode?: "snapshot-pipeline";
   /** This tenant's own `extensions:` block, carried here by the host without
    *  ever being opened. Only this tenant's tools read inside it. */
   extensions?: Record<string, unknown>;
@@ -1907,6 +1910,15 @@ export function buildTools(cfg: {
     (cfg.extensions as { review?: unknown } | undefined)?.review === undefined
       ? undefined
       : parseReviewConfig(cfg.extensions);
+  const runtimeConfig =
+    cfg.phase === "premarket" &&
+    Object.hasOwn(cfg.extensions ?? {}, "runtimeConfig")
+      ? parseRuntimeConfig(cfg.extensions?.runtimeConfig)
+      : undefined;
+  if (cfg.replayMode === "snapshot-pipeline" && cfg.recordings === undefined)
+    throw new Error("snapshot-pipeline replay requires frozen recordings");
+  if (cfg.replayMode === "snapshot-pipeline" && cfg.asOf === undefined)
+    throw new Error("snapshot-pipeline replay requires a frozen clock");
   const asOf = cfg.asOf;
   const asOfIso = asOf?.toISOString();
   // The as-of DAY in the zone this tenant files its reports in. Every dated
@@ -5724,7 +5736,10 @@ export function buildTools(cfg: {
         if (earningsAnswered) delete skipped.earnings;
         const earnings = earningsAnswered
           ? {
-              asOf: new Date().toISOString(),
+              asOf:
+                cfg.replayMode === "snapshot-pipeline" && asOfIso !== undefined
+                  ? asOfIso
+                  : new Date().toISOString(),
               rows: earningsRows,
               missing: earningsMissing,
             }
@@ -6133,7 +6148,10 @@ export function buildTools(cfg: {
           ];
         } else {
           frame.newsOverview = await buildNewsOverview({
-            asOf: new Date().toISOString(),
+            asOf:
+              cfg.replayMode === "snapshot-pipeline" && asOfIso !== undefined
+                ? asOfIso
+                : new Date().toISOString(),
             symbols: [
               ...frame.coverageCandidates.stocks.map((row) => row.symbol),
               ...ofInterest,
@@ -6153,7 +6171,13 @@ export function buildTools(cfg: {
                 row.tvSymbol === undefined ? [] : [[row.symbol, row.tvSymbol]],
               ),
             ),
-            caps: newsCapsFor(cfg.phase),
+            caps:
+              runtimeConfig === undefined
+                ? newsCapsFor(cfg.phase)
+                : {
+                    ...newsCapsFor(cfg.phase),
+                    perStock: runtimeConfig.config.news.perStock,
+                  },
             read: async (ask) =>
               JSON.parse(await newsTool.run(ask, ctx)) as unknown,
           });
@@ -7032,6 +7056,23 @@ export function buildTools(cfg: {
   // Re-fetching historical data beside saved quotes changes the experiment.
   if (cfg.recordings !== undefined) {
     const recordings = cfg.recordings;
+    if (cfg.replayMode === "snapshot-pipeline") {
+      for (const tool of built) {
+        if (tool.name === "ow_session_frame") continue;
+        Object.assign(tool, {
+          description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,
+          run: async (args: Record<string, unknown>): Promise<string> => {
+            const recorded = recordings.lookup(tool.name, args);
+            if (recorded !== undefined) return recorded;
+            const reason =
+              "no recording for these arguments; live fallback disabled";
+            cfg.pit?.markUnavailable(tool.name, reason);
+            throw new Error(`${tool.name}: ${reason}`);
+          },
+        });
+      }
+      return built;
+    }
     return built.map((tool) => ({
       ...tool,
       description: `${tool.description} ${AS_OF_REPLAYED_SENTENCE}`,

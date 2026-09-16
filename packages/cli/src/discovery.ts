@@ -142,6 +142,7 @@ export interface TenantToolConfig {
    *  the tenant's word about itself; handing it back to the tenant's own
    *  `buildTools` is not the host reading inside it. */
   extensions?: Record<string, unknown>;
+  replayMode?: "snapshot-pipeline";
 }
 
 export async function loadTenantTools(
@@ -167,6 +168,7 @@ export async function loadTenantTools(
         ) => string | undefined;
       };
       extensions?: Record<string, unknown>;
+      replayMode?: "snapshot-pipeline";
     }) => EcosystemTool[];
   };
   if (typeof module.buildTools !== "function") return [];
@@ -180,6 +182,7 @@ export async function loadTenantTools(
     ...(cfg.calendar === undefined ? {} : { calendar: cfg.calendar }),
     ...(cfg.recordings === undefined ? {} : { recordings: cfg.recordings }),
     ...(cfg.extensions === undefined ? {} : { extensions: cfg.extensions }),
+    ...(cfg.replayMode === undefined ? {} : { replayMode: cfg.replayMode }),
   });
 }
 

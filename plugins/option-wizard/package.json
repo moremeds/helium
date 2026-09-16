@@ -19,6 +19,7 @@
     "eval",
     "quality",
     "state",
+    "runtime",
     "tenant.yaml",
     "team.yaml"
   ],

@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "runtime-experiment-template-v1.2",
+  "status": "DRAFT_NOT_EXECUTABLE",
+  "experimentId": null,
+  "hypothesis": "Increasing per-stock news context from 2 to 3 may improve evidence-backed final event coverage without degrading factuality or exceeding a fixed resource budget. This is untested.",
+  "findingRefs": [],
+  "champion": {
+    "configVersionId": null,
+    "configHash": null
+  },
+  "candidate": {
+    "configVersionId": null,
+    "configHash": null
+  },
+  "changedPaths": [
+    "/config/news/perStock"
+  ],
+  "engineSha": null,
+  "engineArtifactHash": null,
+  "baseManifestHashes": null,
+  "replay": {
+    "mode": "SNAPSHOT_PIPELINE",
+    "inputCorpusHash": null,
+    "ledgerSnapshotHash": null,
+    "calendarHash": null,
+    "worldCompletenessReceipt": null
+  },
+  "evaluation": {
+    "evaluatorHash": null,
+    "qualificationHash": null,
+    "promotionPolicyHash": null,
+    "primaryMetric": "coverage.final",
+    "minimumPracticalEffect": null,
+    "alpha": null,
+    "independentClusterCount": null,
+    "replicatesPerCase": null,
+    "holdoutOpenLimit": 1,
+    "decisionFamilyId": null,
+    "holdoutCohortId": null,
+    "holdoutLineageHash": null,
+    "holdoutAccessReservationId": null,
+    "certificationEpoch": null,
+    "criticalErrorsMaximum": 0,
+    "claimsSupportedNonInferiorityMargin": null,
+    "reliabilityNonInferiorityMargin": null,
+    "decisionRule": null,
+    "intervalImplementation": null,
+    "clusterDefinition": null,
+    "sampleSizeRationale": null,
+    "aaCalibrationEvidence": null,
+    "armOrderRandomizationPlan": null,
+    "failureAndRetryRule": null,
+    "treatmentSlices": {
+      "definedBeforeGeneration": true,
+      "withThirdEligibleRowCaseIds": null,
+      "withoutThirdEligibleRowCaseIds": null,
+      "primaryAnalysis": "entire preregistered cohort; report both slices separately"
+    },
+    "unresolvedCriticalDisagreement": "INCONCLUSIVE",
+    "manualEvidenceValidityReviewRef": null,
+    "holdoutExposureRecordRef": null
+  },
+  "budget": null,
+  "actualModelIdentityPlan": null,
+  "notes": [
+    "Before confirmation fill the M2 identities, calibrated decision/sample/resource policy and manualEvidenceValidityReviewRef. certificationEpoch is M3-only and may remain null in M2; holdoutAccessReservationId may remain null only when a persistent manual exposure record is referenced by holdoutExposureRecordRef. No automated certification or reservation service is required for M2. A/A and local engineering tests have separate plans.",
+    "Do not execute this as an experiment by filling guessed hashes, fake corpus rows, or fabricated provider identities.",
+    "The target is recorded for binding only; this draft authorizes neither production reads nor activation. Actual evaluation executes in an isolated namespace with delivery disabled.",
+    "Correction/invalidation or cohort reuse requires new trusted evidence; old receipt bytes are not permanent permission.",
+    "Default target is test. Production targeting requires explicit scope and authorization before registration; an existing test comparison cannot be relabeled production. M2 ends at REVIEW_READY, never AUTO_ACTIVATE."
+  ],
+  "targetDeployment": {
+    "tenant": "option-wizard",
+    "phase": "premarket",
+    "environment": "test",
+    "kind": "product",
+    "championVersionId": null,
+    "expectedRevision": null
+  },
+  "executionContext": {
+    "environment": "evaluation",
+    "stateNamespace": null,
+    "deliveryMode": "disabled"
+  },
+  "deliveryWave": "M2",
+  "activationMode": "MANUAL_REVIEW_ONLY",
+  "resourcePolicy": {
+    "perTrialTokenLimit": null,
+    "perTrialCallLimit": null,
+    "timeoutSeconds": null,
+    "totalTokenLimit": null,
+    "totalCallLimit": null,
+    "costIncreaseLimit": null,
+    "latencyIncreaseLimit": null,
+    "aggregationRule": null,
+    "unknownCostHandling": "retain reservation; do not report zero or blindly retry"
+  },
+  "stopPolicy": [
+    "registered comparison completed",
+    "budget exhausted",
+    "unknown request pending reconciliation",
+    "no unexposed confirmation cohort",
+    "critical issue or kill"
+  ]
+}

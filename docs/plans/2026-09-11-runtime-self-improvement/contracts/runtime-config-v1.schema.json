@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Helium Option Wizard premarket runtime payload v1",
+  "description": "Design contract for the initial registered policy space. Validation is not production authorization or evidence of improvement.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "tenant",
+    "phase",
+    "config"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "ow-runtime-v1"
+    },
+    "tenant": {
+      "const": "option-wizard"
+    },
+    "phase": {
+      "const": "premarket"
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "news"
+      ],
+      "properties": {
+        "news": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "global",
+            "perStock",
+            "stocks"
+          ],
+          "properties": {
+            "global": {
+              "type": "integer",
+              "const": 4
+            },
+            "perStock": {
+              "type": "integer",
+              "enum": [
+                1,
+                2,
+                3
+              ]
+            },
+            "stocks": {
+              "type": "integer",
+              "const": 5
+            }
+          }
+        }
+      }
+    }
+  }
+}

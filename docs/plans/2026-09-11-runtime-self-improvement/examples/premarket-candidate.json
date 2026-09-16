@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "ow-runtime-v1",
+  "tenant": "option-wizard",
+  "phase": "premarket",
+  "config": {
+    "news": {
+      "global": 4,
+      "perStock": 3,
+      "stocks": 5
+    }
+  }
+}

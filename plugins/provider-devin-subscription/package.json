@@ -1,0 +1,22 @@
+{
+  "name": "@helium/provider-devin-subscription",
+  "version": "0.0.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./evaluation": "./lib/evaluation.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@helium/core": "file:../../packages/core",
+    "@helium/provider-sdk": "file:../../packages/provider-sdk"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5"
+  }
+}

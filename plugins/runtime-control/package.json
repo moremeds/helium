@@ -1,0 +1,14 @@
+{
+  "name": "@helium/runtime-control",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./lib/index.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:integration": "cd ../.. && HELIUM_RUNTIME_PG_TEST=1 pnpm vitest run --project unit plugins/runtime-control/tests/store.spec.ts"
+  },
+  "dependencies": { "@helium/core": "file:../../packages/core" },
+  "devDependencies": { "@types/node": "^22", "typescript": "^5" }
+}

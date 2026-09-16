@@ -11,7 +11,8 @@
   "exports": {
     ".": "./lib/index.js",
     "./runner": "./lib/runner.js",
-    "./scoreboard": "./lib/scoreboard.js"
+    "./scoreboard": "./lib/scoreboard.js",
+    "./runtime-pilot": "./lib/runtime-pilot.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && chmod +x lib/cli.js",
@@ -20,7 +21,8 @@
   "dependencies": {
     "@helium/core": "file:../core",
     "undici": "^8.10.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@helium/runtime-control": "file:../../plugins/runtime-control"
   },
   "devDependencies": {
     "@types/node": "^22",

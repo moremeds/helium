@@ -1,3 +1,4 @@
+import type { CurlResponse } from "@helium/provider-sdk/curl";
 import { curlPostJson } from "@helium/provider-sdk/curl";
 import {
   MAX_TOOL_TURNS,
@@ -48,7 +49,14 @@ export interface CodexInvocationResult {
   turns?: number;
 }
 
+/** Trusted host hooks, never read from model/tool payloads. */
+export interface CodexInvocationObserver {
+  beforeRequest(body: string, timeoutMs: number, context?: { role: string }): number;
+  afterRequest(response: CurlResponse, usage: { inputTokens?: number; outputTokens?: number }, reportedModel?: string, completed?: boolean): boolean;
+}
+
 export interface CodexInvocation {
+  observer?: CodexInvocationObserver;
   model: string;
   effort: CodexEffort;
   prompt: string;
@@ -148,6 +156,7 @@ function collectSse(body: string): {
     } catch {
       continue;
     }
+    if (event === null || typeof event !== "object") continue;
     events.push(event);
     const e = event as {
       type?: string;
@@ -300,41 +309,64 @@ export async function invokeCodex(
 
   for (let turn = 1; turn <= MAX_TOOL_TURNS; turn += 1) {
     const startedAt = Date.now();
-    const res = await curlPostJson({
-      url: ENDPOINT,
-      secretHeaders: {
-        authorization: { prefix: "Bearer ", value: token },
-        "chatgpt-account-id": { prefix: "", value: accountId },
-      },
-      headers: {
-        originator: ORIGINATOR,
-        "OpenAI-Beta": "responses=experimental",
-        accept: "text/event-stream",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        model: input.model,
-        // The backend refuses `store: true` outright, so the whole
-        // conversation is resent every turn — which is also why the loop has
-        // a ceiling.
-        store: false,
-        stream: true,
-        instructions: input.systemPrompt ?? "You are a helpful assistant.",
-        input: conversation,
-        reasoning: { effort: input.effort, summary: "auto" },
-        ...(input.maxOutputTokens === undefined
-          ? {}
-          : { max_output_tokens: input.maxOutputTokens }),
-        ...(declared.length === 0 ? {} : { tools: declared }),
-        tool_choice: "auto",
-        parallel_tool_calls: true,
-      }),
-      timeoutMs: input.timeoutMs,
-      ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+    const body = JSON.stringify({
+      model: input.model,
+      // The backend refuses `store: true` outright, so the whole
+      // conversation is resent every turn — which is also why the loop has
+      // a ceiling.
+      store: false,
+      stream: true,
+      instructions: input.systemPrompt ?? "You are a helpful assistant.",
+      input: conversation,
+      reasoning: { effort: input.effort, summary: "auto" },
+      ...(input.maxOutputTokens === undefined
         ? {}
-        : { proxy: input.env.HELIUM_PROXY }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
+        : { max_output_tokens: input.maxOutputTokens }),
+      ...(declared.length === 0 ? {} : { tools: declared }),
+      tool_choice: "auto",
+      parallel_tool_calls: true,
     });
+    const timeoutMs = input.observer?.beforeRequest(body, input.timeoutMs) ?? input.timeoutMs;
+    let res: CurlResponse;
+    try {
+      res = await curlPostJson({
+        url: ENDPOINT,
+        secretHeaders: {
+          authorization: { prefix: "Bearer ", value: token },
+          "chatgpt-account-id": { prefix: "", value: accountId },
+        },
+        headers: {
+          originator: ORIGINATOR,
+          "OpenAI-Beta": "responses=experimental",
+          accept: "text/event-stream",
+          "content-type": "application/json",
+        },
+        body,
+        timeoutMs,
+        ...(input.env.HELIUM_PROXY === undefined || input.env.HELIUM_PROXY === ""
+          ? {}
+          : { proxy: input.env.HELIUM_PROXY }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+    } catch (error) {
+      if (input.observer === undefined) throw error;
+      // Preserve uncertain dispatch without recording transport errors that may contain secrets.
+      input.observer?.afterRequest({ status: 0, body: "", terminal: "transport" }, {});
+      throw new Error("codex transport failed");
+    }
+    const collected = collectSse(input.observer !== undefined || (res.terminal === undefined && res.status >= 200 && res.status < 300) ? res.body : "");
+    const reportedModel = collected.events.reduce<string | undefined>((model, event) => {
+      const value = (event as { response?: { model?: unknown } }).response?.model;
+      return typeof value === "string" ? value : model;
+    }, undefined);
+    const completed = collected.events.findLast((event) =>
+      (event as { type?: string }).type === "response.completed",
+    ) as { response?: { usage?: { input_tokens?: number; output_tokens?: number } } } | undefined;
+    const observedUsage = completed === undefined ? collected.usage : {
+      inputTokens: completed.response?.usage?.input_tokens,
+      outputTokens: completed.response?.usage?.output_tokens,
+    };
+    const accountingKnown = input.observer?.afterRequest(res, observedUsage, reportedModel, completed !== undefined);
 
     if (res.terminal === "timeout") {
       return { ok: false, classification: "timeout", runtimeSnapshot: snapshot() };
@@ -357,7 +389,7 @@ export async function invokeCodex(
       };
     }
 
-    const { text, usage, events, calls, errorMessage } = collectSse(res.body);
+    const { text, usage, events, calls, errorMessage } = collected;
     totals.inputTokens += usage.inputTokens ?? 0;
     totals.outputTokens += usage.outputTokens ?? 0;
     allEvents.push(...events);
@@ -370,6 +402,9 @@ export async function invokeCodex(
           : "error",
         runtimeSnapshot: snapshot(),
       };
+    }
+    if (accountingKnown === false) {
+      return { ok: false, classification: "error", runtimeSnapshot: snapshot() };
     }
     log.push(...turnEvents(seq, turn, startedAt, usage));
     seq += 2;

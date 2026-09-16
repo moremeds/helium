@@ -12,7 +12,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseTenantYaml } from "@helium/core";
 import {
   EARNINGS_PER_CALL,
@@ -41,6 +41,7 @@ const tools = buildTools({
 const frameTool = tools.find((tool) => tool.name === "ow_session_frame")!;
 
 describe("ow_session_frame", () => {
+  afterEach(() => vi.useRealTimers());
   it("is built and takes no parameters", () => {
     expect(frameTool).toBeDefined();
     expect(frameTool.paramsSchema.safeParse({}).success).toBe(true);
@@ -131,6 +132,9 @@ describe("ow_session_frame", () => {
   // universe here is deliberately one larger than the cap, so a frame that
   // stopped batching would ask for zero tickers, not for fourteen.
   it("batches the earnings lookup at the tool's own cap", async () => {
+    // Keep the regression's Sep 10 earnings event in its original future window.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-06T12:00:00Z"));
     const members = Array.from(
       { length: EARNINGS_PER_CALL + 1 },
       (_, index) => `TT${String(index)}`,

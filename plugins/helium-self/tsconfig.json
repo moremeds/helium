@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "lib", "rootDir": "." },
-  "include": ["tools", "render"]
+  "include": ["tools", "render", "evolution"]
 }

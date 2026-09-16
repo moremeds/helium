@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "review-package-validation-v1.1",
+  "scope": "PACKAGE_STATIC_AND_SPEC_MODEL_ONLY",
+  "executedAt": "2026-09-11T11:52:43.240396+00:00",
+  "environment": "document editing container; not user repo, PostgreSQL, mini or production",
+  "checks": [
+    {
+      "command": "python verification/validate_package.py",
+      "exitCode": 0,
+      "observed": {
+        "scope": "PACKAGE_STATIC_ONLY",
+        "result": "PASS",
+        "implementationChecks": 105,
+        "allImplementationChecks": "NOT_RUN",
+        "legacyMappings": 77,
+        "databaseTestsExecuted": false,
+        "heliumTestsExecuted": false,
+        "productionTestsExecuted": false
+      },
+      "stdoutSha256": "8a6d2c38003f2bd27471ccfcb03aa2018737a6f6bead1184542f9c7eef020b7c"
+    },
+    {
+      "command": "python verification/counterexamples.py",
+      "exitCode": 0,
+      "observed": "10 pure Python specification-model tests passed; not real database or provider execution",
+      "logSha256": "68216335b2c157ddfb27b555edcc82c19443e87b8713d06a2b5525673c6cb70f"
+    },
+    {
+      "command": "compare original 83 requirements and 77 mappings against v1.1",
+      "exitCode": 0,
+      "observed": "Original IDs, stages, names, Given/When/Expected, levels, requiredFor and NOT_RUN statuses preserved; all 77 mapping targets/dispositions preserved."
+    }
+  ],
+  "implementationChecksStatus": "ALL_NOT_RUN",
+  "heliumTestsExecuted": false,
+  "databaseTestsExecuted": false,
+  "productionReportsRetrieved": false
+}
