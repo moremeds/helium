@@ -3,6 +3,9 @@
 The email delivery channel now sends via the Resend API instead of SMTP:
 configure `RESEND_HELIUM_TOKEN`, optionally `HELIUM_EMAIL_FROM` (default sender
 `Helium <helium@rsiarc.com>`); the `SMTP_*` variables are no longer read.
+Sends carry `Idempotency-Key` `<tenant>/<runId>` so a retried timeout cannot
+duplicate a briefing, and a 4xx other than 429 fails immediately instead of
+retrying a body the API already rejected.
 
 ## v0.2.0 — 2026-09-02
 

@@ -18,8 +18,17 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { Resend } from "resend";
 import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
+
+/** The one thing this channel needs from `fetch`: send a body, read a status
+ *  and the error text. Narrow on purpose — a test injects a few lines instead of
+ *  a Response. */
+export type Poster = (
+  url: string,
+  init: { method: string; headers: Record<string, string>; body: string },
+) => Promise<{ status: number; text: () => Promise<string> }>;
+
+const RESEND_URL = "https://api.resend.com/emails";
 
 export const DEFAULT_FROM = "Helium <helium@rsiarc.com>";
 
@@ -43,6 +52,18 @@ export interface Mail {
 }
 
 const BACKOFF_MS = [5_000, 25_000];
+
+/** Resend answers errors as `{ statusCode, name, message }`; anything else is
+ *  quoted as-is, clipped so a proxy's HTML page cannot flood the audit row. */
+async function resendMessage(res: { text: () => Promise<string> }): Promise<string> {
+  const raw = (await res.text().catch(() => "")).trim();
+  try {
+    const body = JSON.parse(raw) as { name?: unknown; message?: unknown };
+    if (typeof body.message === "string")
+      return typeof body.name === "string" ? `${body.name}: ${body.message}` : body.message;
+  } catch { /* not JSON */ }
+  return raw.slice(0, 200);
+}
 
 interface EmailConfig {
   to: string;
@@ -89,7 +110,6 @@ export class EmailChannel implements Channel {
   readonly id = "email";
   /** Mail leaves the machine, so the operator brake applies. */
   readonly external = true;
-  #client: Resend | null = null;
 
   // Every dep is optional so the module can default-export a working INSTANCE:
   // discovery imports the default and calls `.deliver` on it, with no chance to
@@ -100,7 +120,7 @@ export class EmailChannel implements Channel {
       resend?: ResendConfig | null;
       env?: NodeJS.ProcessEnv;
       sleep?: (ms: number) => Promise<void>;
-      send?: (mail: Mail) => Promise<void>;
+      fetch?: Poster;
     } = {},
   ) {}
 
@@ -153,17 +173,37 @@ export class EmailChannel implements Channel {
         : { html: payload.rendered.html }),
     };
 
+    const post = this.deps.fetch ?? (globalThis.fetch as unknown as Poster);
+    // One key per delivery attempt SET, not per attempt: a send Resend accepted
+    // but the client never heard about must not become a second briefing.
+    const idempotencyKey = `${payload.tenant}/${payload.runId}`;
     let error = "";
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await this.#send(mail);
-        counters[payload.tenant] = { ...counters[payload.tenant], [day]: used + 1 };
-        this.#write(counters);
-        return { state: "sent", detail: `attempt ${attempt}` };
+        const res = await post(RESEND_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${resend.apiKey}`,
+            "Idempotency-Key": idempotencyKey,
+          },
+          body: JSON.stringify(mail),
+        });
+        if (res.status >= 200 && res.status < 300) {
+          counters[payload.tenant] = { ...counters[payload.tenant], [day]: used + 1 };
+          this.#write(counters);
+          return { state: "sent", detail: `attempt ${attempt}` };
+        }
+        error = `HTTP ${String(res.status)}: ${await resendMessage(res)}`;
+        // A rejected body is rejected again (bad key, unverified sender, invalid
+        // address): retrying wastes the window and hides the reason behind a
+        // timeout. 429 is the one 4xx that is about the moment, not the body.
+        if (res.status >= 400 && res.status < 500 && res.status !== 429)
+          return { state: "failed", detail: error };
       } catch (cause: unknown) {
         error = cause instanceof Error ? cause.message : String(cause);
-        if (attempt < 3) await this.#sleep(BACKOFF_MS[attempt - 1]!);
       }
+      if (attempt < 3) await this.#sleep(BACKOFF_MS[attempt - 1]!);
     }
     return { state: "failed", detail: error };
   }
@@ -176,20 +216,6 @@ export class EmailChannel implements Channel {
    *  environment answers, which is what the default export relies on. */
   get #resend(): ResendConfig | null {
     return this.deps.resend !== undefined ? this.deps.resend : resendFromEnv(this.#env);
-  }
-
-  // An API error comes back in the response, not as a rejection, so it is
-  // thrown here for the retry loop to treat like any other failure.
-  async #send(mail: Mail): Promise<void> {
-    if (this.deps.send !== undefined) {
-      await this.deps.send(mail);
-      return;
-    }
-    const resend = this.#resend;
-    if (resend === null) throw new Error("no RESEND_HELIUM_TOKEN configured");
-    this.#client ??= new Resend(resend.apiKey);
-    const { error } = await this.#client.emails.send(mail);
-    if (error) throw new Error(`${error.name}: ${error.message}`);
   }
 
   #sleep(ms: number): Promise<void> {

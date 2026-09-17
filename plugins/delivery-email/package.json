@@ -11,8 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@helium/core": "file:../../packages/core",
-    "resend": "6.27.0"
+    "@helium/core": "file:../../packages/core"
   },
   "devDependencies": {
     "@types/node": "^22",
