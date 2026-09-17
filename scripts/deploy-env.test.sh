@@ -57,7 +57,9 @@ check "token landed" \
   "$(grep -c '^RESEND_HELIUM_TOKEN=re_test_value_abc$' "$MINI_ENV" 2>/dev/null)" "1"
 check "recipient landed" \
   "$(grep -c '^HELIUM_EMAIL_TO=ops@example.test$' "$MINI_ENV" 2>/dev/null)" "1"
-check "mini file is mode 600" "$(stat -f %Lp "$MINI_ENV")" "600"
+# perl rather than stat: `stat -f` is the mode on macOS and the filesystem on
+# Linux, and CI runs the latter.
+check "mini file is mode 600" "$(perl -e 'printf "%o\n", (stat $ARGV[0])[2] & 0777' "$MINI_ENV")" "600"
 check "both keys reported by name" \
   "$(grep -c '\[deploy-env\] synced' "$WORK/out")" "2"
 
