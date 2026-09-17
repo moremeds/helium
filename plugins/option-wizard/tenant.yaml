@@ -157,7 +157,7 @@ delivery:
       dir: reports
   # Mail is external, so this entry alone sends nothing: the channel is resolved
   # first and then asked whether it leaves the machine, and it does — so it also
-  # needs the operator's HELIUM_TENANT_DELIVERY=1 and a reachable SMTP_HOST.
+  # needs the operator's HELIUM_TENANT_DELIVERY=1 and a RESEND_HELIUM_TOKEN.
   # Three independent conditions, deliberately: intent here, authority in the
   # brake, capability in the environment. The recipient is HELIUM_EMAIL_TO
   # rather than a literal, so nobody's inbox is committed to the repo.

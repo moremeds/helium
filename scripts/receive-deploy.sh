@@ -13,11 +13,14 @@
 # symlink. The two arguments are still validated before anything else happens:
 # they are the sender's entire vocabulary and the whole surface of this path.
 #
-# The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
-# alongside HELIUM_TENANT_DELIVERY=1. That variable is the ONLY thing that
-# removes the `[TEST] ` prefix from a delivered subject, and it defaults to
-# test on purpose: an unset variable makes a production mail look like a drill,
-# never the reverse.
+# The mini's ~/.config/helium/helium.env sets HELIUM_DEPLOYMENT=production
+# alongside HELIUM_TENANT_DELIVERY=1 — those two are still configured by hand
+# on the mini. RESEND_HELIUM_TOKEN and HELIUM_EMAIL_TO are copied there from
+# the laptop's helium.env by scripts/deploy-env.sh on every deploy, because
+# launchd jobs do not read ~/.zshenv and the mail channel skips without them.
+# HELIUM_DEPLOYMENT is the ONLY thing that removes the `[TEST] ` prefix from a
+# delivered subject, and it defaults to test on purpose: an unset variable
+# makes a production mail look like a drill, never the reverse.
 set -euo pipefail
 
 # Overridable so scripts/receive-deploy.test.sh can stub the three binaries

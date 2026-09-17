@@ -11,10 +11,9 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "vitest run --project unit",
     "test:contracts": "vitest run --project contracts",
-    "test:scripts": "bash scripts/receive-deploy.test.sh"
+    "test:scripts": "bash scripts/receive-deploy.test.sh && bash scripts/deploy-env.test.sh"
   },
   "dependencies": {
-    "nodemailer": "9.0.5",
     "semver": "^7.8.5"
   },
   "devDependencies": {
