@@ -5,7 +5,9 @@ configure `RESEND_HELIUM_TOKEN`, optionally `HELIUM_EMAIL_FROM` (default sender
 `Helium <helium@rsiarc.com>`); the `SMTP_*` variables are no longer read.
 Sends carry `Idempotency-Key` `<tenant>/<runId>` so a retried timeout cannot
 duplicate a briefing, and a 4xx other than 429 fails immediately instead of
-retrying a body the API already rejected.
+retrying a body the API already rejected. `scripts/deploy.sh` now syncs
+`RESEND_HELIUM_TOKEN` and `HELIUM_EMAIL_TO` from the laptop's helium.env to
+the mini's on every deploy.
 
 ## v0.2.0 — 2026-09-02
 

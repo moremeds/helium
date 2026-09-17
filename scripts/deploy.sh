@@ -19,13 +19,14 @@
 # assumption is what breaks first, and the fix is an install step on the
 # receiver, not a smarter tar.
 #
-# The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
-# alongside HELIUM_TENANT_DELIVERY=1, and must also carry RESEND_HELIUM_TOKEN
-# and HELIUM_EMAIL_TO: launchd jobs do not read ~/.zshenv, so the token and
-# the recipient live in that file or nowhere. HELIUM_DEPLOYMENT is the ONLY
-# thing that removes the `[TEST] ` prefix from a delivered subject, and it
-# defaults to test on purpose: an unset variable makes a production mail look
-# like a drill, never the reverse.
+# The mini's ~/.config/helium/helium.env sets HELIUM_DEPLOYMENT=production
+# alongside HELIUM_TENANT_DELIVERY=1 — those two are still configured by hand
+# on the mini. RESEND_HELIUM_TOKEN and HELIUM_EMAIL_TO are copied there from
+# the laptop's helium.env by scripts/deploy-env.sh on every deploy, because
+# launchd jobs do not read ~/.zshenv and the mail channel skips without them.
+# HELIUM_DEPLOYMENT is the ONLY thing that removes the `[TEST] ` prefix from a
+# delivered subject, and it defaults to test on purpose: an unset variable
+# makes a production mail look like a drill, never the reverse.
 set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"
@@ -42,6 +43,9 @@ if [ -n "$(git status --porcelain)" ]; then
   git status --short >&2
   exit 1
 fi
+
+say "syncing mail settings to $HELIUM_HOST"
+scripts/deploy-env.sh "$HELIUM_HOST" RESEND_HELIUM_TOKEN HELIUM_EMAIL_TO
 
 say "building"
 pnpm build
