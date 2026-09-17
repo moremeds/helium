@@ -20,10 +20,12 @@
 # receiver, not a smarter tar.
 #
 # The mini's ~/.config/helium/helium.env must set HELIUM_DEPLOYMENT=production
-# alongside HELIUM_TENANT_DELIVERY=1. That variable is the ONLY thing that
-# removes the `[TEST] ` prefix from a delivered subject, and it defaults to
-# test on purpose: an unset variable makes a production mail look like a drill,
-# never the reverse.
+# alongside HELIUM_TENANT_DELIVERY=1, and must also carry RESEND_HELIUM_TOKEN
+# and HELIUM_EMAIL_TO: launchd jobs do not read ~/.zshenv, so the token and
+# the recipient live in that file or nowhere. HELIUM_DEPLOYMENT is the ONLY
+# thing that removes the `[TEST] ` prefix from a delivered subject, and it
+# defaults to test on purpose: an unset variable makes a production mail look
+# like a drill, never the reverse.
 set -euo pipefail
 
 HELIUM_HOST="${HELIUM_DEPLOY_HOST:-macmini}"

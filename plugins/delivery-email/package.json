@@ -12,11 +12,10 @@
   },
   "dependencies": {
     "@helium/core": "file:../../packages/core",
-    "nodemailer": "9.0.5"
+    "resend": "6.27.0"
   },
   "devDependencies": {
     "@types/node": "^22",
-    "@types/nodemailer": "8.0.1",
     "typescript": "^5"
   }
 }

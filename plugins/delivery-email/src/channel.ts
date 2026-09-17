@@ -1,5 +1,5 @@
 /**
- * The email delivery channel: SMTP plus a per-tenant daily rate cap, salvaged
+ * The email delivery channel: Resend plus a per-tenant daily rate cap, salvaged
  * from v1's `delivery.ts` (design §8, keep-trim).
  *
  * What was dropped in the move: the write-ahead JSONL state machine, the
@@ -18,29 +18,28 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import nodemailer, { type Transporter } from "nodemailer";
+import { Resend } from "resend";
 import type { Channel, DeliveryOutcome, DeliveryPayload } from "@helium/core";
 
-export interface SmtpConfig {
-  host: string;
-  port: number;
-  secure: boolean;
-  user?: string;
-  pass?: string;
+export const DEFAULT_FROM = "Helium <helium@rsiarc.com>";
+
+export interface ResendConfig {
+  apiKey: string;
   from: string;
 }
 
-/** Builds SMTP config from `SMTP_*` env keys. Never logs the returned values. */
-export function smtpFromEnv(env: NodeJS.ProcessEnv): SmtpConfig | null {
-  if (!env.SMTP_HOST) return null;
-  return {
-    host: env.SMTP_HOST,
-    port: Number(env.SMTP_PORT ?? "587"),
-    secure: env.SMTP_SECURE === "true",
-    ...(env.SMTP_USER === undefined ? {} : { user: env.SMTP_USER }),
-    ...(env.SMTP_PASS === undefined ? {} : { pass: env.SMTP_PASS }),
-    from: env.SMTP_FROM ?? `helium@${env.SMTP_HOST}`,
-  };
+/** Builds Resend config from env. Never logs the returned values. */
+export function resendFromEnv(env: NodeJS.ProcessEnv): ResendConfig | null {
+  if (!env.RESEND_HELIUM_TOKEN) return null;
+  return { apiKey: env.RESEND_HELIUM_TOKEN, from: env.HELIUM_EMAIL_FROM ?? DEFAULT_FROM };
+}
+
+export interface Mail {
+  from: string;
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
 }
 
 const BACKOFF_MS = [5_000, 25_000];
@@ -90,7 +89,7 @@ export class EmailChannel implements Channel {
   readonly id = "email";
   /** Mail leaves the machine, so the operator brake applies. */
   readonly external = true;
-  #transport: Transporter | null = null;
+  #client: Resend | null = null;
 
   // Every dep is optional so the module can default-export a working INSTANCE:
   // discovery imports the default and calls `.deliver` on it, with no chance to
@@ -98,10 +97,10 @@ export class EmailChannel implements Channel {
   constructor(
     private readonly deps: {
       stateDir?: string;
-      smtp?: SmtpConfig | null;
+      resend?: ResendConfig | null;
       env?: NodeJS.ProcessEnv;
       sleep?: (ms: number) => Promise<void>;
-      transport?: Transporter;
+      send?: (mail: Mail) => Promise<void>;
     } = {},
   ) {}
 
@@ -110,10 +109,9 @@ export class EmailChannel implements Channel {
     config: Record<string, unknown>,
   ): Promise<DeliveryOutcome> {
     const email = readConfig(config, this.#env);
-    const smtp = this.#smtp;
-    const transport = this.#ensureTransport();
-    if (transport === null || smtp === null) {
-      return { state: "skipped", detail: "no SMTP configured" };
+    const resend = this.#resend;
+    if (resend === null) {
+      return { state: "skipped", detail: "no RESEND_HELIUM_TOKEN configured" };
     }
 
     // The runner's day, in the tenant's declared report zone -- never a clock
@@ -145,8 +143,8 @@ export class EmailChannel implements Channel {
             ...(payload.artifacts ?? []).map((path) => `Artifact: ${path}`),
           ].join("\n")
         : payload.rendered.text;
-    const mail = {
-      from: smtp.from,
+    const mail: Mail = {
+      from: resend.from,
       to: email.to,
       subject,
       text,
@@ -158,7 +156,7 @@ export class EmailChannel implements Channel {
     let error = "";
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        await transport.sendMail(mail);
+        await this.#send(mail);
         counters[payload.tenant] = { ...counters[payload.tenant], [day]: used + 1 };
         this.#write(counters);
         return { state: "sent", detail: `attempt ${attempt}` };
@@ -176,22 +174,22 @@ export class EmailChannel implements Channel {
 
   /** Injected config wins, including an explicit `null`; otherwise the
    *  environment answers, which is what the default export relies on. */
-  get #smtp(): SmtpConfig | null {
-    return this.deps.smtp !== undefined ? this.deps.smtp : smtpFromEnv(this.#env);
+  get #resend(): ResendConfig | null {
+    return this.deps.resend !== undefined ? this.deps.resend : resendFromEnv(this.#env);
   }
 
-  #ensureTransport(): Transporter | null {
-    if (this.deps.transport !== undefined) return this.deps.transport;
-    if (this.#transport !== null) return this.#transport;
-    const smtp = this.#smtp;
-    if (smtp === null) return null;
-    this.#transport = nodemailer.createTransport({
-      host: smtp.host,
-      port: smtp.port,
-      secure: smtp.secure,
-      ...(smtp.user === undefined ? {} : { auth: { user: smtp.user, pass: smtp.pass } }),
-    });
-    return this.#transport;
+  // An API error comes back in the response, not as a rejection, so it is
+  // thrown here for the retry loop to treat like any other failure.
+  async #send(mail: Mail): Promise<void> {
+    if (this.deps.send !== undefined) {
+      await this.deps.send(mail);
+      return;
+    }
+    const resend = this.#resend;
+    if (resend === null) throw new Error("no RESEND_HELIUM_TOKEN configured");
+    this.#client ??= new Resend(resend.apiKey);
+    const { error } = await this.#client.emails.send(mail);
+    if (error) throw new Error(`${error.name}: ${error.message}`);
   }
 
   #sleep(ms: number): Promise<void> {

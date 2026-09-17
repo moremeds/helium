@@ -1,3 +1,9 @@
+## Unreleased
+
+The email delivery channel now sends via the Resend API instead of SMTP:
+configure `RESEND_HELIUM_TOKEN`, optionally `HELIUM_EMAIL_FROM` (default sender
+`Helium <helium@rsiarc.com>`); the `SMTP_*` variables are no longer read.
+
 ## v0.2.0 — 2026-09-02
 
 v2: delete v1, rebuild the core on dsh (M0+M1). The job/ops/SOP lanes,

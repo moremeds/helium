@@ -14,7 +14,7 @@
     "test:scripts": "bash scripts/receive-deploy.test.sh"
   },
   "dependencies": {
-    "nodemailer": "9.0.5",
+    "resend": "6.27.0",
     "semver": "^7.8.5"
   },
   "devDependencies": {
