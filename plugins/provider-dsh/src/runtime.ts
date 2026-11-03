@@ -80,6 +80,11 @@ export async function createDshContext(
   ctx.plugin((await import("@deepseek-ai/dsh-session-projection")).default);
   ctx.plugin((await import("@deepseek-ai/dsh-fs-local")).default, {});
   ctx.plugin((await import("@deepseek-ai/dsh-working-directory")).default);
+  ctx.plugin((await import("@deepseek-ai/dsh-subprocess-local")).default);
+  ctx.plugin((await import("@deepseek-ai/dsh-bash-local")).default);
+  ctx.plugin(await import("@deepseek-ai/dsh-shell-env"));
+  ctx.plugin(await import("@deepseek-ai/dsh-tool-bash"), { enableRunInBackground: false });
+  ctx.plugin(await import("@deepseek-ai/dsh-tool-fs"), { readImage: false });
   ctx.plugin((await import("@deepseek-ai/dsh-agent")).default);
   // The agent factory itself. Without it `agents.create()` fails with "no
   // agent factory registered" — dsh-agent is the registry, not the loop.

@@ -29,11 +29,10 @@ export interface SandboxSpec {
   kind: string;
   /** The run this sandbox belongs to; used for naming and cleanup only. */
   runId: string;
-  /** Absolute paths the run may read. Everything else is out of reach. */
+  /** Requested read roots; enforcement depends on the sandbox implementation. */
   readRoots: string[];
   /**
-   * Absolute paths the run may WRITE. The guard is fail-closed: a write
-   * outside this list is refused under every kind, `none` included.
+   * Requested write roots; a worktree alone does not enforce access.
    */
   writeRoots: string[];
 }
@@ -42,7 +41,7 @@ export interface SandboxHandle {
   kind: string;
   /** Absolute path the run's cwd is set to. */
   root: string;
-  /** The resolved, absolute write boundary the guard enforces. */
+  /** Enforced write roots; empty when the plugin provides no write confinement. */
   writeRoots: string[];
   /** Kind-specific detail (a branch name, a $DSH_HOME, …). Opaque to core. */
   detail?: Record<string, unknown>;

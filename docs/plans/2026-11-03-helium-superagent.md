@@ -69,7 +69,7 @@ Helium 开出的 PR CI 全绿、被我合并；一条 audit 查询答出这张�
 ### P2 `plugins/sandbox-worktree`
 
 - `create` = `git worktree add .worktrees/<slug> -b agent/<slug>`；`destroy` 只在工作树干净且 `git branch --merged` 包含该分支时执行，否则保留并记原因。插件只懂 git；"PR 已关闭"由 GitHub 侧决定，不进 sandbox 插件。
-- 环境变量清洗（约 15 行）：去掉 `GH_TOKEN`/`GITHUB_TOKEN`，设 `GIT_TERMINAL_PROMPT=0`，`gh` 指向 bot 的配置目录。
+- 环境变量：DSH 子进程本身已删掉含 TOKEN/KEY/SECRET 的变量（`dsh-subprocess` `scrubbedParentEnv`）；插件自己的 git 调用去掉 `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`，设 `GIT_TERMINAL_PROMPT=0`。`gh` 指向 bot 配置目录**推迟到 P6**：P6 用只装 bot 凭据的专用 macOS 用户运行，那时 `~/.config/gh` 就是 bot 的。
 - runner 调 `create/destroy`，把 `handle.root` 作为 worker 的 cwd。
 - sandbox root 要传到**子 agent 的实际 cwd**（shell 里 `pwd`），不只是 runner 的 cwd。`SandboxHandle` 只声明实际执行的边界；`writeRoots` 未实现就不声称成立（`sandbox.ts:32-46` 的承诺暂不兑现）。
 - 验收：真实 shell 的 cwd 是新 worktree；运行结束后未合并分支不被删。

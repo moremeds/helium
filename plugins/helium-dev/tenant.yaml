@@ -1,0 +1,7 @@
+tenant: helium-dev
+enabled: true
+team: team.yaml
+sandbox: worktree
+budget: { usd: 1, tokens: 50000 }
+triggers: []
+delivery: []

@@ -123,6 +123,7 @@ export function dshTargetId(modelId: string) {
 }
 
 export class DshProvider implements Provider {
+  readonly supportsMutations = true;
   readonly id = "dsh";
   readonly models = DSH_MODELS;
 

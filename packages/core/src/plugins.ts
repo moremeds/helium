@@ -87,6 +87,8 @@ export interface ModelRun {
  */
 export interface Provider {
   id: string;
+  /** Undefined means false. */
+  supportsMutations?: boolean;
   capabilities: string[];
   models: ProviderModel[];
   /**

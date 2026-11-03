@@ -14,6 +14,7 @@ import type {
   EcosystemTool,
   Gate,
   Provider,
+  SandboxKind,
   Settler,
   TenantRenderer,
 } from "@helium/core";
@@ -404,4 +405,24 @@ export async function discoverChannels(
     }
   }
   return { channels, skipped };
+}
+
+/** Sandbox plugins use the same directory/symlink discovery as providers. */
+export async function discoverSandboxes(dir: string): Promise<{ live: SandboxKind[]; skipped: Skipped[] }> {
+  const live: SandboxKind[] = [];
+  const skipped: Skipped[] = [];
+  if (!existsSync(dir)) return { live, skipped };
+  const names = readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && entry.name.startsWith("sandbox-"))
+    .map((entry) => entry.name).sort();
+  for (const name of names) {
+    try {
+      const plugin = (await import(pathToFileURL(join(dir, name, "lib/sandbox.js")).href)).default as SandboxKind;
+      if (typeof plugin?.id !== "string" || typeof plugin.create !== "function" || typeof plugin.destroy !== "function") throw new Error("default export is not a SandboxKind");
+      live.push(plugin);
+    } catch (error) {
+      skipped.push({ id: name, reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { live, skipped };
 }
