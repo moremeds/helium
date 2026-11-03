@@ -25,17 +25,19 @@ function repository() {
 }
 afterEach(() => vi.unstubAllEnvs());
 
-it.each(["merged", "dirty", "unmerged"])("worktree cleanup: %s", async (state) => {
+it.each(["merged", "dirty", "unmerged", "detached"])("worktree cleanup: %s", async (state) => {
   const root = repository();
   const handle = await sandbox.create({ kind: "worktree", runId: state, readRoots: [root], writeRoots: [] });
+  if (state === "detached") git(handle.root, "checkout", "--detach");
   if (state !== "merged") writeFileSync(join(handle.root, "README.md"), "after\n");
-  if (state === "unmerged") {
+  if (state === "unmerged" || state === "detached") {
     git(handle.root, "add", ".");
     git(handle.root, "commit", "-m", "change");
   }
+  if (state === "detached") expect(git(root, "rev-parse", String(handle.detail?.branch))).toBe(git(root, "rev-parse", "HEAD"));
   await sandbox.destroy(handle);
   expect(existsSync(handle.root)).toBe(state !== "merged");
-  expect(handle.detail?.retainedReason).toBe(state === "merged" ? undefined : state);
+  expect(handle.detail?.retainedReason).toBe(state === "detached" ? "unmerged" : state === "merged" ? undefined : state);
 });
 
 it("runs the coding loop in a worktree with real tools and persists the structured result", async () => {
