@@ -12,22 +12,16 @@
  * API key.
  *
  * dsh-scope API cited against the installed @deepseek-ai/dsh-scope
- * 0.1.2-alpha.3 package: `scopeOf(ctx: Context): ScopeKey | undefined`
+ * 0.2.1-rc.5 package: `scopeOf(ctx: Context): ScopeKey | undefined`
  * (lib/types/index.d.ts) reads the nearest scope tag a context carries --
- * `ToolRuntime.restrict()`/`.schemas()` use the identical `scopeOf(this.ctx)`
- * internally (dsh-tools/lib/index.js:2792, confirmed by reading the
- * installed package directly). The signature is unchanged from
- * 0.1.1-rc.2; only the minified line number moved (2780 -> 2792).
+ * `ToolRuntime.restrict()`/`.schemas()` use the same scope internally.
  * @module dsh-plugin-helium-restrict-proof
  */
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import type { Context } from "@deepseek-ai/cordis";
 import type {} from "@deepseek-ai/cordis-plugin-loader";
-import {
-  installModelSelection,
-  type ModelSelectionRef,
-} from "@deepseek-ai/dsh-agent";
+import type {} from "@deepseek-ai/dsh-agent";
 import type {} from "@deepseek-ai/dsh-agent-default-model";
 import { SessionId } from "@deepseek-ai/dsh-session";
 import { defineTool } from "@deepseek-ai/dsh-tools";
@@ -76,12 +70,6 @@ export function apply(ctx: Context, config: Config): void {
         meta: { cwd: process.cwd() },
         agentOptions: { provider: selection.provider, model: selection.model },
         setup: (agentCtx) => {
-          const selectedRef: ModelSelectionRef = {
-            current: selection,
-            assembled: undefined,
-          };
-          installModelSelection(agentCtx, selectedRef);
-
           // Identical to TriageRunner.dispatch()'s deny computation
           // (plugins/helium/src/dispatch.ts): keep exactly the job's
           // allow-listed tools, deny every other registered global.

@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** The dsh version helium pins (plan global constraint; spec §9.1). */
-export const PINNED_DSH_VERSION = "0.1.2-alpha.3";
+export const PINNED_DSH_VERSION = "0.2.1-rc.5";
 
 /** The dsh version this run exercises. */
 export const dshVersion: string =
@@ -30,8 +30,8 @@ export const dshBin: string =
 /**
  * `overrides:` lines pinning every `@deepseek-ai/*` package to `dshVersion`.
  *
- * The dsh train versions in lockstep but depends on itself through CARET
- * ranges (`@deepseek-ai/dsh-base@0.1.2-alpha.3` asks for
+ * DSH 0.2.1-rc.5 uses exact train dependencies. Older canary targets used CARET
+ * ranges (`@deepseek-ai/dsh-base@0.1.2-alpha.3` asked for
  * `"@deepseek-ai/dsh-agent": "^0.1.2-alpha.3"`). The repo's own lockfile holds
  * that float still; an install into a generated fixture or profile directory
  * has no lockfile and re-resolves from the registry every time it runs.
