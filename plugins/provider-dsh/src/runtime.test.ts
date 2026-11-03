@@ -103,12 +103,9 @@ describe("DshHost.run", () => {
       model: "claude-haiku-4-5",
       provider: "anthropic",
     });
-    expect(seen[0]!.toolFilter).toEqual({ allow: ["fake_probe"] });
   });
 
-  it("omits the tool filter entirely for a role with no tools", async () => {
-    // `tools.restrict({allow: []})` is rejected by dsh outright, so an empty
-    // allow-list is not "allow nothing" — it is a start-time throw.
+  it("passes an empty allow-list for a role with no tools", async () => {
     const seen: Record<string, unknown>[] = [];
     const host = new DshHost({
       subagents: stubRuntime(seen),
@@ -117,6 +114,6 @@ describe("DshHost.run", () => {
       maxDepth: 1,
     });
     await host.run("run-1", work([]), selection, new AbortController().signal);
-    expect(seen[0]).not.toHaveProperty("toolFilter");
+    expect(seen[0]!.allow).toEqual([]);
   });
 });

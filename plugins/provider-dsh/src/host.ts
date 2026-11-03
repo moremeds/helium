@@ -13,14 +13,14 @@
  * Core folds it (`foldSessionLog`); nothing here computes a token count.
  * @module dsh-plugin-provider-dsh/host
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { LogEvent, ModelSelection, WorkOrder } from "@helium/core";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
-import { SessionId, type SessionHeader } from "@deepseek-ai/dsh-session";
-import type { SubagentRuntime } from "@deepseek-ai/dsh-subagent";
+import { SessionId } from "@deepseek-ai/dsh-session";
+import type { SubagentStartRequest } from "@deepseek-ai/dsh-subagent";
 import type {} from "@deepseek-ai/dsh-session-persistence";
 
 export interface RunHandle {
@@ -62,9 +62,9 @@ export interface DshSubagentRuntime {
       parent: unknown;
       signal: AbortSignal;
       agentOptions: Record<string, unknown>;
-      outputSchema?: object;
+      outputSchema?: SubagentStartRequest["outputSchema"];
       maxDepth: number;
-      toolFilter?: { allow: string[] };
+      allow: string[];
       persona: string;
     },
   ): Promise<SubagentRun>;
@@ -111,8 +111,6 @@ export class DshHost {
     // the child's agent options.
     const { providerName, tools: _tools, ...agentOptions } = selection.options ?? {};
     const transport = String(providerName ?? "default");
-    // An EMPTY allow-list is not "allow nothing" to dsh — `tools.restrict()`
-    // rejects an empty filter outright. A role with no tools gets no filter.
     const allow = [...work.constraints.tools];
     let child: SubagentRun | undefined;
     try {
@@ -127,7 +125,7 @@ export class DshHost {
         signal,
         agentOptions: { model: selection.model, ...agentOptions },
         maxDepth: this.deps.maxDepth,
-        ...(allow.length === 0 ? {} : { toolFilter: { allow } }),
+        allow,
         persona: this.deps.persona ?? work.role,
       });
       const terminal = await child.result;
@@ -213,8 +211,10 @@ export class CordisRunParentFactory implements RunParentFactory {
     if (this.ctx.agents.get(id) !== undefined) {
       throw new Error(`run parent already has a live owner: ${String(id)}`);
     }
-    const persisted = (await this.ctx.sessionPersistence.list(input.signal)).some(
-      (header: SessionHeader) => header.id === id,
+    const persisted = (await this.ctx.sessionPersistence.list(
+      input.signal === undefined ? {} : { signal: input.signal },
+    )).some(
+      (snapshot) => snapshot.header.id === id,
     );
     const handle = persisted
       ? await this.ctx.agents.resume({
@@ -245,15 +245,54 @@ export class CordisRunParentFactory implements RunParentFactory {
  * accounting available to the audit projection.
  */
 export class CordisSubagentRuntime implements DshSubagentRuntime {
-  constructor(private readonly runtime: SubagentRuntime) {}
+  readonly #policies = new Map<SessionId, { allow: string[]; persona: string; agent?: Agent }>();
+
+  constructor(private readonly ctx: Context) {
+    ctx.on("agent/created", ({ agent }) => {
+      const policy = this.#policies.get(agent.id);
+      if (policy === undefined) return;
+      policy.agent = agent;
+      agent.ctx.tools.restrict({ allow: policy.allow });
+      agent.ctx.systemPrompt.section({
+        name: "deployment:persona-prefix",
+        order: agent.ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"),
+        text: policy.persona,
+      });
+      return undefined;
+    });
+    ctx.effect(() => () => { this.#policies.clear(); });
+  }
 
   async start(
     providerName: string,
     request: Parameters<DshSubagentRuntime["start"]>[1],
   ): Promise<SubagentRun> {
-    const run = await this.runtime.start(providerName, request as never);
+    const childId = SessionId(randomUUID());
+    const { allow, persona, signal, ...childRequest } = request;
+    const policy = { allow: [...allow], persona, agent: undefined as Agent | undefined };
+    this.#policies.set(childId, policy);
+    let run;
+    try {
+      run = await this.ctx.subagents.startActivation({
+        provider: providerName,
+        label: persona,
+        childId,
+        request: { ...childRequest, parent: request.parent as Agent },
+        signal,
+        delivery: "caller",
+      });
+    } catch (error) {
+      this.#policies.delete(childId);
+      throw error;
+    }
+    // The manager tears the child down before resolving its result. Retain the
+    // session through that teardown, including any later cold materialization.
+    policy.agent = this.ctx.agents.get(childId) ?? policy.agent;
+    const interrupt = () => this.interrupt(childId, request.parent);
+    signal.addEventListener("abort", interrupt, { once: true });
+    if (signal.aborted) interrupt();
     const result = run.result.then((terminal) => {
-      const events = (run.localAgent?.session.events ?? []) as unknown as LogEvent[];
+      const events = (policy.agent?.session.snapshotEvents() ?? []) as unknown as LogEvent[];
       const header = [...events]
         .reverse()
         .find((event) => event.type === "request/header") as
@@ -264,11 +303,11 @@ export class CordisSubagentRuntime implements DshSubagentRuntime {
             data?: {
               reason?: {
                 error?: {
-                code?: unknown;
-                status?: unknown;
-                providerRetryAfterMs?: unknown;
-                message?: unknown;
-              };
+                  code?: unknown;
+                  status?: unknown;
+                  providerRetryAfterMs?: unknown;
+                  message?: unknown;
+                };
               };
             };
           }
@@ -298,16 +337,23 @@ export class CordisSubagentRuntime implements DshSubagentRuntime {
               },
             }),
       };
-    });
-    return { id: run.id, result, dispose: () => run.dispose() };
+    }).finally(() => signal.removeEventListener("abort", interrupt));
+    return {
+      id: childId,
+      result,
+      dispose: async () => {
+        try { await run.dispose(); }
+        finally { this.#policies.delete(childId); }
+      },
+    };
   }
 
   async drainDescendants(parent: unknown): Promise<void> {
-    await this.runtime.drainContinuableDescendants([parent as Agent]);
+    await this.ctx.subagents.drainDescendants([parent as Agent]);
   }
 
   interrupt(childId: unknown, parent: unknown): void {
-    this.runtime.interrupt(childId as never, {
+    this.ctx.subagents.interrupt(childId as never, {
       kind: "ancestor",
       agent: parent as Agent,
     });

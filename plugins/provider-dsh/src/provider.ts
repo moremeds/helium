@@ -286,7 +286,7 @@ export class DshProvider implements Provider {
     }).then((ctx) => {
       this.#workspacesDir = join(root, "workspaces");
       this.#host = new DshHost({
-        subagents: new CordisSubagentRuntime(ctx.subagents),
+        subagents: new CordisSubagentRuntime(ctx),
         parents: new CordisRunParentFactory(ctx),
         workspacesDir: this.#workspacesDir,
         maxDepth: 1,

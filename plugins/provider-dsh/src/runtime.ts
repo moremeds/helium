@@ -58,7 +58,7 @@ export function authHeaders(token: string | undefined): Record<string, string> {
 }
 
 /**
- * Nine plugins, in dependency order. `dsh-system-prompt` is not optional:
+ * Runtime plugins, in dependency order. `dsh-system-prompt` is not optional:
  * `dsh-tools` injects `systemPrompt` and its absence is a hard boot failure.
  * `dsh-llm-pi-ai` and `dsh-subagent-spawn-in-process` export no `default` —
  * they are namespace plugins (`apply`/`inject`/`name`), so the module object
@@ -78,12 +78,14 @@ export async function createDshContext(
   // dsh-agent-loop injects `sessionProjections`; without the registry the loop
   // plugin stays inactive and `agents.create()` still reports no factory.
   ctx.plugin((await import("@deepseek-ai/dsh-session-projection")).default);
+  ctx.plugin((await import("@deepseek-ai/dsh-fs-local")).default, {});
+  ctx.plugin((await import("@deepseek-ai/dsh-working-directory")).default);
   ctx.plugin((await import("@deepseek-ai/dsh-agent")).default);
   // The agent factory itself. Without it `agents.create()` fails with "no
   // agent factory registered" — dsh-agent is the registry, not the loop.
   ctx.plugin((await import("@deepseek-ai/dsh-agent-loop")).default);
   ctx.plugin((await import("@deepseek-ai/dsh-subagent")).default);
-  ctx.plugin((await import("@deepseek-ai/dsh-session-persistence-jsonl")).default, {
+  ctx.plugin(await import("@deepseek-ai/dsh-session-persistence-jsonl"), {
     root: options.sessionRoot,
     compression: "none",
   });
@@ -110,7 +112,7 @@ type DshParams = Record<string, { type: string; required?: true; description?: s
 /**
  * Register helium tools as dsh tools for the life of one step.
  *
- * They must exist BEFORE the child starts: `toolFilter` is applied as a scoped
+ * They must exist BEFORE the child starts: its policy is applied as a scoped
  * `tools.restrict()` with loud unknown-name validation, so an allow-list
  * naming a tool nobody registered throws instead of quietly narrowing.
  *
