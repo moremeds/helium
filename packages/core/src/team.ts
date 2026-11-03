@@ -6,7 +6,7 @@
  * vendor name cannot enter through a declaration.
  *
  * v2 trims v1's manifest to what a run actually needs: the claims-ledger
- * vocabulary (`crossReference`, `outputSchema`, `allowPartialClaims`,
+ * vocabulary (`crossReference`, `allowPartialClaims`,
  * `responsibility`) went with the ledger.
  * @module @helium/core/team
  */
@@ -58,6 +58,7 @@ export const TeamTaskSchema = z.strictObject({
   dependsOn: z.array(z.string().min(1)).default([]),
   requires: CapabilityList,
   prompt: z.string().max(20000).optional(),
+  outputSchema: z.object({ type: z.literal("object") }).catchall(z.unknown()).optional(),
   /**
    * Run labels this task belongs to. ABSENT means every label — a task that
    * does not care must not have to enumerate the ones it does not know about.

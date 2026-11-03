@@ -63,6 +63,7 @@ export interface DshSubagentRuntime {
       signal: AbortSignal;
       agentOptions: Record<string, unknown>;
       outputSchema?: SubagentStartRequest["outputSchema"];
+      cwd?: string;
       maxDepth: number;
       allow: string[];
       persona: string;
@@ -109,7 +110,8 @@ export class DshHost {
     // `tools` comes out too: those are the tool IMPLEMENTATIONS the provider
     // registers, not a model option, and they must never be serialised into
     // the child's agent options.
-    const { providerName, tools: _tools, ...agentOptions } = selection.options ?? {};
+    const { providerName, tools: _tools, cwd, outputSchema, ...agentOptions } = selection.options ?? {};
+    if (cwd !== undefined && typeof cwd !== "string") throw new Error("child cwd must be a string");
     const transport = String(providerName ?? "default");
     const allow = [...work.constraints.tools];
     let child: SubagentRun | undefined;
@@ -125,6 +127,8 @@ export class DshHost {
         signal,
         agentOptions: { model: selection.model, ...agentOptions },
         maxDepth: this.deps.maxDepth,
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(outputSchema === undefined ? {} : { outputSchema: outputSchema as SubagentStartRequest["outputSchema"] }),
         allow,
         persona: this.deps.persona ?? work.role,
       });

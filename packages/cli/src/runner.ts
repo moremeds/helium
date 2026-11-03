@@ -48,6 +48,8 @@ import {
   type RenderedReport,
   type RunReport,
   type Settler,
+  type SandboxKind,
+  type SandboxHandle,
   type TenantCalendar,
   type TenantRenderer,
   type Span,
@@ -57,6 +59,7 @@ import {
 import {
   discoverChannels,
   discoverProviders,
+  discoverSandboxes,
   loadGates,
   loadRenderer,
   loadSettler,
@@ -156,7 +159,7 @@ export function registerProviders(
         supports: {
           structuredOutput: model.caps.includes("structured.output"),
           toolIsolation: true,
-          mutations: false,
+          mutations: provider.supportsMutations === true,
         },
       };
       catalog.register(profile);
@@ -778,6 +781,18 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
     };
   }
 
+  for (const role of Object.values(manifest.roles)) {
+    if (role.sandbox !== undefined && role.sandbox !== spec.sandbox) throw new Error("role sandbox override is not implemented; use tenant.sandbox");
+  }
+  let sandbox: SandboxHandle | undefined;
+  let sandboxKind: SandboxKind | undefined;
+  try {
+  if (spec.sandbox !== "none") {
+    const kinds = await discoverSandboxes(options.pluginsDir);
+    sandboxKind = kinds.live.find((kind) => kind.id === spec.sandbox);
+    if (sandboxKind === undefined) throw new Error(`sandbox ${spec.sandbox} unavailable: ${kinds.skipped.map((skip) => skip.reason).join("; ")}`);
+    sandbox = await sandboxKind.create({ kind: spec.sandbox, runId, readRoots: [options.tenant.dir], writeRoots: [] });
+  }
   const discovered =
     options.providers === undefined
       ? await discoverProviders(options.pluginsDir)
@@ -1358,6 +1373,8 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         // process global would leak between concurrent runs.
         options: {
           ...(chosen.options ?? {}),
+          ...(sandbox === undefined ? {} : { cwd: sandbox.root }),
+          ...(task.outputSchema === undefined ? {} : { outputSchema: task.outputSchema }),
           ...(role.permissions.tools.length === 0
             ? {}
             : {
@@ -1464,7 +1481,7 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
         stepToolOutputs,
       });
       if (out.ran > 0) stepNo += 1;
-      const kept = liftState(result.text);
+      const kept = liftState(result.structured === undefined ? result.text : JSON.stringify(result.structured));
       produced.set(taskId, kept);
       report.steps.push({
         task: taskId,
@@ -1711,6 +1728,16 @@ export async function runTenant(options: RunOptions): Promise<RunReport> {
   }
 
   return report;
+  } finally {
+    if (sandbox !== undefined && sandboxKind !== undefined) {
+      try { await sandboxKind.destroy(sandbox); }
+      finally {
+        const dir = join(options.stateRoot, "runs", runId);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "sandbox.json"), JSON.stringify(sandbox, null, 2) + "\n");
+      }
+    }
+  }
 }
 
 /**

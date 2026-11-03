@@ -314,6 +314,9 @@ importers:
       '@deepseek-ai/dsh-agent-loop':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(4fd441e0ebd9a03d297878b098f59582)
+      '@deepseek-ai/dsh-bash-local':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-shell@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-sandbox@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-session@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))))(@deepseek-ai/dsh-subprocess@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-http-proxy@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))))(@deepseek-ai/dsh-subprocess@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-http-proxy@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-timeout@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
       '@deepseek-ai/dsh-fs':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-brand@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-llm@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-sandbox@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-session@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))))
@@ -338,15 +341,27 @@ importers:
       '@deepseek-ai/dsh-session-projection':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-session@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)))
+      '@deepseek-ai/dsh-shell-env':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(b1f57c4915be1b00914628f246d8c625)
       '@deepseek-ai/dsh-subagent':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(829fa3f26582b8b902c27168ccbbe4e2)
       '@deepseek-ai/dsh-subagent-spawn-in-process':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-subagent@0.2.1-rc.5(829fa3f26582b8b902c27168ccbbe4e2))
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-subprocess@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-http-proxy@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)))(@deepseek-ai/dsh-timeout@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
       '@deepseek-ai/dsh-system-prompt':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(@deepseek-ai/cordis@4.0.5)(@deepseek-ai/dsh-llm@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))(@deepseek-ai/dsh-scope@0.2.1-rc.5(@deepseek-ai/cordis@4.0.5))
+      '@deepseek-ai/dsh-tool-bash':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(cef5413a6c19877b3662f6d06585ebb5)
+      '@deepseek-ai/dsh-tool-fs':
+        specifier: 0.2.1-rc.5
+        version: 0.2.1-rc.5(66a8963f1c5104faf8b98016602a8b18)
       '@deepseek-ai/dsh-tools':
         specifier: 0.2.1-rc.5
         version: 0.2.1-rc.5(47e11ee6492a70a2f2353a0c993abe69)
@@ -368,6 +383,19 @@ importers:
         version: 5.9.3
 
   plugins/runtime-control:
+    dependencies:
+      '@helium/core':
+        specifier: file:../../packages/core
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22
+        version: 22.20.1
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
+  plugins/sandbox-worktree:
     dependencies:
       '@helium/core':
         specifier: file:../../packages/core
