@@ -3,7 +3,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuditStore, CapabilityCatalog, loadTenants, type Provider } from "@helium/core";
-import { LlmAdapter, ToolCallId, type StreamChunk } from "@deepseek-ai/dsh-llm";
+import { LlmAdapter, ToolCallId, type GenerateOptions, type StreamChunk } from "@deepseek-ai/dsh-llm";
 import { afterEach, expect, it, vi } from "vitest";
 import sandbox from "../../sandbox-worktree/src/sandbox.js";
 import { runTenant, registerProviders } from "../../../packages/cli/src/runner.js";
@@ -64,7 +64,8 @@ console.log('https://example.invalid/pr/1');
   ] as const;
   let turn = 0;
   class FakeLlm extends LlmAdapter {
-    async *stream(): AsyncIterable<StreamChunk> {
+    async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
+      expect(JSON.stringify(options.messages)).toContain("Check the [exit code: N] marker on every bash result");
       const [name, args] = script[turn++]!;
       yield { type: "block-start", index: 0, blockType: "tool-call" };
       yield { type: "block-end", index: 0, block: { type: "tool-call", id: ToolCallId(`call-${turn}`), name, arguments: JSON.stringify(args) } };

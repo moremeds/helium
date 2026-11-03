@@ -69,6 +69,7 @@ describe("real DSH child tool policy (offline fake LLM)", () => {
       for (const call of fake.calls) {
         expect((call.tools ?? []).map(({ name }) => name).sort()).toEqual(visible);
         expect(JSON.stringify(call.messages)).toContain("ROLE-PERSONA");
+        expect(JSON.stringify(call.messages)).not.toContain("Check the [exit code: N] marker on every bash result");
       }
       expect(executed).toEqual(visible);
       expect(result.events.some(({ type }) => type === "assistant/message")).toBe(true);

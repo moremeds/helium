@@ -257,6 +257,11 @@ export class CordisSubagentRuntime implements DshSubagentRuntime {
       if (policy === undefined) return;
       policy.agent = agent;
       agent.ctx.tools.restrict({ allow: policy.allow });
+      if (!policy.allow.includes("bash")) agent.ctx.systemPrompt.section({
+        name: "tool:bash",
+        order: agent.ctx.systemPrompt.getSectionOrder("TOOL_BASH"),
+        text: "",
+      });
       agent.ctx.systemPrompt.section({
         name: "deployment:persona-prefix",
         order: agent.ctx.systemPrompt.getSectionOrder("DEPLOYMENT_PERSONA_PREFIX"),
