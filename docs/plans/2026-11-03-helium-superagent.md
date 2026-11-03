@@ -43,7 +43,7 @@ Helium 开出的 PR CI 全绿、被我合并；一条 audit 查询答出这张�
 
 ### P0 DSH 0.2.1 移植（独立 PR，是其余阶段的前提）
 
-分支 `chore/dsh-0.2.1`，worktree `.worktrees/chore-dsh-0-2-1`（版本号已改、`pnpm install` 已过）。
+分支 `feat/superagent-p0`，worktree `.worktrees/feat-superagent-p0`（版本号已改、`pnpm install` 已过，基线提交 `135d7e2`）。
 
 - 0.2 的 `SubagentStartRequest` 没有 `toolFilter`/`persona`，新子 agent 只能经 preset 得到工具范围；只修类型错误会让**每个角色看到全部工具**。
 - 改法（Fable 审后修订）：**保留** `subagents.startActivation`（结果、`stopReason`、`outputSchema` 结构化输出、深度、`drainDescendants`/`interrupt` 都由 manager 管），自己预先指定 `childId`，并注册一个 `agent/created` 监听器：`agent.id` 命中时 `agent.ctx.tools.restrict({allow})`。依据：dsh-agent `runtime-types.d.ts:212-222`，监听器"在创建 resolve 之前被 await，AgentLoop 在全部监听器结束前扣住排队输入"；superagent 用的就是这个做法（`src/app/sessions.ts:263-293`）。不自己 `agents.create`，否则要重写 manager。
