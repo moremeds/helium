@@ -91,6 +91,15 @@ describe("smoke pipeline on real DSH", () => {
     expect(r.err).toMatch(/ended error without structured output/);
   });
 
+  it("stops an agent that keeps calling tools past its step cap", () => {
+    const r = run(["run", "smoke", "--as-of", "2026-11-09"], { HELIUM_FAKE_MODE: "loop" });
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/started step 11 of at most 10/);
+    const id = (db().prepare("SELECT id FROM runs ORDER BY started_at DESC LIMIT 1").get() as { id: string }).id;
+    const per = db().prepare("SELECT label, COUNT(*) AS n FROM spans WHERE run_id = ? GROUP BY label").all(id) as { n: number }[];
+    expect(Math.max(...per.map((p) => p.n))).toBeLessThanOrEqual(11);
+  });
+
   it("ends a hung run at the whole-run timeout", () => {
     const t = Date.now();
     const r = run(["run", "smoke", "--as-of", "2026-11-09", "--timeout", "2"], { HELIUM_FAKE_MODE: "hang" });

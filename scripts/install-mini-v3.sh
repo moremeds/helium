@@ -27,6 +27,6 @@ echo "[v3] sending $sha to $host:~/$dest"
 tar -cz --exclude=./.git --exclude=./.worktrees --exclude='./.helium*' --exclude=.DS_Store . \
   | ssh "$host" "$remote_env; mkdir -p ~/$dest && tar -xzf - -C ~/$dest && ~/$dest/scripts/install-profile.sh"
 if [ "${1:-}" = smoke ]; then
-  ssh "$host" "$remote_env; set -a; . ~/.config/helium/helium.env; . ~/.config/helium/claude-token.env; set +a;
+  ssh "$host" "set -a; . ~/.config/helium/helium.env; . ~/.config/helium/claude-token.env; set +a; $remote_env; unset HELIUM_STATE_ROOT HELIUM_PROFILE;
     mkdir -p ~/.helium-v3/run && cd ~/.helium-v3/run && ~/$dest/scripts/helium run smoke --phase close"
 fi

@@ -23,6 +23,9 @@ export interface AgentTask {
   prompt: string;
   /** JSON Schema the agent must satisfy through `structured_output`. */
   schema: Record<string, unknown>;
+  /** Model steps the agent may start (default 10). The prompt states it; the
+   *  runner stops the agent and fails the task when it starts one more. */
+  maxSteps?: number;
 }
 
 export interface Run {

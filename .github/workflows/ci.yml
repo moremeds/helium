@@ -24,6 +24,8 @@ jobs:
           node-version: "24"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # smoke imports helium-base through its lib/ types.
+      - run: pnpm run build
       - run: pnpm run typecheck
       - run: pnpm run test
       # Boots the real dsh with a fake LLM against a throwaway $DSH_HOME.

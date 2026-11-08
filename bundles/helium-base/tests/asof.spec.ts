@@ -24,5 +24,6 @@ describe("as-of", () => {
 
   it("rejects a malformed as-of", () => {
     expect(() => setAsOf("11/06/2026")).toThrow(/yyyy-mm-dd/);
+    expect(() => setAsOf("2026-02-30")).toThrow(/yyyy-mm-dd/);
   });
 });

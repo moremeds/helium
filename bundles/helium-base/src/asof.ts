@@ -15,7 +15,8 @@ type G = typeof globalThis & { [KEY]?: string };
 
 /** Runner-only. One run per process, so one as-of per process. */
 export function setAsOf(day: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new Error(`as-of must be yyyy-mm-dd, got ${day}`);
+  const ok = /^\d{4}-\d{2}-\d{2}$/.test(day) && new Date(`${day}T00:00:00Z`).toISOString().startsWith(day);
+  if (!ok) throw new Error(`as-of must be yyyy-mm-dd, got ${day}`);
   (globalThis as G)[KEY] = day;
 }
 

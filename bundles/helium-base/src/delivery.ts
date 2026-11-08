@@ -6,7 +6,9 @@
  * - email subjects carry `[TEST] ` unless `HELIUM_DEPLOYMENT=production`;
  * - email has a per-bundle per-as-of-day cap counted from this store (so a
  *   deploy no longer resets it); argon is idempotent on (tenant, run_id);
- * - 4xx is not retried, 5xx/network gets two retries with backoff.
+ * - 4xx is not retried (email retries 429, argon does not, as in v2),
+ *   5xx/network gets two retries with backoff; the run's abort signal stops
+ *   the request and the backoff.
  * The intent row is written before the send and updated after it.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -38,13 +40,15 @@ export interface DeliveryContext {
   day: string;
   code: string;
   env: NodeJS.ProcessEnv;
+  /** The run's signal: a timed-out run sends nothing more. */
+  signal?: AbortSignal;
   fetch?: Poster;
   sleep?: (ms: number) => Promise<void>;
 }
 
 export type Poster = (
   url: string,
-  init: { method: string; headers: Record<string, string>; body: string },
+  init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal },
 ) => Promise<{ status: number; text: () => Promise<string> }>;
 
 const EXTERNAL: Record<ChannelName, boolean> = { markdown: false, email: true, argon: true };
@@ -119,7 +123,7 @@ async function email(doc: Doc, ctx: DeliveryContext): Promise<Outcome> {
     Authorization: `Bearer ${key}`,
     // A send Resend accepted but we never heard about must not become a second mail.
     "Idempotency-Key": `${ctx.bundle}/${ctx.runId}`,
-  });
+  }, true);
 }
 
 async function argon(doc: Doc, ctx: DeliveryContext): Promise<Outcome> {
@@ -144,22 +148,37 @@ async function argon(doc: Doc, ctx: DeliveryContext): Promise<Outcome> {
     view: data,
     report: { subject: doc.subject, body: doc.text, artifacts: [] },
   });
-  return post(ctx, `${base.replace(/\/+$/, "")}/api/agent-runs`, body, { Authorization: `Bearer ${token}` });
+  return post(ctx, `${base.replace(/\/+$/, "")}/api/agent-runs`, body, { Authorization: `Bearer ${token}` }, false);
 }
 
 const BACKOFF_MS = [5_000, 25_000];
 
-async function post(ctx: DeliveryContext, url: string, body: string, headers: Record<string, string>): Promise<Outcome> {
+async function post(
+  ctx: DeliveryContext,
+  url: string,
+  body: string,
+  headers: Record<string, string>,
+  retry429: boolean,
+): Promise<Outcome> {
+  const { signal } = ctx;
   const send = ctx.fetch ?? (globalThis.fetch as unknown as Poster);
-  const sleep = ctx.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const sleep =
+    ctx.sleep ??
+    ((ms: number) =>
+      new Promise<void>((r) => {
+        const t = setTimeout(r, ms);
+        signal?.addEventListener("abort", () => (clearTimeout(t), r()), { once: true });
+      }));
   let detail = "";
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    if (signal?.aborted) return { state: "failed", detail: `aborted before attempt ${attempt}${detail ? `; last: ${detail}` : ""}` };
     try {
-      const res = await send(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body });
+      const res = await send(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body, signal });
       if (res.status >= 200 && res.status < 300) return { state: "sent", detail: `HTTP ${res.status}` };
       detail = `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 200)}`;
-      // A rejected body is rejected again; 429 is about the moment, not the body.
-      if (res.status >= 400 && res.status < 500 && res.status !== 429) return { state: "failed", detail };
+      // A rejected body is rejected again. 429 is about the moment, not the
+      // body; only email retries it (v2 argon stopped on every 4xx).
+      if (res.status >= 400 && res.status < 500 && !(retry429 && res.status === 429)) return { state: "failed", detail };
     } catch (e) {
       detail = e instanceof Error ? e.message : String(e);
     }

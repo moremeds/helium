@@ -13,7 +13,7 @@ profile="${HELIUM_PROFILE:-helium}"
 [ -x "$dsh" ] || { echo "no $dsh; run pnpm install first" >&2; exit 1; }
 if [ "$#" -eq 0 ]; then set -- $(cd "$repo/bundles" && ls); fi
 for b in "$@"; do
-  [ -f "$repo/bundles/$b/lib/../package.json" ] || { echo "no bundle $b" >&2; exit 1; }
+  [ -f "$repo/bundles/$b/package.json" ] || { echo "no bundle $b" >&2; exit 1; }
   [ -d "$repo/bundles/$b/lib" ] || { echo "bundle $b is not built; run pnpm build" >&2; exit 1; }
 done
 # helium-base first: product bundles patch on top of it.

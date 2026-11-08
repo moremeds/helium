@@ -50,7 +50,7 @@ describe("delivery", () => {
     expect(c.db.prepare("SELECT state FROM deliveries").get()).toEqual({ state: "sent" });
   });
 
-  it("posts argon once on 4xx and three times on 5xx", async () => {
+  it("posts argon once on any 4xx, 429 included, and three times on 5xx", async () => {
     let n = 0;
     const c4 = ctx(live, async () => (n++, { status: 422, text: async () => "bad" }));
     expect((await deliver("argon", doc, ["argon"], c4)).state).toBe("failed");
@@ -59,6 +59,21 @@ describe("delivery", () => {
     const c5 = ctx(live, async () => (n++, { status: 503, text: async () => "" }));
     expect((await deliver("argon", doc, ["argon"], c5)).state).toBe("failed");
     expect(n).toBe(3);
+    n = 0;
+    const c429 = ctx(live, async () => (n++, { status: 429, text: async () => "" }));
+    expect((await deliver("argon", doc, ["argon"], c429)).state).toBe("failed");
+    expect(n).toBe(1);
+  });
+
+  it("sends nothing more once the run is aborted", async () => {
+    let n = 0;
+    const stop = new AbortController();
+    const c = ctx(live, async () => (n++, stop.abort(), { status: 503, text: async () => "" }));
+    c.signal = stop.signal;
+    const out = await deliver("argon", doc, ["argon"], c);
+    expect(out.state).toBe("failed");
+    expect(out.detail).toMatch(/aborted before attempt 2/);
+    expect(n).toBe(1);
   });
 
   it("files argon runs under the ISO week, ISO year at the boundary", async () => {

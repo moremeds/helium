@@ -4,7 +4,8 @@
  * so the as-of clamp is observable), then answers through
  * `structured_output` with a value built from that tool's schema (enums take
  * their first member). Every call logs the model and the tool names it saw.
- * HELIUM_FAKE_MODE=hang waits until aborted; =noschema never submits output.
+ * HELIUM_FAKE_MODE=hang waits until aborted; =noschema never submits output;
+ * =loop calls a tool on every step and never submits.
  */
 import { LlmAdapter } from "@deepseek-ai/dsh-llm";
 
@@ -42,7 +43,8 @@ class Fake extends LlmAdapter {
       await new Promise((_, reject) => o.signal?.addEventListener("abort", () => reject(o.signal.reason ?? new Error("aborted"))));
     }
     const history = JSON.stringify(o.messages ?? []);
-    const own = tools.find((t) => t.name !== "structured_output" && !history.includes(`"${t.name}"`));
+    const loop = process.env.HELIUM_FAKE_MODE === "loop";
+    const own = tools.find((t) => t.name !== "structured_output" && (loop || !history.includes(`"${t.name}"`)));
     const out = tools.find((t) => t.name === "structured_output");
     const pick = own ?? (process.env.HELIUM_FAKE_MODE === "noschema" ? undefined : out);
     if (pick !== undefined) {

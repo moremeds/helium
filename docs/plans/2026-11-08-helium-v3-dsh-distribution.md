@@ -183,6 +183,23 @@ Fable 只读审查后，lead 对照 spike 核实并采纳：
 | P3 mini | 装到 `~/projects/helium-v3-releases/f5c4783`，`DSH_HOME=~/.helium-v3/dsh`；真 Claude 经代理成功；`helium audit` 有记录。`helium-releases/current` 仍是 `516ab39`，launchd 五个任务不变，`receive-deploy.sh` 未改 | run `2026-11-08-smoke-close-e978f065` |
 | 未验证 | "旧 option-wizard 当天的 argon 记录照常出现"：今天是周末，要等下一个交易日的定时运行才能看到 | — |
 
+### Astra review（gpt-6-astra，2026-11-09）
+
+8 条发现，逐条对照代码、计划和 v2 代码核实：
+
+| # | 发现 | 处理 |
+|---|---|---|
+| 1 | `--phase` 带 `../` 时 markdown 写出 state root | 修复：runner 只接受 `[a-z0-9-]` 的 phase |
+| 2 | 整体超时后 delivery 还在重试 | 修复：run 的 signal 传给 fetch 和退避；中止后不再发送（单元测试） |
+| 3 | settle 返回的 id 可以不在到期集合里 | 修复：不在集合里就抛错，run 失败 |
+| 4 | email 上限不是原子的；按 as-of 日计数而不是实际发送日 | 不改：一个进程一个 run，launchd 不并发同一 bundle；按报告日计数与 v2 相同（doctrine 6） |
+| 5 | argon 对 429 重试，v2 不重试 | 修复：argon 任何 4xx 都不重试；email 仍重试 429（与 v2 相同） |
+| 6 | 回放中没有扣留无日期数据；`2026-02-30` 被接受 | 日历校验已修复；无日期数据扣留移到第二阶段：需要第一个真实数据工具来定结果格式，smoke 只有模拟数据 |
+| 7 | agent 没有步数上限和预算 | 修复：`AgentTask.maxSteps`（默认 10），提示词写明上限，runner 用 `step/start` 计数，超出就停止 child 并让任务失败（组合测试）。每步剩余额度的动态反馈移到第二阶段 |
+| 8 | mini smoke 先设 DSH_HOME 再 source 环境文件，可能被覆盖 | 修复：source 之后再设隔离变量。mini 的环境文件里实际没有这些键（只查了键名） |
+
+另外自查发现：CI 在 build 之前跑 typecheck，干净 checkout 会失败（smoke 通过 lib/ 引用 helium-base 的类型）。已在 CI 里先 build。
+
 ### 交付
 
 - 第一阶段是一个 PR（分支 `v3/dsh-distribution` → master），P3 验收通过后合并。

@@ -9,6 +9,8 @@
  * writable root), settles due ledger entries, runs the pipeline under a
  * whole-run timeout, and writes one span row per model step as DSH appends
  * it (`session/event`), so a crash still leaves the tokens it spent on record.
+ * The same event stream counts each child's steps: a child that starts more
+ * than its task's `maxSteps` is stopped and its task fails.
  */
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -86,6 +88,11 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
 
   const models = { ...DEFAULT_MODELS, ...config.models };
   const phase = flag(args, "phase");
+  // The phase names report files and the argon kind: one plain word.
+  if (phase !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(phase)) {
+    log(`--phase must be lower-case letters, digits and dashes, got ${phase}`);
+    return 2;
+  }
   const asOf = flag(args, "as-of") ?? new Intl.DateTimeFormat("en-CA", { timeZone: pipeline.zone ?? "UTC" }).format(new Date());
   setAsOf(asOf);
   const runId = `${asOf}-${target}-${phase ?? "run"}-${randomUUID().slice(0, 8)}`;
@@ -99,6 +106,8 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
   const labels = new Map<string, string>();
   const stepStart = new Map<string, number>();
   const stepModel = new Map<string, string>();
+  const steps = new Map<string, number>();
+  const caps = new Map<string, { max: number; trip(): void }>();
   const insertSpan = db.prepare(
     `INSERT INTO spans (run_id, session_id, role, label, step, model, input, output, cache_read, cache_write, context, wall_ms, cost_usd, at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -106,7 +115,13 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
   ctx.on("session/event", (session: any, event: any) => {
     const sid: string = session.id;
     if (event.type === "request/context") stepModel.set(sid, event.data.model);
-    else if (event.type === "step/start") stepStart.set(sid, event.time);
+    else if (event.type === "step/start") {
+      stepStart.set(sid, event.time);
+      const n = (steps.get(sid) ?? 0) + 1;
+      steps.set(sid, n);
+      const cap = caps.get(sid);
+      if (cap !== undefined && n > cap.max) cap.trip();
+    }
     else if (event.type === "assistant/message" && event.data.usage) {
       const u = event.data.usage;
       const usage = { input: u.inputTokens ?? 0, output: u.outputTokens ?? 0, cacheRead: u.cacheReadTokens ?? 0, cacheWrite: u.cacheWriteTokens ?? 0 };
@@ -152,6 +167,8 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
     log: (m) => log(`${target}: ${m}`),
     async agent<T>(task: AgentTask): Promise<T> {
       const label = task.label ?? task.role;
+      const max = task.maxSteps ?? 10;
+      const prompt = `${task.prompt}\n\nYou have at most ${max} model steps for this task; submit your answer with structured_output before then.`;
       const activation = await ctx.subagents.startActivation({
         provider: "spawn",
         label,
@@ -160,15 +177,24 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
         request: {
           agentPreset: task.role,
           parent: driver,
-          prompt: [{ type: "text", text: task.prompt }],
+          prompt: [{ type: "text", text: prompt }],
           agentOptions: models[task.capability],
           outputSchema: task.schema,
         },
       });
       labels.set(activation.childId, label);
       live.add(activation);
+      let overran!: (e: Error) => void;
+      const overrun = new Promise<never>((_, reject) => (overran = reject));
+      caps.set(activation.childId, {
+        max,
+        trip() {
+          activation.dispose().catch(() => {});
+          overran(new Error(`agent ${label} started step ${max + 1} of at most ${max}`));
+        },
+      });
       try {
-        const r = await activation.result;
+        const r = await Promise.race([activation.result, overrun]);
         const stop = typeof r.stopReason === "string" ? r.stopReason : r.stopReason?.kind;
         if (stop !== "completed" || r.structured === undefined) {
           throw new Error(`agent ${label} ended ${stop}${r.diagnostic ? `: ${r.diagnostic}` : ""} without structured output`);
@@ -176,10 +202,11 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
         return r.structured as T;
       } finally {
         live.delete(activation);
+        caps.delete(activation.childId);
       }
     },
     deliver: (channel: ChannelName, doc: Doc) =>
-      deliver(channel, doc, pipeline.channels, { db, stateRoot: root, runId, bundle: target, phase, day: asOf, code, env: process.env }),
+      deliver(channel, doc, pipeline.channels, { db, stateRoot: root, runId, bundle: target, phase, day: asOf, code, env: process.env, signal }),
     enter(key, due, payload) {
       db.prepare("INSERT INTO ledger (id, bundle, run_id, key, as_of, due, payload) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
         `${runId}:${key}`, target, runId, key, asOf, due, JSON.stringify(payload),
@@ -194,12 +221,17 @@ async function main(ctx: Ctx, config: Config): Promise<number> {
       const due = openEntries(db, target, asOf);
       if (due.length > 0) {
         const settled = await Promise.race([pipeline.settle(due, run), aborted]);
+        const ids = new Set(due.map((d) => d.id));
+        const stray = settled.filter((s) => !ids.has(s.id)).map((s) => s.id);
+        if (stray.length > 0) throw new Error(`settle returned entries it was not given: ${stray.join(", ")}`);
         const upd = db.prepare("UPDATE ledger SET outcome = ?, settled_run = ? WHERE id = ? AND outcome IS NULL");
         for (const s of settled) upd.run(JSON.stringify(s.outcome), runId, s.id);
         log(`settled ${settled.length}/${due.length}`);
       }
     }
-    await Promise.race([pipeline.run(run), aborted]);
+    const work = pipeline.run(run);
+    work.catch(() => {}); // after a timeout it still rejects; the race already decided
+    await Promise.race([work, aborted]);
     finish("ok", null);
     log(`ok ${runId}`);
     return 0;
