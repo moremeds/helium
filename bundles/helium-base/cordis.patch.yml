@@ -1,0 +1,43 @@
+# helium-base bundle layer. Applied after @deepseek-ai/dsh-base.
+#
+# Host plane: no model-facing execution, write, web or plugin tools. A role
+# sees exactly the tools its agent preset lists (P0 item 4); service rows
+# (sandbox, approval, subprocess, shell-env) stay on. Do not rely on
+# `tools.restrict`: spawned children do not inherit it.
+- { id: tool-bash, disabled: true }
+- { id: tool-pwsh, disabled: true }
+- { id: tool-jobs, disabled: true }
+- { id: tool-fs, disabled: true }
+- { id: tool-fs-search, disabled: true }
+- { id: tool-plugin-manager, disabled: true }
+- { id: tool-web, disabled: true }
+- { id: tool-subagent, disabled: true }
+- { id: tool-subagent-fork, disabled: true }
+- { id: tool-subagent-control, disabled: true }
+- { id: tool-workflow, disabled: true }
+- { id: tool-todo, disabled: true }
+- { id: tool-goal, disabled: true }
+- { id: tool-skill, disabled: true }
+- { id: tool-working-directory, disabled: true }
+- { id: plan-mode, disabled: true }
+- { id: hmr, disabled: true }
+- { id: credentials, disabled: true }
+- { id: authorization, disabled: true }
+- { id: deepseek-account, disabled: true }
+# Claude through pi-ai with the subscription OAuth token (sk-ant-oat...);
+# pi-ai sends the OAuth headers itself. Proxy: HTTPS_PROXY in the environment.
+- id: llm-pi-ai
+  config:
+    providers:
+      anthropic:
+        apiKeyEnv: CLAUDE_CODE_OAUTH_TOKEN
+- insert:
+    - id: agent-preset-registry
+      name: '@deepseek-ai/dsh-agent-preset-registry'
+      config: { default: helium-driver }
+    # The never-prompted driver that parents every child agent: no tools.
+    - id: preset-helium-driver
+      name: '@deepseek-ai/dsh-agent-preset'
+      config: { id: helium-driver, plugins: [] }
+    - id: helium-runner
+      name: helium-base/runner

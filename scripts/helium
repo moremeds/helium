@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# `helium <args>` = `dsh --profile helium <args>` with this checkout's dsh.
+#   scripts/helium run smoke --phase close
+#   scripts/helium audit <run-id>
+# HELIUM_PROXY, when set, becomes HTTPS_PROXY (the mini reaches Anthropic only
+# through its proxy).
+set -euo pipefail
+repo="$(cd "$(dirname "$0")/.." && pwd -P)"
+if [ -n "${HELIUM_PROXY:-}" ]; then export HTTPS_PROXY="$HELIUM_PROXY" HTTP_PROXY="$HELIUM_PROXY"; fi
+exec "$repo/node_modules/.bin/dsh" --profile "${HELIUM_PROFILE:-helium}" "$@"
