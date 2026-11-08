@@ -1,0 +1,41 @@
+# PRIVATE tenant: the user's real IB + Futu positions, sizes and P&L. Its output
+# must never reach a public surface — argon's /flash page is public, which is
+# why this is not an option-wizard phase. Delivery is markdown + email only;
+# never add the argon channel here.
+#
+# Read-only toward both brokers: broker/snapshot.py calls only position /
+# account / open-order / history / quote methods (IB TWS API on the mini's IB
+# Gateway, Futu OpenD), never place / modify / cancel / unlock_trade. Suggested
+# levels go to xenon as a JSON suggestion file the user approves; this tenant
+# never writes to xenon or to a broker.
+tenant: position-review
+enabled: true
+team: team.yaml
+sandbox: none
+budget:
+  usd: 1.50
+  tokens: 200000
+env:
+  - PR_PYTHON
+  - PR_IB_HOST
+  - PR_IB_PORT
+  - PR_IB_CLIENT_ID
+  - PR_FUTU_HOST
+  - PR_FUTU_PORT
+reportTimezone: America/New_York
+# Hand-run only (`helium run position-review --phase review`). A schedule is a
+# later decision: see docs in the PR for the recurring-job proposal.
+triggers: []
+# The suggestion file xenon reads: <stateRoot>/position-review/<day>/review.levels.json
+stateBlock:
+  fence: position-levels
+  suffix: levels.json
+delivery:
+  - channel: markdown
+    config:
+      dir: reports
+  # External, so it also needs HELIUM_TENANT_DELIVERY=1 and RESEND_HELIUM_TOKEN.
+  - channel: email
+    config:
+      subjectPrefix: "[position-review]"
+      maxPerDay: 3
