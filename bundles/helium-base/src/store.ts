@@ -77,7 +77,7 @@ export function auditRows(db: DatabaseSync, runId: string): Record<string, unkno
       `SELECT role, COALESCE(label, role) AS label, model, COUNT(*) AS steps,
         SUM(input) AS input, SUM(output) AS output, SUM(cache_read) AS cache_read,
         SUM(cache_write) AS cache_write, MAX(context) AS max_context,
-        SUM(wall_ms) AS wall_ms, SUM(cost_usd) AS cost_usd
+        SUM(wall_ms) AS wall_ms, ROUND(SUM(cost_usd), 6) AS cost_usd
        FROM spans WHERE run_id = ? GROUP BY role, label, model ORDER BY MIN(at)`,
     )
     .all(runId) as Record<string, unknown>[];

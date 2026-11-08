@@ -1,6 +1,6 @@
 # Helium v3：Helium 就是一个 DSH 发行版（破坏性重写，全新架构）
 
-日期：2026-11-08（2026-11-09 修订：先做框架，内容另起）　状态：P0 通过，P1 进行中
+日期：2026-11-08（2026-11-09 修订：先做框架，内容另起）　状态：P0–P3 完成（2026-11-09），待 review
 取代：`2026-11-03-helium-superagent.md` 的 P0；`.worktrees/chore-dsh-0-2-1` 作废（只改了版本号）。
 方法论依据：`docs/research/2026-11-08-tradingagents-ai-hedge-fund-methods.md`
 
@@ -155,19 +155,13 @@ Fable 只读审查后，lead 对照 spike 核实并采纳：
 - `profile/` 模板 + `scripts/install-profile.sh`。
 - AGENTS.md 重写 Commands/Architecture；Doctrine 六条不动，头部改成"Helium 是一个 DSH 发行版"。
 
-### P2 smoke bundle：验收全部能力
+### P2 smoke bundle：验收第一阶段能力
 
-`bundles/smoke` 用假数据工具，覆盖第 3 节每一行。验收：
+范围按 4.1 修订：辩论、菜单、gate、反思、记分卡、`helium replay` 移到第二阶段，所以 P2 不再验收它们。菜单在 smoke 里只是 outputSchema 的 enum。
 
-1. 组合测试（真 DSH、假 LLM，进 CI）：
-   - 一次运行走完：代码任务 → 按 key map 的并行 agent → 一轮辩论 → 菜单选择（菜单外的选项被拒绝）→ 阻断 gate 拦下一个编造的数字 → 渲染 → markdown + span 行 + 入账。
-   - 下一次运行：先结算上次的决定，反思写入，回灌只出现在指定角色的上下文里。
-   - 模型传入晚于 as-of 的日期被截断。
-   - 工具范围：完整可见集合断言。
-   - 通道白名单：声明只发 email 的 bundle 调 argon 通道被拒绝。
-2. 真模型一次（不进 CI）：同一流程用 Sonnet + Opus 跑一遍；`helium audit <run>` 一条查询给出每个角色的 token 和成本。
-3. `helium replay` 在 3 个日期 × 2 个 key 上跑完，每格独立账本。
-4. 记分卡在合成的 25 个评分日上算出命中率、IC、t 值，并给出权重建议。
+1. 组合测试（真 DSH、假 LLM，进 CI，`pnpm test:compose`）：并行分析师 → 裁判只能从代码给的菜单选 → 入账 → markdown；span 行；下一次运行先结算；工具范围完整集合断言；模型给的晚于 as-of 的日期被截断；agent 不交结构化输出时 run 失败；挂起时整体超时结束。
+2. 单元测试：as-of 截断、通道白名单（越界抛错）、操作员刹车、`[TEST] ` 前缀、每日上限、先写 intent 再发送、argon 4xx 不重试 / 5xx 重试、ISO 周、helium-base 不含业务词。
+3. 真模型一次（不进 CI）：`scripts/helium run smoke` 用 Sonnet + Opus；`scripts/helium audit <run>` 给出每个角色的 token 和成本。
 
 ### P3 mini 环境验证（不切换）
 
@@ -175,6 +169,19 @@ Fable 只读审查后，lead 对照 spike 核实并采纳：
 - 在 mini 上手动跑一次 smoke（真 Claude，经 Clash 代理），只写 markdown。
 - 用一个新脚本 `scripts/install-mini-v3.sh` 安装，不改 mini 上手装的 `~/.config/helium/receive-deploy.sh`（旧版本的发布仍走它）。`deploy.sh` / `receive-deploy.sh` 的改造放到第二阶段切换时做。
 - 验收：mini 上 smoke 成功；`helium audit` 有记录；旧 option-wizard 的定时运行不受影响（当天的 argon 记录照常出现）。
+
+### P1–P3 结果（2026-11-09）
+
+| 项 | 结果 | 证据 |
+|---|---|---|
+| P1 删除 | 删除 packages/、plugins/、contracts/、旧 scripts（flash-*、pit-replay、runtime-*、research、fixtures）。保留 docs/、launchd/、deploy.sh、receive-deploy.sh（第二阶段切换时改） | commit `8ceb836` |
+| P1 helium-base | runner、agent 任务、span 表、ledger、as-of、delivery、超时；`install-profile.sh` 重新指向时不重复 bundle | 同上 |
+| 用量来源 | 不解压 jsonl.zstd：DSH 每次追加事件都发 `session/event`，runner 收到 `assistant/message` 就写一行 span。Node 自带的 zstd 只解第一个 frame（同一个日志 Node 读出 1 行，`zstd` 命令读出 29 行），所以不用它 | spike 日志对比 |
+| P2 组合测试 | 4 个全过，5.6 秒 | `pnpm test:compose` |
+| P2 单元测试 | 10 个全过 | `pnpm test` |
+| P2 真模型（笔记本） | 9.8 秒；analyst Sonnet 5.5 × 2、judge Opus 5.5；按 API 价约 $0.019；第二步命中提示缓存 | run `2026-11-08-smoke-close-aa7895a0` |
+| P3 mini | 装到 `~/projects/helium-v3-releases/f5c4783`，`DSH_HOME=~/.helium-v3/dsh`；真 Claude 经代理成功；`helium audit` 有记录。`helium-releases/current` 仍是 `516ab39`，launchd 五个任务不变，`receive-deploy.sh` 未改 | run `2026-11-08-smoke-close-e978f065` |
+| 未验证 | "旧 option-wizard 当天的 argon 记录照常出现"：今天是周末，要等下一个交易日的定时运行才能看到 | — |
 
 ### 交付
 
