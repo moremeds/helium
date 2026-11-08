@@ -22,6 +22,16 @@ const isoExpiry = (e: string) => `${e.slice(0, 4)}-${e.slice(4, 6)}-${e.slice(6,
 const years = (expiry: string, asOf: Date) =>
   (Date.parse(`${expiry}T21:00:00Z`) - asOf.getTime()) / (365 * 86_400_000);
 
+/** Split levels by the sign of the estimated P&L there. A null/NaN P&L goes to `unclassified`. */
+export function sideCandidates<T extends { estPnlAtLevel: number | null | undefined }>(levels: T[]) {
+  const ok = (x: number | null | undefined): x is number => typeof x === "number" && Number.isFinite(x);
+  return {
+    stopCandidates: levels.filter((c) => ok(c.estPnlAtLevel) && c.estPnlAtLevel < 0),
+    takeProfitCandidates: levels.filter((c) => ok(c.estPnlAtLevel) && c.estPnlAtLevel > 0),
+    unclassified: levels.filter((c) => !ok(c.estPnlAtLevel)),
+  };
+}
+
 /** Levels shared by every underlying: daily technicals + a daily-bar volume profile. */
 function technicals(bars: DailyBar[], spot: number, bucket: number) {
   const recent = bars.slice(-130);
@@ -140,21 +150,21 @@ export function analyse(raw: Raw, asOf: Date) {
       candidates.push({ id, level: r2(level)!, source });
   };
   if (spxTech) {
-    add("sma50", spxTech.sma50, "SPX 50-day SMA");
-    add("sma200", spxTech.sma200, "SPX 200-day SMA");
-    spxTech.swingLowsBelow.forEach((s, i) => add(`swing_low_${i + 1}`, s.low, `SPX swing low ${s.date}`));
+    add("sma50", spxTech.sma50, "SPX 50-day simple moving average of IB daily closes");
+    add("sma200", spxTech.sma200, "SPX 200-day simple moving average of IB daily closes");
+    spxTech.swingLowsBelow.forEach((s, i) => add(`swing_low_${i + 1}`, s.low, `SPX swing low on ${s.date}: that day's low is the lowest of the 3 trading days on each side (last 130 IB daily bars)`));
     if (spxTech.atr14 !== null && spot !== undefined) {
-      add("atr1", spot - spxTech.atr14, "SPX close minus 1x ATR14");
-      add("atr2", spot - 2 * spxTech.atr14, "SPX close minus 2x ATR14");
+      add("atr1", spot - spxTech.atr14, "SPX last close minus 1x ATR14 (14-day Wilder average true range)");
+      add("atr2", spot - 2 * spxTech.atr14, "SPX last close minus 2x ATR14 (14-day Wilder average true range)");
     }
   }
-  if (summerLow) add("summer_low", summerLow.low, `SPX summer low ${summerLow.time}`);
+  if (summerLow) add("summer_low", summerLow.low, `lowest SPX daily low between 2026-07-01 and 2026-08-31 (on ${summerLow.time})`);
   if (esVp) {
-    add("vp_val", esVp.val, "ES volume-profile value-area low (mapped)");
-    add("vp_poc", esVp.poc, "ES volume-profile POC (mapped)");
-    esVp.lvnBelowSpot.forEach((x, i) => add(`vp_lvn_${i + 1}`, x, "ES low-volume node (mapped)"));
+    add("vp_val", esVp.val, "value-area low (bottom of the price range holding 70% of volume) of ES futures over 20 sessions of 30-min bars, mapped to SPX");
+    add("vp_poc", esVp.poc, "point of control (price with the most volume) of ES futures over 20 sessions of 30-min bars, mapped to SPX");
+    esVp.lvnBelowSpot.forEach((x, i) => add(`vp_lvn_${i + 1}`, x, "low-volume node of ES futures over 20 sessions of 30-min bars, mapped to SPX (price moves fast through thin volume)"));
   }
-  spreads.forEach((s) => add(`long_strike_${s.long}`, s.long, `long strike of ${s.id}`));
+  spreads.forEach((s) => add(`long_strike_${s.long}`, s.long, `long put strike of ${s.id}: below it the spread is at max loss`));
   candidates.sort((a, b) => b.level - a.level);
 
   // The cushion-zero level is itself a candidate: a stop below it exits with a negative cushion.
@@ -162,7 +172,7 @@ export function analyse(raw: Raw, asOf: Date) {
     ? Math.max(spotWhereLossReaches(allLegs, spot, el, asOf, Math.min(...spreads.map((s) => s.long)) - 200, 0) ?? -Infinity,
         spotWhereLossReaches(allLegs, spot, el, asOf, Math.min(...spreads.map((s) => s.long)) - 200, IV_SHOCK) ?? -Infinity)
     : undefined;
-  if (czEarly !== undefined && Number.isFinite(czEarly)) add("cushion_zero", czEarly, "SPX level where the estimated IB cushion reaches 0 (worse of flat / +5 IV)");
+  if (czEarly !== undefined && Number.isFinite(czEarly)) add("cushion_zero", czEarly, "SPX level where the estimated IB ExcessLiquidity reaches 0 (Black-Scholes repricing of the spreads, worse of flat IV / IV+5)");
   candidates.sort((a, b) => b.level - a.level);
   const baseValue = ivOk && spot !== undefined ? legsValue(allLegs, spot, asOf) : NaN;
   const lossAt = (level: number, shift: number) => ivOk ? baseValue - legsValue(allLegs, level, asOf, shift) : NaN;
@@ -228,17 +238,17 @@ export function analyse(raw: Raw, asOf: Date) {
     const pos = others.filter((o) => o.underlying === u);
     // Candidate stop (below) and take-profit (above) levels, both sides, from the technicals.
     const below = tech ? [
-      ...tech.swingLowsBelow.map((s) => ({ id: `swing_low_${s.date}`, level: s.low, source: `swing low ${s.date}` })),
-      ...(tech.atr14 !== null ? [{ id: "atr2_down", level: r2(spotU! - 2 * tech.atr14)!, source: "close minus 2x ATR14" }] : []),
-      ...(tech.sma50 !== null && tech.sma50 < spotU! ? [{ id: "sma50", level: tech.sma50, source: "50-day SMA" }] : []),
-      ...(tech.sma200 !== null && tech.sma200 < spotU! ? [{ id: "sma200", level: tech.sma200, source: "200-day SMA" }] : []),
+      ...tech.swingLowsBelow.map((s) => ({ id: `swing_low_${s.date}`, level: s.low, source: `swing low on ${s.date}: lowest low of the 3 trading days on each side (last 130 IB daily bars)` })),
+      ...(tech.atr14 !== null ? [{ id: "atr2_down", level: r2(spotU! - 2 * tech.atr14)!, source: "last close minus 2x ATR14 (14-day Wilder average true range)" }] : []),
+      ...(tech.sma50 !== null && tech.sma50 < spotU! ? [{ id: "sma50", level: tech.sma50, source: "50-day simple moving average of IB daily closes" }] : []),
+      ...(tech.sma200 !== null && tech.sma200 < spotU! ? [{ id: "sma200", level: tech.sma200, source: "200-day simple moving average of IB daily closes" }] : []),
     ] : [];
     const above = tech ? [
-      ...tech.swingHighsAbove.map((s) => ({ id: `swing_high_${s.date}`, level: s.high, source: `swing high ${s.date}` })),
-      ...(tech.atr14 !== null ? [{ id: "atr2_up", level: r2(spotU! + 2 * tech.atr14)!, source: "close plus 2x ATR14" }] : []),
-      ...(tech.sma50 !== null && tech.sma50 > spotU! ? [{ id: "sma50", level: tech.sma50, source: "50-day SMA" }] : []),
-      ...(tech.sma200 !== null && tech.sma200 > spotU! ? [{ id: "sma200", level: tech.sma200, source: "200-day SMA" }] : []),
-      { id: "high52w", level: tech.high52w!, source: "52-week high" },
+      ...tech.swingHighsAbove.map((s) => ({ id: `swing_high_${s.date}`, level: s.high, source: `swing high on ${s.date}: highest high of the 3 trading days on each side (last 130 IB daily bars)` })),
+      ...(tech.atr14 !== null ? [{ id: "atr2_up", level: r2(spotU! + 2 * tech.atr14)!, source: "last close plus 2x ATR14 (14-day Wilder average true range)" }] : []),
+      ...(tech.sma50 !== null && tech.sma50 > spotU! ? [{ id: "sma50", level: tech.sma50, source: "50-day simple moving average of IB daily closes" }] : []),
+      ...(tech.sma200 !== null && tech.sma200 > spotU! ? [{ id: "sma200", level: tech.sma200, source: "200-day simple moving average of IB daily closes" }] : []),
+      { id: "high52w", level: tech.high52w!, source: "highest daily high of the last year of IB daily bars" },
     ] : [];
     const pnlAt = (level: number) => r2(pos.reduce((sum, o) => {
       if (o.kind === "STK") return sum + (level - spotU!) * o.qty;
@@ -253,10 +263,13 @@ export function analyse(raw: Raw, asOf: Date) {
       lastClose: r2(spotU), afterHoursLast: r2(q?.last), quoteTime: q?.time ?? null,
       technicals: tech,
       positions: pos,
-      // Neutral sides: for a long put the stop is ABOVE and the take-profit BELOW.
-      // The sign of estPnlAtLevel says which side hurts.
-      levelsBelow: below.map((c) => ({ ...c, estPnlAtLevel: pnlAt(c.level) })),
-      levelsAbove: above.map((c) => ({ ...c, estPnlAtLevel: pnlAt(c.level) })),
+      // Code, not the model, decides which side is the stop: a level where the
+      // estimated P&L is negative is a stop candidate, positive a take-profit one.
+      // (Run 3 on 2026-11-08: given neutral below/above lists the model read a long
+      // XLV put as short and swapped its stop and take-profit.)
+      ...sideCandidates([...below, ...above].map((c) => ({
+        ...c, side: c.level < spotU! ? "below" : "above", estPnlAtLevel: pnlAt(c.level),
+      }))),
       dust: pos.every((o) => o.kind === "STK" && Math.abs(o.qty * (spotU ?? 0)) < 200),
       // A >20% close-to-close jump in 60 sessions is more likely a split the bar
       // feed did not adjust than a real move; levels from such bars are not usable.

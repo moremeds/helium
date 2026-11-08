@@ -38,14 +38,21 @@ tasks:
          Also print spx.cushionZero (flatIv, ivPlus5, worse) as the SPX level
          where the IB cushion reaches 0, with its note.
       3. Every other position (IB stocks, all Futu stocks and options) gets a
-         stop AND a take-profit as underlying levels, chosen from
-         others[].levelsBelow / levelsAbove. The sign of estPnlAtLevel tells
-         you which side hurts (for a long put the stop is ABOVE). Skip
-         positions marked dust: list them in one line. If
-         possibleCorporateAction is true, say the levels are not usable. If
-         checkPriceSeries is true, say the bar series must be checked against
-         the exchange before the levels are used.
-      4. Levels are DESCRIPTIVE. Say once, plainly: none of these levels
+         stop AND a take-profit as underlying levels. The stop MUST come from
+         others[].stopCandidates and the take-profit MUST come from
+         others[].takeProfitCandidates — code has already put each level on
+         its side by the sign of estPnlAtLevel; never move a level to the other
+         list and never describe a position's direction yourself (long/short
+         comes from positions[].qty sign: positive = long). Each candidate's
+         `side` says whether it is below or above the last close. If a list is
+         empty, write "unavailable" for that side. Skip positions marked dust:
+         list them in one line. If possibleCorporateAction is true, say the
+         levels are not usable. If checkPriceSeries is true, say the bar series
+         must be checked against the exchange before the levels are used.
+      4. Every chosen level prints its candidate's `source` text from pr_book
+         verbatim (translated to Chinese is fine, the numbers and dates must not
+         change) as its 依据. A level without a 依据 is not allowed.
+      5. Levels are DESCRIPTIVE. Say once, plainly: none of these levels
          (GEX regime, 0.618 measured move, swing lows, volume nodes) is a
          validated edge — argon/signal-lab measured no edge for GEX regime
          persistence or the 0.618 measured move.
@@ -53,6 +60,16 @@ tasks:
       REPORT SECTIONS, in this order
       A. 一句话结论: the one most important risk fact, with the SPX cushion-zero
          level and Friday's SPX close.
+      A2. 止损止盈建议总表: ONE table, every non-dust position plus the SPX
+         book: 标的 | broker | 止损 (level, candidate id) | 止盈 (level,
+         candidate id, or "不设 — VRP 持有到期") | 止损依据 | 止盈依据 |
+         estPnl / estAddedLoss at each level. Then one short paragraph
+         "这些点位基于什么": the candidates are computed by code from IB daily
+         bars (SMA, ATR14, swing highs/lows), the ES futures volume profile and
+         the IB cushion estimate; the model only picks one candidate per side
+         under the hard rules above; for the SPX book the binding constraint is
+         the cushion, not a chart level; and none of them is a validated edge
+         (rule 5).
       B. 数据时点与缺口: pr_book's fetchedAt for IB and Futu; that quotes are IB
          FROZEN data (last available, Sunday — not live); droppedPartialBars;
          errors; and these caveats verbatim:
@@ -73,7 +90,8 @@ tasks:
          spread with reasoning (technicals, volume profile, summer low, long
          strike), the loss figures, and cushionZero.
       F. 其他持仓: per underlying — positions, chosen stop and take-profit with
-         candidate id, estPnlAtLevel for each, and one line of reasoning.
+         candidate id, its 依据 (source), estPnlAtLevel for each, and one line of
+         reasoning.
       G. 给 xenon 的调整建议: what orders or monitored exits xenon should set up,
          as suggestions the user must approve. Never say an order was placed.
 

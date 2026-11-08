@@ -62,3 +62,18 @@ describe("position-review levels", () => {
     expect(spotWhereLossReaches(legs, 7500, 1e9, asOf, 6000)).toBeUndefined();
   });
 });
+
+describe("position-review stop/take-profit side", () => {
+  it("a long put's stop is above spot and its take-profit below", async () => {
+    const { sideCandidates } = await import("../tools/analyse.js");
+    // Futu XLV 261218 P170 x40 (long), estPnl from the 2026-11-08 run (IB daily bars, frozen).
+    const s = sideCandidates([
+      { id: "swing_low_2026-10-28", level: 177.07, side: "below", estPnlAtLevel: 6374.66 },
+      { id: "atr2_up", level: 191.98, side: "above", estPnlAtLevel: -2602.71 },
+      { id: "x", level: 180, side: "below", estPnlAtLevel: null },
+    ]);
+    expect(s.stopCandidates.map((c) => c.id)).toEqual(["atr2_up"]);
+    expect(s.takeProfitCandidates.map((c) => c.id)).toEqual(["swing_low_2026-10-28"]);
+    expect(s.unclassified.map((c) => c.id)).toEqual(["x"]);
+  });
+});
