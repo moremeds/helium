@@ -1,0 +1,30 @@
+{
+  "name": "helium-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stage-1 acceptance bundle: exercises every helium-base primitive on simulated data.",
+  "exports": {
+    "./pipeline": "./lib/pipeline.js",
+    "./tools": "./lib/tools.js",
+    "./fake-llm": "./lib/fake-llm.js"
+  },
+  "files": ["lib", "cordis.patch.yml"],
+  "engines": {
+    "dsh": "0.2.2-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "helium-base": "workspace:*"
+  }
+}

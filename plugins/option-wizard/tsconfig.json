@@ -1,5 +1,0 @@
-{
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "outDir": "lib", "rootDir": "." },
-  "include": ["tools", "gates", "render", "quality", "state", "eval", "runtime"]
-}

@@ -1,4 +1,4 @@
-import { configDefaults, defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
@@ -7,28 +7,18 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: [
-            "packages/*/tests/**/*.spec.ts",
-            "packages/*/src/**/*.test.ts",
-            "plugins/*/tests/**/*.spec.ts",
-            "plugins/*/src/**/*.test.ts",
-          ],
-          // Belt-and-suspenders: the local E2E harness (Task 3.1) already
-          // lives outside these include globs (plugins/*/test/e2e/, not
-          // src/ or tests/), but excluding it explicitly keeps it out of
-          // the CI unit lane even if that ever changes.
-          exclude: [...configDefaults.exclude, "**/*.e2e.test.ts"],
+          include: ["bundles/*/tests/**/*.spec.ts"],
         },
       },
       {
+        // Boots the real `dsh` against a throwaway $DSH_HOME with a fake LLM.
+        // Needs `pnpm build` first: DSH loads the bundles' lib/ output.
         test: {
-          name: "contracts",
+          name: "compose",
           environment: "node",
-          include: ["contracts/tests/**/*.spec.ts"],
-          testTimeout: 300_000,
-          hookTimeout: 300_000,
-          // dsh boots and pnpm installs are not parallel-safe against one
-          // throwaway $DSH_HOME each; keep contract files serialized.
+          include: ["bundles/*/tests/**/*.compose.ts"],
+          testTimeout: 120_000,
+          hookTimeout: 120_000,
           fileParallelism: false,
         },
       },

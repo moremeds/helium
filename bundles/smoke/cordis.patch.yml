@@ -1,0 +1,13 @@
+# One preset per role. A role sees exactly the tools listed here.
+- insert:
+    - id: preset-smoke-analyst
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: smoke-analyst
+        plugins:
+          - { id: smoke-tools, name: helium-smoke/tools }
+    - id: preset-smoke-judge
+      name: '@deepseek-ai/dsh-agent-preset'
+      config: { id: smoke-judge, plugins: [] }
+    - id: smoke-pipeline
+      name: helium-smoke/pipeline

@@ -2,56 +2,27 @@
 
 Helium is a multipurpose, multi-agent harness that improves itself.
 
-DeepSeek Harness (dsh) supplies the agent runtime as an in-process library:
-sessions, subagents, tools, compaction, approval and its same-world sandbox are
-consumed, never reimplemented. Helium adds the four things dsh has no opinion
-on — multi-tenancy, capability routing, sandbox kinds beyond same-world, and a
-queryable token audit.
+**Status: v3 — Helium is a DeepSeek Harness (DSH) distribution.** It is a DSH
+profile (`helium`) plus bundles. DSH supplies sessions, subagents, tools,
+the sandbox and the model routes; Helium adds a runner, the token audit, a
+decision ledger, point-in-time enforcement and delivery. Plan of record:
+`docs/plans/2026-11-08-helium-v3-dsh-distribution.md`. Stage 1 (this tree) is
+the framework; product bundles are rebuilt in stage 2.
 
-**Status: v2, rebuilt from scratch.** The v1 job/ops/SOP lanes were deleted
-rather than migrated; they authorized an empty set and delivered nothing. The
-design of record is `docs/plans/2026-09-02-helium-v2-design.md`, and the six
-doctrine points it answers to live in this checkout's `AGENTS.md` (untracked by
-design — it describes the machine, not the project).
+## Layout
 
-## What works today
-
-- `helium run <tenant>` discovers tenants by glob, routes each role by
-  capability, runs the team, and writes one audit span per step.
-- `helium audit <run-id>` answers "where did the tokens go" from a SQLite table
-  folded out of the dsh session log.
-- Three provider plugins ship: Claude subscription, Codex subscription, and
-  DeepSeek via dsh. A role declares `requires: [capability]` and never a model.
-- `plugins/delivery-email` sends a result off the machine under a daily cap.
-
-Not yet: sandbox kind implementations, gate discovery, and the two real tenants
-(option-wizard, livewire build/heal). See the design doc's build order.
-
-## Repository map
-
-- `packages/core` — the four Helium-owned nouns and nothing else
-- `packages/cli` — `helium run` / `helium audit`
-- `packages/provider-sdk` — the executor and receipt seam providers implement
-- `plugins/provider-*` — one directory per vendor; `provider-dsh` is the only
-  source naming `@deepseek-ai/*`
-- `plugins/delivery-*` — result channels
-- `plugins/fake-tenant` — the domain-free seam proof
-- `contracts` — three tests that earn their keep (see below)
-- `docs/plans` — designs of record
-
-## Contracts
-
-Three, deliberately. Each one has caught a real defect or mechanically enforces
-a doctrine point that nothing else can:
-
-- `core-neutrality` — nothing under `packages/core/src` names a provider or a
-  business domain.
-- `tool-restriction` — a tool outside the allow-list disappears from the agent's
-  own scoped view, even with mutations enabled. Fail-closed.
-- `provider-executor-conformance` — every provider proves the same execution
-  boundary: declared tools only, no ambient secret, an owned working directory.
-
-A fourth, `sandbox-write-boundary`, arrives with the sandbox kinds.
+- `bundles/helium-base` — the distribution layer, no business words:
+  - `runner` — `dsh --profile helium run <pipeline> [--phase P] [--as-of D] [--timeout S]` and `audit <run>`
+  - `run.agent({role, capability, prompt, schema})` — one child agent; the role is
+    an agent preset that lists exactly its tools; the capability picks the model
+    (`reason.quick` = Sonnet, `reason.deep` = Opus)
+  - `spans` table — one row per model step: model, tokens in/out/cache, context, wall time, cost
+  - `ledger` — `run.enter(key, due, payload)`; the pipeline's `settle` runs on due entries at the next run
+  - `withAsOf` — tools get the run's as-of day from the framework; model-supplied dates are clamped to it
+  - delivery — markdown, email (Resend), argon; each pipeline declares its channels and nothing else is allowed
+- `bundles/smoke` — acceptance bundle on simulated data; its composition test boots the real `dsh` with a fake LLM
+- `scripts/install-profile.sh` — install or re-point the `helium` profile at this checkout
+- `scripts/helium` — `dsh --profile helium` with this checkout's `dsh`
 
 ## Development
 
@@ -59,32 +30,19 @@ A fourth, `sandbox-write-boundary`, arrives with the sandbox kinds.
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test            # unit
-pnpm test:contracts  # the three above
-node packages/cli/lib/cli.js run fake-tenant
+pnpm test:compose    # real dsh + fake LLM, throwaway $DSH_HOME
+scripts/install-profile.sh && scripts/helium run smoke --phase close   # real Claude
+scripts/helium audit <run-id>
 ```
 
-Node 22.19+ or 24+. Deleting `lib/` without also deleting `tsconfig.tsbuildinfo`
-makes `tsc` emit nothing and every dependent package fail to resolve
-`@helium/core` — remove both or neither.
+State (SQLite db and reports) lives in `$HELIUM_STATE_ROOT`, default
+`$DSH_HOME/helium`. Claude is reached through pi-ai with
+`CLAUDE_CODE_OAUTH_TOKEN`; set `HELIUM_PROXY` where Anthropic is only reachable
+through a proxy.
 
-## Adding a tenant
+## Adding a product
 
-Write `plugins/<name>/{tenant.yaml,team.yaml,tools/index.ts}`. There is no
-registry to edit and no core change to make. A malformed manifest, a throwing
-tool module or a role naming an unknown tool skips that tenant with a recorded
-reason; only a duplicate tenant name fails the whole load.
-
-## Safety
-
-Read-only is the default and a prompt is never a permission boundary.
-`packages/core/src/mcp/selection.ts` is the single place that resolves the tool
-allow-list and the mutation flag, and it fails closed: a tool outside the
-allow-list is dropped even with mutations enabled.
-
-Blast radius is defined by where an agent runs, not by signatures. Outside a
-sandbox two rules hold: never write the production data lake, never place an
-order.
-
-## License
-
-MIT.
+A new directory `bundles/<name>/` with `package.json` (`dsh.bundle.patch`),
+a `cordis.patch.yml` that inserts one agent preset per role and a plugin row
+whose `apply` calls `definePipeline({name, channels, settle?, run})`.
+Then `pnpm build && scripts/install-profile.sh`.
